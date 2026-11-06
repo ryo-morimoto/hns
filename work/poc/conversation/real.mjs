@@ -1,4 +1,4 @@
-// One real conversation against Ollama Cloud, with the same tools as the faux run.
+// One real conversation (Ollama Cloud or OpenCode Go), with the same tools as the faux run.
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,11 +11,17 @@ import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-e
 import { Workspace } from "../workspace-core/workspace.mjs";
 import { createSandboxEnv } from "../workspace-core/sandbox.mjs";
 import { ollamaCloud, readOllamaKey } from "./ollama.mjs";
+import { opencodeGo, readOpenCodeKey } from "./opencode.mjs";
 
 const BWRAP = process.env.BWRAP ?? "/nix/store/mvj6y8k3xs35cj7kq937xi44q4hl3r93-bubblewrap-0.12.0/bin/bwrap";
-const model = process.env.OLLAMA_MODEL ?? "qwen3-coder:480b";
-const key = readOllamaKey();
-if (!key) { console.error("no key: set OLLAMA_API_KEY or write ~/.config/hns/ollama.key"); process.exit(2); }
+const kind = process.env.PROVIDER ?? "ollama";
+const model = process.env.MODEL_ID ?? (kind === "opencode" ? "deepseek-v4.1-flash" : "gpt-oss:120b");
+const providerId = kind === "opencode" ? "opencode-go" : "ollama-cloud";
+const key = kind === "opencode" ? readOpenCodeKey() : readOllamaKey();
+if (!key) {
+  console.error(`no key for ${kind}: write ~/.config/hns/${kind === "opencode" ? "opencode" : "ollama"}.key`);
+  process.exit(2);
+}
 
 const base = await mkdtemp(join(tmpdir(), "hns-real-"));
 const root = join(base, "root");
@@ -45,13 +51,13 @@ const tools = defineExtension({
   ],
 });
 
-const { provider } = ollamaCloud({ apiKey: key, model });
+const built = kind === "opencode" ? opencodeGo({ apiKey: key, model }) : ollamaCloud({ apiKey: key, model });
 const models = createModels();
-models.setProvider(provider);
+models.setProvider(built.provider);
 const registry = createRegistry();
 registry.install(tools);
 const harness = await Harness.open(new MemoryStorage(), { models, registry, env: () => sandbox }, ctx);
-const conversation = await harness.root(ctx, { agent: { model: { provider: "ollama-cloud", modelId: model }, cwd: root } });
+const conversation = await harness.root(ctx, { agent: { model: { provider: providerId, modelId: model }, cwd: root } });
 
 const started = Date.now();
 const submission = await conversation.submit({
