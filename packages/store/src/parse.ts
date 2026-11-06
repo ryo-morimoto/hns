@@ -39,14 +39,14 @@ function parseDetail(detail: string | null): JsonValue | null {
   return parsed as JsonValue;
 }
 
-export function toProject(row: ProjectRow): Project {
+export function parseProject(row: ProjectRow): Project {
   // SAFETY: the projects table's id column is the project id.
   const id = row.id as ProjectId;
 
   return { id, name: row.name, created_at: row.created_at };
 }
 
-export function toConversation(row: ConversationRow): Conversation {
+export function parseConversation(row: ConversationRow): Conversation {
   // SAFETY: the conversations table's ids are these ids.
   const id = row.id as ConversationId;
   // SAFETY: conversations.project_id references projects.id.
@@ -63,7 +63,7 @@ export function toConversation(row: ConversationRow): Conversation {
   };
 }
 
-export function toTask(row: TaskRow): Task {
+export function parseTask(row: TaskRow): Task {
   // SAFETY: tasks.project_id references projects.id.
   const projectId = row.project_id as ProjectId;
 
@@ -77,7 +77,7 @@ export function toTask(row: TaskRow): Task {
   };
 }
 
-export function toEvent(row: EventRow): Event {
+export function parseEvent(row: EventRow): Event {
   // SAFETY: event names are written by our own journal.
   const event = row.event as EventName;
   // SAFETY: event conversation ids are conversations ids, or null.
