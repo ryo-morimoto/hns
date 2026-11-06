@@ -1,5 +1,5 @@
 // Workspace v0.1: versioned read/write, a journal, and a seq'd event log on ExecutionEnv.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getOrThrow } from "@earendil-works/pi-durable/env";
 
 export class Denied extends Error {}
@@ -12,22 +12,55 @@ const sha = (bytes) => "sha256:" + createHash("sha256").update(bytes).digest("he
 export class Workspace {
   #env; #root; #context; #journalPath; #crashAt;
   #canonicalRoot; #journal; #listeners = new Set(); #known = new Map(); #watcher; #timers = new Map();
+  #identityPath; #identity; #beforeRename;
 
-  constructor({ env, root, journalPath, context, crashAt }) {
+  constructor({ env, root, journalPath, context, crashAt, beforeRename }) {
     this.#env = env; this.#root = root; this.#context = context;
-    this.#journalPath = journalPath; this.#crashAt = crashAt;
+    this.#journalPath = journalPath; this.#crashAt = crashAt; this.#beforeRename = beforeRename;
   }
 
   async open() {
     this.#canonicalRoot = getOrThrow(await this.#env.canonicalPath(this.#root, this.#context));
     const read = await this.#env.readTextFile(this.#journalPath, this.#context);
     const loaded = read.ok ? JSON.parse(read.value) : {};
-    this.#journal = { ops: loaded.ops ?? {}, seq: loaded.seq ?? 0, events: loaded.events ?? [], audit: loaded.audit ?? [] };
+    this.#journal = { id: loaded.id, ops: loaded.ops ?? {}, seq: loaded.seq ?? 0, events: loaded.events ?? [], audit: loaded.audit ?? [] };
     for (const e of this.#journal.events) if (e.kind === "changed" || e.kind === "created") this.#known.set(e.path, e.version);
+    this.#identityPath = this.#canonicalRoot + "/.hns/root.json";
+    await this.#establishIdentity();
     return this;
   }
 
   #crash(step) { if (this.#crashAt === step) throw new Crash(step); }
+
+  /**
+   * Bind the workspace to this directory. The id lives in the Journal (outside the root);
+   * the marker inside the root is a copy. A missing or different marker means the root was
+   * replaced, and we fail closed.
+   */
+  async #establishIdentity() {
+    const marker = await this.#env.readTextFile(this.#identityPath, this.#context);
+    const markerId = marker.ok ? JSON.parse(marker.value).id : undefined;
+
+    if (this.#journal.id === undefined) {
+      const id = markerId ?? randomUUID();
+      this.#journal.id = id;
+      await this.#save();
+      if (markerId === undefined) {
+        await this.#env.writeFile(this.#identityPath, JSON.stringify({ id, createdAt: new Date().toISOString() }), this.#context);
+        await this.#env.flushFile(this.#identityPath, this.#context);
+      }
+      this.#identity = id;
+      return;
+    }
+
+    if (markerId !== this.#journal.id) throw new Denied("root replaced");
+    this.#identity = this.#journal.id;
+  }
+
+  async #verifyIdentity() {
+    const read = await this.#env.readTextFile(this.#identityPath, this.#context);
+    if (!read.ok || JSON.parse(read.value).id !== this.#identity) throw new Denied("root replaced");
+  }
 
   async #save() {
     await this.#env.writeFile(this.#journalPath, JSON.stringify(this.#journal), this.#context);
@@ -78,6 +111,7 @@ export class Workspace {
     if (!getOrThrow(await this.#env.exists(this.#canonicalRoot, this.#context))) {
       throw new Denied("root missing");
     }
+    await this.#verifyIdentity();
     const rel = this.#normalize(relativePath);
     const abs = await this.#canonicalForWrite(this.#joinRoot(rel));
     if (abs !== this.#canonicalRoot && !abs.startsWith(this.#canonicalRoot + "/")) throw new Denied("escapes root");
@@ -86,18 +120,34 @@ export class Workspace {
 
   #joinRoot(rel) { return this.#canonicalRoot + (rel ? "/" + rel : ""); }
 
+  /** Read through an opened handle, refusing a final symbolic link. */
+  async #readBytes(abs) {
+    const opened = await this.#env.openBinaryReader(abs, { noFollow: true }, this.#context);
+    if (!opened.ok) throw opened.error;
+    const reader = opened.value;
+    try {
+      const info = getOrThrow(await reader.info(this.#context));
+      const chunks = [];
+      let offset = 0;
+      while (offset < info.size) {
+        const part = getOrThrow(await reader.read(offset, Math.min(1 << 20, info.size - offset), this.#context));
+        if (part.length === 0) break;
+        chunks.push(part); offset += part.length;
+      }
+      return Buffer.concat(chunks);
+    } finally { await reader.close(this.#context); }
+  }
+
   async #versionOfFile(abs) {
-    const read = await this.#env.readBinaryFile(abs, this.#context);
-    if (!read.ok) { if (read.error.code === "not_found") return "absent"; throw read.error; }
-    return sha(read.value);
+    try { return sha(await this.#readBytes(abs)); }
+    catch (error) { if (error?.code === "not_found") return "absent"; throw error; }
   }
 
   async read(relativePath) {
     try {
       const { rel, abs } = await this.#resolve(relativePath);
-      const read = await this.#env.readBinaryFile(abs, this.#context);
-      if (!read.ok) throw read.error;
-      return { path: rel, content: dec.decode(read.value), version: sha(read.value) };
+      const bytes = await this.#readBytes(abs);
+      return { path: rel, content: dec.decode(bytes), version: sha(bytes) };
     } catch (error) {
       if (error instanceof Denied) await this.#audit({ operationId: null, path: relativePath, reason: error.message, denied: true });
       throw error;
@@ -161,6 +211,21 @@ export class Workspace {
       return { status: "conflict", operationId, currentVersion: again };
     }
 
+    if (this.#beforeRename) await this.#beforeRename({ abs, rel });
+    const parent = abs.slice(0, abs.lastIndexOf("/"));
+    const parentNow = await this.#canonicalForWrite(parent);
+    if (parentNow !== parent) {
+      await this.#env.remove(rec.temp, { force: true }, this.#context);
+      return this.#record(operationId, { status: "unknown", operationId, reason: "io" });
+    }
+    try { await this.#verifyIdentity(); }
+    catch (error) {
+      if (error instanceof Denied) {
+        await this.#env.remove(rec.temp, { force: true }, this.#context);
+        return this.#record(operationId, { status: "unknown", operationId, reason: "io" });
+      }
+      throw error;
+    }
     await this.#env.renameFile(rec.temp, abs, this.#context);
     this.#crash("rename");
 
@@ -195,7 +260,7 @@ export class Workspace {
     if (change.kind === "overflow") { await this.#emit({ kind: "overflow" }); return; }
     if (change.kind === "failed") { await this.#emit({ kind: "overflow" }); return; }
     for (const abs of change.paths) {
-      if (abs.includes("/.hns-tmp-")) continue;
+      if (abs.includes("/.hns-tmp-") || abs.includes("/.hns/")) continue;
       const rel = abs.startsWith(this.#canonicalRoot + "/") ? abs.slice(this.#canonicalRoot.length + 1) : undefined;
       if (rel === undefined) continue;
       const prior = this.#timers.get(rel);

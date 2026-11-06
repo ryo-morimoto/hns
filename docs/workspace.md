@@ -68,15 +68,18 @@ type MutationResult =
 - `.git/` は読み取りのみ
 - 操作ごとに root の存在を確認。消えていたら `denied`（書き込みで再作成しない）
 - 拒否は `operationId` 付きで Journal の `audit` に残す
-- root の差し替え（同じパスの別ディレクトリ）は**検出できない**（`ExecutionEnv` から inode を取得できない）
+- **root の同一性**: Journal の `id` と root 内の `.hns/root.json` を照合する。欠落・不一致なら開かない（fail closed）
+- **exec の隔離**: `createSandboxEnv`（bubblewrap）で、root だけ書き込み可能・他は読み取り専用。ネットワークは残す
+- **TOCTOU**: rename 直前に親ディレクトリの canonical を再確認し、変わっていれば `unknown`。窓は残る
 - root が symlink のときは、開いた時点の解決結果に固定する。差し替えは反映されない
-- TOCTOU は残る（`openat2(RESOLVE_BENEATH)` 相当は未対応）
+- Windows の区切り・大文字小文字、macOS の正規化は未検証（Linux のみ）
 - Windows の区切り・大文字小文字、macOS の正規化は未検証（Linux のみ）
 
 ### 脅威モデル
 
-この層が防ぐのは**事故と協力的な Agent**。同一ユーザーの悪意あるプロセスや `exec` は防がない。
-実質の境界は OS の権限とサンドボックスで、Workspace の認可はその内側の整合性チェック。
+- `exec` は sandbox で root 外に書けない（bubblewrap が要る）。
+- 残るのは、同一ユーザーの別プロセスが root 内で競合する TOCTOU。検査と rename の間の窓は未閉鎖。
+- Root の外を作り変えられた場合（マウント差し替え等）は OS の権限の範囲。
 
 ## イベント
 

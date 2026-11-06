@@ -25,6 +25,7 @@ traversal と symlink 脱出は 7/7 で拒否済み（`work/poc/root-containment
 
 - `Workspace` が拒否を `audit`（operationId・path・reason）に残す。HTTP では 403。
 - root は操作ごとに存在確認。rename 後は denied になり、書き込みで再作成しない。
-- root の replace は検出できない。symlink の差し替えは開いた時点の解決結果に固定される。
+- root の replace は Journal の id と `.hns/root.json` で検出（open で拒否）。symlink の差し替えは開いた時点の解決結果に固定。
+- 残る TOCTOU は 0005、bwrap の前提は 0006。
 - 封じ込めは node / daemon / RemoteExecutionEnv の3経路で 21/21。
 - 残り: SSH 越しの RemoteExecutionEnv（この環境に sshd がない）、`.git/` 書き込み拒否、監査の永続化形式。

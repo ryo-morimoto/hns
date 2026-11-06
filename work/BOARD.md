@@ -8,6 +8,8 @@
 | [0002](issues/0002-mutation-crash.md) | T-03/T-04 Mutation の故障注入 | **done** | 0001 |
 | [0003](issues/0003-walking-skeleton.md) | Workspace Walking Skeleton | **done** | 0002 |
 | [0004](issues/0004-dev-env.md) | 開発環境の固定（node） | open | — |
+| [0005](issues/0005-toctou.md) | TOCTOU の窓を閉じる（openat2 / dirfd） | open | — |
+| [0006](issues/0006-sandbox-deploy.md) | sandbox の前提（bwrap の検出・配布） | open | — |
 
 ## ユーザー判断待ち
 
@@ -21,7 +23,7 @@
 
 - [research/pi-durable-1.5.0.md](research/pi-durable-1.5.0.md): API・適合・失更新・封じ込め
 - [research/](research/): 提供資料の原文（agentics / agent engineering / 開発プロセス / 設計プレイブック / 要件状態 v0.3）
-- [poc/](poc/): conformance / mutation-gap / root-containment / root-swap / daemon-life / workspace-core / walking-skeleton
+- [poc/](poc/): conformance / mutation-gap / root-containment / root-swap / daemon-life / workspace-core / walking-skeleton / sandbox
 
 ## 制約
 
