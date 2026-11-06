@@ -55,3 +55,7 @@ function issuesOf(issues: readonly v.BaseIssue<unknown>[]): string[] {
     return path === undefined ? issue.message : path + ": " + issue.message;
   });
 }
+/** The query object a route's schema expects, from the raw search params. */
+export function searchParamsObject(params: URLSearchParams) {
+  return Object.fromEntries(params);
+}

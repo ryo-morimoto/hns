@@ -15,12 +15,16 @@
 | rename 中の親差し替え | rename 直前に親を再確認し、後にも canonical を再確認。外れていれば `unknown` |
 | 復旧コードの総当たり | 同一 login で 5 回失敗したら 15 分 429 |
 | SSH の事故 | pi-env の `sshArguments` を検査: `-T -a -x`、`BatchMode=yes`、転送なし、ホスト鍵は自前ファイルに厳格 |
+| 操作 ID で root の外に書く | `operationId` を `[A-Za-z0-9_-]{1,64}` に限定（core の schema と workspace の両方）。temp 名は内部生成の UUID で、呼び出し側の文字列をパスに使わない |
+| agent の bash にサーバの env（鍵・token）が漏れる | sandbox で `--clearenv`。`PATH` と `HOME`（root）などだけを `--setenv` で戻す |
+| agent の bash から鍵ファイルが読める | `createSandboxEnv({ hide })` が指定ディレクトリを tmpfs で隠す（呼び出し側が `~/.config/hns` を渡す） |
+| watcher がディレクトリ作成で落ちる | `is_directory` はイベント対象外にし、未知の失敗は `overflow` に落とす。`void` の reject も必ず処理する |
 
 ## 残っている
 
 | 穴 | 影響 | 次の手 |
 | --- | --- | --- |
-| TOCTOU の最終窓 | 再確認と `rename` の間に親を差し替えられると理論上は外に出る | `openat2(RESOLVE_BENEATH)` / dirfd が要る（0005） |
+| TOCTOU の最終窓 | 親の差し替えは dirfd で閉じた。同名ファイルを hash と rename の間に差し替える窓は残る | `renameat2(RENAME_EXCHANGE)` で交換して検証する（0005 の残り） |
 | SSH の実接続 | フラグは検証したが、実サーバとの接続は未検証 | 2台目が用意できたら 1 回通す |
 | 非 Linux と bwrap 未導入 | exec を出せない（封じ込めなしでは動かさない） | 検出は 0006 で完了。macOS / Windows の backend と配布は 0033 / 0040（[調査](../work/research/sandbox-platforms.md)） |
 | DEK の露出 | unlocked 中は `/api/passkey/dek` が DEK を返す。XSS で破れる | CSP、入力の扱い |

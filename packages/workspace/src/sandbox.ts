@@ -7,9 +7,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Context } from "@earendil-works/chord";
+import { err, ExecutionError } from "@earendil-works/pi-durable/env";
 import type {
   ExecutionEnv,
-  ExecutionError,
   Result,
   ShellExecOptions,
   ShellExecResult,
@@ -375,7 +375,10 @@ class NoExecEnv extends ForwardingEnv {
   }
 
   override exec(): Promise<Result<ShellExecResult, ExecutionError>> {
-    return Promise.reject(new SandboxUnavailableError(this.#status));
+    // A typed failure, not a rejection: callers branch on Result like every other exec.
+    return Promise.resolve(
+      err(new ExecutionError("shell_unavailable", "exec is unavailable: " + this.#status.reason)),
+    );
   }
 }
 
@@ -388,6 +391,8 @@ export interface SandboxOptions {
   readonly root: string;
   readonly bwrap?: string | undefined;
   readonly shell?: string | undefined;
+  /** Directories to mask inside the sandbox, such as the key config directory. */
+  readonly hide?: readonly string[] | undefined;
 }
 
 /** An environment whose exec runs under bubblewrap, with only the root writable. */
@@ -400,6 +405,12 @@ export function createSandboxEnv(env: ExecutionEnv, options: SandboxOptions): Ex
   const shell = options.shell ?? resolveShell();
   const prefix = root.endsWith("/") ? root : root + "/";
   const under = (path: string): boolean => path === root || path.startsWith(prefix);
+  const hidden = (options.hide ?? []).map((path) => {
+    if (!path.startsWith("/") || path === "/" || path === root) {
+      throw new Error("a hidden path must be absolute, not /, and not the root");
+    }
+    return path;
+  });
 
   const wrap = (
     command: string | readonly string[],
@@ -421,6 +432,15 @@ export function createSandboxEnv(env: ExecutionEnv, options: SandboxOptions): Ex
     ];
     // A tmpfs at /tmp would hide a root that lives there, so leave /tmp read-only in that case.
     if (!root.startsWith("/tmp/")) args.push("--tmpfs", "/tmp");
+    // Drop the server's environment (keys, tokens) and pass back only what a shell needs.
+    args.push("--clearenv", "--setenv", "PATH", process.env.PATH ?? "/usr/bin:/bin");
+    args.push("--setenv", "HOME", root);
+    for (const name of ["LANG", "LC_ALL", "TERM", "TZ"]) {
+      const value = process.env[name];
+      if (value !== undefined) args.push("--setenv", name, value);
+    }
+    // Masked directories are mounted after the read-only root, so they shadow it.
+    for (const path of hidden) args.push("--tmpfs", path);
     args.push("--unshare-pid", "--unshare-ipc", "--unshare-uts", "--chdir", cwd, "--");
     const argv = Array.isArray(command) ? [...command] : [shell, "-c", command];
     return [bwrap, ...args, ...argv];

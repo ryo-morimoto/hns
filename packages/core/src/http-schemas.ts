@@ -544,13 +544,23 @@ export const StateEventSchema: v.GenericSchema<unknown, StateEvent> = v.object({
 
 export const StateQuerySchema = v.object({ conversationId: v.optional(ConversationIdSchema) });
 export const TaskListQuerySchema = v.object({ projectId: v.optional(ProjectIdSchema) });
+const booleanFlag = v.pipe(
+  v.picklist(["1", "0", "true", "false"]),
+  v.transform((value) => value === "1" || value === "true"),
+);
+const positiveInteger = v.pipe(
+  v.string(),
+  v.regex(/^[1-9]\d*$/),
+  v.transform((value) => Number(value)),
+);
+
 export const ConversationListQuerySchema = v.object({
   projectId: v.optional(ProjectIdSchema),
   q: v.optional(v.string()),
-  includeArchived: v.optional(v.boolean()),
+  includeArchived: v.optional(booleanFlag),
 });
 export const EventListQuerySchema = v.object({
-  limit: v.optional(v.number()),
+  limit: v.optional(positiveInteger),
   level: v.optional(v.picklist(EVENT_LEVELS)),
   since: v.optional(iso),
 });

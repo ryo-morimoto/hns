@@ -6,6 +6,7 @@ import type {
   FileChange,
   FileErrorCode,
   FileWatcher,
+  Result,
 } from "@earendil-works/pi-durable/env";
 import type { FileRead, MutationResult } from "@hns/core";
 import { Crash, Denied, FileFailure } from "./errors.ts";
@@ -28,6 +29,17 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 const sha = (bytes: Uint8Array): Version =>
   "sha256:" + createHash("sha256").update(bytes).digest("hex");
+
+// The same shape as core's OPERATION_ID_PATTERN. It is duplicated because the workspace must not
+// import @hns/core at runtime: a test run would depend on core's built dist (npm test before build).
+const JOURNAL_KEY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** ExecutionEnv reports file failures as FileError; the workspace speaks FileFailure. */
+function asFileFailure(error: Error): Error {
+  if (error instanceof FileFailure) return error;
+  if (error instanceof FileError) return new FileFailure(error.code, error.message);
+  return error;
+}
 
 /** Helper failure codes in pi-durable's vocabulary, so callers branch on code. */
 const HELPER_CODES = new Map<string, FileErrorCode>([
@@ -98,6 +110,7 @@ export class Workspace {
   #identityPath = "";
   #identity = "";
   #journal: JournalState = emptyJournal();
+  #saveChain: Promise<void> = Promise.resolve();
   #watcher: FileWatcher | undefined;
   #rooted: Rooted | undefined;
 
@@ -164,8 +177,14 @@ export class Workspace {
       await this.#save();
       if (markerId === undefined) {
         const markerBody = JSON.stringify({ id, createdAt: new Date().toISOString() });
-        await this.#env.writeFile(this.#identityPath, markerBody, this.#context);
-        await this.#env.flushFile(this.#identityPath, this.#context);
+        this.#require(
+          await this.#env.writeFile(this.#identityPath, markerBody, this.#context),
+          "write root marker",
+        );
+        this.#require(
+          await this.#env.flushFile(this.#identityPath, this.#context),
+          "flush root marker",
+        );
       }
       return id;
     }
@@ -179,9 +198,30 @@ export class Workspace {
     if (!read.ok || parseMarker(read.value) !== this.#identity) throw new Denied("root replaced");
   }
 
-  async #save(): Promise<void> {
-    await this.#env.writeFile(this.#journalPath, JSON.stringify(this.#journal), this.#context);
-    await this.#env.flushFile(this.#journalPath, this.#context);
+  /** Serialize saves and replace the journal atomically, so a crash cannot leave partial JSON. */
+  #save(): Promise<void> {
+    const next = this.#saveChain.then(() => this.#writeJournal());
+    this.#saveChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  async #writeJournal(): Promise<void> {
+    const temp = this.#journalPath + ".tmp";
+    const body = JSON.stringify(this.#journal);
+    this.#require(await this.#env.writeFile(temp, body, this.#context), "write journal");
+    this.#require(await this.#env.flushFile(temp, this.#context), "flush journal");
+    this.#require(
+      await this.#env.renameFile(temp, this.#journalPath, this.#context),
+      "rename journal",
+    );
+  }
+
+  /** Refuse to continue when the environment could not persist something. */
+  #require(result: Result<void, FileError>, what: string): void {
+    if (!result.ok) throw new FileFailure(result.error.code, what + ": " + result.error.message);
   }
 
   #crash(step: CrashPoint): void {
@@ -201,7 +241,13 @@ export class Workspace {
     if (this.#journal.events.length > 500)
       this.#journal.events.splice(0, this.#journal.events.length - 500);
     await this.#save();
-    for (const listener of this.#listeners) listener(event);
+    for (const listener of this.#listeners) {
+      try {
+        listener(event);
+      } catch {
+        // A listener must not break the writer; the stream is best effort by design.
+      }
+    }
     return event;
   }
 
@@ -276,29 +322,34 @@ export class Workspace {
 
   /** Read through an opened handle, refusing a final symbolic link. */
   async #readBytes(abs: string): Promise<Uint8Array> {
-    if (this.#rooted !== undefined) {
-      const outcome = await this.#rooted.read(this.#partsOf(abs));
-      if (outcome.kind === "content") return outcome.bytes;
-      throw this.#helperFailure(outcome);
-    }
-    const opened = await this.#env.openBinaryReader(abs, { noFollow: true }, this.#context);
-    if (!opened.ok) throw opened.error;
-    const reader = opened.value;
     try {
-      const info = getOrThrow(await reader.info(this.#context));
-      const chunks: Uint8Array[] = [];
-      let offset = 0;
-      while (offset < info.size) {
-        const part = getOrThrow(
-          await reader.read(offset, Math.min(1 << 20, info.size - offset), this.#context),
-        );
-        if (part.length === 0) break;
-        chunks.push(part);
-        offset += part.length;
+      if (this.#rooted !== undefined) {
+        const outcome = await this.#rooted.read(this.#partsOf(abs));
+        if (outcome.kind === "content") return outcome.bytes;
+        throw this.#helperFailure(outcome);
       }
-      return Buffer.concat(chunks);
-    } finally {
-      await reader.close(this.#context);
+      const opened = await this.#env.openBinaryReader(abs, { noFollow: true }, this.#context);
+      if (!opened.ok) throw opened.error;
+      const reader = opened.value;
+      try {
+        const info = getOrThrow(await reader.info(this.#context));
+        const chunks: Uint8Array[] = [];
+        let offset = 0;
+        while (offset < info.size) {
+          const part = getOrThrow(
+            await reader.read(offset, Math.min(1 << 20, info.size - offset), this.#context),
+          );
+          if (part.length === 0) break;
+          chunks.push(part);
+          offset += part.length;
+        }
+        return Buffer.concat(chunks);
+      } finally {
+        await reader.close(this.#context);
+      }
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      throw asFileFailure(error);
     }
   }
 
@@ -312,8 +363,10 @@ export class Workspace {
     try {
       return sha(await this.#readBytes(abs));
     } catch (error) {
-      if (error instanceof FileError && error.code === "not_found") return "absent";
-      throw error;
+      if (!(error instanceof Error)) throw error;
+      const failure = asFileFailure(error);
+      if (failure instanceof FileFailure && failure.code === "not_found") return "absent";
+      throw failure;
     }
   }
 
@@ -332,7 +385,8 @@ export class Workspace {
           denied: true,
         });
       }
-      throw error;
+      if (!(error instanceof Error)) throw error;
+      throw asFileFailure(error);
     }
   }
 
@@ -368,11 +422,13 @@ export class Workspace {
           denied: true,
         });
       }
-      throw error;
+      if (!(error instanceof Error)) throw error;
+      throw asFileFailure(error);
     }
   }
 
   async #write(input: FileWrite): Promise<MutationResult> {
+    if (!JOURNAL_KEY_PATTERN.test(input.operationId)) throw new Denied("invalid operationId");
     const { rel, abs } = await this.#resolve(input.path);
     if (rel === ".git" || rel.startsWith(".git/")) throw new Denied("git is read-only");
     const bytes = input.content instanceof Uint8Array ? input.content : enc.encode(input.content);
@@ -392,14 +448,31 @@ export class Workspace {
     const current = await this.#versionOfFile(abs);
     const existed = current !== "absent";
     if (rec === undefined) {
-      if (current !== expectedVersion)
-        return { status: "conflict", operationId, currentVersion: current };
+      if (current !== expectedVersion) {
+        // Record the conflict so a retry keeps the same answer instead of applying later.
+        const conflict: MutationResult = {
+          status: "conflict",
+          operationId,
+          currentVersion: current,
+        };
+        this.#journal.ops[operationId] = {
+          abs,
+          rel,
+          expectedVersion,
+          contentHash,
+          temp: "",
+          outcome: conflict,
+        };
+        await this.#save();
+        return conflict;
+      }
       const intent: JournalIntent = {
         abs,
         rel,
         expectedVersion,
         contentHash,
-        temp: this.#canonicalRoot + "/.hns-tmp-" + operationId,
+        // Never derived from the caller's id: it is only a journal key.
+        temp: this.#canonicalRoot + "/.hns-tmp-" + randomUUID(),
       };
       this.#journal.ops[operationId] = intent;
       await this.#save();
@@ -407,8 +480,8 @@ export class Workspace {
       rec = intent;
     }
 
-    await this.#env.writeFile(rec.temp, bytes, this.#context);
-    await this.#env.flushFile(rec.temp, this.#context);
+    this.#require(await this.#env.writeFile(rec.temp, bytes, this.#context), "write temp");
+    this.#require(await this.#env.flushFile(rec.temp, this.#context), "flush temp");
     this.#crash("temp");
 
     if (this.#beforeRename !== undefined) await this.#beforeRename({ abs, rel });
@@ -418,7 +491,11 @@ export class Workspace {
       const committed = await this.#commitRooted(rec, abs, expectedVersion);
       if (committed.status === "conflict") {
         await this.#removeTemp(rec);
-        return { status: "conflict", operationId, currentVersion: committed.currentVersion };
+        return this.#record(operationId, {
+          status: "conflict",
+          operationId,
+          currentVersion: committed.currentVersion,
+        });
       }
       if (committed.status !== "applied") {
         await this.#removeTemp(rec);
@@ -428,7 +505,11 @@ export class Workspace {
       const again = await this.#versionOfFile(abs);
       if (again !== expectedVersion) {
         await this.#removeTemp(rec);
-        return { status: "conflict", operationId, currentVersion: again };
+        return this.#record(operationId, {
+          status: "conflict",
+          operationId,
+          currentVersion: again,
+        });
       }
       const parent = abs.slice(0, abs.lastIndexOf("/"));
       const parentNow = await this.#canonicalForWrite(parent);
@@ -443,8 +524,7 @@ export class Workspace {
         await this.#removeTemp(rec);
         return this.#record(operationId, { status: "unknown", operationId, reason: "io" });
       }
-      const renamed = await this.#env.renameFile(rec.temp, abs, this.#context);
-      if (!renamed.ok) throw renamed.error;
+      this.#require(await this.#env.renameFile(rec.temp, abs, this.#context), "rename");
     }
 
     // A parent swapped for a link can leave our target resolving outside.
@@ -511,7 +591,7 @@ export class Workspace {
     const result = await this.#env.watch(
       [{ path: this.#canonicalRoot, recursive: true }],
       (change) => {
-        void this.#onChange(change);
+        void this.#onChange(change).catch(() => this.#watchFailed());
       },
       this.#context,
     );
@@ -537,14 +617,35 @@ export class Workspace {
         rel,
         setTimeout(() => {
           this.#timers.delete(rel);
-          void this.#settlePath(rel);
+          void this.#settlePath(rel).catch(() => this.#watchFailed());
         }, 100),
       );
     }
   }
 
+  /** A watcher callback has no caller: keep the process alive and resync with an overflow. */
+  #watchFailed(): void {
+    void this.#emit({ kind: "overflow" }).catch(() => undefined);
+  }
+
   async #settlePath(rel: string): Promise<void> {
-    const version = await this.#versionOfFile(this.#joinRoot(rel));
+    let version: ExpectedVersion;
+    try {
+      version = await this.#versionOfFile(this.#joinRoot(rel));
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      const failure = asFileFailure(error);
+      // Directories are not files; a directory that replaces a file reads as a deletion.
+      if (
+        failure instanceof FileFailure &&
+        (failure.code === "is_directory" || failure.code === "invalid")
+      ) {
+        if (this.#known.delete(rel)) await this.#emit({ kind: "deleted", path: rel });
+        return;
+      }
+      await this.#emit({ kind: "overflow" });
+      return;
+    }
     if (version === "absent") {
       if (this.#known.delete(rel)) await this.#emit({ kind: "deleted", path: rel });
       return;

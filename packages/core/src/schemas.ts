@@ -13,6 +13,18 @@ import type {
   TaskUpdate,
 } from "./types.ts";
 
+/** One mutation's id. It is also a temporary file name, so it is a safe token, not free text. */
+export const OPERATION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function isOperationId(value: string): boolean {
+  return OPERATION_ID_PATTERN.test(value);
+}
+
+export const OperationIdSchema: v.GenericSchema<unknown, string> = v.pipe(
+  v.string(),
+  v.regex(OPERATION_ID_PATTERN, "operationId must be 1-64 characters of [A-Za-z0-9_-]"),
+);
+
 export const ProjectIdSchema: v.GenericSchema<unknown, ProjectId> = v.pipe(
   v.string(),
   v.transform((value): ProjectId => {
@@ -62,7 +74,7 @@ export const FileWriteRequestSchema: v.GenericSchema<unknown, FileWriteRequest> 
   path: v.pipe(v.string(), v.minLength(1)),
   content: v.string(),
   expectedVersion: v.union([v.literal("absent"), v.string()]),
-  operationId: v.pipe(v.string(), v.minLength(1)),
+  operationId: OperationIdSchema,
 });
 
 export const ErrorResponseSchema: v.GenericSchema<unknown, ErrorResponse> = v.object({

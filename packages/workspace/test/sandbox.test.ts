@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { getOrThrow } from "@earendil-works/pi-durable/env";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
 import {
@@ -13,11 +14,27 @@ import {
   detectSandbox,
   parseVersion,
   resolveShell,
-  SandboxUnavailableError,
 } from "../src/sandbox.ts";
 import type { SandboxReport } from "../src/sandbox.ts";
 
 const base = await mkdtemp(join(tmpdir(), "hns-sandbox-"));
+
+/** Run one shell command and return what it printed. */
+async function outputOf(env: ExecutionEnv, script: string): Promise<string> {
+  let output = "";
+  getOrThrow(
+    await env.exec(
+      [resolveShell(), "-c", script],
+      {
+        onOutput: (text) => {
+          output += text;
+        },
+      },
+      ctx,
+    ),
+  );
+  return output;
+}
 const BWRAP = process.env.BWRAP ?? "bwrap";
 
 let detectedPromise: Promise<SandboxReport> | undefined;
@@ -104,10 +121,10 @@ test("exec is refused when the sandbox is unavailable", async () => {
   assert.ok(!missing.available);
   const disabled = createNoExecEnv(env, missing);
 
-  await assert.rejects(
-    disabled.exec("echo should-not-run > refused.txt", undefined, ctx),
-    SandboxUnavailableError,
-  );
+  const refused = await disabled.exec("echo should-not-run > refused.txt", undefined, ctx);
+  assert.equal(refused.ok, false);
+  if (refused.ok) return;
+  assert.equal(refused.error.code, "shell_unavailable");
   assert.equal((await readdir(base)).includes("refused.txt"), false);
   assert.equal(getOrThrow(await disabled.exists(root, ctx)), true);
   await connection.close();
@@ -152,4 +169,60 @@ test("exec runs inside the root and cannot write outside", async (t) => {
   assert.equal(getOrThrow(await sandbox.exists(join(root, "sub"), ctx)), true);
   await env.cleanup(ctx);
   await connection.close();
+});
+test("a hidden path must be an absolute directory other than /", () => {
+  const env = new NodeExecutionEnv({ cwd: base });
+
+  assert.throws(() => createSandboxEnv(env, { root: join(base, "r1"), hide: ["/"] }), Error);
+  assert.throws(() => createSandboxEnv(env, { root: join(base, "r2"), hide: ["relative"] }), Error);
+});
+
+// Catches: bash inherited the server's environment, so API keys were visible to the agent.
+test("the sandbox clears the server environment and points HOME at the root", async (t) => {
+  const status = await detected();
+  if (!status.available) {
+    t.skip("bubblewrap is unavailable: " + status.reason);
+    return;
+  }
+  const root = join(base, "root-env");
+  const env = new NodeExecutionEnv({ cwd: base });
+  await env.createDir(root, undefined, ctx);
+  process.env.HNS_TEST_SECRET = "leaked";
+  const sandbox = createSandboxEnv(env, { root, bwrap: status.bwrap, shell: status.shell });
+  try {
+    const secret = await outputOf(sandbox, 'printf %s "$HNS_TEST_SECRET"');
+    assert.equal(secret, "");
+    const home = await outputOf(sandbox, 'printf %s "$HOME"');
+    assert.equal(home, root);
+  } finally {
+    delete process.env.HNS_TEST_SECRET;
+    await env.cleanup(ctx);
+  }
+});
+
+// Catches: the read-only root bind exposed the key files to the agent's shell.
+test("a hidden directory is masked inside the sandbox", async (t) => {
+  const status = await detected();
+  if (!status.available) {
+    t.skip("bubblewrap is unavailable: " + status.reason);
+    return;
+  }
+  const root = join(base, "root-hide");
+  const secrets = join(base, "secrets");
+  const env = new NodeExecutionEnv({ cwd: base });
+  await env.createDir(root, undefined, ctx);
+  await env.createDir(secrets, undefined, ctx);
+  await env.writeFile(join(secrets, "key.txt"), "secret", ctx);
+  const sandbox = createSandboxEnv(env, {
+    root,
+    bwrap: status.bwrap,
+    shell: status.shell,
+    hide: [secrets],
+  });
+  try {
+    const listed = await outputOf(sandbox, "ls -A " + secrets);
+    assert.equal(listed.trim(), "");
+  } finally {
+    await env.cleanup(ctx);
+  }
 });

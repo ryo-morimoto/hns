@@ -47,6 +47,7 @@
 | [0041](issues/0041-ci-dev-env.md) | CI と開発環境の固定 | open | — |
 | [0042](issues/0042-boundaries-knip.md) | 依存境界と未使用コードの検査 | open | 0031 |
 | [0044](issues/0044-multi-machine.md) | マルチマシン（保留） | **保留** | 0040 |
+| [0045](issues/0045-review-hardening.md) | レビュー指摘の修正（C/H/M） | **done** | 0004, 0033, 0037 |
 | [0024](issues/0024-secret-scopes.md) | 秘密のスコープ分離（14） | **done** | 0019 |
 
 ## ゲート

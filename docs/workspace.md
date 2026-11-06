@@ -48,7 +48,7 @@ type MutationResult =
 1. Root 内であることを検証（下記）
 2. 現在の版を計算し、`expectedVersion` と比較。違えば `conflict`
 3. Journal に intent を記録（`operationId`, ref, expected, contentHash, temp）
-4. 同一ディレクトリに temp を書き、flush
+4. root 直下に temp を書き、flush（名前は内部生成の UUID。`operationId` はトークンで、パスには使わない）
 5. ヘルパー内で再ハッシュして確認し、dirfd 相対で rename して置換（下記「TOCTOU」）
 6. Journal に outcome を記録し、イベントを追記
 
@@ -73,6 +73,7 @@ type MutationResult =
 - **root の同一性**: Journal の `id` と root 内の `.hns/root.json` を照合する。欠落・不一致なら開かない（fail closed）
 - **exec の隔離**: 起動時に bubblewrap を検出し、通らなければ exec を出さない（fail closed）。通ったときは `createSandboxEnv` で root だけ書き込み可能・他は読み取り専用。ネットワークは残す
 - **TOCTOU**: 解決と使用を同じ dirfd で行う（下記）。ヘルパーを実行できない環境では、rename 直前に親の canonical を再確認し、変わっていれば `unknown` に落とす（窓は残る）
+- **exec の環境**: sandbox は `--clearenv` でサーバの env を落とし、`PATH` と `HOME`（root）などだけを戻す。`SandboxOptions.hide` のディレクトリは tmpfs で隠す（鍵のディレクトリは呼び出し側が渡す）
 - root が symlink のときは、開いた時点の解決結果に固定する。差し替えは反映されない
 - Windows の区切り・大文字小文字、macOS の正規化は未検証（Linux のみ）
 
@@ -86,7 +87,7 @@ type MutationResult =
 
 パスの解決と open / rename を 1 回の解決にまとめる。ExecutionEnv のファイル API はパスしか取らないため、解決は別プロセスに任せる。
 
-- 書込: temp を root 直下に書いたあと、`rooted.mjs` が root の dirfd を開き、各親を `O_NOFOLLOW | O_DIRECTORY` で辿り、対象を再ハッシュして `expectedVersion` と比べ、**その場で** rename する（比較と置換の間も窓にしない）。
+- 書込: temp を root 直下に書いたあと、`rooted.mjs` が root の dirfd を開き、各親を `O_NOFOLLOW | O_DIRECTORY` で辿り、対象を再ハッシュして `expectedVersion` と比べ、**その親の dirfd から** rename する。親の差し替えはこれで閉じるが、**同名ファイルを hash と rename の間に差し替える窓は残る**（Linux に compare-and-rename は無い）。
 - 読取: 同じ辿りで最終コンポーネントを `O_NOFOLLOW` で開き、開いた fd から読む。内容は base64 で 1 本の stdout に返す。
 - root の同一性は `.hns/root.json` を dirfd 経由で読み、`probe` で記録した dev / ino と照合する。パスを差し替えられても別のディレクトリは開かない。
 - 起動時に `probe` を 1 回実行して可否を決める。失敗したら（Linux 以外・exec 無し・ヘルパーが届かないホスト）従来の再確認にフォールバックし、`Workspace.mode` が `checks` になる。
@@ -145,8 +146,9 @@ recover（applied / pending / unknown）を実装。**40/40 合格**（Node env 
 ## 限界（実装で確認したもの）
 
 - Journal の保存は §writeFile§（非原子）。原子的な追記ログにする必要がある。
-- temp は root 直下の §.hns-tmp-<opId>§。Agent から見える。制御用ディレクトリに逃がす。
-- 比較と rename の間の窓は、ヘルパーが動く環境では閉じた。動かない環境では残る（`Workspace.mode === "checks"`）。
+- temp は root 直下の §.hns-tmp-<uuid>§（内部生成）。Agent から見える。制御用ディレクトリに逃がす。
+- 親の差し替えは dirfd で閉じた。**同名ファイルの差し替え**は hash と rename の間に残る。ヘルパーが動かない環境では親の窓も残る（`Workspace.mode === "checks"`）。
+- `SandboxOptions.hide` は既定で空。サーバの composition root が鍵のディレクトリを渡す。
 - ヘルパーは操作ごとに Node を起動する（1 操作あたり数百 ms）。リモートの daemon に配る手段は未定。
 - dirfd 経路の読み取りは 8 MiB まで。超えると `invalid` で断る。
 - ディレクトリの fsync をしないため、rename の耐久性は保証しない。

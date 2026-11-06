@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as v from "valibot";
 import {
   parseRequest,
   parseResponse,
+  searchParamsObject,
   type RouteRequest,
   type RouteResponse,
 } from "../src/contract.ts";
+import { FileWriteRequestSchema } from "../src/schemas.ts";
 
 const at = "2026-11-07T00:00:00.000Z";
 
@@ -67,3 +70,39 @@ const invalidProject: RouteResponse<"GET /api/projects"> = [
 ];
 
 void invalidProject;
+// Catches: operationId was free text, so it could become a path segment.
+test("a file write refuses an operationId that is not a token", () => {
+  const base = { path: "a.txt", content: "x", expectedVersion: "absent" };
+
+  assert.equal(
+    v.parse(FileWriteRequestSchema, { ...base, operationId: "w_1-2" }).operationId,
+    "w_1-2",
+  );
+  for (const operationId of ["../x", "a/b", "a b", "x".repeat(65), ""]) {
+    assert.throws(
+      () => v.parse(FileWriteRequestSchema, { ...base, operationId }),
+      String(operationId),
+    );
+  }
+});
+
+// Catches: query schemas declared booleans/numbers that the wire sends as strings.
+test("query schemas take the strings the wire sends", () => {
+  const listed = parseRequest("GET /api/conversations", { includeArchived: "1", q: "hello" });
+  assert.equal(listed.ok, true);
+  if (!listed.ok) return;
+  assert.equal(listed.value.includeArchived, true);
+  assert.equal(parseRequest("GET /api/conversations", { includeArchived: "yes" }).ok, false);
+
+  const events = parseRequest("GET /api/events", { limit: "50" });
+  assert.equal(events.ok, true);
+  if (!events.ok) return;
+  assert.equal(events.value.limit, 50);
+  assert.equal(parseRequest("GET /api/events", { limit: "0" }).ok, false);
+});
+
+test("search params become the object a query schema parses", () => {
+  const params = new URLSearchParams("includeArchived=1&q=hello");
+
+  assert.deepEqual(searchParamsObject(params), { includeArchived: "1", q: "hello" });
+});
