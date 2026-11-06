@@ -29,6 +29,7 @@ PoC の HTTP/SSE/認証/周辺機能を packages/server に移し、bin で起�
 - store の SQL は書かず、0047 / 0048 の API を使う。pi-durable も直接触らず、0049 の API を使う。
 - 最初の縦切りは [engineering.md](../docs/engineering.md) の health / state / chat。
 - テストは 0046 の規律に従う。
+- `automations.last_fired_at` は store が full ISO を要求する。PoC の minute 文字列をそのまま渡さない。
 
 ## やらないこと
 
