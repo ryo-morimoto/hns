@@ -332,6 +332,28 @@ test("an automation rejects a non-ISO last_fired_at before writing", () => {
   });
 });
 
+test("a firing rejects a non-ISO at before writing", () => {
+  return withStore((store) => {
+    const project = store.projects.ensureDefault();
+    const automation = store.automations.create({
+      projectId: project.id,
+      name: "hook",
+      trigger: { type: "webhook" },
+      action: { type: "task" },
+    });
+    // SAFETY: a JS caller can bypass the type; createFiring must still refuse a non-ISO value.
+    const hostileTime = "2026-01-01T00:01" as IsoTimestamp;
+    assert.throws(() =>
+      store.automations.createFiring({
+        automationId: automation.id,
+        at: hostileTime,
+        status: "running",
+      }),
+    );
+    assert.equal(store.automations.listFirings(automation.id).length, 0);
+  });
+});
+
 test("usage is recorded and summed for the day", () => {
   return withStore((store) => {
     store.usage.add({ tokens: 3, cost: 0.25 });

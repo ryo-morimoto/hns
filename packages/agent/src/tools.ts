@@ -2,7 +2,7 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { Extension, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import { createBashTool } from "@earendil-works/pi-durable/tools";
 import { obj, str } from "@earendil-works/pi-schema";
-import { operationId } from "@hns/core";
+import { operationIdFrom } from "@hns/core";
 import type { MutationResult, OperationId } from "@hns/core";
 import type { Workspace } from "@hns/workspace";
 import type { AgentEventSink } from "./events.ts";
@@ -14,12 +14,11 @@ import type { ShellAccess } from "./shell.ts";
 const MAX_READ_CONTENT = 32 * 1024;
 
 /**
- * The wire's OperationIdSchema allows letters, digits, "_" and "-", up to 64 characters.
- * pi-durable call ids look like
- * "tool:<ms>:<id>". Keep the id unique and inside the rule the HTTP boundary enforces.
+ * pi-durable call ids look like "tool:<ms>:<id>". The codec maps the characters the wire
+ * refuses and caps the length; "call-" marks where the id came from.
  */
 export function operationIdFor(callId: string): OperationId {
-  return operationId(("call-" + callId.replaceAll(/[^A-Za-z0-9_-]/g, "-")).slice(0, 64));
+  return operationIdFrom("call-" + callId);
 }
 
 export interface WorkspaceToolsOptions {

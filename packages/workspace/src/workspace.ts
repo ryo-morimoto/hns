@@ -449,7 +449,15 @@ export class Workspace {
     try {
       opId = operationId(input.operationId);
     } catch {
-      throw new Denied("invalid operationId");
+      // The id cannot be a journal key, but the refusal is still an audit event.
+      const denied = new Denied("invalid operationId");
+      await this.#audit({
+        operationId: null,
+        path: input.path,
+        reason: denied.message,
+        denied: true,
+      });
+      throw denied;
     }
     try {
       return await this.#write({ ...input, operationId: opId });

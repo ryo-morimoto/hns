@@ -212,23 +212,39 @@ for (const kind of KINDS) {
     });
   });
 
-  // Catches: a direct workspace.write caller could bypass the HTTP operationId rule.
+  // Catches: a direct workspace.write caller could bypass the HTTP operationId rule, and a
+  // path-shaped id left a journal entry or a temp file, or the refusal left no audit line.
   test(kind + ": an invalid operationId is refused before writing", async () => {
     await withTarget(kind, async (target) => {
-      const workspace = await openWorkspace(target, "op-invalid");
-      const root = rootOf(target, "op-invalid");
+      const name = "op-invalid";
+      const workspace = await openWorkspace(target, name);
+      const root = rootOf(target, name);
       await assert.rejects(
         workspace.write({
           path: "bad.txt",
           content: "x",
           expectedVersion: "absent",
-          operationId: "bad id",
+          operationId: "../../escape",
         }),
         Denied,
       );
+
+      const entries = await readdir(root);
       assert.deepEqual(
-        (await readdir(root)).filter((name) => name === "bad.txt"),
+        entries.filter(
+          (entry) =>
+            entry === "bad.txt" || entry.startsWith(".hns-tmp-") || entry.includes("escape"),
+        ),
         [],
+      );
+      const journal = v.parse(
+        v.object({ ops: v.record(v.string(), v.unknown()) }),
+        JSON.parse(await readFile(join(target.base, "journal-" + name + ".json"), "utf8")),
+      );
+      assert.deepEqual(Object.keys(journal.ops), []);
+      assert.deepEqual(
+        workspace.auditLog.map((entry) => [entry.operationId, entry.denied]),
+        [[null, true]],
       );
       await workspace.close();
     });

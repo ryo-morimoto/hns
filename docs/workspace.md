@@ -71,7 +71,7 @@ type MutationResult =
 - 新規は「最も深い既存祖先を canonical 化して末尾を結合」
 - `.git/` は読み取りのみ
 - 操作ごとに root の存在を確認。消えていたら `denied`（書き込みで再作成しない）
-- 拒否は `operationId` 付きで Journal の `audit` に残す
+- 拒否は Journal の `audit` に残す。有効な `operationId` があればそれ付き、なければ `null`
 - **root の同一性**: Journal の `id` と root 内の `.hns/root.json` を照合する。欠落・不一致なら開かない（fail closed）
 - **cwd**: `contains(path)` が書き込みと同じ解決で root 配下かを返す。agent の cwd はこれで検査する
 - **helper の必須化**: `rooted: "required"` は、ヘルパーが動かない環境では開かない（既定は `mode: "checks"` へフォールバック）
