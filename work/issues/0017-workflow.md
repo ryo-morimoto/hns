@@ -20,5 +20,6 @@ touches: work/poc/app
 - `workflow.mjs`: `validateGraph` / `topoOrder` / `interpolate`。
 - ノードは当面 `agent` のみ。実行はサーバ内で逐次（トポロジカル順）。1ノード = 1会話。
 - API: `/api/workflows`（GET/POST/PUT）、`/api/workflows/:id/runs`（POST）、`/api/runs`（GET）。
-- 落ちた run は起動時に `interrupted` にする（再開はしない。D012）。
-- **10/10 合格**。
+- ノード種別: `agent` / `tool`（bash）/ `human`（承認待ち）。
+- 再開: 落ちた run は running のノードを pending に戻して再開。`waiting` の human は再起動をまたいで待ち、完了 API で続きから進む。
+- **16/16 合格**。

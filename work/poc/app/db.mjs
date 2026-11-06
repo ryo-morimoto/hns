@@ -170,10 +170,21 @@ export function openControlPlane(path) {
       db.prepare("UPDATE workflow_nodes SET status = ?, output = ?, conversation_id = ?, finished_at = ? WHERE run_id = ? AND node_id = ?")
         .run(status, output, conversationId ?? null, now(), runId, nodeId);
     },
-    /** A run left running by a crash is not resumable yet. */
-    reconcileRuns() {
-      db.prepare("UPDATE workflow_runs SET status = 'interrupted', finished_at = ? WHERE status IN ('queued', 'running')").run(now());
-      db.prepare("UPDATE workflow_nodes SET status = 'interrupted' WHERE status = 'running'").run();
+    /** Runs a crash cut off: their running node goes back to pending and the runner picks it up again. */
+    resumeRuns() {
+      db.prepare("UPDATE workflow_nodes SET status = 'pending' WHERE status = 'running'").run();
+      return db.prepare("SELECT * FROM workflow_runs WHERE status IN ('queued', 'running') ORDER BY created_at").all().map(row);
+    },
+    completeNode(runId, nodeId, output) {
+      const node = db.prepare("SELECT * FROM workflow_nodes WHERE run_id = ? AND node_id = ?").get(runId, nodeId);
+      if (!node || node.status !== "waiting") return undefined;
+      db.prepare("UPDATE workflow_nodes SET status = 'done', output = ?, finished_at = ? WHERE run_id = ? AND node_id = ?")
+        .run(output, now(), runId, nodeId);
+      return row(db.prepare("SELECT * FROM workflow_nodes WHERE run_id = ? AND node_id = ?").get(runId, nodeId));
+    },
+    setNodeWaiting(runId, nodeId, prompt) {
+      db.prepare("UPDATE workflow_nodes SET status = 'waiting', prompt = ?, started_at = ? WHERE run_id = ? AND node_id = ?")
+        .run(prompt, now(), runId, nodeId);
     },
 
     registerConversation({ id, projectId, title }) {

@@ -15,8 +15,9 @@
 9. Editor（Zed の操作モデルを参考にする）
 10. Git Diff Viewer（Want）
 11. Web UI Grabber Extension（Want）
+12. Automations（スケジュール / Webhook で Workflow・会話を起動）
 
-- Must は 1〜9。主画面は **Conversation / Progress** で、Editor First にはしない。
+- Must は 1〜9 と 12。主画面は **Conversation / Progress** で、Editor First にはしない。
 - 最初の利用者は「複数開発マシンを持つ個人開発者」（仮説）。
 - MVP 候補: セルフホスト起動、会話、2マシン接続、権限つきファイル編集、再開。**範囲は未承認**。
 
@@ -33,7 +34,7 @@
 | 要件・決定 | 設計ベースライン（v0.3） |
 | Agent Runtime | Pi Durable **1.5.0 固定**、実API確認済み |
 | ファイル安全 | Workspace 契約 v0.1（実装前） |
-| 検証 | 部品 156 チェック合格、統合 E2E 12/12、ドメイン 15/15、Workflow 10/10、実モデル 2プロバイダ |
+| 検証 | 部品 156 チェック合格、統合 E2E 12/12、ドメイン 15/15、Workflow 16/16、実モデル 2プロバイダ |
 | 実装 | 未着手 |
 
 ## 読む順

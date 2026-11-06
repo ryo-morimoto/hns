@@ -104,7 +104,6 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
 
   const storage = await openNodeSqliteStorage(join(stateDir, "session.sqlite"));
   const control = openControlPlane(join(stateDir, "control.sqlite"));
-  control.reconcileRuns();
   const registry = createRegistry();
   registry.install(tools);
   const harness = await Harness.open(storage, { models, registry, env: () => sandbox }, ctx);
@@ -129,19 +128,41 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
     return Array.isArray(content) ? content.filter((block) => block.type === "text").map((block) => block.text).join("") : "";
   };
 
-  const executeRun = async (runId) => {
-    const run = control.getRun(runId);
-    if (!run) return;
-    let parsed;
-    try { parsed = validateGraph(JSON.parse(run.graph_json)); }
-    catch (error) { control.finishRun(runId, "failed", String(error?.message ?? error)); return; }
-    const values = { input: run.input };
-    control.setRunStatus(runId, "running");
+  const activeRuns = new Set();
+  const advance = async (runId) => {
+    if (activeRuns.has(runId)) return;
+    activeRuns.add(runId);
     try {
+      const run = control.getRun(runId);
+      if (!run || run.status === "done" || run.status === "failed" || run.status === "waiting") return;
+      const parsed = validateGraph(JSON.parse(run.graph_json));
+      const values = { input: run.input };
+      for (const node of run.nodes) if (node.status === "done" && node.output !== null) values[node.node_id] = node.output;
+      control.setRunStatus(runId, "running");
+
       for (const id of parsed.order) {
-        const node = parsed.nodes.find((candidate) => candidate.id === id);
-        const prompt = interpolate(node.prompt, values);
+        const node = control.getRun(runId).nodes.find((candidate) => candidate.node_id === id);
+        if (node.status === "done") continue;
+        const definition = parsed.nodes.find((candidate) => candidate.id === id);
+        const prompt = interpolate(definition.type === "tool" ? definition.command : definition.prompt, values);
+
+        if (definition.type === "human") {
+          control.setNodeWaiting(runId, id, prompt);
+          control.setRunStatus(runId, "waiting");
+          return;
+        }
         control.setNodeRunning(runId, id, prompt);
+
+        if (definition.type === "tool") {
+          let output = "";
+          const result = await sandbox.exec(prompt, { onOutput: (text) => { output += text; } }, ctx);
+          const exitCode = result.ok ? result.value.exitCode : undefined;
+          control.setNodeResult(runId, id, exitCode === 0 ? "done" : "failed", output);
+          if (exitCode !== 0) throw new Error("tool node failed: " + id);
+          values[id] = output;
+          continue;
+        }
+
         const conversation = await harness.createConversation({
           ownership: { kind: "ownerless" },
           agent: { model: { provider: providerId, modelId }, cwd: root },
@@ -153,9 +174,12 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         control.setNodeResult(runId, id, settled.status === "done" ? "done" : "failed", text, String(conversation.id));
         if (settled.status !== "done") throw new Error("node failed: " + id);
       }
+
       control.finishRun(runId, "done", JSON.stringify(values));
     } catch (error) {
-      control.finishRun(runId, "failed", JSON.stringify({ error: String(error?.message ?? error), values }));
+      control.finishRun(runId, "failed", JSON.stringify({ error: String(error?.message ?? error) }));
+    } finally {
+      activeRuns.delete(runId);
     }
   };
 
@@ -191,6 +215,8 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       for (const client of clients) client.write(`event: state\ndata: ${data}\n\n`);
     }, 30);
   };
+  for (const run of control.resumeRuns()) void advance(run.id);
+
   const watch = await rootConversation.watch(ctx);
   watch.start(async (call) => { if (call.kind === "value") broadcast(); });
 
@@ -254,8 +280,20 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         const { input = "" } = await bodyOf(req);
         const run = control.createRun({ workflowId: id, input });
         if (!run) return json(res, 404, { error: "workflow not found" });
-        void executeRun(run.id);
+        void advance(run.id);
         return json(res, 202, { id: run.id, version: run.version });
+      }
+      if (url.pathname.startsWith("/api/runs/") && req.method === "POST") {
+        const parts = url.pathname.split("/").filter(Boolean); // api, runs, <id>, nodes, <nodeId>
+        if (parts.length === 5 && parts[3] === "nodes") {
+          const runId = parts[2];
+          const node = control.completeNode(runId, parts[4], (await bodyOf(req)).output ?? "");
+          if (!node) return json(res, 404, { error: "waiting node not found" });
+          control.setRunStatus(runId, "running");
+          void advance(runId);
+          return json(res, 202, { runId, node });
+        }
+        return json(res, 404, { error: "not found" });
       }
       if (url.pathname.startsWith("/api/runs/") && req.method === "GET") {
         const run = control.getRun(url.pathname.slice("/api/runs/".length));

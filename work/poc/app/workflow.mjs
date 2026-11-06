@@ -1,7 +1,7 @@
 // Workflow graphs: validation, ordering, and prompt interpolation.
 export class GraphError extends Error {}
 
-const TYPES = new Set(["agent"]);
+const TYPES = new Set(["agent", "tool", "human"]);
 
 export function validateGraph(graph) {
   if (!graph || typeof graph !== "object") throw new GraphError("graph must be an object");
@@ -16,7 +16,8 @@ export function validateGraph(graph) {
     if (ids.has(node.id)) throw new GraphError("duplicate node id: " + node.id);
     ids.add(node.id);
     if (!TYPES.has(node.type)) throw new GraphError("unknown node type: " + node.type);
-    if (typeof node.prompt !== "string" || node.prompt.length === 0) throw new GraphError("agent node needs a prompt");
+    if (node.type === "tool" && (typeof node.command !== "string" || node.command.length === 0)) throw new GraphError("tool node needs a command");
+    if (node.type !== "tool" && (typeof node.prompt !== "string" || node.prompt.length === 0)) throw new GraphError(node.type + " node needs a prompt");
   }
 
   const seen = new Set();

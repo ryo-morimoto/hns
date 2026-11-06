@@ -13,6 +13,8 @@
 | Run | id, taskId?, conversationId?, workspaceId, status | 実行の記録 |
 | Workflow | id, projectId, version, graph | Project に属する |
 | WorkflowRun | id, workflowId, version, status, startedAt | 版を固定して実行する |
+| Automation | id, projectId, trigger, action, enabled | Webhook / スケジュールの起点（[automation.md](automation.md)） |
+| Firing | id, automationId, status, runId | 起動の記録。実行は Workflow Run に委譲 |
 
 ## 状態
 
@@ -26,6 +28,7 @@
 - Workflow は「定義（版）」と「実行」を分ける。実行は版を固定する。
 - Conversation は Task に必須ではない（雑談・調査もある）。
 - 1 Project に複数 Conversation。Task との紐付けは任意（D-01 はこれで決め）。
+- Automation は Workflow Run を起動するだけ。自分では実行状態を持たない。
 - Workflow の実行は当面サーバ内の逐次（D012）。ノードは agent のみ、落ちたら interrupted。
 - Project / Task / Conversation の正本は `control.sqlite`（Durable の `session.sqlite` と分ける）。
 
