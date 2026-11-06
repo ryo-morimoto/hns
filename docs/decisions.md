@@ -144,3 +144,9 @@ date: 2026-11-06 · by: user · issue: 0028
 HTTP・会話・中断・例外を `events` に残す。クエリ・ヘッダ・本文は記録しない（token を落とさない）。
 `x-request-id` で相関し、`/api/events` と `/api/metrics` で読む。30日で削除。
 時系列の保存や外部送出（OTLP/Prometheus）は必要になってから。
+## D024: 会話は論理削除、root は消さない
+date: 2026-11-07 · by: user · issue: 0029
+
+会話は `deleted_at` で隠す。Durable の transcript は `session.sqlite` に残し、アプリからは見せない（物理削除の API が無い）。
+root 会話は削除できない（アプリの起点）。検索はタイトルのみ（本文検索は必要になってから）。
+一覧は `updated_at` の新しい順で、送信・完了のたびに更新する。

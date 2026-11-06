@@ -140,7 +140,10 @@ export function openControlPlane(path) {
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      updated_at TEXT,
+      archived INTEGER NOT NULL DEFAULT 0,
+      deleted_at TEXT
     );
   `);
 
@@ -153,6 +156,12 @@ export function openControlPlane(path) {
   }
   if (version < 2) db.exec("PRAGMA user_version = 2");
   if (version < 3) db.exec("PRAGMA user_version = 3");
+  if (version < 4) {
+    for (const column of ["updated_at TEXT", "archived INTEGER NOT NULL DEFAULT 0", "deleted_at TEXT"]) {
+      try { db.exec("ALTER TABLE conversations ADD COLUMN " + column); } catch {}
+    }
+    db.exec("PRAGMA user_version = 4");
+  }
 
   const now = () => new Date().toISOString();
   const row = (value) => (value === undefined ? undefined : { ...value });
@@ -199,11 +208,33 @@ export function openControlPlane(path) {
       return this.getTask(id);
     },
 
-    listConversations(projectId) {
-      const sql = projectId
-        ? "SELECT * FROM conversations WHERE project_id = ? ORDER BY created_at"
-        : "SELECT * FROM conversations ORDER BY created_at";
-      return (projectId ? db.prepare(sql).all(projectId) : db.prepare(sql).all()).map(row);
+    /** Live conversations, newest activity first. */
+    listConversations({ projectId, q, includeArchived = false, limit = 100 } = {}) {
+      const clauses = ["deleted_at IS NULL"];
+      const params = [];
+      if (!includeArchived) clauses.push("archived = 0");
+      if (projectId) { clauses.push("project_id = ?"); params.push(projectId); }
+      if (q) { clauses.push("title LIKE ?"); params.push("%" + q + "%"); }
+      const rows = db.prepare("SELECT * FROM conversations WHERE " + clauses.join(" AND ") + " ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?")
+        .all(...params, Math.min(Number(limit) || 100, 500));
+      return rows.map(row);
+    },
+    getConversation: (id) => row(db.prepare("SELECT * FROM conversations WHERE id = ?").get(id)),
+    renameConversation(id, title) {
+      db.prepare("UPDATE conversations SET title = ? WHERE id = ?").run(title, id);
+      return this.getConversation(id);
+    },
+    setConversationArchived(id, archived) {
+      db.prepare("UPDATE conversations SET archived = ? WHERE id = ?").run(archived ? 1 : 0, id);
+      return this.getConversation(id);
+    },
+    /** Soft delete: the Durable transcript stays in session.sqlite, hidden from the app. */
+    deleteConversation(id) {
+      db.prepare("UPDATE conversations SET deleted_at = ? WHERE id = ?").run(now(), id);
+      return this.getConversation(id);
+    },
+    touchConversation(id) {
+      db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now(), id);
     },
     createWorkflow({ projectId, name, graph }) {
       const workflow = { id: randomUUID(), project_id: projectId, name, version: 1, graph_json: JSON.stringify(graph), created_at: now(), updated_at: now() };
@@ -439,9 +470,9 @@ export function openControlPlane(path) {
     },
 
     registerConversation({ id, projectId, title }) {
-      db.prepare("INSERT INTO conversations (id, project_id, title, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, title = excluded.title")
-        .run(id, projectId, title, now());
-      return row(db.prepare("SELECT * FROM conversations WHERE id = ?").get(id));
+      db.prepare("INSERT INTO conversations (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, title = excluded.title")
+        .run(id, projectId, title, now(), now());
+      return this.getConversation(id);
     },
   };
 }

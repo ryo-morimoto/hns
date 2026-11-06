@@ -1,13 +1,21 @@
 // Requirement 14: PRF wraps plus a recovery code; both open the same data key.
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
 import { startApp } from "./server.mjs";
 
-const CHROME = process.env.HNS_CHROME ?? "/nix/store/r0f9i35n3r7rng8162xih4c1dag0s1vw-chromium-156.0.8078.47/bin/chromium";
-if (!existsSync(CHROME)) { console.log("SKIP: no chromium at " + CHROME); process.exit(0); }
+function findChrome() {
+  if (process.env.HNS_CHROME) return process.env.HNS_CHROME;
+  try {
+    const dirs = readdirSync("/nix/store").filter((name) => /-chromium-\d+\./.test(name)).sort().reverse();
+    for (const dir of dirs) { const candidate = "/nix/store/" + dir + "/bin/chromium"; if (existsSync(candidate)) return candidate; }
+  } catch {}
+  return undefined;
+}
+const CHROME = findChrome();
+if (!CHROME) { console.log("SKIP: no chromium"); process.exit(0); }
 let pass = 0, fail = 0;
 const check = (ok, name, detail) => { ok ? pass++ : fail++; console.log(ok ? "PASS" : "FAIL", name, ok ? "" : detail ?? ""); };
 

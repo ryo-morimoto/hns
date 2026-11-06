@@ -183,6 +183,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const conversations = new Map([[String(rootConversation.id), rootConversation]]);
   const conversationById = async (id) => {
     if (!id) return rootConversation;
+    if (control.getConversation(String(id))?.deleted_at) return undefined;
     const cached = conversations.get(String(id));
     if (cached) return cached;
     const found = await harness.conversation(Number(id), ctx);
@@ -615,6 +616,25 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         await tick(at ? new Date(at) : new Date());
         return json(res, 200, { ok: true });
       }
+      if (url.pathname.startsWith("/api/conversations/")) {
+        const id = url.pathname.slice("/api/conversations/".length);
+        const meta = control.getConversation(id);
+        if (!meta || meta.deleted_at) return json(res, 404, { error: "conversation not found" });
+        if (req.method === "PATCH") {
+          const body = await bodyOf(req);
+          if (body.title !== undefined) control.renameConversation(id, String(body.title));
+          if (body.archived !== undefined) control.setConversationArchived(id, Boolean(body.archived));
+          control.addEvent({ event: "conversation.updated", conversationId: id, detail: { title: body.title, archived: body.archived } });
+          return json(res, 200, control.getConversation(id));
+        }
+        if (req.method === "DELETE") {
+          if (id === String(rootConversation.id)) return json(res, 400, { error: "the root conversation cannot be deleted" });
+          if (activeChats.has(id)) { const conversation = await conversationById(id); await conversation?.abort(ctx).catch(() => {}); }
+          control.deleteConversation(id);
+          control.addEvent({ event: "conversation.deleted", conversationId: id });
+          return json(res, 200, { deleted: true, durableDataKept: true });
+        }
+      }
       if (url.pathname === "/api/workflows") {
         if (req.method === "GET") return json(res, 200, control.listWorkflows(url.searchParams.get("projectId") ?? undefined));
         if (req.method === "POST") {
@@ -665,7 +685,13 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         return json(res, 200, control.listRuns(url.searchParams.get("workflowId") ?? undefined));
       }
       if (url.pathname === "/api/conversations") {
-        if (req.method === "GET") return json(res, 200, control.listConversations(url.searchParams.get("projectId") ?? undefined));
+        if (req.method === "GET") {
+          return json(res, 200, control.listConversations({
+            projectId: url.searchParams.get("projectId") ?? undefined,
+            q: url.searchParams.get("q") ?? undefined,
+            includeArchived: url.searchParams.get("includeArchived") === "1",
+          }));
+        }
         if (req.method === "POST") {
           const { projectId = "default", title = "conversation" } = await bodyOf(req);
           const created = await harness.createConversation({
@@ -710,6 +736,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         const requestId = "ui-" + now;
         const submission = await conversation.submit({ type: "input", content: message, requestId }, ctx);
         activeChats.set(key, { submissionId: submission.id, requestId });
+        control.touchConversation(key);
         control.addEvent({ event: "chat.submitted", conversationId: key, requestId });
         let timer;
         if (limitsConfig.turnTimeoutMs > 0) {
@@ -721,6 +748,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           activeChats.delete(key);
           const after = usageTotals(await harness.usage(ctx));
           control.addUsage({ conversationId: key, tokens: after.tokens - before.tokens, cost: after.cost - before.cost, requestId });
+          control.touchConversation(key);
           control.addEvent({
             event: "chat.settled", conversationId: key, requestId, durationMs: Date.now() - now,
             level: settled?.status === "done" ? "info" : "warn",

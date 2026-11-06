@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Project | id, name, createdAt | Workspace・Conversation・Task・Workflow を持つ |
 | Workspace | id, machineId, rootPath | Project に属する |
-| Conversation | Durable の id, projectId, title | Project に属する。1 Project に複数 |
+| Conversation | Durable の id, projectId, title, archived, deletedAt | 一覧は更新順。削除は論理削除（0029） |
 | Task | id, projectId, title, status, createdAt, updatedAt | Project に属し、Run を持つ |
 | Run | id, taskId?, conversationId?, workspaceId, status | 実行の記録 |
 | Workflow | id, projectId, version, graph | Project に属する |
