@@ -56,6 +56,8 @@ export function openControlPlane(path) {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       login TEXT NOT NULL UNIQUE,
+      wrapped_dek TEXT,
+      dek_iv TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS credentials (
@@ -112,7 +114,13 @@ export function openControlPlane(path) {
   `);
 
   const version = db.prepare("PRAGMA user_version").get().user_version ?? 0;
-  if (version < 1) db.exec("PRAGMA user_version = 1");
+  // v1 databases predate the wrapped data key.
+  if (version === 1) {
+    for (const column of ["wrapped_dek", "dek_iv"]) {
+      try { db.exec("ALTER TABLE users ADD COLUMN " + column + " TEXT"); } catch {}
+    }
+  }
+  if (version < 2) db.exec("PRAGMA user_version = 2");
 
   const now = () => new Date().toISOString();
   const row = (value) => (value === undefined ? undefined : { ...value });
@@ -258,6 +266,11 @@ export function openControlPlane(path) {
     updateCounter(id, counter) {
       db.prepare("UPDATE credentials SET counter = ? WHERE id = ?").run(counter, id);
     },
+    setWrappedDek(userId, { wrappedDek, dekIv }) {
+      db.prepare("UPDATE users SET wrapped_dek = ?, dek_iv = ? WHERE id = ?").run(wrappedDek, dekIv, userId);
+    },
+    getUserById: (id) => row(db.prepare("SELECT * FROM users WHERE id = ?").get(id)),
+
     createSession(userId, ttlMs) {
       const session = { id: randomUUID(), user_id: userId, expires_at: new Date(Date.now() + ttlMs).toISOString(), created_at: now() };
       db.prepare("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)").run(session.id, session.user_id, session.expires_at, session.created_at);

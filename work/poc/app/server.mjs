@@ -94,6 +94,8 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const control = openControlPlane(join(stateDir, "control.sqlite"));
   const secrets = new SecretStore({ stateDir, control });
   const passkey = createPasskey({ control });
+  /** Data keys unlocked for a session; never written to storage. */
+  const unlocks = new Map();
   const ws = await new Workspace({ env: raw, root, journalPath: join(stateDir, "journal.json"), context: ctx }).open();
   await ws.recover();
 
@@ -375,10 +377,16 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           return task ? json(res, 200, task) : json(res, 404, { error: "task not found" });
         } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
       }
+      const sessionOf = (req) => control.getSession(cookieOf(req.headers.cookie, "hns_session"));
+      const dekOf = (req) => unlocks.get(cookieOf(req.headers.cookie, "hns_session"));
       if (url.pathname === "/api/me" && req.method === "GET") {
-        const session = control.getSession(cookieOf(req.headers.cookie, "hns_session"));
+        const session = sessionOf(req);
         const user = session ? control.getUser(session.user_id) : undefined;
-        return json(res, 200, { user: user ? { login: user.login } : null });
+        return json(res, 200, {
+          user: user ? { login: user.login } : null,
+          unlocked: Boolean(session && unlocks.has(session.id)),
+          hasWrapped: Boolean(user?.wrapped_dek),
+        });
       }
       if (url.pathname.startsWith("/api/passkey/")) {
         const hostHeader = req.headers.host ?? "localhost";
@@ -390,14 +398,31 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           return json(res, 200, await passkey.registrationOptions({ login, rpID }));
         }
         if (url.pathname === "/api/passkey/register/verify" && req.method === "POST") {
-          const { login, response } = await bodyOf(req);
-          try { return json(res, 200, await passkey.verifyRegistration({ login, response, origin, rpID })); }
-          catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+          const { login, response, wrappedDek, dekIv } = await bodyOf(req);
+          try {
+            const result = await passkey.verifyRegistration({ login, response, origin, rpID });
+            if (result.verified && wrappedDek && dekIv) control.setWrappedDek(result.user.id, { wrappedDek, dekIv });
+            return json(res, 200, { verified: result.verified });
+          } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+        }
+        if (url.pathname === "/api/passkey/unlock" && req.method === "POST") {
+          const session = sessionOf(req);
+          if (!session) return json(res, 401, { error: "unauthorized" });
+          const { dek } = await bodyOf(req);
+          const key = Buffer.from(String(dek ?? ""), "base64");
+          if (key.length !== 32) return json(res, 400, { error: "dek must be 32 bytes" });
+          unlocks.set(session.id, key);
+          return json(res, 200, { unlocked: true });
         }
         if (url.pathname === "/api/passkey/login/options" && req.method === "POST") {
           const { login } = await bodyOf(req);
           if (!login) return json(res, 400, { error: "login is required" });
-          return json(res, 200, await passkey.authenticationOptions({ login, rpID }));
+          const options = await passkey.authenticationOptions({ login, rpID });
+          const user = control.getUserByLogin(login);
+          return json(res, 200, {
+            ...options,
+            wrapped: user?.wrapped_dek ? { wrappedDek: user.wrapped_dek, dekIv: user.dek_iv } : null,
+          });
         }
         if (url.pathname === "/api/passkey/login/verify" && req.method === "POST") {
           const { login, response } = await bodyOf(req);
@@ -411,7 +436,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         }
         if (url.pathname === "/api/passkey/logout" && req.method === "POST") {
           const id = cookieOf(req.headers.cookie, "hns_session");
-          if (id) control.deleteSession(id);
+          if (id) { control.deleteSession(id); unlocks.delete(id); }
           res.setHeader("set-cookie", "hns_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
           return json(res, 200, { ok: true });
         }
@@ -424,10 +449,16 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       if (url.pathname.startsWith("/api/secrets/")) {
         const parts = url.pathname.split("/").filter(Boolean); // api, secrets, scope, name
         if (parts.length === 4 && !SCOPES.includes(parts[2])) return json(res, 400, { error: "unknown scope" });
+        if (parts.length === 4 && parts[2] === "user" && !dekOf(req)) return json(res, 423, { error: "locked" });
+        if (parts.length === 4 && req.method === "GET") {
+          const value = secrets.get(parts[2], parts[3], { key: dekOf(req) });
+          return value === undefined ? json(res, 404, { error: "not found" }) : json(res, 200, { scope: parts[2], name: parts[3], value });
+        }
         if (parts.length === 4 && req.method === "PUT") {
           const { value } = await bodyOf(req);
           if (typeof value !== "string") return json(res, 400, { error: "value is required" });
-          return json(res, 200, secrets.put(parts[2], parts[3], value));
+          try { return json(res, 200, secrets.put(parts[2], parts[3], value, { key: dekOf(req) })); }
+          catch (error) { return json(res, 423, { error: String(error.message ?? error) }); }
         }
         if (parts.length === 4 && req.method === "DELETE") {
           secrets.delete(parts[2], parts[3]);

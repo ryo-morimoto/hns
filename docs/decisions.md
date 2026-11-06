@@ -113,3 +113,9 @@ date: 2026-11-06 · by: user · issue: 0022
 date: 2026-11-06 · by: user · issue: 0024
 
 `user` は人の秘密、`service` は Automation とバックグラウンド実行の資格情報。AES-256-GCM で保存し、Automation 側は `getService` だけを使う。`user` は将来 PRF で包む。
+## D019: PRF で包み、ログイン中だけ復号する
+date: 2026-11-06 · by: user · issue: 0023
+
+登録時にブラウザで DEK を生成し、PRF 出力から HKDF で作った KEK で包んで保存する。
+ログイン時に開いてセッションに渡し、平文の DEK はメモリだけに置く。再起動・ログアウトで消える。
+`user` の秘密はロック中 `423`。`service` はサーバ鍵なので Automation は動き続ける。

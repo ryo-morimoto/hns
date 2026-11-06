@@ -23,11 +23,17 @@ export class SecretStore {
     if (this.#key.length !== 32) throw new Error("secrets key must be 32 bytes");
   }
 
-  put(scope, name, value) {
+  #keyFor(scope, key) {
+    if (scope === "service") return this.#key;
+    if (!key || key.length !== 32) throw new Error("user secrets are locked");
+    return key;
+  }
+
+  put(scope, name, value, { key } = {}) {
     if (!SCOPES.includes(scope)) throw new Error("unknown scope: " + scope);
     if (!name) throw new Error("name is required");
     const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", this.#key, iv);
+    const cipher = createCipheriv("aes-256-gcm", this.#keyFor(scope, key), iv);
     const ciphertext = Buffer.concat([cipher.update(String(value), "utf8"), cipher.final()]);
     this.#control.putSecret({
       scope, name,
@@ -38,11 +44,11 @@ export class SecretStore {
     return { scope, name };
   }
 
-  get(scope, name) {
+  get(scope, name, { key } = {}) {
     if (!SCOPES.includes(scope)) return undefined;
     const row = this.#control.getSecret(scope, name);
     if (!row) return undefined;
-    const decipher = createDecipheriv("aes-256-gcm", this.#key, Buffer.from(row.iv, "base64"));
+    const decipher = createDecipheriv("aes-256-gcm", this.#keyFor(scope, key), Buffer.from(row.iv, "base64"));
     decipher.setAuthTag(Buffer.from(row.tag, "base64"));
     return Buffer.concat([decipher.update(Buffer.from(row.ciphertext, "base64")), decipher.final()]).toString("utf8");
   }
