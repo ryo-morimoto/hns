@@ -53,6 +53,10 @@
   box-sizing: border-box;
 }
 
+body {
+  margin: 0;
+}
+
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -298,6 +302,7 @@
 
 .hns-menu-popup {
   min-width: 180px;
+  max-width: min(360px, calc(100vw - 16px));
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -329,6 +334,29 @@
 
 .hns-menu-item--danger {
   color: var(--danger);
+}
+
+.hns-menu-item__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hns-menu-item__check-slot {
+  display: inline-flex;
+  flex: 0 0 12px;
+  align-items: center;
+}
+
+.hns-menu-item__check {
+  color: var(--accent-text);
+}
+
+.hns-menu-item__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hns-menu-shortcut {

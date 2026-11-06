@@ -18,7 +18,7 @@
 | 頻度 | 毎日使う操作を実装するとき | 頻繁な操作に長い演出が入っていないか。演出が初回・完了・異常に寄っているか | [FigJam](https://www.figma.com/figjam/) |
 | 情報密度 | 一覧・詳細・設定を作るとき | 重要な情報が強く、補助が後退しているか。すべて同じ強さになっていないか | [Are.na](https://www.are.na) |
 | キーボード同等 | 主要操作を実装するとき | マウスでできることをキーボードでもできるか。フォーカスが見え、順序が自然か | [FigJam](https://www.figma.com/figjam/) |
-| 操作の配置（頻度） | モバイル・タブレットの操作を配置するとき | 頻度が高い操作（agentic ではコンテキスト/タスクの切替、Needs you、コマンド）が画面下部に集約されているか。稀な操作（設定・接続・テーマ）が下部を占有していないか。下部だけに重要操作を閉じ込めていないか | [Apple HIG — Tab bars](https://developer.apple.com/design/human-interface-guidelines/tab-bars) / [Material 3 — Navigation bar](https://m3.material.io/components/navigation-bar/overview) |
+| 操作の配置（頻度） | モバイル・タブレットの操作やフッターを設計するとき | フッターの主役が composer か。汎用の下部ナビバーで頻繁操作を並べていないか。頻繁操作（コンテキスト/タスク切替・Needs you・コマンド）が composer と共存して届くか、届かないなら上部/drawer/キーボードにあるか | [Material 3 — Navigation bar](https://m3.material.io/components/navigation-bar/overview) |
 | タッチ / スワイプ | モバイル・タブレット向けの操作（dismiss・drawer・行の操作・タブ切替）を作るとき | スワイプは補助で、同じ操作をボタン/メニュー/キーボードでもできるか（WCAG 2.5.1 / 2.5.7）。縦スクロールや画面端の戻るジェスチャと競合しないか。閾値・速度・途中のキャンセルが一貫しているか。破壊的操作に Undo か確認があるか | [Apple HIG — Gestures](https://developer.apple.com/design/human-interface-guidelines/gestures) / [Material 3 — Gestures](https://m3.material.io/foundations/interaction/gestures) / [WCAG 2.5.1](https://www.w3.org/WAI/WCAG22/Understanding/pointer-gestures.html) / [WCAG 2.5.7](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html) |
 | 状態の網羅 | 画面・部品を作るとき | loading / empty / error / 権限なし / 保存中 / 競合 / undo があるか | [Linear](https://linear.app) |
 | 意図の確認 | Agent に依頼する画面を作るとき | 曖昧な依頼で1〜3個だけ聞くか。触ってよい範囲（パス・環境）が見えるか | [Setproduct](https://www.setproduct.com/blog/ai-agent-ui-design-patterns) |
