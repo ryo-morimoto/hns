@@ -27,7 +27,7 @@
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run --root ../.. --project workspace",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsrs --noEmit"
   },
   "dependencies": {
     "@earendil-works/chord": "1.5.0",

@@ -35,7 +35,7 @@ npm run check
 
 Node 26 is pinned by `flake.nix`. Run anything that needs `node`/`npm` inside `nix develop` (or prefix it with `nix develop --command`).
 
-`npm run check` is the gate: oxlint → oxfmt --check → tsc → test → build. It also runs from the pre-commit hook after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`).
+`npm run check` is the gate: oxlint → oxfmt --check → tsrs → test → build. It also runs from the pre-commit hook after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`).
 Building is not proof of correctness; types and tests are.
 
 ## Build Commands
@@ -163,7 +163,7 @@ Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS
 - **oxlint** with the vendored [anti-slop](https://github.com/dmmulroy/anti-slop) rules (`tools/oxlint/anti-slop/`). Read a rule before disabling it; do not edit the vendored copy without recording it in `UPSTREAM.md`
 - **oxfmt** owns whitespace. `require-readable-spacing` is disabled because the two disagree
 - `npm run lint` / `npm run fmt`; the pre-commit hook runs both through `npm run check`
-- Type checks run per workspace (`tsc --noEmit`)
+- Type checks run per workspace (`tsrs --noEmit`, D044); declaration emit stays on `tsc`
 
 ## Commit Guidelines
 

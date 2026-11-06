@@ -19,7 +19,11 @@
   "knip": {
     "workspaces": {
       "packages/*": { "entry": ["test/**/*.test.ts"] },
-      "packages/workspace": { "entry": ["test/**/*.test.ts", "src/rooted-helper.ts"] }
+      "packages/workspace": { "entry": ["test/**/*.test.ts", "src/rooted-helper.ts"] },
+      "packages/web": {
+        "entry": ["test/**/*.test.{ts,tsx}"],
+        "ignoreDependencies": ["jsdom"]
+      }
     },
     "ignore": ["work/**", "tools/**"]
   },
@@ -28,6 +32,7 @@
     "knip": "6.44.1",
     "oxfmt": "0.77.0",
     "oxlint": "1.78.0",
+    "tsrs": "0.22.0-ts7.1.0-beta",
     "vitest": "5.1.0"
   }
 }

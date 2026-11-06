@@ -24,7 +24,7 @@
 18. 安全（TOCTOU の残余・sandbox の配布・SSH 経路の検証）
 19. 開発・検証基盤（node の固定・CI・テスト集約）
 20. 会話の管理（一覧・名前・削除・検索）
-21. UI / UX の仕上げ（最終段、D011）
+21. UI / UX の仕上げ（D043 で画面単位に前倒し）
 
 - Must は 1〜9 と 12〜21（10・11 は Want）。主画面は **Conversation / Progress** で、Editor First にはしない。
 - 最初の利用者は「複数開発マシンを持つ個人開発者」（仮説）。
@@ -118,7 +118,7 @@ curl -s "$URL/events?cursor=0&limit=1"
 | 網羅（全イベント） | `cd work/poc/app && node run-journal.mjs` |
 | 会話の管理 | `cd work/poc/app && node run-conversations.mjs` |
 | 安全 | `cd work/poc/app && node run-safety.mjs` |
-| まとめて検査 | `npm run check`（oxlint / oxfmt / tsc / test / build） |
+| まとめて検査 | `npm run check`（oxlint / oxfmt / tsrs / test / build） |
 | 秘密 | `cd work/poc/app && node run-secrets.mjs` |
 | バックアップ | `cd work/poc/app && node run-backup.mjs` |
 | 実モデル（要キー） | `cd work/poc/conversation && PROVIDER=opencode MODEL_ID=deepseek-v4.1-flash node real.mjs` |

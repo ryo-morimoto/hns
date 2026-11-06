@@ -8,7 +8,7 @@
 - `npm test` = `vitest run`（全部）。`npm test -w @hns/store` = そのパッケージだけ。
 - watch は `npx vitest`。coverage はゲートに入れない（必要になってから閾値ごと決める）。
 - アサーションは **`node:assert/strict` に統一**。`expect` は使わない（書き方を1つにする）。
-- テストも `tsc --noEmit` の対象。`any`・`@ts-ignore`・根拠のない `as` は禁止。
+- テストも `tsrs --noEmit` の対象。`any`・`@ts-ignore`・根拠のない `as` は禁止。
 - `retries: 0`。flaky をリトライで隠さない。
 
 ## 層
@@ -40,7 +40,7 @@
 
 ## ゲート
 
-- `npm run check` = oxlint → oxfmt → tsc → `vitest run` → build。
+- `npm run check` = oxlint → oxfmt → tsrs → `vitest run` → build。
 - CI も同じコマンド。テストのためだけの別ランナー・別設定を作らない。
 - テストを足さない変更は「何を証明したか」を説明する。
 

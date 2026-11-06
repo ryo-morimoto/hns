@@ -43,7 +43,11 @@ export default defineConfig({
       },
     },
     {
-      files: ["packages/store/**/*.ts", "packages/workspace/**/*.ts", "packages/web/**/*.ts"],
+      files: [
+        "packages/store/**/*.ts",
+        "packages/workspace/**/*.ts",
+        "packages/web/**/*.{ts,tsx}",
+      ],
       rules: {
         "no-restricted-imports": [
           "error",

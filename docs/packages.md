@@ -28,7 +28,7 @@
 | `@hns/agent` | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode） | core, workspace, pi-durable, pi-ai |
 | `@hns/store` | SQLite、migration、リポジトリ。`./identity` で token・tailnet・passkey・セッション・秘密 | node:sqlite |
 | `@hns/server` | HTTP / SSE / 認証の組み立て、Workflow・Automation、bin（`hns`） | 全部 |
-| `@hns/web` | React UI（最後） | core（型のみ） |
+| `@hns/web` | React UI（D043 で前倒し） | core（ROUTES / parseResponse を含む） |
 
 ## 依存グラフ
 
@@ -93,6 +93,6 @@ server ─┬─► agent ─┬─► workspace ─► core
 2. `store` ← `work/poc/app/db.mjs` + `secrets.mjs` / `passkey.mjs` / `tailscale.mjs` / `recovery.mjs`
 3. `agent` ← `work/poc/conversation` + ツール + hooks
 4. `server` ← `work/poc/app/server.mjs`
-5. `web` ← `work/poc/app/ui`（最後。D011）
+5. `web` ← `work/poc/app/ui`（D043 で前倒し。画面単位）
 
 各段で型検査を通す。

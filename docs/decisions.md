@@ -334,6 +334,35 @@ date: 2026-11-07 · by: agent · issue: -
 レビュー時は各観点の Ref 列から辿る。原典と統合判断の区別（2回で抽象化、blocking の定義、優先度を作らない）は
 design.md と各項目の補足に書く。
 
+## D043: Web UI を画面単位で前倒しする（contract-first / fixture 併用）
+date: 2026-11-07 · by: user · issue: 0036
+
+D011 の「UI は最後」を、ユーザー判断で前倒しする。PoC で Agentic Workspace の Intent と Golden flow を検証でき、画面単位で本実装へ移せる見通しが付いた。型・検証・サーバを固める順序は変えないが、Web は core の HTTP 契約（0037）に接続し、0035 の完成前は fixture client で画面とテストを進める。
+
+- packages/web は React 19.3.1 + Vite 8.3.6 + TanStack Query 5.106.1。依存は exact pin。
+- HTTP は @hns/core の ROUTES / parseResponse だけを使い、response 型を手書きしない。
+- 画面: workspace → conversation → editor → settings / auth → project-task / workflow / automation。
+- 0100 foundation → 0101 design system → 0102 shell → 0103–0112 screens/components → 0113 responsive/a11y → 0114 visual review → 0036 integration → 0043 E2E。
+- 0100 の依存 pin: react 19.3.1 / react-dom 19.3.1 / @tanstack/react-query 5.106.1 / vite 8.3.6 / @vitejs/plugin-react 6.2.1 / @types/react 19.3.0 / @types/react-dom 19.3.0 / @testing-library/react 16.3.3 / @testing-library/user-event 14.6.8 / jsdom 31.0.0。
+- CodeMirror 6 は 0106 で exact pin と理由をこの decision に追記する（engineering で選定済み）。
+- API / data の不足は 0115–0131 に分離（overview / WorkItem / ack / live SSE / conversation GET / evidence / search / provider / settings / backup / file tree / notifications / project root / OAuth / run cancel / workflow archive / automation archive）。
+- UI の Intent は work/poc/app/ui/INTENT.md を引き継ぐ。PoC は履歴として残し、機能追加はしない。
+- server 0035 が未完成の間、実サーバー接続を前提にした受け入れは fixture と契約テストまで。E2E は 0043。
+- 技術選定の参考として X の記事（[Rebuilding the global town square from scratch](https://blog.x.com/en/engineering/rebuilding-the-global-town-square-from-scratch), 2026-11-04）を採る。Vite 8（Rolldown）/ React 19 / TypeScript strict / named export と barrel なし / 境界での parse / jsdom + Testing Library の方針を共有する。
+- Relay + GraphQL と SSR / streaming は採らない。hns の契約は core の ROUTES による typed REST で、読者は自己ホストの認証済み利用者だけ（crawler / link preview を分ける必要がない）。
+- プリミティブは Base UI（`@base-ui/react` 1.9.0、exact pin）を土台にする（0101）。CSS は CSS 変数のトークンのままで、Tailwind は入れない。未使用の依存を 0100 に足さないため、追加は最初の部品を作る 0101 で行う。
+- 0100 の web 依存のうち typescript / @types/node / valibot は既存 workspace と同じレンジ（^ 始まり）、受入条件に列挙した 10 依存は exact pin。
+
+## D044: 型検査は tsrs（Rust 版 tsc）で行う
+date: 2026-11-07 · by: user · issue: 0100
+
+X の記事（2026-11-04）に倣い、`npm run check` の型検査を [tsrs](https://github.com/oxc-project/tsrs) 0.22.0-ts7.1.0-beta（TS 7.1 の Rust 実装）に置き換える。速さとメモリが目的で、検査の意味は変えない。
+
+- 各パッケージの `typecheck` は `tsrs --noEmit`。ゲートでは `--fast` を付けない（既定モードが TS 7.1 の checker 挙動を保つ）。
+- 宣言の emit（`tsc -p tsconfig.build.json`）は TypeScript 5.9 のまま。tsrs は検査専用にし、emit の置き換えは必要になってから別 issue にする。
+- tsrs が未対応の構文で落ちたときは tsc に戻す。ゲートを止めない。
+- 既存 4 パッケージと web の型検査が tsrs で通ることを確認して切り替えた。
+
 ## D045: 調査・要件・技術選定の進め方を docs/process.md に置く
 date: 2026-11-07 · by: agent · issue: -
 

@@ -22,7 +22,7 @@
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run --root ../.. --project store",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsrs --noEmit"
   },
   "dependencies": {
     "@hns/core": "0.1.0",

@@ -10,7 +10,8 @@
 | 実行 | Node.js 26（`flake.nix` + nixpkgs-unstable で固定、D035） | 既存の pi-durable と同一。`node:sqlite` が使える | Bun（DB と sandbox の相性が未検証） |
 | HTTP | Fastify 5 | SSE・テストが素直 | Express（検証が弱い）、Hono（未検証） |
 | DB | SQLite（`node:sqlite`） | Durable と同じ。バックアップが簡単 | Postgres（今は不要） |
-| UI | React 19 + Vite + TanStack Query | 最終段の UX を詰めやすい。状態の取り回しが明確 | 素の DOM（UI が育たない） |
+| UI | React 19 + Vite 8（Rolldown）+ TanStack Query 5 + Base UI | 最終段の UX を詰めやすい。状態の取り回しが明確。X の新 x.com（2026-11-04）と同じ土台 | 素の DOM（UI が育たない） |
+| 型検査 | tsrs 0.22（D044） | tsc 互換の Rust 実装。型検査を速く保つ。emit は tsc のまま | tsc だけ（遅い） |
 | エディタ | CodeMirror 6 | 軽い。diff は自前で持っている | Monaco（重い） |
 | テスト | Vitest 5（unit / contract / repository / API）+ E2E（0043 で決める） | 1 runner で backend と将来の React を同じ規律に。型ストリップに依存しない | Jest（重い）、node:test（UI で二重化） |
 | Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored） | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
@@ -91,4 +92,4 @@ npm 依存ではなく**コピー**として持つ。読んで、必要なら自
 ## 5. 移行
 
 PoC は残す（履歴）。製品コードは `apps` / `packages` に新しく置き、PoC から1機能ずつ移植する。
-最初の縦切りは **protocol → server の health / state / chat**。UI は最後（D011）。
+最初の縦切りは **protocol → server の health / state / chat**。UI は D043 で画面単位に前倒しする。

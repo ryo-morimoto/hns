@@ -36,7 +36,15 @@ export default defineConfig({
       },
       { extends: true, test: { name: "agent", include: ["packages/agent/test/**/*.test.ts"] } },
       { extends: true, test: { name: "server", include: ["packages/server/test/**/*.test.ts"] } },
-      { extends: true, test: { name: "web", include: ["packages/web/test/**/*.test.ts"] } },
+      {
+        extends: true,
+        test: {
+          name: "web",
+          environment: "jsdom",
+          include: ["packages/web/test/**/*.test.{ts,tsx}"],
+          setupFiles: ["packages/web/test/setup.ts"],
+        },
+      },
     ],
   },
 });
