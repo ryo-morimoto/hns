@@ -33,7 +33,7 @@
 | 要件・決定 | 設計ベースライン（v0.3） |
 | Agent Runtime | Pi Durable **1.5.0 固定**、実API確認済み |
 | ファイル安全 | Workspace 契約 v0.1（実装前） |
-| 検証 | T-01 29/29、T-02 21/21・12/12、T-03/T-04 40/40、Skeleton 13/13、Sandbox 7/7、会話 10/10 |
+| 検証 | T-01〜T-04 全合格、Skeleton 13/13、Sandbox 7/7、会話 10/10、Editor 14/14 |
 | 実装 | 未着手 |
 
 ## 読む順
@@ -43,8 +43,8 @@
 ## 触ってみる
 
 ```bash
-cd work/poc/walking-skeleton && npm install
-node server.mjs        # root と url を表示する
+cd work/poc/editor && npm install
+node serve.mjs ~/some/dir    # url を表示する（エディタ）
 ```
 
 表示された url を使って:
@@ -64,6 +64,7 @@ curl -s "$URL/events?cursor=0&limit=1"
 | T-02 Root同一性 | `cd work/poc/root-swap && node run.mjs` |
 | exec 隔離 | `cd work/poc/sandbox && node run.mjs` |
 | 会話の実結線 | `cd work/poc/conversation && node run.mjs` |
+| Editor | `cd work/poc/editor && node run.mjs` |
 | T-03/T-04 | `cd work/poc/workspace-core && node run.mjs` |
 | Walking Skeleton | `cd work/poc/walking-skeleton && node run.mjs` |
 

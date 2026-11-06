@@ -38,3 +38,9 @@ date: 2026-11-06 · by: user · issue: 0007
 組み込みの `read`/`write` は使わず、`read_file`/`write_file` を自前で登録して Workspace の版チェックを通す。
 `bash` は `createBashTool` を sandbox（`createSandboxEnv`）越しに動かす。
 組み込み Tool は `api.env` を直接触るため、条件付き保存も root 封じ込めも通らない。
+## D006: 次は Editor、Provider は鍵が来てから
+date: 2026-11-06 · by: user · issue: 0008
+
+MVP の受入は「会話→編集→差分→再開」。会話は faux で通ったので、次は人間側の編集を成立させる。
+実 Provider（U-05）は API 鍵がこの環境に無く、検証できないため後回しにする。
+Editor は Workspace の競合契約を人間の操作で確かめる場でもある。

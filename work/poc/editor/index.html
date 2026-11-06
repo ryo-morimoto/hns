@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>hns editor</title>
+  <style>
+    body { margin: 0; font: 13px/1.5 ui-monospace, monospace; display: flex; height: 100vh; }
+    aside { width: 220px; border-right: 1px solid #ddd; overflow: auto; padding: 8px; }
+    aside button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px; cursor: pointer; }
+    aside button:hover { background: #f3f3f3; }
+    main { flex: 1; display: flex; flex-direction: column; }
+    header, footer { padding: 6px 10px; border-bottom: 1px solid #ddd; display: flex; gap: 8px; align-items: center; }
+    footer { border-top: 1px solid #ddd; border-bottom: 0; }
+    textarea { flex: 1; border: 0; padding: 10px; resize: none; font: inherit; outline: none; }
+    .dirty { color: #b45309; }
+    .conflict { background: #fef2f2; color: #991b1b; padding: 6px 10px; }
+    .ok { color: #166534; }
+  </style>
+</head>
+<body>
+  <aside id="files"></aside>
+  <main>
+    <header>
+      <strong id="path">(no file)</strong>
+      <button id="save">Save</button>
+      <button id="reload">Reload</button>
+      <span id="status"></span>
+    </header>
+    <div id="conflict" class="conflict" hidden></div>
+    <textarea id="text" spellcheck="false"></textarea>
+    <footer><span id="version">-</span></footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,5 +1,7 @@
 // Walking skeleton: client → Worker (HTTP) → ExecutionEnv (pi-env daemon) → files.
 import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +22,20 @@ const bodyOf = (req) => new Promise((resolve, reject) => {
   req.on("error", reject);
 });
 
-export async function startServer({ env, root, journalPath }) {
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json" };
+
+async function serveStatic(webDir, pathname, res) {
+  const name = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  if (name.includes("..")) return false;
+  try {
+    const body = await readFile(join(webDir, name));
+    res.writeHead(200, { "content-type": MIME[extname(name)] ?? "application/octet-stream" });
+    res.end(body);
+    return true;
+  } catch { return false; }
+}
+
+export async function startServer({ env, root, journalPath, webDir }) {
   const ws = await new Workspace({ env, root, journalPath, context: ctx }).open();
   await ws.recover();
   await ws.startWatching();
@@ -30,6 +45,10 @@ export async function startServer({ env, root, journalPath }) {
       const url = new URL(req.url ?? "/", "http://localhost");
       if (req.method === "GET" && url.pathname === "/read") {
         return json(res, 200, await ws.read(url.searchParams.get("path")));
+      }
+      if (req.method === "GET" && url.pathname === "/list") {
+        const listing = await env.listFiles(url.searchParams.get("path") ?? ".", { hidden: false, exclude: [".hns", ".hns-tmp-"] }, ctx);
+        return json(res, listing.ok ? 200 : 400, listing.ok ? listing.value.entries.filter((e) => e.kind === "file" || e.kind === "directory") : { error: listing.error.message });
       }
       if (req.method === "POST" && url.pathname === "/write") {
         const outcome = await ws.write(await bodyOf(req));
@@ -58,6 +77,7 @@ export async function startServer({ env, root, journalPath }) {
       if (req.method === "GET" && url.pathname === "/audit") {
         return json(res, 200, ws.auditLog);
       }
+      if (req.method === "GET" && webDir && (await serveStatic(webDir, url.pathname, res))) return;
       return json(res, 404, { error: "not found" });
     } catch (error) {
       if (error instanceof Denied) return json(res, 403, { error: error.message });
