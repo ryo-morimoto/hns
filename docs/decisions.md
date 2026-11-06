@@ -20,3 +20,8 @@ date: 2026-11-06 · by: coordinator · issue: -
 README は「やりたいこと」、ARCH はアーキテクチャ、docs はコンポーネント・レイヤー別の仕様、
 work は作業（BOARD・issues）と調査・PoC（research・poc）。docs はネストさせずフラットに置く。
 提供資料の原文は work/research に置き、書き換えない。
+## D003: MVP は 1マシンで「会話→編集→差分→再開」
+date: 2026-11-06 · by: user · issue: -
+
+最初の実用範囲は 1 マシン。セルフホスト起動、会話、権限つきファイル編集、差分、再開までを通し、
+2マシン接続は M3 に送る。要件#2 の配置（A/B）は [topology.md](topology.md) で比較中。
