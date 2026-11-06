@@ -79,7 +79,7 @@ function viewEntry(entry) {
   return undefined;
 }
 
-export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false, auth = true, host = process.env.HOST ?? "127.0.0.1", tailscale = {} }) {
+export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false, auth = true, host = process.env.HOST ?? "127.0.0.1", tailscale = {}, limits = {} }) {
   const token = await resolveToken(stateDir);
   const tailscaleMode = auth === "tailscale";
   const verifyTailscale = tailscaleMode
@@ -156,6 +156,22 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const rootConversation = await harness.root(ctx, { agent: { model: { provider: providerId, modelId }, cwd: root } });
   control.registerConversation({ id: String(rootConversation.id), projectId: "default", title: "main" });
   harness.resume();
+
+  const limitsConfig = {
+    turnsPerMinute: limits.turnsPerMinute ?? Number(process.env.HNS_TURNS_PER_MINUTE ?? 0),
+    dailyTokenBudget: limits.dailyTokenBudget ?? Number(process.env.HNS_DAILY_TOKEN_BUDGET ?? 0),
+    turnTimeoutMs: limits.turnTimeoutMs ?? Number(process.env.HNS_TURN_TIMEOUT_MS ?? 0),
+  };
+  const recentChats = new Map();
+  const activeChats = new Map();
+  const usageTotals = (state) => {
+    let tokens = 0, cost = 0;
+    for (const bucket of [...Object.values(state.models ?? {}), ...Object.values(state.tools ?? {})]) {
+      tokens += Number(bucket.totalTokens ?? 0);
+      cost += Number(bucket.cost?.total ?? 0);
+    }
+    return { tokens, cost };
+  };
 
   const conversations = new Map([[String(rootConversation.id), rootConversation]]);
   const conversationById = async (id) => {
@@ -617,8 +633,47 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         const { message, conversationId } = await bodyOf(req);
         const conversation = await conversationById(conversationId);
         if (!conversation) return json(res, 404, { error: "conversation not found" });
-        const submission = await conversation.submit({ type: "input", content: message, requestId: "ui-" + Date.now() }, ctx);
-        return json(res, 202, { requestId: submission.id, conversationId: String(conversation.id) });
+        const key = String(conversation.id);
+        const now = Date.now();
+        if (limitsConfig.turnsPerMinute > 0) {
+          const stamps = (recentChats.get(key) ?? []).filter((at) => now - at < 60_000);
+          if (stamps.length >= limitsConfig.turnsPerMinute) {
+            return json(res, 429, { error: "rate limited", retryAfterMs: 60_000 - (now - stamps[0]) });
+          }
+          stamps.push(now);
+          recentChats.set(key, stamps);
+        }
+        if (limitsConfig.dailyTokenBudget > 0 && control.usageToday().tokens >= limitsConfig.dailyTokenBudget) {
+          return json(res, 429, { error: "daily token budget exceeded" });
+        }
+        const before = usageTotals(await harness.usage(ctx));
+        const requestId = "ui-" + now;
+        const submission = await conversation.submit({ type: "input", content: message, requestId }, ctx);
+        activeChats.set(key, { submissionId: submission.id, requestId });
+        let timer;
+        if (limitsConfig.turnTimeoutMs > 0) {
+          timer = setTimeout(() => { void conversation.abort(ctx).catch(() => {}); }, limitsConfig.turnTimeoutMs);
+        }
+        void (async () => {
+          try { await submission.wait(ctx); } catch {}
+          if (timer) clearTimeout(timer);
+          activeChats.delete(key);
+          const after = usageTotals(await harness.usage(ctx));
+          control.addUsage({ conversationId: key, tokens: after.tokens - before.tokens, cost: after.cost - before.cost, requestId });
+          broadcast();
+        })();
+        return json(res, 202, { requestId, submissionId: submission.id, conversationId: key });
+      }
+      if (url.pathname === "/api/chat/abort" && req.method === "POST") {
+        const { conversationId } = await bodyOf(req);
+        const conversation = await conversationById(conversationId);
+        const active = activeChats.get(String(conversation?.id));
+        if (!active) return json(res, 404, { error: "no active chat" });
+        await conversation.abort(ctx);
+        return json(res, 202, { outcome: "aborted" });
+      }
+      if (url.pathname === "/api/usage" && req.method === "GET") {
+        return json(res, 200, { session: await harness.usage(ctx), today: control.usageToday(), limits: limitsConfig });
       }
       if (url.pathname === "/api/files" && req.method === "GET") {
         const listing = await raw.listFiles(url.searchParams.get("path") ?? ".", { hidden: false, exclude: [".hns", ".hns-tmp-"] }, ctx);

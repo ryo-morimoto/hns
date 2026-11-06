@@ -131,3 +131,10 @@ date: 2026-11-06 · by: user · issue: 0026
 `/api/passkey/add/options` と `add/verify` は unlocked のセッションだけを受け付ける。
 ブラウザは `/api/passkey/dek` で DEK を受け取り、新しい認証器の PRF で包み直して追加する。
 既存の包みは消さない。DEK を返すのは unlocked の間だけなので、XSS は境界を破れる点に注意。
+## D022: 制限はアプリ層でかけ、中断は conversation.abort
+date: 2026-11-06 · by: user · issue: 0027
+
+レート・予算・タイムアウトは Durable の設定ではなくアプリ層で判定する。
+利用量はターン終了時に `usage` の差分を `usage_log` に残す。
+中断は `abortSubmission` では実行中のターンが止まらなかったため、`conversation.abort` を使う。
+予算超過は実行中のターンを止めず、次のターンから 429。

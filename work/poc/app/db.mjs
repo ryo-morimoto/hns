@@ -68,6 +68,14 @@ export function openControlPlane(path) {
       transports TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS usage_log (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT,
+      at TEXT NOT NULL,
+      tokens INTEGER NOT NULL,
+      cost REAL NOT NULL,
+      request_id TEXT
+    );
     CREATE TABLE IF NOT EXISTS user_keys (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -278,6 +286,15 @@ export function openControlPlane(path) {
     updateCounter(id, counter) {
       db.prepare("UPDATE credentials SET counter = ? WHERE id = ?").run(counter, id);
     },
+    addUsage({ conversationId, tokens, cost, requestId }) {
+      db.prepare("INSERT INTO usage_log (id, conversation_id, at, tokens, cost, request_id) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(randomUUID(), conversationId ?? null, now(), Math.round(tokens), cost, requestId ?? null);
+    },
+    usageToday(date = new Date().toISOString().slice(0, 10)) {
+      const row2 = db.prepare("SELECT COUNT(*) AS turns, COALESCE(SUM(tokens), 0) AS tokens, COALESCE(SUM(cost), 0) AS cost FROM usage_log WHERE substr(at, 1, 10) = ?").get(date);
+      return { turns: Number(row2.turns), tokens: Number(row2.tokens), cost: Number(row2.cost) };
+    },
+
     addUserKey({ userId, kind, credentialId, wrappedDek, iv, salt, label }) {
       const key = { id: randomUUID(), user_id: userId, kind, credential_id: credentialId ?? null, wrapped_dek: wrappedDek, iv, salt: salt ?? null, label: label ?? null, created_at: now() };
       db.prepare("INSERT INTO user_keys (id, user_id, kind, credential_id, wrapped_dek, iv, salt, label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
