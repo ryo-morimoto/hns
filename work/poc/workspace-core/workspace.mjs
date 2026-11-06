@@ -22,7 +22,7 @@ export class Workspace {
     this.#canonicalRoot = getOrThrow(await this.#env.canonicalPath(this.#root, this.#context));
     const read = await this.#env.readTextFile(this.#journalPath, this.#context);
     const loaded = read.ok ? JSON.parse(read.value) : {};
-    this.#journal = { ops: loaded.ops ?? {}, seq: loaded.seq ?? 0, events: loaded.events ?? [] };
+    this.#journal = { ops: loaded.ops ?? {}, seq: loaded.seq ?? 0, events: loaded.events ?? [], audit: loaded.audit ?? [] };
     for (const e of this.#journal.events) if (e.kind === "changed" || e.kind === "created") this.#known.set(e.path, e.version);
     return this;
   }
@@ -63,7 +63,21 @@ export class Workspace {
     }
   }
 
+  async #audit(entry) {
+    const e = { at: new Date().toISOString(), ...entry };
+    this.#journal.audit.push(e);
+    if (this.#journal.audit.length > 500) this.#journal.audit.splice(0, this.#journal.audit.length - 500);
+    await this.#save();
+    return e;
+  }
+
+  /** Denied attempts, for the audit trail. */
+  get auditLog() { return this.#journal.audit; }
+
   async #resolve(relativePath) {
+    if (!getOrThrow(await this.#env.exists(this.#canonicalRoot, this.#context))) {
+      throw new Denied("root missing");
+    }
     const rel = this.#normalize(relativePath);
     const abs = await this.#canonicalForWrite(this.#joinRoot(rel));
     if (abs !== this.#canonicalRoot && !abs.startsWith(this.#canonicalRoot + "/")) throw new Denied("escapes root");
@@ -79,10 +93,15 @@ export class Workspace {
   }
 
   async read(relativePath) {
-    const { rel, abs } = await this.#resolve(relativePath);
-    const read = await this.#env.readBinaryFile(abs, this.#context);
-    if (!read.ok) throw read.error;
-    return { path: rel, content: dec.decode(read.value), version: sha(read.value) };
+    try {
+      const { rel, abs } = await this.#resolve(relativePath);
+      const read = await this.#env.readBinaryFile(abs, this.#context);
+      if (!read.ok) throw read.error;
+      return { path: rel, content: dec.decode(read.value), version: sha(read.value) };
+    } catch (error) {
+      if (error instanceof Denied) await this.#audit({ operationId: null, path: relativePath, reason: error.message, denied: true });
+      throw error;
+    }
   }
 
   async #reconcile(opId) {
@@ -99,7 +118,15 @@ export class Workspace {
     return outcome;
   }
 
-  async write({ path, content, expectedVersion, operationId }) {
+  async write(input) {
+    try { return await this.#write(input); }
+    catch (error) {
+      if (error instanceof Denied) await this.#audit({ operationId: input?.operationId ?? null, path: input?.path ?? null, reason: error.message, denied: true });
+      throw error;
+    }
+  }
+
+  async #write({ path, content, expectedVersion, operationId }) {
     const { rel, abs } = await this.#resolve(path);
     const bytes = typeof content === "string" ? enc.encode(content) : content;
     const contentHash = sha(bytes);

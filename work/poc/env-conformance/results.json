@@ -1,12 +1,12 @@
 {
-  "target": "local",
+  "target": "node",
   "node": "v24.15.0",
   "piVersion": "1.5.0",
   "results": [
     {
       "name": "binary reader reads byte ranges of the opened file",
       "status": "passed",
-      "ms": 7
+      "ms": 3
     },
     {
       "name": "binary reader scans lines like decoding the whole file",
@@ -46,7 +46,7 @@
     {
       "name": "watch reports a missing file's creation, changes, replacement and removal",
       "status": "passed",
-      "ms": 314
+      "ms": 311
     },
     {
       "name": "watch reports a missing target whose ancestors are created",
@@ -56,22 +56,22 @@
     {
       "name": "watch follows directories created together with their contents",
       "status": "passed",
-      "ms": 190
+      "ms": 189
     },
     {
       "name": "watch keeps watching a path whose parent is renamed and recreated",
       "status": "passed",
-      "ms": 188
+      "ms": 189
     },
     {
       "name": "watch skips excluded entries and reports a rename out of them",
       "status": "passed",
-      "ms": 64
+      "ms": 65
     },
     {
       "name": "watch keeps recursive coverage where a non-recursive target overlaps",
       "status": "passed",
-      "ms": 65
+      "ms": 64
     },
     {
       "name": "watch follows a directory replaced at the same path",
@@ -81,7 +81,7 @@
     {
       "name": "watch stops reporting once stopped",
       "status": "passed",
-      "ms": 302
+      "ms": 303
     },
     {
       "name": "argv exec passes arguments to the program without shell parsing",
@@ -91,17 +91,17 @@
     {
       "name": "exec reports the stream of every chunk in both forms",
       "status": "passed",
-      "ms": 9
+      "ms": 8
     },
     {
       "name": "argv exec honors cwd and exit codes",
       "status": "passed",
-      "ms": 5
+      "ms": 4
     },
     {
       "name": "argv exec reports missing programs and empty argv as spawn errors",
       "status": "passed",
-      "ms": 2
+      "ms": 1
     },
     {
       "name": "windowed exec keeps the exact tail and counts what it skips",
@@ -111,32 +111,37 @@
     {
       "name": "argv exec distinguishes timeout from abort",
       "status": "passed",
-      "ms": 205
+      "ms": 206
     },
     {
       "name": "listFiles lists files and directories depth first in name order",
-      "status": "passed",
-      "ms": 12
+      "status": "failed",
+      "ms": 2,
+      "error": "Error: The environment does not implement listFiles"
     },
     {
       "name": "listFiles skips what git ignores in work trees, .git, and excluded names",
-      "status": "passed",
-      "ms": 7
+      "status": "failed",
+      "ms": 2,
+      "error": "Error: The environment does not implement listFiles"
     },
     {
       "name": "listFiles stops at its bounds and reports truncated",
-      "status": "passed",
-      "ms": 6
+      "status": "failed",
+      "ms": 1,
+      "error": "Error: The environment does not implement listFiles"
     },
     {
       "name": "listFiles fails on missing directories, files, and aborts",
-      "status": "passed",
-      "ms": 2
+      "status": "failed",
+      "ms": 0,
+      "error": "TypeError: env.listFiles is not a function"
     },
     {
       "name": "listFiles lists symbolic links without following them",
-      "status": "passed",
-      "ms": 13
+      "status": "failed",
+      "ms": 12,
+      "error": "Error: The environment does not implement listFiles"
     },
     {
       "name": "binary reader follows symlinks unless noFollow refuses the final one",
@@ -146,7 +151,7 @@
     {
       "name": "watch reports changes to the file a watched symbolic link points to",
       "status": "passed",
-      "ms": 67
+      "ms": 66
     }
   ]
 }

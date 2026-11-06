@@ -72,9 +72,11 @@ await post("/debug/touch", { path: "a.txt", content: "from-bash-2" });
 const afterOverflow = await nextEvent(overflowEvent.seq);
 check(afterOverflow.kind === "changed" && afterOverflow.version === (await get("/read?path=a.txt")).body.version, "change after overflow", JSON.stringify(afterOverflow));
 
-// root confinement through the API
+// root confinement through the API, with an audit record
 const escape = await post("/write", { path: "../x.txt", content: "x", expectedVersion: "absent", operationId: "w5" });
-check(escape.status === 500 || escape.status === 400, "path traversal rejected", JSON.stringify(escape));
+check(escape.status === 403, "path traversal rejected", JSON.stringify(escape));
+const audit = await get("/audit");
+check(audit.body.some((a) => a.denied && a.operationId === "w5" && a.path === "../x.txt"), "denial is audited", JSON.stringify(audit.body));
 
 await app.close();
 await env.cleanup?.(ctx);

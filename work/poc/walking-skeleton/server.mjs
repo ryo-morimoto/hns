@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import { Workspace } from "../workspace-core/workspace.mjs";
+import { Denied, Workspace } from "../workspace-core/workspace.mjs";
 
 const json = (res, status, body) => {
   res.writeHead(status, { "content-type": "application/json" });
@@ -55,8 +55,12 @@ export async function startServer({ env, root, journalPath }) {
       if (req.method === "POST" && url.pathname === "/debug/overflow") {
         return json(res, 200, await ws.overflow());
       }
+      if (req.method === "GET" && url.pathname === "/audit") {
+        return json(res, 200, ws.auditLog);
+      }
       return json(res, 404, { error: "not found" });
     } catch (error) {
+      if (error instanceof Denied) return json(res, 403, { error: error.message });
       return json(res, 500, { error: String(error?.message ?? error) });
     }
   });

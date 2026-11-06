@@ -66,6 +66,10 @@ type MutationResult =
 - canonical root と `canonicalPath` の結果を比較し、配下でなければ `denied`
 - 新規は「最も深い既存祖先を canonical 化して末尾を結合」
 - `.git/` は読み取りのみ
+- 操作ごとに root の存在を確認。消えていたら `denied`（書き込みで再作成しない）
+- 拒否は `operationId` 付きで Journal の `audit` に残す
+- root の差し替え（同じパスの別ディレクトリ）は**検出できない**（`ExecutionEnv` から inode を取得できない）
+- root が symlink のときは、開いた時点の解決結果に固定する。差し替えは反映されない
 - TOCTOU は残る（`openat2(RESOLVE_BENEATH)` 相当は未対応）
 
 ## イベント
