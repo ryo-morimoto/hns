@@ -177,3 +177,9 @@ date: 2026-11-07 · by: user · issue: 0032
 core / workspace / agent / store / server / web。apps は作らず packages に置く（pi の coding-agent に倣う）。
 providers は agent の中、identity は store の ./identity、Workflow と Automation は server の中。
 状態の所有者と依存方向は [packages.md](../docs/packages.md)。育ったら orchestrator 等に切る。
+## D030: 型は不変条件を持つパッケージに置く
+date: 2026-11-07 · by: user · issue: 0032
+
+`core` は公開モデル（2つ以上のパッケージが使い、ワイヤーで約束するもの）だけ。Row 型は `store`、
+実行中の内部状態は `agent`、ファイル操作の内部型は `workspace` に置く。1パッケージしか使わない型は core に置かない。
+`@hns/store` の Row 型と変換から実装を始めた（`packages/store`）。brand は `ProjectId` と `ConversationId` のみ。
