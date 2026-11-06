@@ -258,3 +258,19 @@ D026 の Vitest を維持し、node:test から移行した（124 tests）。Vit
 アサーションは `node:assert/strict` に統一し、`expect` は使わない。flaky はリトライしない。
 Trigger.dev / Medusa / Twenty / Payload / Effect の層分けを参考にした（[testing.md](testing.md)）。
 
+
+## D039: 会話ランタイムは pi-durable 一択とし、pi-agent-core は採用しない
+date: 2026-11-07 · by: user · issue: 0034
+
+pi-agent-core 1.5.0 は版が揃っていて（pi-ai / pi-schema は同一の exact pin）、実測では Workspace のツールと sandbox を
+そのまま載せられた（[work/poc/pi-agent](../work/poc/pi-agent)、12/12）。ただ機能差は「実行場所の差」で、サーバ常駐の
+我々の構成では使わない。pi-agent-core の固有機能は proxy.ts（クライアントから LLM 呼び出しをサーバ経由にする）、
+素のループ API（agentLoop / runAgentLoop / runToolCall）、thinkingBudgets、onProviderStreamEvent で、いずれも
+ループをクライアントで回すための道具立て。それ以外は Durable に対応物がある（subscribe → Conversation.watch + pi.live、
+text_delta → partial commit、steer/followUp → whenBusy / steeringMode / pi.inbox、convertToLlm → beforeRequest、
+beforeToolCall → ToolHooks）。逆に Durable にしかないもの（耐久・checkpoint・compaction・タスクグラフ・拡張レジストリ・
+usage 台帳・subagent 会話の所有権・commit 単位の watch）は要件に直結する。
+
+前提が変わる条件: web 側でループを回す（オフライン編集＋ローカル推論など）なら、proxy と素のループが採用理由になる。
+それまでの delegate（外の会話から一発の副作業を切り出す）は Durable の子会話で行う（[compare.mjs](../work/poc/pi-agent/compare.mjs) の B）。
+agent-core in durable（同 C）は採らない。
