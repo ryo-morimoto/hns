@@ -1,0 +1,9 @@
+{
+  "name": "hns-poc-mutation-gap",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/chord": "*"
+  }
+}

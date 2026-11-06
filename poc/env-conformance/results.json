@@ -1,0 +1,152 @@
+{
+  "target": "local",
+  "node": "v24.15.0",
+  "piVersion": "1.5.0",
+  "results": [
+    {
+      "name": "binary reader reads byte ranges of the opened file",
+      "status": "passed",
+      "ms": 7
+    },
+    {
+      "name": "binary reader scans lines like decoding the whole file",
+      "status": "passed",
+      "ms": 2
+    },
+    {
+      "name": "binary reader keeps reading the file it opened after a rename",
+      "status": "passed",
+      "ms": 1
+    },
+    {
+      "name": "binary reader refuses directories, missing files and aborted opens",
+      "status": "passed",
+      "ms": 1
+    },
+    {
+      "name": "directory reader pages every entry exactly once",
+      "status": "passed",
+      "ms": 2
+    },
+    {
+      "name": "directory reader reports the end and refuses use after close",
+      "status": "passed",
+      "ms": 0
+    },
+    {
+      "name": "directory reader refuses missing paths and files",
+      "status": "passed",
+      "ms": 0
+    },
+    {
+      "name": "directory reader skips entries removed during enumeration",
+      "status": "passed",
+      "ms": 1
+    },
+    {
+      "name": "watch reports a missing file's creation, changes, replacement and removal",
+      "status": "passed",
+      "ms": 314
+    },
+    {
+      "name": "watch reports a missing target whose ancestors are created",
+      "status": "passed",
+      "ms": 65
+    },
+    {
+      "name": "watch follows directories created together with their contents",
+      "status": "passed",
+      "ms": 190
+    },
+    {
+      "name": "watch keeps watching a path whose parent is renamed and recreated",
+      "status": "passed",
+      "ms": 188
+    },
+    {
+      "name": "watch skips excluded entries and reports a rename out of them",
+      "status": "passed",
+      "ms": 64
+    },
+    {
+      "name": "watch keeps recursive coverage where a non-recursive target overlaps",
+      "status": "passed",
+      "ms": 65
+    },
+    {
+      "name": "watch follows a directory replaced at the same path",
+      "status": "passed",
+      "ms": 188
+    },
+    {
+      "name": "watch stops reporting once stopped",
+      "status": "passed",
+      "ms": 302
+    },
+    {
+      "name": "argv exec passes arguments to the program without shell parsing",
+      "status": "passed",
+      "ms": 8
+    },
+    {
+      "name": "exec reports the stream of every chunk in both forms",
+      "status": "passed",
+      "ms": 9
+    },
+    {
+      "name": "argv exec honors cwd and exit codes",
+      "status": "passed",
+      "ms": 5
+    },
+    {
+      "name": "argv exec reports missing programs and empty argv as spawn errors",
+      "status": "passed",
+      "ms": 2
+    },
+    {
+      "name": "windowed exec keeps the exact tail and counts what it skips",
+      "status": "passed",
+      "ms": 11
+    },
+    {
+      "name": "argv exec distinguishes timeout from abort",
+      "status": "passed",
+      "ms": 205
+    },
+    {
+      "name": "listFiles lists files and directories depth first in name order",
+      "status": "passed",
+      "ms": 12
+    },
+    {
+      "name": "listFiles skips what git ignores in work trees, .git, and excluded names",
+      "status": "passed",
+      "ms": 7
+    },
+    {
+      "name": "listFiles stops at its bounds and reports truncated",
+      "status": "passed",
+      "ms": 6
+    },
+    {
+      "name": "listFiles fails on missing directories, files, and aborts",
+      "status": "passed",
+      "ms": 2
+    },
+    {
+      "name": "listFiles lists symbolic links without following them",
+      "status": "passed",
+      "ms": 13
+    },
+    {
+      "name": "binary reader follows symlinks unless noFollow refuses the final one",
+      "status": "passed",
+      "ms": 7
+    },
+    {
+      "name": "watch reports changes to the file a watched symbolic link points to",
+      "status": "passed",
+      "ms": 67
+    }
+  ]
+}
