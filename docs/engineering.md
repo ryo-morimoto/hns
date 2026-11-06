@@ -19,14 +19,16 @@
 
 ## 2. コード構造
 
+分割の提案と根拠は [packages.md](packages.md)。
+
 ```text
 packages/
-  core/       types.ts（ドメイン語彙）+ contracts.ts（zod）+ OpenAPI。pi-ai の types.ts と同じ位置づけ
-  workspace/  Workspace（版・Journal・認可・sandbox）
-  providers/  Ollama / OpenCode などのアダプタ
-  config/     環境変数の zod パース
-  server/     app。HTTP・SSE・認証。bin を持つ（coding-agent の package.json に倣う）
-  web/        React UI（会話・進捗・エディタ）
+  core/       types.ts（ドメイン語彙）+ contracts.ts（zod）+ OpenAPI
+  workspace/  版・Journal・認可・イベント。./sandbox で exec 隔離
+  agent/      Durable の組み立て、ツール、hooks、Model アダプタ
+  store/      SQLite・migration・リポジトリ。./identity で認証と秘密
+  server/     app。HTTP・SSE・Workflow・Automation、bin「hns」
+  web/        React UI（最後）
 
 各パッケージは [pi の packages](https://github.com/earendil-works/pi/tree/main/packages) に倣う。
 

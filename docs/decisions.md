@@ -171,3 +171,9 @@ date: 2026-11-07 · by: user · issue: 0031
 date: 2026-11-07 · by: user · issue: 0031
 
 契約テスト、noUncheckedIndexedAccess、vendored anti-slop（18 ルール。require-readable-spacing は oxfmt と衝突するため無効）、tsc --noEmit、oxfmt --check、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。
+## D029: パッケージは 6 つで始める
+date: 2026-11-07 · by: user · issue: 0032
+
+core / workspace / agent / store / server / web。apps は作らず packages に置く（pi の coding-agent に倣う）。
+providers は agent の中、identity は store の ./identity、Workflow と Automation は server の中。
+状態の所有者と依存方向は [packages.md](../docs/packages.md)。育ったら orchestrator 等に切る。
