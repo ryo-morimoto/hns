@@ -178,6 +178,7 @@ Read on demand — not every session:
 | When | What |
 | --- | --- |
 | Requirements and scope | `README.md`, `ARCH.md` |
+| Research, requirements, tech selection, gates | `docs/process.md` |
 | Package boundaries and where types live | `docs/packages.md` |
 | Why a decision was made | `docs/decisions.md` (append-only) |
 | Stack, tooling, AI-slop gates | `docs/engineering.md` |

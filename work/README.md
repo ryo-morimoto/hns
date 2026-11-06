@@ -21,6 +21,8 @@ touches: 触るパス
 ## Acceptance criteria
 - [ ] 検証できる形で書く
 ## Notes
+## 未確定
+- U-01: 何が / 仮説 / 影響 / 責任者 / 期限かトリガー
 ## やらないこと
 ## Log
 ## Result
