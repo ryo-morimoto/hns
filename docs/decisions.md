@@ -98,3 +98,9 @@ date: 2026-11-06 · by: user · issue: 0020
 動いている間に取れる一貫したスナップショットとして `VACUUM INTO` を使う。`journal.json` と `token` はコピー。
 復元はアプリを止めて行い、`-wal` / `-shm` を消してから置き換える。
 `control.sqlite` は `user_version` でスキーマ版を持ち、変更はそこに足す。
+## D016: tailnet の ID を認証に使う
+date: 2026-11-06 · by: user · issue: 0021
+
+`auth: "tailscale"` のとき、接続元 IP を `tailscale whois` で引いて LoginName を取る。
+許可リストで絞り、whois が失敗したら拒否。ループバックは既定で拒否（`HNS_ALLOW_LOCAL=1` で許可）。
+`tailscale serve` のヘッダは信じない。passkey は設計だけ残し、ブラウザ認証器が要るので後回し。

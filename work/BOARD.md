@@ -24,6 +24,8 @@
 | [0018](issues/0018-automations.md) | Automations（Schedule / Webhook） | **done** | 0017 |
 | [0019](issues/0019-auth.md) | 認証と公開範囲（13） | **done** | 0014 |
 | [0020](issues/0020-backup.md) | バックアップと復元（16） | **done** | 0014 |
+| [0021](issues/0021-tailscale-auth.md) | tailnet の ID で認証（13） | **done** | 0019 |
+| [0022](issues/0022-passkey.md) | passkey と暗号化（13） | open | 0021 |
 
 ## ゲート
 
@@ -69,7 +71,7 @@
 
 | # | 要件 | いまの状態 |
 | --- | --- | --- |
-| 13 | 認証・認可と公開範囲 | token のみ（0019）。RBAC なし |
+| 13 | 認証・認可と公開範囲 | token（0019）と tailnet（0021）。passkey は保留 |
 | 14 | 秘密の管理 | ファイル置き場のみ |
 | 15 | 利用量と制限 | 未計測。中断・タイムアウトも未完 |
 | 16 | データの保全 | 取得・復元（0020）。定期化は未 |

@@ -13,6 +13,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { obj, str } from "@earendil-works/pi-schema";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
 import { openControlPlane } from "./db.mjs";
+import { createTailscaleVerifier, parseUsers } from "./tailscale.mjs";
 import { cronMatches } from "./cron.mjs";
 import { GraphError, interpolate, validateGraph } from "./workflow.mjs";
 import { Workspace } from "../workspace-core/workspace.mjs";
@@ -75,8 +76,16 @@ function viewEntry(entry) {
   return undefined;
 }
 
-export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false, auth = true, host = process.env.HOST ?? "127.0.0.1" }) {
+export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false, auth = true, host = process.env.HOST ?? "127.0.0.1", tailscale = {} }) {
   const token = await resolveToken(stateDir);
+  const tailscaleMode = auth === "tailscale";
+  const verifyTailscale = tailscaleMode
+    ? createTailscaleVerifier({
+        users: tailscale.users ?? parseUsers(process.env.HNS_TAILSCALE_USERS),
+        allowLocal: tailscale.allowLocal ?? process.env.HNS_ALLOW_LOCAL === "1",
+        whois: tailscale.whois,
+      })
+    : undefined;
   const connection = new Connection({ command: [localDaemon()] });
   const raw = new LocalExecutionEnv({ cwd: root, connection });
   const sandbox = createSandboxEnv(raw, { root, bwrap: BWRAP });
@@ -313,9 +322,14 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       const url = new URL(req.url ?? "/", "http://localhost");
       const isHook = url.pathname.startsWith("/api/hooks/");
       if (auth && url.pathname.startsWith("/api/") && !isHook) {
-        const bearer = (req.headers.authorization ?? "").startsWith("Bearer ") ? req.headers.authorization.slice(7) : undefined;
-        const candidate = bearer ?? url.searchParams.get("token") ?? cookieOf(req.headers.cookie, "hns_token");
-        if (!same(candidate ?? "", token)) return json(res, 401, { error: "unauthorized" });
+        if (tailscaleMode) {
+          const verdict = await verifyTailscale(req.socket.remoteAddress);
+          if (!verdict.ok) return json(res, 401, { error: "unauthorized", reason: verdict.reason });
+        } else {
+          const bearer = (req.headers.authorization ?? "").startsWith("Bearer ") ? req.headers.authorization.slice(7) : undefined;
+          const candidate = bearer ?? url.searchParams.get("token") ?? cookieOf(req.headers.cookie, "hns_token");
+          if (!same(candidate ?? "", token)) return json(res, 401, { error: "unauthorized" });
+        }
       }
       if (url.pathname === "/api/state" && req.method === "GET") {
         const conversation = await conversationById(url.searchParams.get("conversationId"));
