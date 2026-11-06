@@ -13,6 +13,12 @@ section{margin:18px 0;padding-top:12px;border-top:1px solid #ddd}</style>
 <pre id="recovery" hidden></pre>
 
 <section>
+  <strong>add another passkey</strong>
+  <p>サインイン中だけ追加できます。この端末のデータ鍵を、新しい認証器でも開けるようにします。</p>
+  <p><button id="addpasskey">add passkey</button></p>
+</section>
+
+<section>
   <strong>recovery code</strong>
   <p>端末を失ったときは、ここにコードを入れて開きます。</p>
   <p><input id="code" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"> <button id="recover">recover</button></p>
@@ -150,6 +156,40 @@ document.querySelector("#signin").onclick = async () => {
       status("signed in. secrets are locked; use a recovery code or a PRF-capable device.");
     }
     location.href = "/";
+  } catch (error) { status("error: " + error.message); }
+};
+
+document.querySelector("#addpasskey").onclick = async () => {
+  try {
+    status("adding a passkey…");
+    const dekResponse = await fetch("/api/passkey/dek");
+    if (!dekResponse.ok) throw new Error("sign in first (unlocked session required)");
+    const { dek } = await dekResponse.json();
+    const dekKey = await crypto.subtle.importKey("raw", unb64(dek), { name: "AES-GCM" }, true, ["encrypt", "decrypt"]);
+
+    const options = await post("/api/passkey/add/options", {});
+    options.challenge = toBytes(options.challenge);
+    options.user.id = toBytes(options.user.id);
+    for (const credential of options.excludeCredentials ?? []) credential.id = toBytes(credential.id);
+    options.extensions = { prf: { eval: { first: PRF_SALT } } };
+    const created = await navigator.credentials.create({ publicKey: options });
+
+    const prf = created.getClientExtensionResults().prf?.results?.first;
+    if (!prf) throw new Error("this authenticator has no PRF");
+    const kek = await deriveKek(prf);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const wrappedBytes = await crypto.subtle.wrapKey("raw", dekKey, kek, { name: "AES-GCM", iv });
+
+    const response = {
+      id: created.id, type: created.type, rawId: fromBytes(created.rawId),
+      response: {
+        clientDataJSON: fromBytes(created.response.clientDataJSON),
+        attestationObject: fromBytes(created.response.attestationObject),
+        transports: created.response.getTransports?.() ?? [],
+      },
+    };
+    await post("/api/passkey/add/verify", { response, wrapped: { wrappedDek: b64(wrappedBytes), dekIv: b64(iv) } });
+    status("added. this authenticator can open your secrets.");
   } catch (error) { status("error: " + error.message); }
 };
 

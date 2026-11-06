@@ -53,6 +53,12 @@ Provider 鍵は §service/provider.<name>§ に置けば、ファイルや env �
 - PRF 非対応の認証器でも復旧コードの包みは作る。その端末ではパスキーでは開けないが、復旧コードで開ける。
 - Automation は `service` しか使わないので、誰もログインしていなくても動く。
 
+### 2台目のパスキー（実装済み）
+
+unlocked のセッション中に `/api/passkey/add/options` → ブラウザが `/api/passkey/dek` で DEK を受け取り、
+新しい認証器の PRF で包み直して `add/verify`。既存の包みは残る。
+DEK を返すのは unlocked の間だけ。XSS はこの境界を破れるので、CSP と入力の扱いが前提。
+
 WebAuthn には「鍵を渡す」機能が無い。使えるのは **PRF 拡張**（認証器の hmac-secret）。
 
 - 登録時に PRF の salt を渡し、`prf.results.first` から鍵を導出 → データ鍵を包む（wrap）。

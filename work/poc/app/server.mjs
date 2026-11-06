@@ -413,6 +413,33 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
             return json(res, 200, { verified: result.verified });
           } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
         }
+        if (url.pathname === "/api/passkey/dek" && req.method === "GET") {
+          const session = sessionOf(req);
+          const dek = session ? unlocks.get(session.id) : undefined;
+          if (!dek) return json(res, 423, { error: "locked" });
+          return json(res, 200, { dek: dek.toString("base64") });
+        }
+        if (url.pathname === "/api/passkey/add/options" && req.method === "POST") {
+          const session = sessionOf(req);
+          const user = session ? control.getUser(session.user_id) : undefined;
+          if (!user) return json(res, 401, { error: "unauthorized" });
+          if (!unlocks.has(session.id)) return json(res, 423, { error: "locked" });
+          return json(res, 200, await passkey.registrationOptions({ login: user.login, rpID }));
+        }
+        if (url.pathname === "/api/passkey/add/verify" && req.method === "POST") {
+          const session = sessionOf(req);
+          const user = session ? control.getUser(session.user_id) : undefined;
+          if (!user) return json(res, 401, { error: "unauthorized" });
+          if (!unlocks.has(session.id)) return json(res, 423, { error: "locked" });
+          const { response, wrapped } = await bodyOf(req);
+          try {
+            const result = await passkey.verifyRegistration({ login: user.login, response, origin, rpID });
+            if (result.verified && wrapped?.wrappedDek && wrapped.dekIv && wrapped.wrappedDek) {
+              control.addUserKey({ userId: user.id, kind: "passkey", credentialId: response.id, wrappedDek: wrapped.wrappedDek, iv: wrapped.dekIv });
+            }
+            return json(res, 200, { verified: result.verified });
+          } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+        }
         if (url.pathname === "/api/passkey/recovery" && req.method === "POST") {
           const { login, code } = await bodyOf(req);
           const user = control.getUserByLogin(String(login ?? ""));

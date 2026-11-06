@@ -125,3 +125,9 @@ date: 2026-11-06 · by: user · issue: 0025
 `user_keys` に包みを複数持つ。登録時に PRF（HKDF）と復旧コード（PBKDF2 600k）の2つで包む。
 ログイン時は PRF で開ける包みを順に試し、開けたらセッションに渡す。復旧コードはサーバ側で開いて
 セッションを作る（コード自体が資格情報）。誤りは 401。
+## D021: 2台目のパスキーは unlocked セッションで追加する
+date: 2026-11-06 · by: user · issue: 0026
+
+`/api/passkey/add/options` と `add/verify` は unlocked のセッションだけを受け付ける。
+ブラウザは `/api/passkey/dek` で DEK を受け取り、新しい認証器の PRF で包み直して追加する。
+既存の包みは消さない。DEK を返すのは unlocked の間だけなので、XSS は境界を破れる点に注意。
