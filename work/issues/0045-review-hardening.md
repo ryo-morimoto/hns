@@ -44,3 +44,4 @@ touches: packages/workspace, packages/core, docs/safety.md, docs/workspace.md
 - 2026-11-07: レビュー（C-1〜M-4）を受けて修正。テストは各パッケージの `test/` に追加。
 - 2026-11-07: 再レビュー。workspace 側の重複した operationId 規則と未使用 helper（`searchParamsObject`）を削除。
   境界は HTTP の schema 1箇所、封じ込めは temp の内部生成で担保する。重複していた回帰テストも統合した。
+- 2026-11-07: 残りを [0052](0052-sandbox-hide-wiring.md)〜[0055](0055-journal-save-batching.md) に切った。
