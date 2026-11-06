@@ -4,15 +4,23 @@ hns（複数マシンの AI Agent を、セルフホストの単一 UI から操
 **原則だけを書く。詳細は docs に置き、このファイルは短く保つ（目安 100 行）。**
 サブディレクトリに AGENTS.md があれば、そちらが優先。
 
-## 最初に読む
+## 読むもの
 
-- `README.md` — やりたいこと（要件 1〜21）と現在地
-- `ARCH.md` — アーキテクチャと不変条件（INV-01〜08）
-- `docs/decisions.md` — 決定の履歴（追記のみ。覆すときは新しい D を足す）
-- `docs/engineering.md` — スタック・型・AI slop 対策
-- `docs/packages.md` — パッケージの責務と型の置き場所
-- `CODING_STANDARDS.md` — 型・検証・安全・エラーの規約
-- `work/BOARD.md` と `work/issues/` — 残作業（残りは `work/` に置く）
+毎回読むのは、このファイルと [CODING_STANDARDS.md](CODING_STANDARDS.md) だけ。あとは変更するコードの隣。
+
+必要になったときだけ:
+
+| いつ | 何 |
+| --- | --- |
+| 要件・スコープを確かめる | `README.md` |
+| 境界・不変条件・構成を変える | `ARCH.md` / `docs/packages.md` |
+| 設計判断の理由を知る・変える | `docs/decisions.md`（追記のみ） |
+| ツール・型・CI を変える | `docs/engineering.md` |
+| 型をレビューする | `docs/type-review.md` |
+| golden example と比べる | `docs/typescript.md` |
+| 対象の作業を選ぶ | `work/BOARD.md` / `work/issues/` |
+
+残作業は `work/` に置く。
 
 ## 環境（いまの環境の事実）
 
