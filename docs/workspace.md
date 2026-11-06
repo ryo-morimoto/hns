@@ -93,7 +93,7 @@ type MutationResult =
 
 - 書込: temp を root 直下に書いたあと、`rooted.mjs` が root の dirfd を開き、各親を `O_NOFOLLOW | O_DIRECTORY` で辿り、対象を再ハッシュして `expectedVersion` と比べ、**その親の dirfd から** rename する。親の差し替えはこれで閉じるが、**同名ファイルを hash と rename の間に差し替える窓は残る**（Linux に compare-and-rename は無い）。
   - **v0.1 はこの窓を許容する**（0054）。同一ユーザーの別プロセスは root に直接書けるため、CAS は行儀の良い並行 writer のためのもので、攻撃者の境界ではない。失うのは差し替えた側の内容（lost update）だけで、root の外・秘密・可用性には影響しない（これは **dirfd 経路**の話）。helper を使えない `checks` 経路は同じ窓に加えて**親の差し替えの窓も残り、root の外に書き・読める**（0005 の既知の穴）。
-  - 閉じるには `renameat2(RENAME_EXCHANGE / RENAME_NOREPLACE)` を出せる native helper が要る。Node の `fs` は `renameat2` を公開しない（`fs.constants` に `RENAME_*` が無い）ため、native addon か同梱バイナリになり、配布（0033 / 0040）とセットで判断する。EXCHANGE で交換した後、temp 側に移った旧対象をハッシュして比べる案は、不一致時の交換返しが原子的でなく、expected が absent の作成には NOREPLACE が要る。どちらも syscall が要る点は同じ。カーネル / FS が非対応なら **`checks` には落とさず**、dirfd のまま hash → rename に留める（この窓は許容）か、`rooted: "required"` で開かない。
+  - 閉じるには `renameat2(RENAME_EXCHANGE)` を出せる native helper が要る。replace の CAS に syscall が要るだけで、absent の作成は `link(2)`（Node の `fs.link`）で原子的に作れ、`EEXIST` を conflict にすればよい。Node の `fs` は `renameat2` を公開しない（`fs.constants` に `RENAME_*` が無い）ため、native addon か同梱バイナリになり、配布（0040）とセットで判断する。EXCHANGE で交換した後、temp 側に移った旧対象をハッシュして比べる案は、不一致時の交換返しが原子的でない。カーネル / FS が非対応なら **`checks` には落とさず**、dirfd のまま hash → rename に留める（この窓は許容）か、helper の probe で対応も確かめて開かない（fail closed）を選ぶ。
 - 読取: 同じ辿りで最終コンポーネントを `O_NOFOLLOW` で開き、開いた fd から読む。内容は base64 で 1 本の stdout に返す。
 - root の同一性は `.hns/root.json` を dirfd 経由で読み、`probe` で記録した dev / ino と照合する。パスを差し替えられても別のディレクトリは開かない。
 - 起動時に `probe` を 1 回実行して可否を決める。失敗したら（Linux 以外・exec 無し・ヘルパーが届かないホスト）従来の再確認にフォールバックし、`Workspace.mode` が `checks` になる。

@@ -24,7 +24,7 @@
 
 | 穴 | 影響 | 次の手 |
 | --- | --- | --- |
-| TOCTOU の最終窓（dirfd） | 同名ファイルを hash と rename の間に差し替える窓が残る。lost update のみで root の外には出ない | v0.1 は許容（0054）。閉じるのは `renameat2` を出せる native helper の導入時（0033 / 0040） |
+| TOCTOU の最終窓（dirfd） | 同名ファイルを hash と rename の間に差し替える窓が残る。lost update のみで root の外には出ない | v0.1 は許容（0054）。閉じるのは `renameat2` を出せる native helper の導入時（配布は 0040） |
 | TOCTOU の親の窓（`checks`） | ヘルパーを実行できない環境では、親の差し替えで root の外に書き・読める（再確認のみで窓が残る） | v0.1 は helper 任意のため許容（保証表の「破れる条件」）。閉じるのは `rooted: "required"` を既定にするか、配布で helper を確実にする（0040） |
 | SSH の実接続 | フラグは検証したが、実サーバとの接続は未検証 | 2台目が用意できたら 1 回通す |
 | 非 Linux と bwrap 未導入 | exec を出せない（封じ込めなしでは動かさない） | 検出は 0006 で完了。macOS / Windows の backend と配布は 0033 / 0040（[調査](../work/research/sandbox-platforms.md)） |
