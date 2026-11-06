@@ -218,3 +218,12 @@ fork になり、macOS / Windows はさらに別 API になる。そこで `root
 Linux 以外・exec 無し・helper が届かないホストでは従来の再確認にフォールバックし、`Workspace.mode` で区別する。
 代替案: daemon に operation を足す（上流 fork）/ 独自 Worker（配布と起動コストが増える）/
 Node の `fs` だけで解決（daemon 越しに fd を渡せない）。上流が fd 相対の操作を出したら helper を捨てる。
+
+## D035: Node 26（最新系列）へ上げる
+date: 2026-11-07 · by: coordinator · issue: 0004
+
+D032 の Node 24 を 26.x に置き換える。nixpkgs の入力を `nixos-25.11` から `nixpkgs-unstable` に変え、
+`flake.lock` で rev（いまは Node 26.13.0 / npm 11.20.0）まで固定する。26 は現行の最新系列（偶数版・LTS）。
+25 は upstream EOL で nixpkgs からも削除済み、24 は保守のみ。`node:sqlite` と `node --test` の
+型ストリップは 26 でも同じで、ゲートと PoC は通った。最新へ上げ直すときは `nix flake update nixpkgs`
+→ `scripts/with-node.sh npm run check`（lock を更新するまで再現性は保たれる）。

@@ -33,7 +33,7 @@ scripts/with-node.sh npm install
 scripts/with-node.sh npm run check
 ```
 
-Node 24 is pinned by `flake.nix`; `scripts/with-node.sh` enters the dev shell for you, so run anything that needs `node`/`npm` through it.
+Node 26 is pinned by `flake.nix`; `scripts/with-node.sh` enters the dev shell for you, so run anything that needs `node`/`npm` through it.
 
 `npm run check` is the gate: oxlint → oxfmt --check → tsc → test → build. It also runs from the pre-commit hook (install once with `scripts/install-hooks.sh`).
 Building is not proof of correctness; types and tests are.

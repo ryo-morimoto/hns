@@ -17,8 +17,8 @@ touches: README.md, flake.nix, flake.lock, scripts/with-node.sh, work/poc/instal
 
 ## Result
 
-- Node は **24.x**（nixpkgs `nixos-25.11` の `nodejs_24`、いまは 24.18.0 / npm 11.16.0）。
-  `flake.nix` と `flake.lock` で nixpkgs の rev まで固定（D032）。
+- Node は **26.x**（nixpkgs-unstable の `nodejs_26`、いまは 26.13.0 / npm 11.20.0）。
+  `flake.nix` と `flake.lock` で nixpkgs の rev まで固定（D035）。24 は D032 で最初に固定した版。
 - `scripts/with-node.sh` は `nix develop` 経由で同じ Node を実行する。`/nix/store` の glob は廃止。
 - `work/poc/install.sh` で PoC の依存をまとめて入れる（`app` は隣の `workspace-core`・`conversation` を import する）。
 - クリーンな HOME・npm キャッシュ・空のツリーから `npm install` → `npm run check`、
@@ -30,3 +30,4 @@ touches: README.md, flake.nix, flake.lock, scripts/with-node.sh, work/poc/instal
 - 2026-11-06: 作成。当面は `/nix/store/…-nodejs-24.15.0/bin/node` を直接使用。
 - 2026-11-07: 決定と実装。`flake.nix` / `flake.lock`、`with-node.sh` の差し替え、README・AGENTS・engineering・decisions（D032）を更新。
 - 2026-11-07: クリーン環境で再現を確認して done。
+- 2026-11-07: 最新系列へ。nixpkgs-unstable + `nodejs_26`（26.13.0 / npm 11.20.0）に変更（D035）。クリーン環境で `npm install` → `run check`、PoC 12/12・13/13 を再確認。

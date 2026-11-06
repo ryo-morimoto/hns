@@ -52,7 +52,7 @@
 
 ## 開発環境
 
-Node 24 を [flake.nix](flake.nix) で固定している（nixpkgs `nixos-25.11`、いまは Node 24.18.0 / npm 11.16.0）。
+Node 26 を [flake.nix](flake.nix) で固定している（nixpkgs `nixpkgs-unstable`、いまは Node 26.13.0 / npm 11.20.0）。
 `nix-command` と `flakes` を有効にした nix を用意し、リポジトリの根から:
 
 ```bash
@@ -60,7 +60,8 @@ nix develop        # Node と npm が入ったシェルに入る
 npm install
 ```
 
-flake を使えない環境では Node 24.18 以降（24.x）を PATH に置く。22.x は使わない（D032）。
+flake を使えない環境では Node 26.13 以降（26.x）を PATH に置く。24.x・22.x は使わない（D035）。
+最新へ上げるには `nix flake update nixpkgs` のあと `scripts/with-node.sh npm run check`。
 `node` は `nix develop` の中か `scripts/with-node.sh` 経由で実行する。
 
 まっさらな環境からの再現:
@@ -123,4 +124,4 @@ curl -s "$URL/events?cursor=0&limit=1"
 | T-03/T-04 | `cd work/poc/workspace-core && node run.mjs` |
 | Walking Skeleton | `cd work/poc/walking-skeleton && node run.mjs` |
 
-Node 24 は [flake.nix](flake.nix) が固定する（issue 0004）。`nix develop` か `scripts/with-node.sh` を通して実行する。
+Node 26 は [flake.nix](flake.nix) が固定する（issue 0004）。`nix develop` か `scripts/with-node.sh` を通して実行する。

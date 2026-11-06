@@ -1,7 +1,7 @@
 {
   description = "hns development environment";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
   outputs =
     { nixpkgs, ... }:
@@ -17,7 +17,7 @@
     {
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = [ pkgs.nodejs_24 ];
+          packages = [ pkgs.nodejs_26 ];
         };
       });
     };

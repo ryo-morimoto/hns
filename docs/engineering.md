@@ -7,7 +7,7 @@
 | 層 | 選定 | 理由 | 捨てたもの |
 | --- | --- | --- | --- |
 | 言語 | TypeScript strict（`noUncheckedIndexedAccess`） | 境界が多い。型で守る | JS（PoC のまま） |
-| 実行 | Node.js 24（`flake.nix` + nixpkgs 25.11 で固定、D032） | 既存の pi-durable と同一。`node:sqlite` が使える | Bun（DB と sandbox の相性が未検証） |
+| 実行 | Node.js 26（`flake.nix` + nixpkgs-unstable で固定、D035） | 既存の pi-durable と同一。`node:sqlite` が使える | Bun（DB と sandbox の相性が未検証） |
 | HTTP | Fastify 5 | SSE・テストが素直 | Express（検証が弱い）、Hono（未検証） |
 | DB | SQLite（`node:sqlite`） | Durable と同じ。バックアップが簡単 | Postgres（今は不要） |
 | UI | React 19 + Vite + TanStack Query | 最終段の UX を詰めやすい。状態の取り回しが明確 | 素の DOM（UI が育たない） |
