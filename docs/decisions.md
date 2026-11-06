@@ -73,7 +73,7 @@ date: 2026-11-06 · by: user · issue: -
 
 いまの UI は機能確認のための最小（会話・ファイル・diff・タスク）。作り込みは最終段に回す。
 そのときは、見た目より「迷わない・戻れる・待ちが分かる」を基準に、まとめて詰める。
-それまでは API と契約を先に固め、UI の都合で境界を曲げない。
+それまでは API と型を先に固め、UI の都合で境界を曲げない。
 ## D012: Workflow は当面サーバ内で逐次実行する
 date: 2026-11-06 · by: user · issue: 0017
 
@@ -164,13 +164,13 @@ TypeScript strict / Node 24 / Fastify + zod / SQLite / React + Vite + CodeMirror
 ## D027: 型が正本（type first）
 date: 2026-11-07 · by: user · issue: 0031
 
-`packages/core` にリクエスト・レスポンス・SSE イベントを zod で書き、OpenAPI と型付きクライアントを生成する。契約テストは実サーバを起動して実 JSON を検証する（モックにしない）。UI は生成型だけを使う。
-語彙（状態の集合）は `types.ts` に置き、zod の契約と型の drift を防ぐ。
+`packages/core/src/types.ts` がモデルの正本。`validation.ts` の zod は `z.ZodType<T>` として型に適合させ、合わなければコンパイルで落とす。API 定義書は生成しない。
+レスポンス検証は実サーバを起動して実 JSON を確認する（モックにしない）。UI は types.ts の型だけを使う。
 
 ## D028: AI slop はゲートで止める
 date: 2026-11-07 · by: user · issue: 0031
 
-契約テスト、noUncheckedIndexedAccess、vendored anti-slop（18 ルール。require-readable-spacing は oxfmt と衝突するため無効）、tsc --noEmit、oxfmt --check、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。
+レスポンス検証、noUncheckedIndexedAccess、vendored anti-slop（18 ルール。require-readable-spacing は oxfmt と衝突するため無効）、tsc --noEmit、oxfmt --check、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。
 ## D029: パッケージは 6 つで始める
 date: 2026-11-07 · by: user · issue: 0032
 

@@ -1,7 +1,7 @@
 {
   "name": "@hns/core",
   "version": "0.1.0",
-  "description": "Domain types and API contracts for hns (zod, OpenAPI)",
+  "description": "Domain types and runtime validation for hns (zod)",
   "files": [
     "dist",
     "README.md",

@@ -15,7 +15,7 @@ PoC（`work/poc`）を、決めた 6 パッケージに移植する。順序と�
 - [ ] `@hns/agent`（conversation + ツール + hooks + Model アダプタ）
 - [ ] `@hns/server`（HTTP / SSE / Workflow / Automation、bin）
 - [ ] `@hns/web`（最後）
-- [ ] 各段で `packages/core` の契約テストが通る
+- [ ] 各段で `packages/core` のレスポンス検証が通る
 
 ## Log
 

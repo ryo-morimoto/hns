@@ -4,7 +4,7 @@
 
 ## 原則
 
-- **状態の所有者は1つ**。境界は「変わりにくい契約」で切る。
+- **状態の所有者は1つ**。境界は「変わりにくいところ」で切る。
 - **依存は一方向**。`core` は誰にも依存しない。
 - 機能名ではなく**状態と責務**で切る。
 - 使う予定のない分割をしない。育ったら切る（今は切らない）。
@@ -23,7 +23,7 @@
 
 | パッケージ | 責任（公開するもの） | 依存 |
 | --- | --- | --- |
-| `@hns/core` | ドメイン語彙（types.ts）と API 契約（zod・OpenAPI） | zod |
+| `@hns/core` | モデル（types.ts）と実行時検証（validation.ts） | zod |
 | `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離 | pi-durable/env |
 | `@hns/agent` | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode） | core, workspace, pi-durable, pi-ai |
 | `@hns/store` | SQLite、migration、リポジトリ。`./identity` で token・tailnet・passkey・セッション・秘密 | node:sqlite |
@@ -45,7 +45,7 @@ server ─┬─► agent ─┬─► workspace ─► pi-durable/env
 
 ## exports の切り方
 
-- `@hns/core`: `.`（型・契約）。
+- `@hns/core`: `.`（型・検証）。
 - `@hns/workspace`: `.`（Workspace）、`./sandbox`（ExecutionEnv デコレータ）。
 - `@hns/store`: `.`（リポジトリ）、`./identity`（認証・秘密）。exec を使わないアプリが
   bubblewrap に依存しないようにする。
@@ -66,4 +66,4 @@ server ─┬─► agent ─┬─► workspace ─► pi-durable/env
 4. `server` ← `work/poc/app/server.mjs`
 5. `web` ← `work/poc/app/ui`（最後。D011）
 
-各段で `packages/core` の契約テストを通す。
+各段で `packages/core` のレスポンス検証を通す。

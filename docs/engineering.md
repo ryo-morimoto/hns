@@ -1,4 +1,4 @@
-# エンジニアリング方針: 技術スタック・構造・契約・AI slop 対策
+# エンジニアリング方針: 技術スタック・構造・型・AI slop 対策
 
 2026-11-07。PoC（`work/poc`）から製品コードへ移すための基準。
 
@@ -6,14 +6,14 @@
 
 | 層 | 選定 | 理由 | 捨てたもの |
 | --- | --- | --- | --- |
-| 言語 | TypeScript strict（`noUncheckedIndexedAccess`） | 境界が多い。型で契約を守る | JS（PoC のまま） |
+| 言語 | TypeScript strict（`noUncheckedIndexedAccess`） | 境界が多い。型で守る | JS（PoC のまま） |
 | 実行 | Node.js 24（`.nix` / devenv で固定） | 既存の pi-durable と同一。`node:sqlite` が使える | Bun（DB と sandbox の相性が未検証） |
 | HTTP | Fastify 5 + zod | schema 検証・SSE・テストが素直 | Express（検証が弱い）、Hono（DB/worker との相性未検証） |
-| 検証・契約 | zod（`packages/protocol`） | 単一の正本から OpenAPI と型を作る | 手書き OpenAPI（乖離する） |
+| 検証 | zod（`packages/core/src/validation.ts`） | 型に縛った実行時検証 | スキーマを先に書く（型が二重になる） |
 | DB | SQLite（`node:sqlite`） | Durable と同じ。バックアップが簡単 | Postgres（今は不要） |
 | UI | React 19 + Vite + TanStack Query | 最終段の UX を詰めやすい。状態の取り回しが明確 | 素の DOM（UI が育たない） |
 | エディタ | CodeMirror 6 | 軽い。diff は自前で持っている | Monaco（重い） |
-| テスト | Vitest（unit / contract）+ Playwright（E2E） | 契約テストを速く回す | Jest（遅い） |
+| テスト | Vitest（unit / API）+ Playwright（E2E） | API のテストを速く回す | Jest（遅い） |
 | Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored） | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
 | パッケージ | **npm workspaces**（`packages/*` + `apps/*`） | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直 | pnpm（今のところ利点より設定が増える） |
 
@@ -23,7 +23,7 @@
 
 ```text
 packages/
-  core/       types.ts（ドメイン語彙）+ contracts.ts（zod）+ OpenAPI
+  core/       types.ts（モデル）+ validation.ts（zod）
   workspace/  版・Journal・認可・イベント。./sandbox で exec 隔離
   agent/      Durable の組み立て、ツール、hooks、Model アダプタ
   store/      SQLite・migration・リポジトリ。./identity で認証と秘密
@@ -48,9 +48,8 @@ packages/
 
 1. `packages/core/src/types.ts` にモデルを書く（Project・Conversation・Event・Metrics …）。
 2. `validation.ts` に zod を書き、`z.ZodType<T>` として型に合わせる。合わなければコンパイルが落ちる。
-3. OpenAPI は `validation.ts` から生成する。
-4. サーバは境界で validation を通す。契約テストは**実サーバ**のレスポンスを検証する。
-5. UI は `types.ts` の型だけを使う（レスポンス型を手書きしない）。
+3. サーバは境界で validation を通す。レスポンス検証は**実サーバ**で行う。
+4. UI は `types.ts` の型だけを使う（レスポンス型を手書きしない）。
 
 - 型の変更が先。スキーマは型に追随する（drift はコンパイルエラーになる）。
 - スキーマを先に書かない。型に無いものを検証しない。
@@ -70,11 +69,11 @@ npm 依存ではなく**コピー**として持つ。読んで、必要なら自
 
 ### ゲート
 
-**slop の定義**: 動くように見えるが、契約と合わない・誰も使わない・根拠のない抽象化・重複した実装。
+**slop の定義**: 動くように見えるが、型と合わない・誰も使わない・根拠のない抽象化・重複した実装。
 
 | 仕組み | 何を止めるか |
 | --- | --- |
-| 契約テスト（実サーバ） | 実装と契約の乖離、想像で書いたレスポンス |
+| レスポンス検証（実サーバ） | 実装と型の乖離、想像で書いたレスポンス |
 | `noUncheckedIndexedAccess` と境界の zod | 未検証の JSON、`any` の伝播 |
 | anti-slop: `no-unknown-parameters`・`no-unsafe-dictionary-type`・`no-widen-then-assert`・`require-safety-comment-for-type-assertion` | 型を捨てる近道、根拠のない `as` |
 | anti-slop: `no-object-parameters`・`no-array-filter-map`・`no-reduce-accumulator-copy`・`no-module-mocking` | 低信号な実装パターン |
@@ -84,12 +83,12 @@ npm 依存ではなく**コピー**として持つ。読んで、必要なら自
 | 小さな PR・1目的 | ついでのリファクタと機能追加の混在 |
 | 変更ごとの「何を証明したか」 | テストが増えない変更、根拠のない最適化 |
 | 未使用の抽象化の禁止 | 使う予定のない汎用層（YAGNI。増やすなら利用箇所を先に示す） |
-| ドキュメントの同期 | 契約・ADR・README の更新漏れ（リンク検査と更新日） |
+| ドキュメントの同期 | 型・ADR・README の更新漏れ（リンク検査と更新日） |
 
 - `TODO` は issue 番号を必須にする（`TODO(#1234): ...`）。
 - `@ts-expect-error` は理由と issue を同じ行に書く。
 - 例外・握りつぶしは「なぜ無視してよいか」をコメントで残す。
-- エージェントが書いたコードも同じゲートを通す。レビューは「契約・テスト・依存」を先に見る。
+- エージェントが書いたコードも同じゲートを通す。レビューは「型・テスト・依存」を先に見る。
 
 ## 5. 移行
 

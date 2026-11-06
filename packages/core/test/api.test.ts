@@ -5,7 +5,6 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "../src/validation.ts";
-import { openapiDocument } from "../src/openapi.ts";
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
@@ -20,12 +19,12 @@ type AppOptions = {
 
 const serverPath = "../../../work/poc/app/server.mjs";
 
-// SAFETY: the app is plain JS without declarations; the contract tests below check every response shape.
+// SAFETY: the app is plain JS without declarations; the response tests below check every shape.
 const { startApp } = (await import(serverPath)) as {
   startApp: (options: AppOptions) => Promise<{ url: string; close(): Promise<void> }>;
 };
 
-const base = await mkdtemp(join(tmpdir(), "hns-contract-"));
+const base = await mkdtemp(join(tmpdir(), "hns-api-"));
 
 await mkdir(join(base, "state"));
 
@@ -36,7 +35,7 @@ const app = await startApp({
   root: join(base, "root"),
   provider: "faux",
   auth: false,
-  fauxScript: [{ text: "contract" }],
+  fauxScript: [{ text: "ok" }],
   webDirs: [join(import.meta.dirname, "../../../work/poc/app/ui")],
 });
 
@@ -81,7 +80,7 @@ test("GET /api/state", async () => {
 });
 
 test("projects, tasks and conversations", async () => {
-  const project = await send("/api/projects", "POST", { name: "contract" });
+  const project = await send("/api/projects", "POST", { name: "api-check" });
 
   parse(v.ProjectSchema, project.body, "project");
   const projectBody = parse(v.ProjectSchema, project.body, "project id");
@@ -151,19 +150,4 @@ test("observability endpoints", async () => {
   const usage = await get("/api/usage");
 
   parse(v.UsageSchema, usage.body, "usage");
-});
-
-test("the OpenAPI document covers the routes", () => {
-  const document = openapiDocument();
-  const paths = Object.keys(document.paths);
-
-  assert.ok(paths.includes("/api/health"));
-  assert.ok(paths.includes("/api/chat"));
-  assert.ok(paths.includes("/api/conversations/{id}"));
-  const operations = Object.values(document.paths).reduce(
-    (sum, operationsForPath) => sum + Object.keys(operationsForPath).length,
-    0,
-  );
-
-  assert.ok(operations >= 15, "expected at least 15 documented operations, got " + operations);
 });

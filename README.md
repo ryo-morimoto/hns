@@ -89,8 +89,8 @@ curl -s "$URL/events?cursor=0&limit=1"
 | 網羅（全イベント） | `cd work/poc/app && node run-journal.mjs` |
 | 会話の管理 | `cd work/poc/app && node run-conversations.mjs` |
 | 安全 | `cd work/poc/app && node run-safety.mjs` |
-| 契約（core） | `npm test --workspace @hns/core` |
-| まとめて検査 | `scripts/check.sh`（oxlint / oxfmt / tsc / 契約テスト） |
+| 検証（core） | `npm test --workspace @hns/core` |
+| まとめて検査 | `scripts/check.sh`（oxlint / oxfmt / tsc / レスポンス検証） |
 | 秘密 | `cd work/poc/app && node run-secrets.mjs` |
 | バックアップ | `cd work/poc/app && node run-backup.mjs` |
 | 実モデル（要キー） | `cd work/poc/conversation && PROVIDER=opencode MODEL_ID=deepseek-v4.1-flash node real.mjs` |
