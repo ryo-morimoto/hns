@@ -64,3 +64,28 @@
 
 根拠: scheduler.js:445（mark + signal + idle 待ち）、tool.js:143（ToolTask.abort → settleFromSlot → settle）、
 tool.js:657（pi.tool-result 追記）、generation.js:286（endRun unanswered/aborted）。
+## 3つの形の比較（実測: compare.mjs / abort-compare.mjs）
+
+同じタスク（a.txt を読んで版を答える）を、faux モデルで 3 回ずつ。数字は中央値。
+
+| | A. pi-agent-core 単体 | B. durable in durable | C. agent-core in durable |
+| --- | --- | --- | --- |
+| モデル呼び出し | 2 | 4（外2 + 子2） | 4（外2 + 内2） |
+| 実行時間（faux） | 44 ms | 53 ms | 45 ms |
+| 内側の履歴 | 5 messages（メモリ） | 5 entries（**会話として永続**、child id 13） | 5 messages（メモリ、ツール終了で消える） |
+| 残るもの | 何も残らない | 外も子も Durable storage | 外の会話だけ |
+| トークン集計 | 210（内側のみ） | 571（外+子を自動で合算） | 495（外 283 + 内 212 を tool usage として手で合算） |
+| 中断（delegate 中） | agent.abort() で止まる | 外の abort が子のツールまで届く（sleep が signal を受けた） | 外の abort は内側に自動では届かない。abortSignal → inner.abort() の配線が要る（実測で配線すれば止まる） |
+
+### 読み方
+
+- **A** は「使い捨てのループ」。永続も中断の伝播も無いが、いちばん単純で速い。C の内側はこれ。
+- **B** は「子も会話」。子会話が Durable に残り、UI で別会話として見せられる。中断も所有権（ownership: task）で自動的に子へ伝わる。代償は会話とタスクが 1 段増えること（faux で +8ms。実モデルでは通信が支配的なので差は小さい）。
+- **C** は「外だけ会話」。内側の途中状態は消える。中断と usage は**自分で配線**する（実測: 配線すれば止まり、usage も 212 トークンを tool usage として合算できた）。会話が 1 本で済むぶん扱いが軽い。
+
+### 実装上の注意（実測で踏んだもの）
+
+- B はツールの中から子会話を作る必要がある。API は api.conversation(id)（既存）しか渡さないので、PoC では harness.createConversation をクロージャで捕まえた。製品では「ツールに子会話を作る口」を注入する必要がある（api の拡張 or コンポジションルート経由）。
+- B の子の回答は子会話の transcript から読む（ツールには結果テキストを直接返す API が無い）。
+- C は usage を ToolExecutionResult.usage に載せないと、Durable の集計から内側の分が抜ける。
+- どちらも delegate の分だけモデル呼び出しが 2 回増える（外の判断 + 外の回答）。
