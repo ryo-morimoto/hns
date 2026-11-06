@@ -38,16 +38,22 @@
 | [0033](issues/0033-workspace-package.md) | workspace パッケージ（移植） | **done** | 0031 |
 | [0034](issues/0034-agent-package.md) | agent パッケージ（移植） | **done** | 0033 |
 | [0037](issues/0037-http-contracts.md) | HTTP 契約と型付きクライアント | in-progress | 0031 |
-| [0035](issues/0035-server-package.md) | server パッケージ（移植） | open | 0034, 0037 |
+| [0035](issues/0035-server-package.md) | server パッケージ（移植） | open | 0037, 0046, 0047, 0048, 0049, 0050 |
 | [0038](issues/0038-workflow-runtime.md) | Workflow / Automation の実行基盤 | open | 0035 |
 | [0039](issues/0039-observability-product.md) | 観測の製品化 | open | 0035 |
 | [0036](issues/0036-web-ui.md) | Web UI（最終段） | open | 0035, 0037 |
 | [0043](issues/0043-product-e2e.md) | 製品の E2E テスト | open | 0036 |
 | [0040](issues/0040-self-host.md) | セルフホストの配布 | open | 0035, 0036 |
-| [0041](issues/0041-ci-dev-env.md) | CI と開発環境の固定 | open | — |
-| [0042](issues/0042-boundaries-knip.md) | 依存境界と未使用コードの検査 | open | 0031 |
+| [0041](issues/0041-ci-dev-env.md) | CI と開発環境の固定 | open | 0046 |
+| [0042](issues/0042-boundaries-knip.md) | 依存境界と未使用コードの検査 | open | 0031, 0046 |
 | [0044](issues/0044-multi-machine.md) | マルチマシン（保留） | **保留** | 0040 |
 | [0045](issues/0045-review-hardening.md) | レビュー指摘の修正（C/H/M） | **done** | 0004, 0033, 0037 |
+| [0046](issues/0046-test-discipline.md) | テストの規律とランナーの固定 | **done** | — |
+| [0047](issues/0047-store-sqlite.md) | store の SQLite 基盤（migrations + repositories） | open | 0046 |
+| [0048](issues/0048-store-identity.md) | store/identity（認証・秘密） | open | 0047 |
+| [0049](issues/0049-agent-conversations.md) | agent の複数会話 API | open | 0034, 0046 |
+| [0050](issues/0050-sse-events.md) | SSE の token / tool イベント | open | 0037, 0046 |
+| [0051](issues/0051-parallel-work.md) | 並列ブランチのルール | **done** | — |
 | [0024](issues/0024-secret-scopes.md) | 秘密のスコープ分離（14） | **done** | 0019 |
 
 ## ゲート
@@ -111,13 +117,27 @@
 - 2マシン（T-05）
 - WASM エディタ（0010）
 
+## 並列の単位
+
+| 波 | 並列してよい | 直列・lock |
+| --- | --- | --- |
+| 0 規律 | 0051（docs） / 0046（test） | — |
+| 1 道具 | 0041（CI） / 0042（knip） | 0042 が package.json / lock の owner |
+| 2 基盤 | 0047→0048（store） / 0049（agent） / 0050（core） | 0047→0048 は store 内で直列 |
+| 3 サーバ | — | 0035 |
+| 4 後続 | 0038 / 0039 は 0035 の後。0036→0043。0040 | 0038 と 0039 は packages/server で直列 |
+
+- 依存が未マージのブランチは、その issue のファイルを触らない。
+- 波が終わるまで次をマージしない、という意味ではない。`depends-on` を満たしたものから積む。
+
 ## 完成までの順序
 
-1. **基盤**: 0033 workspace → 0034 agent → 0037 契約
-2. **サーバ**: 0035 server（0038 実行基盤・0039 観測を並行）
-3. **UI**: 0036 web → 0043 E2E
-4. **配布**: 0040 セルフホスト
-5. **随時**: 0041 CI / 0042 境界検査
+0. **規律**: 0051 並列ルール → 0046 テスト
+1. **道具**: 0041 CI / 0042 knip
+2. **基盤**: 0047 store → 0048 identity / 0049 agent / 0050 SSE
+3. **サーバ**: 0035
+4. **UI**: 0036 → 0043
+5. **配布**: 0040
 6. **保留**: 0044 マルチマシン（1マシン完成後）
 
 要件との対応: 1 → 0040、2/3 → 0044、4〜9 → 0035/0036、12 → 0038、13/14 → 0035、15 → 0035、16 → 0040、17 → 0039、18 → 0005/0006、19 → 0041、20 → 0036、21 → 0036/0043。

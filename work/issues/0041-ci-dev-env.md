@@ -1,7 +1,7 @@
 # 0041: CI と開発環境の固定
 
 status: open
-depends-on: —
+depends-on: 0046
 touches: work/issues/0004, .github
 
 ## Goal
@@ -14,3 +14,13 @@ touches: work/issues/0004, .github
 - [ ] npm run check を CI で回す
 - [ ] 可能なら Playwright の主要シナリオも回す
 - [ ] キャッシュと失敗時のログ
+
+## Notes
+
+- 0046 で決めた runner をそのまま CI で回す。CI だけ別 runner にしない。
+- Node 26 の固定方法（nix か setup-node か）は 0004 の決定に合わせる。
+
+## やらないこと
+
+- Playwright の E2E は 0043 の後。
+- デプロイ・配布（0040）。

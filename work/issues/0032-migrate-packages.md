@@ -22,3 +22,4 @@ PoC（`work/poc`）を、決めた 6 パッケージに移植する。順序と�
 - 2026-11-07: 構成を決定（D029）。
 - 2026-11-07: `@hns/store` を作成。Row 型と公開型への変換（9/9）。
 - 2026-11-07: valibot で境界 parse。ErrorCode、Workflow 状態遷移。store 12/12・core 8/8。
+- 2026-11-07: store の残りを 0047（SQLite / repositories）と 0048（identity）に分割。server の前提を 0035 に追記。
