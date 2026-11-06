@@ -1,6 +1,6 @@
 # 0101: Web のデザインシステムとプリミティブ
 
-status: done
+status: in-progress
 depends-on: 0100
 touches: packages/web/src/design, packages/web/src/components/Button.tsx, packages/web/src/components/Badge.tsx, packages/web/src/components/Icon.tsx, packages/web/src/components/Dialog.tsx, packages/web/src/components/Menu.tsx, packages/web/src/components/Toast.tsx, packages/web/src/components/Skeleton.tsx, packages/web/test/design, packages/web/package.json, package-lock.json
 
@@ -36,6 +36,7 @@ PoC のトークンと操作感を、製品のデザインシステムに落と�
 ## Log
 
 - 2026-11-07: 作成（user）。
+- 2026-11-07: 目視・操作レビュー用の gallery（`#/design`、dev のみ）を追加。ユーザーの OK まで done にしない。
 - 2026-11-07: Base UI 1.9.0（exact pin）を追加。トークン（light-dark + data-theme、テキストは両テーマで 4.5:1）、Button / Badge / Icon / Skeleton、Dialog / Menu（Base UI 土台）、Toast（role=status / alert + Undo）。design の 17 テストを追加し、npm run check は 204 tests で通る。
 
 ## Result
@@ -47,3 +48,4 @@ PoC のトークンと操作感を、製品のデザインシステムに落と�
 - blocking: 初回 2 件（--focus の ring が 1.87:1 / danger Badge の 9.5px が 4.31:1）→ 修正済み（ring 6.1:1 / badge 5.8:1）。低 3 件も修正（未使用 --active の削除 / loading の cursor / Dialog の focus 進入 assert）
 - 残件: badge を --surface-3 に載せる画面では --danger-text が要る（0104）。Menu の focus 戻しは keyboard 選択テストで実質カバー
 - 未確認: 実ブラウザ（focus ring の描画・light-dark・320px の Dialog）、clean `npm ci`、screen reader
+- ユーザーレビュー: 待ち。`npm run dev -w @hns/web` の `#/design` で見た目と挙動（light/dark、Dialog の Esc と focus 戻し、Menu のキーボード、Undo、loading）を確認してもらう
