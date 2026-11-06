@@ -43,6 +43,43 @@
 - [research/](research/): 提供資料の原文（agentics / agent engineering / 開発プロセス / 設計プレイブック / 要件状態 v0.3）
 - [poc/](poc/): conformance / mutation-gap / root-containment / root-swap / daemon-life / workspace-core / walking-skeleton / sandbox
 
+
+## 残り（棚卸し 2026-11-06）
+
+### 要件
+
+| # | 状態 | 残り |
+| --- | --- | --- |
+| 1 セルフホスト | △ | 配布・設定・バックアップ・更新の手順がない |
+| 2 複数マシン | ✗ | 下げ中（T-05） |
+| 3 全マシンを1UIで | ✗ | 2 に依存 |
+| 4 チャット | △ | 履歴一覧、中断、トークンのストリーミング |
+| 5 プロジェクト | △ | API のみ。Workspace との関連、UI |
+| 6 ワークフロー | △ | 逐次実行のみ。並列・分岐・再試行・耐久 |
+| 7 タスク | △ | API のみ。Run / Conversation との関連 |
+| 8 Provider | △ | 鍵の管理、OAuth、能力差の吸収 |
+| 9 Editor | △ | ツリー操作、検索、構文、Git 連携 |
+| 10 Git diff | ✗ | Want |
+| 11 Grabber | ✗ | Want |
+| 12 Automations | △ | 認証、再試行、通知 |
+
+### 横断
+
+- 認証・認可（U-03 / U-12）、公開範囲
+- 秘密の扱い（鍵の置き場所・ローテーション）
+- 性能・費用（利用量、レート制限、タイムアウト、中断）
+- 保存（`control.sqlite` のバックアップ・移行、`session.sqlite` の移行）
+- 観測（ログ、メトリクス、実行履歴）
+- 開発（0004 node 固定、CI、テスト集約、lint、docs 検査）
+- 安全（0005 TOCTOU、0006 bwrap、SSH 未検証）
+- 利用者向けドキュメント（セットアップ、使い方）
+- UI / UX（M5、最後）
+
+### 下げたもの
+
+- 2マシン（T-05）
+- WASM エディタ（0010）
+
 ## 優先度
 
 - **UI の作り込みは最後**（D011）。今は API と契約を固める。
