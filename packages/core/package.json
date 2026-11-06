@@ -9,13 +9,13 @@
   ],
   "type": "module",
   "sideEffects": false,
-  "main": "./dist/types.js",
-  "types": "./dist/types.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "source": "./src/types.ts",
-      "types": "./dist/types.d.ts",
-      "import": "./dist/types.js"
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "scripts": {
