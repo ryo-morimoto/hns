@@ -56,3 +56,9 @@ date: 2026-11-06 · by: user · issue: 0013
 pi-ai の `opencode-go` プロバイダをそのまま使う。鍵は `~/.config/hns/opencode-go.key`。
 `openai-completions` と `anthropic-messages` でツール呼び出しを確認。Google 系（`gemini-4-argon`）は設定で無効化中のため未確認。
 Provider ごとに「API 方式が通る」と「モデルが使える」は別なので、モデル追加時は両方確かめる。
+## D009: 統合 MVP は単一プロセス + SQLite + ポーリング UI
+date: 2026-11-06 · by: user · issue: 0014
+
+会話（Durable）・ファイル（Workspace）・UI を1プロセスに載せる。保存は Durable の SQLite。
+進捗はまず1秒ポーリングで足りる。ストリーミングは必要になってから足す。
+これで MVP の「会話→編集→差分→再開」が1マシンで成立した。

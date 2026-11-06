@@ -17,11 +17,12 @@
 | [0011](issues/0011-diff-limit.md) | diff の上限撤廃 | **done** | 0009 |
 | [0012](issues/0012-real-provider.md) | 実 Provider（Ollama Cloud） | **done** | — |
 | [0013](issues/0013-opencode-go.md) | 2プロバイダ目（OpenCode Go） | **done** | 0012 |
+| [0014](issues/0014-integrated-mvp.md) | 統合 MVP（1マシン） | **done** | 0002 |
 
 ## ゲート
 
 - [0001 M2 → 会話の実結線](gates/0001-m2-to-conversation.md): **Go with Conditions（承認済み・完了）**
-- [0002 統合 MVP](gates/0002-integrated-mvp.md): **Go with Conditions（未承認）**
+- [0002 統合 MVP](gates/0002-integrated-mvp.md): **Go with Conditions（承認済み・完了）**
 
 ## ユーザー判断待ち
 

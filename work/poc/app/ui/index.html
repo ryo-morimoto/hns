@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>hns</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.5 ui-monospace, monospace; height: 100vh; display: flex; }
+  section { display: flex; flex-direction: column; min-width: 0; }
+  #chat { width: 40%; border-right: 1px solid #ddd; }
+  #editor { flex: 1; }
+  header, footer { padding: 6px 10px; border-bottom: 1px solid #ddd; display: flex; gap: 6px; align-items: center; }
+  footer { border-top: 1px solid #ddd; border-bottom: 0; }
+  #messages { flex: 1; overflow: auto; padding: 8px; }
+  .msg { margin: 6px 0; padding: 6px 8px; border-radius: 4px; white-space: pre-wrap; }
+  .user { background: #eef2ff; }
+  .assistant { background: #f8fafc; }
+  .tool { background: #f0fdf4; color: #14532d; font-size: 12px; }
+  .tool.error { background: #fef2f2; color: #991b1b; }
+  #compose { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #ddd; }
+  #compose input { flex: 1; padding: 6px; font: inherit; }
+  #files { width: 180px; border-right: 1px solid #ddd; overflow: auto; padding: 6px; }
+  #files button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 3px; cursor: pointer; }
+  #files button:hover { background: #f3f3f3; }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #text { flex: 1; border: 0; padding: 10px; resize: none; font: inherit; outline: none; }
+  #diff { flex: 1; margin: 0; padding: 10px; overflow: auto; white-space: pre; }
+  #diff .add { background: #ecfdf5; color: #065f46; }
+  #diff .del { background: #fef2f2; color: #991b1b; }
+  .dirty { color: #b45309; }
+  #conflict { background: #fef2f2; color: #991b1b; padding: 6px 10px; display: flex; gap: 6px; align-items: center; }
+</style>
+</head>
+<body>
+  <section id="chat">
+    <header><strong>conversation</strong><span id="live"></span></header>
+    <div id="messages"></div>
+    <form id="compose"><input id="input" placeholder="message" autocomplete="off"><button>Send</button></form>
+  </section>
+  <section id="editor">
+    <header>
+      <strong id="path">(no file)</strong>
+      <button id="save">Save</button>
+      <button id="reload">Reload</button>
+      <button id="diffToggle">Diff</button>
+      <span id="status"></span>
+      <span id="version"></span>
+    </header>
+    <div id="conflict" hidden></div>
+    <div id="main" style="flex-direction: row; display: flex;">
+      <div id="files"></div>
+      <textarea id="text" spellcheck="false"></textarea>
+      <pre id="diff" hidden></pre>
+    </div>
+  </section>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -60,6 +60,7 @@ Web UI（Conversation / Progress first）
 | M0 | 設計ベースライン | 境界と未決が説明できる（完了） |
 | M1 | ExecutionEnv の実証 | T-01 合格、契約 v0.1（完了） |
 | M2 | Mutation・会話・Editor | 完了（diff は 0009） |
+| M2.5 | 統合 MVP（1マシン） | 完了（0014、E2E 8/8） |
 | M3 | 2マシン・復旧・投影 | T-05/T-06/T-07 |
 | M4 | 最初の実用版 | 会話→編集→差分→再開 |
 
