@@ -23,7 +23,7 @@
 
 | パッケージ | 責任（公開するもの） | 依存 |
 | --- | --- | --- |
-| `@hns/core` | モデル（types.ts）と実行時検証（validation.ts） | zod |
+| `@hns/core` | モデル（types.ts） | — |
 | `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離 | pi-durable/env |
 | `@hns/agent` | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode） | core, workspace, pi-durable, pi-ai |
 | `@hns/store` | SQLite、migration、リポジトリ。`./identity` で token・tailnet・passkey・セッション・秘密 | node:sqlite |
@@ -66,4 +66,4 @@ server ─┬─► agent ─┬─► workspace ─► pi-durable/env
 4. `server` ← `work/poc/app/server.mjs`
 5. `web` ← `work/poc/app/ui`（最後。D011）
 
-各段で `packages/core` のレスポンス検証を通す。
+各段で型検査を通す。

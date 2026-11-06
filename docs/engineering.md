@@ -8,8 +8,7 @@
 | --- | --- | --- | --- |
 | 言語 | TypeScript strict（`noUncheckedIndexedAccess`） | 境界が多い。型で守る | JS（PoC のまま） |
 | 実行 | Node.js 24（`.nix` / devenv で固定） | 既存の pi-durable と同一。`node:sqlite` が使える | Bun（DB と sandbox の相性が未検証） |
-| HTTP | Fastify 5 + zod | schema 検証・SSE・テストが素直 | Express（検証が弱い）、Hono（DB/worker との相性未検証） |
-| 検証 | zod（`packages/core/src/validation.ts`） | 型に縛った実行時検証 | スキーマを先に書く（型が二重になる） |
+| HTTP | Fastify 5 | SSE・テストが素直 | Express（検証が弱い）、Hono（未検証） |
 | DB | SQLite（`node:sqlite`） | Durable と同じ。バックアップが簡単 | Postgres（今は不要） |
 | UI | React 19 + Vite + TanStack Query | 最終段の UX を詰めやすい。状態の取り回しが明確 | 素の DOM（UI が育たない） |
 | エディタ | CodeMirror 6 | 軽い。diff は自前で持っている | Monaco（重い） |
@@ -23,7 +22,7 @@
 
 ```text
 packages/
-  core/       types.ts（モデル）+ validation.ts（zod）
+  core/       types.ts（モデル）
   workspace/  版・Journal・認可・イベント。./sandbox で exec 隔離
   agent/      Durable の組み立て、ツール、hooks、Model アダプタ
   store/      SQLite・migration・リポジトリ。./identity で認証と秘密
@@ -44,17 +43,14 @@ packages/
 
 ## 3. type first
 
-**型が正本。** スキーマは型に適合することをコンパイラが検査する。
+**型が唯一の正本。** `@hns/core/src/types.ts` にモデルを書き、実装と UI はその型だけを使う。
 
-1. `packages/core/src/types.ts` にモデルを書く（Project・Conversation・Event・Metrics …）。
-2. `validation.ts` に zod を書き、`z.ZodType<T>` として型に合わせる。合わなければコンパイルが落ちる。
-3. サーバは境界で validation を通す。レスポンス検証は**実サーバ**で行う。
-4. UI は `types.ts` の型だけを使う（レスポンス型を手書きしない）。
+1. `types.ts` にモデルを書く。
+2. サーバと UI をその型で書く。境界（HTTP の入口など）で実行時の検証が要るなら、その場所に書く。
+3. 型を変えたら、コンパイルが落ちる場所で追従する。
 
-- 型の変更が先。スキーマは型に追随する（drift はコンパイルエラーになる）。
-- スキーマを先に書かない。型に無いものを検証しない。
-- SSE のイベントも型とスキーマを持つ。
-- 小さな道具（`json()` など）は型で表現し、`as` は SAFETY コメント付きで最小限にする。
+- スキーマ層は持たない（型を二重に定義しない）。
+- SSE のイベントも型で表す。
 
 ## 4. AI slop を防ぐ
 
@@ -73,8 +69,7 @@ npm 依存ではなく**コピー**として持つ。読んで、必要なら自
 
 | 仕組み | 何を止めるか |
 | --- | --- |
-| レスポンス検証（実サーバ） | 実装と型の乖離、想像で書いたレスポンス |
-| `noUncheckedIndexedAccess` と境界の zod | 未検証の JSON、`any` の伝播 |
+| `noUncheckedIndexedAccess` | 未検証の JSON、`any` の伝播 |
 | anti-slop: `no-unknown-parameters`・`no-unsafe-dictionary-type`・`no-widen-then-assert`・`require-safety-comment-for-type-assertion` | 型を捨てる近道、根拠のない `as` |
 | anti-slop: `no-object-parameters`・`no-array-filter-map`・`no-reduce-accumulator-copy`・`no-module-mocking` | 低信号な実装パターン |
 | `knip` | 未使用の export・依存・ファイル |

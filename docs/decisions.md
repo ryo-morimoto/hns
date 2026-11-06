@@ -159,18 +159,18 @@ date: 2026-11-07 · by: user · issue: 0030
 ## D026: 技術スタックを固定する
 date: 2026-11-07 · by: user · issue: 0031
 
-TypeScript strict / Node 24 / Fastify + zod / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / **oxlint + oxfmt** + vendored anti-slop / **npm workspaces**（pi の packages 構成に倣う）。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
+TypeScript strict / Node 24 / Fastify / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / **oxlint + oxfmt** + vendored anti-slop / **npm workspaces**（pi の packages 構成に倣う）。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
 
 ## D027: 型が正本（type first）
 date: 2026-11-07 · by: user · issue: 0031
 
-`packages/core/src/types.ts` がモデルの正本。`validation.ts` の zod は `z.ZodType<T>` として型に適合させ、合わなければコンパイルで落とす。API 定義書は生成しない。
-レスポンス検証は実サーバを起動して実 JSON を確認する（モックにしない）。UI は types.ts の型だけを使う。
+`packages/core/src/types.ts` が唯一の正本。実行時の検証層と API 定義書は持たない。
+UI とサーバは types.ts の型だけを使う。スキーマを先に書かない（型を二重に定義しない）。
 
 ## D028: AI slop はゲートで止める
 date: 2026-11-07 · by: user · issue: 0031
 
-レスポンス検証、noUncheckedIndexedAccess、vendored anti-slop（18 ルール。require-readable-spacing は oxfmt と衝突するため無効）、tsc --noEmit、oxfmt --check、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。
+noUncheckedIndexedAccess、vendored anti-slop（18 ルール。require-readable-spacing は oxfmt と衝突するため無効）、tsc --noEmit、oxfmt --check、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。
 ## D029: パッケージは 6 つで始める
 date: 2026-11-07 · by: user · issue: 0032
 

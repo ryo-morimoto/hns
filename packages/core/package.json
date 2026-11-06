@@ -1,7 +1,7 @@
 {
   "name": "@hns/core",
   "version": "0.1.0",
-  "description": "Domain types and runtime validation for hns (zod)",
+  "description": "Domain types for hns",
   "files": [
     "dist",
     "README.md",
@@ -21,11 +21,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
-    "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
