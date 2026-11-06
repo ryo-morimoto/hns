@@ -26,3 +26,7 @@
 - google-generative-ai 方式の実動作（権限が付いたモデルで再試行）。
 - openai-responses 方式。
 - レート制限・長い文脈・ストリーミングの体感。
+## 追記（2026-11-06）
+
+`gemini-4-argon` の 403 はアカウント権限ではなく、**OpenCode Go の設定で無効化していた**ため。
+有効化すれば同じ `PROVIDER=opencode MODEL_ID=gemini-4-argon node real.mjs` で試せる。

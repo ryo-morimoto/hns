@@ -13,10 +13,10 @@ T-08「最小2種の正式API方式」を満たす。別プロバイダ・別API
 - [x] OpenCode Go に接続できる（`~/.config/hns/opencode-go.key`）
 - [x] openai-completions 方式でツールが動く
 - [x] anthropic-messages 方式でツールが動く
-- [ ] google-generative-ai 方式（403、アカウント権限なし）
+- [ ] google-generative-ai 方式（設定で無効化中。有効化すれば試せる）
 
 ## Result
 
 `deepseek-v4.1-flash` と `qwen3.8-max` で 2 ツール呼び出し・ファイル更新・OK。
-`gemini-4-argon` は `Model access is disabled`。詳細は [research](../research/opencode-go.md)。
+`gemini-4-argon` は設定で無効化されていた（`Model access is disabled`）。詳細は [research](../research/opencode-go.md)。
 T-08 は 2 プロバイダ・2 API 方式で達成。google 系は権限待ち。

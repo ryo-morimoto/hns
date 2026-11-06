@@ -54,5 +54,5 @@ date: 2026-11-06 · by: user · issue: 0012
 date: 2026-11-06 · by: user · issue: 0013
 
 pi-ai の `opencode-go` プロバイダをそのまま使う。鍵は `~/.config/hns/opencode-go.key`。
-`openai-completions` と `anthropic-messages` でツール呼び出しを確認。Google 系はアカウント権限が無く未確認。
+`openai-completions` と `anthropic-messages` でツール呼び出しを確認。Google 系（`gemini-4-argon`）は設定で無効化中のため未確認。
 Provider ごとに「API 方式が通る」と「モデルが使える」は別なので、モデル追加時は両方確かめる。
