@@ -333,6 +333,7 @@ export function openControlPlane(path) {
         toolCalls: db.prepare("SELECT COUNT(*) AS count FROM events WHERE event = 'tool.result' AND at >= ?").get(since).count,
         toolErrors: db.prepare("SELECT COUNT(*) AS count FROM events WHERE event = 'tool.result' AND level = 'warn' AND at >= ?").get(since).count,
         agentResponses: db.prepare("SELECT COUNT(*) AS count FROM events WHERE event = 'agent.response' AND at >= ?").get(since).count,
+        byEvent: db.prepare("SELECT event, COUNT(*) AS count FROM events WHERE at >= ? GROUP BY event ORDER BY count DESC LIMIT 25").all(since).map(row),
         tokensToday: this.usageToday(),
       };
     },

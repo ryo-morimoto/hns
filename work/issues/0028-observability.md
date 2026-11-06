@@ -21,4 +21,4 @@ touches: work/poc/app
 - `events` テーブル、`/api/events`、`/api/metrics`、`x-request-id`。
 - エージェントのターン（`agent.response`）とツール（`tool.call` / `tool.result`）は Durable の hooks から記録。引数・出力の中身は残さない。
 - 起動時に30日より古いイベントを削除。
-- テスト `run-observe.mjs` 17/17。
+- テスト `run-observe.mjs` 17/17、網羅は `run-journal.mjs` 5/5（Project / Task / 秘密 / ファイル / Workflow / Automation / 会話 / 制限 / 認証拒否）。

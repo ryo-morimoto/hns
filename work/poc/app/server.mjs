@@ -165,6 +165,10 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
     dailyTokenBudget: limits.dailyTokenBudget ?? Number(process.env.HNS_DAILY_TOKEN_BUDGET ?? 0),
     turnTimeoutMs: limits.turnTimeoutMs ?? Number(process.env.HNS_TURN_TIMEOUT_MS ?? 0),
   };
+  control.addEvent({
+    event: "server.start",
+    detail: { provider: providerId, model: modelId, auth: String(auth), limits: limitsConfig, version: 1 },
+  });
   const recentChats = new Map();
   const activeChats = new Map();
   const usageTotals = (state) => {
@@ -214,15 +218,19 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         if (definition.type === "human") {
           control.setNodeWaiting(runId, id, prompt);
           control.setRunStatus(runId, "waiting");
+          control.addEvent({ event: "workflow.node.waiting", detail: { runId, nodeId: id } });
           return;
         }
+        const nodeStarted = Date.now();
         control.setNodeRunning(runId, id, prompt);
+        control.addEvent({ event: "workflow.node.started", detail: { runId, nodeId: id, type: definition.type } });
 
         if (definition.type === "tool") {
           let output = "";
           const result = await sandbox.exec(prompt, { onOutput: (text) => { output += text; } }, ctx);
           const exitCode = result.ok ? result.value.exitCode : undefined;
           control.setNodeResult(runId, id, exitCode === 0 ? "done" : "failed", output);
+          control.addEvent({ event: "workflow.node.finished", level: exitCode === 0 ? "info" : "warn", durationMs: Date.now() - nodeStarted, detail: { runId, nodeId: id, type: "tool", status: exitCode === 0 ? "done" : "failed" } });
           if (exitCode !== 0) throw new Error("tool node failed: " + id);
           values[id] = output;
           continue;
@@ -237,12 +245,15 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         const text = settled.status === "done" ? await lastAssistantText(conversation) : "";
         values[id] = text;
         control.setNodeResult(runId, id, settled.status === "done" ? "done" : "failed", text, String(conversation.id));
+        control.addEvent({ event: "workflow.node.finished", level: settled.status === "done" ? "info" : "warn", durationMs: Date.now() - nodeStarted, detail: { runId, nodeId: id, type: "agent", status: settled.status === "done" ? "done" : "failed" } });
         if (settled.status !== "done") throw new Error("node failed: " + id);
       }
 
       control.finishRun(runId, "done", JSON.stringify(values));
+      control.addEvent({ event: "workflow.run.finished", detail: { runId, status: "done", nodes: parsed.nodes.length } });
     } catch (error) {
       control.finishRun(runId, "failed", JSON.stringify({ error: String(error?.message ?? error) }));
+      control.addEvent({ event: "workflow.run.failed", level: "error", detail: { runId, error: String(error?.message ?? error) } });
     } finally {
       activeRuns.delete(runId);
     }
@@ -273,16 +284,20 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const fire = async (automation, payload, origin) => {
     if (!automation.enabled) return { skipped: "disabled" };
     if (runningAutomations.has(automation.id)) {
-      control.createFiring({ automationId: automation.id, at: new Date().toISOString(), status: "skipped", detail: "already running" });
+      const skipped = control.createFiring({ automationId: automation.id, at: new Date().toISOString(), status: "skipped", detail: "already running" });
+      control.addEvent({ level: "warn", event: "automation.skipped", detail: { automationId: automation.id, firingId: skipped.id, reason: "already running" } });
       return { skipped: "already running" };
     }
     runningAutomations.add(automation.id);
     const firing = control.createFiring({ automationId: automation.id, at: new Date().toISOString(), status: "running", detail: origin });
+    control.addEvent({ event: "automation.fired", detail: { automationId: automation.id, firingId: firing.id, origin } });
     try {
       const result = await runAction(automation, payload);
       control.updateFiring(firing.id, { status: "done", detail: result.detail, runId: result.runId });
+      control.addEvent({ event: "automation.finished", detail: { automationId: automation.id, firingId: firing.id, status: "done", runId: result.runId } });
     } catch (error) {
       control.updateFiring(firing.id, { status: "failed", detail: String(error?.message ?? error) });
+      control.addEvent({ event: "automation.finished", level: "error", detail: { automationId: automation.id, firingId: firing.id, status: "failed", error: String(error?.message ?? error) } });
     } finally {
       runningAutomations.delete(automation.id);
     }
@@ -361,15 +376,22 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       if (auth && url.pathname.startsWith("/api/") && !isHook && !(passkeyMode && passkeyOpen)) {
         if (passkeyMode) {
           if (!control.getSession(cookieOf(req.headers.cookie, "hns_session"))) {
+            control.addEvent({ level: "warn", event: "auth.denied", detail: { mode: "passkey" } });
             return json(res, 401, { error: "unauthorized" });
           }
         } else if (tailscaleMode) {
           const verdict = await verifyTailscale(req.socket.remoteAddress);
-          if (!verdict.ok) return json(res, 401, { error: "unauthorized", reason: verdict.reason });
+          if (!verdict.ok) {
+            control.addEvent({ level: "warn", event: "auth.denied", detail: { mode: "tailscale", reason: verdict.reason } });
+            return json(res, 401, { error: "unauthorized", reason: verdict.reason });
+          }
         } else {
           const bearer = (req.headers.authorization ?? "").startsWith("Bearer ") ? req.headers.authorization.slice(7) : undefined;
           const candidate = bearer ?? url.searchParams.get("token") ?? cookieOf(req.headers.cookie, "hns_token");
-          if (!same(candidate ?? "", token)) return json(res, 401, { error: "unauthorized" });
+          if (!same(candidate ?? "", token)) {
+            control.addEvent({ level: "warn", event: "auth.denied", detail: { mode: "token" } });
+            return json(res, 401, { error: "unauthorized" });
+          }
         }
       }
       if (url.pathname === "/api/state" && req.method === "GET") {
@@ -382,20 +404,27 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         if (req.method === "POST") {
           const { name } = await bodyOf(req);
           if (!name) return json(res, 400, { error: "name is required" });
-          return json(res, 201, control.createProject(name));
+          const project = control.createProject(name);
+          control.addEvent({ event: "project.created", detail: { projectId: project.id, name } });
+          return json(res, 201, project);
         }
       }
       if (url.pathname.startsWith("/api/projects/") && req.method === "PATCH") {
         const id = url.pathname.slice("/api/projects/".length);
         const { name } = await bodyOf(req);
         const project = control.renameProject(id, name);
+        if (project) control.addEvent({ event: "project.renamed", detail: { projectId: id, name } });
         return project ? json(res, 200, project) : json(res, 404, { error: "project not found" });
       }
       if (url.pathname === "/api/tasks") {
         if (req.method === "GET") return json(res, 200, control.listTasks(url.searchParams.get("projectId") ?? undefined));
         if (req.method === "POST") {
           const body = await bodyOf(req);
-          try { return json(res, 201, control.createTask({ projectId: body.projectId, title: body.title })); }
+          try {
+            const task = control.createTask({ projectId: body.projectId, title: body.title });
+            control.addEvent({ event: "task.created", detail: { taskId: task.id, projectId: task.project_id, status: task.status } });
+            return json(res, 201, task);
+          }
           catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
         }
       }
@@ -403,6 +432,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         const id = url.pathname.slice("/api/tasks/".length);
         try {
           const task = control.updateTask(id, await bodyOf(req));
+          if (task) control.addEvent({ event: "task.updated", detail: { taskId: task.id, status: task.status } });
           return task ? json(res, 200, task) : json(res, 404, { error: "task not found" });
         } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
       }
@@ -535,11 +565,16 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         if (parts.length === 4 && req.method === "PUT") {
           const { value } = await bodyOf(req);
           if (typeof value !== "string") return json(res, 400, { error: "value is required" });
-          try { return json(res, 200, secrets.put(parts[2], parts[3], value, { key: dekOf(req) })); }
+          try {
+            const result = secrets.put(parts[2], parts[3], value, { key: dekOf(req) });
+            control.addEvent({ event: "secret.put", detail: { scope: parts[2], name: parts[3] } });
+            return json(res, 200, result);
+          }
           catch (error) { return json(res, 423, { error: String(error.message ?? error) }); }
         }
         if (parts.length === 4 && req.method === "DELETE") {
           secrets.delete(parts[2], parts[3]);
+          control.addEvent({ event: "secret.delete", detail: { scope: parts[2], name: parts[3] } });
           return json(res, 200, { deleted: true });
         }
       }
@@ -548,7 +583,11 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         if (req.method === "POST") {
           const { projectId = "default", name, trigger, action, enabled = true } = await bodyOf(req);
           if (!name || !trigger?.type || !action?.type) return json(res, 400, { error: "name, trigger, and action are required" });
-          try { return json(res, 201, control.createAutomation({ projectId, name, trigger, action, enabled })); }
+          try {
+            const automation = control.createAutomation({ projectId, name, trigger, action, enabled });
+            control.addEvent({ event: "automation.created", detail: { automationId: automation.id, trigger: trigger.type, action: action.type } });
+            return json(res, 201, automation);
+          }
           catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
         }
       }
@@ -583,7 +622,9 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           try { validateGraph(graph); }
           catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
           if (!name) return json(res, 400, { error: "name is required" });
-          return json(res, 201, control.createWorkflow({ projectId, name, graph }));
+          const workflow = control.createWorkflow({ projectId, name, graph });
+          control.addEvent({ event: "workflow.created", detail: { workflowId: workflow.id, version: workflow.version, nodes: graph.nodes.length } });
+          return json(res, 201, workflow);
         }
       }
       if (url.pathname.startsWith("/api/workflows/") && req.method === "PUT") {
@@ -592,12 +633,14 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         try { validateGraph(graph); }
         catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
         const workflow = control.updateWorkflow(id, graph);
+        if (workflow) control.addEvent({ event: "workflow.updated", detail: { workflowId: id, version: workflow.version } });
         return workflow ? json(res, 200, workflow) : json(res, 404, { error: "workflow not found" });
       }
       if (url.pathname.startsWith("/api/workflows/") && url.pathname.endsWith("/runs") && req.method === "POST") {
         const id = url.pathname.slice("/api/workflows/".length, -"/runs".length);
         const { input = "" } = await bodyOf(req);
         const run = control.createRun({ workflowId: id, input });
+        if (run) control.addEvent({ event: "workflow.run.started", detail: { workflowId: id, runId: run.id, version: run.version, inputBytes: String(input).length } });
         if (!run) return json(res, 404, { error: "workflow not found" });
         void advance(run.id);
         return json(res, 202, { id: run.id, version: run.version });
@@ -630,7 +673,9 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
             agent: { model: { provider: providerId, modelId }, cwd: root },
           }, ctx);
           conversations.set(String(created.id), created);
-          return json(res, 201, control.registerConversation({ id: String(created.id), projectId, title }));
+          const conversation = control.registerConversation({ id: String(created.id), projectId, title });
+          control.addEvent({ event: "conversation.created", conversationId: String(created.id), detail: { projectId, title } });
+          return json(res, 201, conversation);
         }
       }
       if (url.pathname === "/api/stream" && req.method === "GET") {
@@ -650,12 +695,15 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         if (limitsConfig.turnsPerMinute > 0) {
           const stamps = (recentChats.get(key) ?? []).filter((at) => now - at < 60_000);
           if (stamps.length >= limitsConfig.turnsPerMinute) {
-            return json(res, 429, { error: "rate limited", retryAfterMs: 60_000 - (now - stamps[0]) });
+            const retryAfterMs = 60_000 - (now - stamps[0]);
+            control.addEvent({ level: "warn", event: "chat.rate_limited", conversationId: key, detail: { retryAfterMs } });
+            return json(res, 429, { error: "rate limited", retryAfterMs });
           }
           stamps.push(now);
           recentChats.set(key, stamps);
         }
         if (limitsConfig.dailyTokenBudget > 0 && control.usageToday().tokens >= limitsConfig.dailyTokenBudget) {
+          control.addEvent({ level: "warn", event: "chat.budget_exceeded", conversationId: key, detail: { tokensToday: control.usageToday().tokens } });
           return json(res, 429, { error: "daily token budget exceeded" });
         }
         const before = usageTotals(await harness.usage(ctx));
@@ -668,12 +716,16 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           timer = setTimeout(() => { void conversation.abort(ctx).catch(() => {}); }, limitsConfig.turnTimeoutMs);
         }
         void (async () => {
-          try { await submission.wait(ctx); } catch {}
+          const settled = await submission.wait(ctx).catch(() => undefined);
           if (timer) clearTimeout(timer);
           activeChats.delete(key);
           const after = usageTotals(await harness.usage(ctx));
           control.addUsage({ conversationId: key, tokens: after.tokens - before.tokens, cost: after.cost - before.cost, requestId });
-          control.addEvent({ event: "chat.settled", conversationId: key, requestId, durationMs: Date.now() - now });
+          control.addEvent({
+            event: "chat.settled", conversationId: key, requestId, durationMs: Date.now() - now,
+            level: settled?.status === "done" ? "info" : "warn",
+            detail: { status: settled?.status, reason: settled?.reason },
+          });
           broadcast();
         })();
         return json(res, 202, { requestId, submissionId: submission.id, conversationId: key });
@@ -709,7 +761,9 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         catch (error) { return json(res, 404, { error: String(error?.message ?? error) }); }
       }
       if (url.pathname === "/api/file" && req.method === "PUT") {
-        const outcome = await ws.write(await bodyOf(req));
+        const input = await bodyOf(req);
+        const outcome = await ws.write(input);
+        control.addEvent({ event: "file.write", level: outcome.status === "applied" ? "info" : "warn", detail: { path: input.path, status: outcome.status } });
         return json(res, outcome.status === "applied" ? 200 : outcome.status === "conflict" ? 409 : 202, outcome);
       }
       if (url.pathname.startsWith("/api/file") === false) {
