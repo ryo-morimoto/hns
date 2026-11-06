@@ -71,6 +71,12 @@ type MutationResult =
 - root の差し替え（同じパスの別ディレクトリ）は**検出できない**（`ExecutionEnv` から inode を取得できない）
 - root が symlink のときは、開いた時点の解決結果に固定する。差し替えは反映されない
 - TOCTOU は残る（`openat2(RESOLVE_BENEATH)` 相当は未対応）
+- Windows の区切り・大文字小文字、macOS の正規化は未検証（Linux のみ）
+
+### 脅威モデル
+
+この層が防ぐのは**事故と協力的な Agent**。同一ユーザーの悪意あるプロセスや `exec` は防がない。
+実質の境界は OS の権限とサンドボックスで、Workspace の認可はその内側の整合性チェック。
 
 ## イベント
 
