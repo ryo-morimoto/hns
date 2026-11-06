@@ -22,29 +22,14 @@ hns（複数マシンの AI Agent を、セルフホストの単一 UI から操
 
 残作業は `work/` に置く。
 
-## 環境（いまの環境の事実）
-
-- Node は PATH に無い（Nix）。最初に一度:
-
-```bash
-NODE=$(ls -d /nix/store/*nodejs-24*/bin/node | head -1); export PATH=$(dirname "$NODE"):$PATH
-export npm_config_cache=$PWD/.work/npm-cache
-```
-
-- npm workspaces（`packages/*`）
-- 秘密はリポジトリ外（`~/.config/hns/*.key`）。ログ・コミットに出さない
-- Docker は無い。SQLite はインプロセスで使う
-- Chromium が要るテストは無ければ skip（`HNS_CHROME` で上書き）
-
 ## コマンド
 
 ```bash
-npm run check                 # oxlint → oxfmt --check → tsc → test → build
-npm test -w @hns/core
-npm test -w @hns/store        # 実 SQLite を含む
+scripts/with-node.sh npm run check     # oxlint → oxfmt --check → tsc → test → build
+scripts/with-node.sh npm test -w @hns/store
 ```
 
-pre-commit は `npm run check`（初回だけ `scripts/install-hooks.sh`）。
+pre-commit は自動（初回だけ `scripts/install-hooks.sh`）。
 
 `work/poc/` は過去の検証。製品コードではない。
 
