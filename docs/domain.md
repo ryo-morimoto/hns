@@ -25,12 +25,13 @@
 - Task と Durable の内部 Task は別 ID・別ライフサイクル。
 - Workflow は「定義（版）」と「実行」を分ける。実行は版を固定する。
 - Conversation は Task に必須ではない（雑談・調査もある）。
+- 1 Project に複数 Conversation。Task との紐付けは任意（D-01 はこれで決め）。
+- Project / Task / Conversation の正本は `control.sqlite`（Durable の `session.sqlite` と分ける）。
 
 ## 未決
 
 | ID | 論点 | 案 | 決める時 |
 | --- | --- | --- | --- |
-| D-01 | Task と Conversation の対応 | 1 Task に複数 Conversation | Task 実装時 |
 | D-02 | Workflow の実行主体 | Durable の task に載せる | Workflow 実装前 |
 | D-03 | Run の粒度 | 1 送信 = 1 Run | 実装時 |
 | D-04 | 削除と履歴 | 論理削除 + 監査 | Task 実装時 |

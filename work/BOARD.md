@@ -19,7 +19,7 @@
 | [0013](issues/0013-opencode-go.md) | 2プロバイダ目（OpenCode Go） | **done** | 0012 |
 | [0014](issues/0014-integrated-mvp.md) | 統合 MVP（1マシン） | **done** | 0002 |
 | [0015](issues/0015-progress-stream.md) | 進捗のストリーミング | **done** | 0014 |
-| [0016](issues/0016-project-task.md) | Project と Task | open | 0014 |
+| [0016](issues/0016-project-task.md) | Project と Task | **done** | 0014 |
 
 ## ゲート
 

@@ -10,6 +10,7 @@ import { createBashTool } from "@earendil-works/pi-durable/tools";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { obj, str } from "@earendil-works/pi-schema";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
+import { openControlPlane } from "./db.mjs";
 import { Workspace } from "../workspace-core/workspace.mjs";
 import { createSandboxEnv } from "../workspace-core/sandbox.mjs";
 import { ollamaCloud, readOllamaKey } from "../conversation/ollama.mjs";
@@ -101,14 +102,26 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   });
 
   const storage = await openNodeSqliteStorage(join(stateDir, "session.sqlite"));
+  const control = openControlPlane(join(stateDir, "control.sqlite"));
   const registry = createRegistry();
   registry.install(tools);
   const harness = await Harness.open(storage, { models, registry, env: () => sandbox }, ctx);
-  const conversation = await harness.root(ctx, { agent: { model: { provider: providerId, modelId }, cwd: root } });
+  const rootConversation = await harness.root(ctx, { agent: { model: { provider: providerId, modelId }, cwd: root } });
+  control.registerConversation({ id: String(rootConversation.id), projectId: "default", title: "main" });
   harness.resume();
 
+  const conversations = new Map([[String(rootConversation.id), rootConversation]]);
+  const conversationById = async (id) => {
+    if (!id) return rootConversation;
+    const cached = conversations.get(String(id));
+    if (cached) return cached;
+    const found = await harness.conversation(Number(id), ctx);
+    if (found) conversations.set(String(found.id), found);
+    return found;
+  };
+
   const clients = new Set();
-  const snapshot = async () => {
+  const snapshot = async (conversation = rootConversation) => {
     const transcript = await conversation.entries({}, 100, undefined, ctx);
     const messages = transcript.items.map(viewEntry).filter(Boolean);
     const inspection = await harness.inspect(ctx);
@@ -124,6 +137,8 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       scheduling: inspection.scheduling,
       provider: providerId,
       model: modelId,
+      conversations: control.listConversations(),
+      projects: control.listProjects(),
     };
   };
   let pending = false;
@@ -137,14 +152,57 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       for (const client of clients) client.write(`event: state\ndata: ${data}\n\n`);
     }, 30);
   };
-  const watch = await conversation.watch(ctx);
+  const watch = await rootConversation.watch(ctx);
   watch.start(async (call) => { if (call.kind === "value") broadcast(); });
 
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       if (url.pathname === "/api/state" && req.method === "GET") {
-        return json(res, 200, await snapshot());
+        const conversation = await conversationById(url.searchParams.get("conversationId"));
+        if (!conversation) return json(res, 404, { error: "conversation not found" });
+        return json(res, 200, await snapshot(conversation));
+      }
+      if (url.pathname === "/api/projects") {
+        if (req.method === "GET") return json(res, 200, control.listProjects());
+        if (req.method === "POST") {
+          const { name } = await bodyOf(req);
+          if (!name) return json(res, 400, { error: "name is required" });
+          return json(res, 201, control.createProject(name));
+        }
+      }
+      if (url.pathname.startsWith("/api/projects/") && req.method === "PATCH") {
+        const id = url.pathname.slice("/api/projects/".length);
+        const { name } = await bodyOf(req);
+        const project = control.renameProject(id, name);
+        return project ? json(res, 200, project) : json(res, 404, { error: "project not found" });
+      }
+      if (url.pathname === "/api/tasks") {
+        if (req.method === "GET") return json(res, 200, control.listTasks(url.searchParams.get("projectId") ?? undefined));
+        if (req.method === "POST") {
+          const body = await bodyOf(req);
+          try { return json(res, 201, control.createTask({ projectId: body.projectId, title: body.title })); }
+          catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+        }
+      }
+      if (url.pathname.startsWith("/api/tasks/") && req.method === "PATCH") {
+        const id = url.pathname.slice("/api/tasks/".length);
+        try {
+          const task = control.updateTask(id, await bodyOf(req));
+          return task ? json(res, 200, task) : json(res, 404, { error: "task not found" });
+        } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+      }
+      if (url.pathname === "/api/conversations") {
+        if (req.method === "GET") return json(res, 200, control.listConversations(url.searchParams.get("projectId") ?? undefined));
+        if (req.method === "POST") {
+          const { projectId = "default", title = "conversation" } = await bodyOf(req);
+          const created = await harness.createConversation({
+            ownership: { kind: "ownerless" },
+            agent: { model: { provider: providerId, modelId }, cwd: root },
+          }, ctx);
+          conversations.set(String(created.id), created);
+          return json(res, 201, control.registerConversation({ id: String(created.id), projectId, title }));
+        }
       }
       if (url.pathname === "/api/stream" && req.method === "GET") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -155,9 +213,11 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         return;
       }
       if (url.pathname === "/api/chat" && req.method === "POST") {
-        const { message } = await bodyOf(req);
+        const { message, conversationId } = await bodyOf(req);
+        const conversation = await conversationById(conversationId);
+        if (!conversation) return json(res, 404, { error: "conversation not found" });
         const submission = await conversation.submit({ type: "input", content: message, requestId: "ui-" + Date.now() }, ctx);
-        return json(res, 202, { requestId: submission.id });
+        return json(res, 202, { requestId: submission.id, conversationId: String(conversation.id) });
       }
       if (url.pathname === "/api/files" && req.method === "GET") {
         const listing = await raw.listFiles(url.searchParams.get("path") ?? ".", { hidden: false, exclude: [".hns", ".hns-tmp-"] }, ctx);
@@ -201,6 +261,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       await new Promise((resolve) => server.close(resolve));
       await Promise.race([harness.close(ctx).catch(() => {}), new Promise((resolve) => setTimeout(resolve, 3000))]);
       await Promise.race([storage.close?.() ?? Promise.resolve(), new Promise((resolve) => setTimeout(resolve, 2000))]);
+      try { control.close(); } catch {}
       await raw.cleanup?.().catch(() => {});
       connection.close();
     },
