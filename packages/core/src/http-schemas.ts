@@ -565,21 +565,21 @@ export const FileQuerySchema = v.object({ path: v.optional(v.string()) });
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
-export interface RouteContract {
+export interface RouteContract<TRequest = undefined, TResponse = unknown> {
   readonly method: HttpMethod;
   readonly path: string;
   /** Body or query parameters; absent when the route takes neither. */
-  readonly request?: v.GenericSchema<unknown, unknown> | undefined;
+  readonly request?: v.GenericSchema<unknown, TRequest> | undefined;
   /** The success body. Every route can also answer with ErrorResponseSchema. */
-  readonly response: v.GenericSchema<unknown, unknown>;
+  readonly response: v.GenericSchema<unknown, TResponse>;
 }
 
-function route(
+function route<TRequest = undefined, TResponse = unknown>(
   method: HttpMethod,
   path: string,
-  response: v.GenericSchema<unknown, unknown>,
-  request?: v.GenericSchema<unknown, unknown>,
-): RouteContract {
+  response: v.GenericSchema<unknown, TResponse>,
+  request?: v.GenericSchema<unknown, TRequest>,
+): RouteContract<TRequest, TResponse> {
   return request === undefined ? { method, path, response } : { method, path, response, request };
 }
 
@@ -751,6 +751,6 @@ export const ROUTES = {
   "GET /api/metrics": route("GET", "/api/metrics", MetricsSchema),
   "GET /api/usage": route("GET", "/api/usage", UsageSchema),
   "POST /api/debug/tick": route("POST", "/api/debug/tick", OkSchema, DebugTickSchema),
-} satisfies Record<string, RouteContract>;
+};
 
 export type RouteKey = keyof typeof ROUTES;

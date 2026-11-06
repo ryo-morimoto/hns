@@ -6,10 +6,10 @@
 
 | リポジトリ | 見るファイル | 学ぶこと |
 | --- | --- | --- |
-| Trigger.dev | [`internal-packages/run-engine/AGENTS.md`](https://github.com/triggerdotdev/trigger.dev/blob/main/internal-packages/run-engine/AGENTS.md) | 失敗前提の実行管理。状態・ロック・リトライ・checkpoint・testcontainers |
+| Trigger.dev | [`internal-packages/run-engine/AGENTS.md`](https://github.com/triggerdotdev/trigger.dev/blob/main/internal-packages/run-engine/AGENTS.md)（実在。`apps/webapp/AGENTS.md` は無い） | 失敗前提の実行管理。状態・ロック・リトライ・checkpoint・testcontainers |
 | Medusa | [`workflows-sdk/src/utils/composer/create-step.ts`](https://github.com/medusajs/medusa/blob/develop/packages/core/workflows-sdk/src/utils/composer/create-step.ts) / [`create-workflow.ts`](https://github.com/medusajs/medusa/blob/develop/packages/core/workflows-sdk/src/utils/composer/create-workflow.ts) | step の invoke / compensate、workflow の合成、モジュール分離 |
-| Twenty | [`CLAUDE.md`](https://github.com/twentyhq/twenty/blob/main/CLAUDE.md) | 日常の規約。type 優先・literal union・named generic・guard の再利用 |
-| Payload CMS | [`fields/validations.ts`](https://github.com/payloadcms/payload/blob/main/packages/payload/src/fields/validations.ts) | 境界での検証。`test/<feature>/{config,int.spec,e2e.spec}.ts` の3層テスト |
+| Twenty | [`CLAUDE.md`](https://github.com/twentyhq/twenty/blob/main/CLAUDE.md)（リポジトリ直下。`packages/twenty-server/CLAUDE.md` は無い） | 日常の規約。type 優先・literal union・named generic・guard の再利用 |
+| Payload CMS | [`AGENTS.md`](https://github.com/payloadcms/payload/blob/main/AGENTS.md) / [`fields/validations.ts`](https://github.com/payloadcms/payload/blob/main/packages/payload/src/fields/validations.ts) | 境界での検証。`test/<feature>/{config,int.spec,e2e.spec}.ts` の3層テスト |
 | Effect | [`Schema.ts`](https://github.com/Effect-TS/effect/blob/main/packages/effect/src/Schema.ts) / [`Layer.ts`](https://github.com/Effect-TS/effect/blob/main/packages/effect/src/Layer.ts) | `decodeUnknown` による境界検証、型付きエラー、依存の合成 |
 
 ## 1. 境界で parse する（全5プロジェクトがやっている）
@@ -145,3 +145,19 @@ Trigger.dev は **testcontainers** で PostgreSQL と Redis を立て、engine �
 - 型を先に書くこと（type first）と、境界で parse することは両立する。型はモデル、parse は入口。
 
 推奨: HTTP の入口と DB の読み出しに parse を置く。zod を使わないなら手書きの guard でもよいが、**検証を省かない**。
+## 11. hns での適用（2026-11-07 追記）
+
+参照元を実際に取得して確かめたパスは上の表のとおり。ここまでの実装に落としたもの:
+
+| 原則 | hns の実装 |
+| --- | --- |
+| 境界で parse（Payload / Effect） | `packages/core/src/contract.ts` の `parseRequest` / `parseResponse`。`ROUTES` の schema で parse し、失敗は `Result` で返す。DB は `packages/store/src/parse.ts` |
+| 失敗を型で（Effect / Trigger） | `packages/core/src/result.ts` の `Result<T, E>` と `ContractError`。HTTP の失敗は `ErrorCode` の union |
+| 状態を型で・遷移は1箇所（Medusa / Trigger） | `packages/core/src/workflow.ts` の遷移表。`WORKFLOW_RUN_STATUSES` 等は const array 由来 |
+| 3層テスト（Payload） | unit は各パッケージの `test/`。store は実 SQLite。統合 / E2E は server（0035）と 0043 で足す |
+| 依存は端で組み立てる（Effect Layer） | まだ server が無いので未適用。0035 の composition root で行う |
+
+意図的に合わせないもの:
+
+- Payload の「引数はオブジェクトに统一」は、vendored anti-slop の `no-object-parameters` と衝突する。**anti-slop を優先**する。
+- Twenty の「`type` を優先」は既存の `interface`（モデル）と衝突する。移行は別 issue。新規の API 契約は `type` / `interface` を周囲に合わせる。

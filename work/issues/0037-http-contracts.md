@@ -21,7 +21,9 @@ touches: packages/core, packages/web
   ドメインの型は `types.ts`、ブランドの schema は `schemas.ts`。
 - `packages/core/src/http-schemas.ts`: 49 ルートの request / response schema と `ROUTES` 表。
   パスは `:id` 形式で、キーは `METHOD /path`。応答の失敗は `ErrorResponseSchema`。
-- `packages/core/test/http.test.ts`: 26 ケース（受理・拒否・ルート表の整合）。core は 34/34。
+- `packages/core/test/http.test.ts`: 26 ケース（受理・拒否・ルート表の整合）。
+- `packages/core/src/contract.ts` / `result.ts`: 境界 parse を `Result<RouteRequest<K>, ContractError>` で返す
+  （Effect / Payload の「境界で parse・失敗は値」）。`test/contract.test.ts` 7 ケース。core は 41/41。
 - 契約を書いて見つかったモデルのずれを直した:
   - `EVENT_NAMES` に `chat.rate_limited` / `chat.budget_exceeded` を追加（PoC が発行していた）
   - `SandboxStatus` を 0006 の検出結果（exec / backend / userNamespaces / code / reason）に更新
@@ -31,3 +33,4 @@ touches: packages/core, packages/web
 ## Log
 
 - 2026-11-07: 作成。core 側の契約と表を実装。server / web の適用は 0035 / 0036。
+- 2026-11-07: golden example（Payload / Effect）に合わせ、境界 parse の helper と Result を追加。
