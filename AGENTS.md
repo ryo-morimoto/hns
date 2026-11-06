@@ -11,6 +11,7 @@ hns（複数マシンの AI Agent を、セルフホストの単一 UI から操
 - `docs/decisions.md` — 決定の履歴（追記のみ。覆すときは新しい D を足す）
 - `docs/engineering.md` — スタック・型・AI slop 対策
 - `docs/packages.md` — パッケージの責務と型の置き場所
+- `CODING_STANDARDS.md` — 型・検証・安全・エラーの規約
 - `work/BOARD.md` と `work/issues/` — 残作業（残りは `work/` に置く）
 
 ## 環境（いまの環境の事実）
@@ -39,21 +40,9 @@ pre-commit は `npm run check`（初回だけ `scripts/install-hooks.sh`）。
 
 `work/poc/` は過去の検証。製品コードではない。
 
-## 型
+## コードの規約
 
-- モデルは `packages/core/src/types.ts`。**型が正本**
-- 境界は valibot。`v.GenericSchema<unknown, T>` で型に縛る（`packages/core/src/schemas.ts`、`packages/store/src/schemas.ts`）
-- 外部入力（HTTP・DB・JSON・env）を `as` で型にしない。**parse する**
-- `as` はやむを得ない場所だけ。必ず `// SAFETY: ...` を直前に書く（anti-slop が検査する）
-- optional と null と「無い」を区別する（`exactOptionalPropertyTypes`）
-- brand は、**同じ primitive の値が同じスコープで交差し、取り違えると壊れる境界**にだけ付ける。固定リストにしない。増やすときは「どの取り違えを防ぐか」を言えること（現在の例: `ProjectId` / `ConversationId`）
-- `any` を使わない
-
-## 境界とエラー
-
-- 保存表現（`archived: 0 | 1`、JSON 文字列、連番）をパッケージの外に出さない。境界で公開型に parse する
-- 想定内の失敗は型に出す（`ErrorCode`）。想定外は throw。空 catch を書かない
-- 変更は1目的に保つ。無関係な整形・リファクタを混ぜない
+型・検証・安全・エラーは [CODING_STANDARDS.md](CODING_STANDARDS.md)。
 
 ## パッケージ
 
