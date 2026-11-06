@@ -35,6 +35,8 @@ npm test -w @hns/core
 npm test -w @hns/store        # 実 SQLite を含む
 ```
 
+pre-commit は `npm run check`（初回だけ `scripts/install-hooks.sh`）。
+
 `work/poc/` は過去の検証。製品コードではない。
 
 ## 型
@@ -85,27 +87,3 @@ npm test -w @hns/store        # 実 SQLite を含む
 - 隣のファイルの書き方（命名・構成・コメント密度）に合わせる。ただし**型・検証・安全**の規約はこのファイルが優先
 - 使う予定のない抽象化・汎用層を作らない（YAGNI）
 - 生成物は手編集しない（生成ヘッダと再生成コマンドを守る）
-
-## 作業の流れ
-
-1. `work/BOARD.md` で対象の issue を選ぶ
-2. 型 → schema → 実装 → テスト の順
-3. `npm run check` を通す
-4. issue に結果を書き、`BOARD.md` を更新する。設計を変えたら `docs/decisions.md` に追記
-5. コミットする（`area: summary`、1コミット1目的）
-
-**push しない。** 指示があるまでローカルだけ。
-
-## やらないこと
-
-- issue 番号の無い TODO
-- UI の作り込み（D011。最後に集中する）
-- 指示だけで設計を変える。golden example（[docs/typescript.md](docs/typescript.md)）と矛盾するなら、その場で言う
-
-## コミット前
-
-- `npm run check` が通る
-- 外部入力の parse がある
-- union の `switch` が `never` で網羅されている
-- 失敗が型に出ている（エラーコード・throw・Result のどれか）
-- テストの回帰が1行で言える。issue / BOARD / decisions が更新されている

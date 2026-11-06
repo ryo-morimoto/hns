@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v node >/dev/null 2>&1; then
+  NODE=$(ls -d /nix/store/*nodejs-24*/bin/node 2>/dev/null | head -1 || true)
+  if [ -z "${NODE:-}" ]; then
+    echo "pre-commit: node not found" >&2
+    exit 1
+  fi
+  export PATH="$(dirname "$NODE"):$PATH"
+fi
+
+export npm_config_cache="$PWD/.work/npm-cache"
+npm run check
