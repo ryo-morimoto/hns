@@ -8,7 +8,7 @@ export class Denied extends Error {
   }
 }
 
-export const CRASH_POINTS = ["intent", "temp", "rename"] as const;
+const CRASH_POINTS = ["intent", "temp", "rename"] as const;
 /** Where a test makes the write stop. Not for callers. */
 export type CrashPoint = (typeof CRASH_POINTS)[number];
 

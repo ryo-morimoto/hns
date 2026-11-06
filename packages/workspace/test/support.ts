@@ -1,4 +1,4 @@
-import { mkdtemp, rename, rm, symlink, unlink } from "node:fs/promises";
+import { mkdtemp, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
@@ -66,10 +66,4 @@ export async function openWorkspace(
 export async function swapParent(root: string, name: string, outside: string): Promise<void> {
   await rename(join(root, name), join(root, name + "-old"));
   await symlink(outside, join(root, name));
-}
-
-/** Undo a swap. */
-export async function restoreParent(root: string, name: string): Promise<void> {
-  await unlink(join(root, name));
-  await rename(join(root, name + "-old"), join(root, name));
 }

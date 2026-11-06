@@ -10,7 +10,7 @@ export interface HelperBase {
   readonly ino?: number | undefined;
 }
 
-export const HELPER_OPS = ["probe", "hash", "read", "commit"] as const;
+const HELPER_OPS = ["probe", "hash", "read", "commit"] as const;
 export type HelperOp = (typeof HELPER_OPS)[number];
 
 /**

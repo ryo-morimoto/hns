@@ -33,7 +33,7 @@ export interface AgentOptions {
 }
 
 /** What `Submission.wait()` settles with; Durable's own record, not a copy. */
-export type Settlement = Awaited<ReturnType<Submission["wait"]>>;
+type Settlement = Awaited<ReturnType<Submission["wait"]>>;
 
 /** One submitted turn, as Durable settled it, plus the text it answered with. */
 export interface Turn {

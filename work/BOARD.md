@@ -45,7 +45,7 @@
 | [0043](issues/0043-product-e2e.md) | 製品の E2E テスト | open | 0036 |
 | [0040](issues/0040-self-host.md) | セルフホストの配布 | open | 0035, 0036 |
 | [0041](issues/0041-ci-dev-env.md) | CI と開発環境の固定 | open | 0046 |
-| [0042](issues/0042-boundaries-knip.md) | 依存境界と未使用コードの検査 | open | 0031, 0046 |
+| [0042](issues/0042-boundaries-knip.md) | 依存境界と未使用コードの検査 | **done** | 0031, 0046 |
 | [0044](issues/0044-multi-machine.md) | マルチマシン（保留） | **保留** | 0040 |
 | [0045](issues/0045-review-hardening.md) | レビュー指摘の修正（C/H/M） | **done** | 0004, 0033, 0037 |
 | [0046](issues/0046-test-discipline.md) | テストの規律とランナーの固定 | **done** | — |
