@@ -43,7 +43,7 @@
 | 要件・決定 | 設計ベースライン（v0.3） |
 | Agent Runtime | Pi Durable **1.5.0 固定**、実API確認済み |
 | ファイル安全 | Workspace 契約 v0.1（実装前） |
-| 検証 | 部品 156 チェック合格、統合 E2E 12/12、ドメイン 15/15、Workflow 16/16、Automation 17/17、認証 9/9・tailnet 10/10・passkey 7/7・PRF 9/9・2台目 4/4・秘密 12/12、制限 12/12、観測 17/17・網羅 5/5・会話管理 13/13、バックアップ 5/5、実モデル 2プロバイダ |
+| 検証 | 部品 156 チェック合格、統合 E2E 12/12、ドメイン 15/15、Workflow 16/16、Automation 17/17、認証 9/9・tailnet 10/10・passkey 7/7・PRF 9/9・2台目 4/4・秘密 12/12、制限 12/12、観測 17/17・網羅 5/5・会話管理 13/13、安全 10/10、バックアップ 5/5、実モデル 2プロバイダ |
 | 実装 | 未着手 |
 
 ## 読む順
@@ -88,6 +88,7 @@ curl -s "$URL/events?cursor=0&limit=1"
 | 観測 | `cd work/poc/app && node run-observe.mjs` |
 | 網羅（全イベント） | `cd work/poc/app && node run-journal.mjs` |
 | 会話の管理 | `cd work/poc/app && node run-conversations.mjs` |
+| 安全 | `cd work/poc/app && node run-safety.mjs` |
 | 秘密 | `cd work/poc/app && node run-secrets.mjs` |
 | バックアップ | `cd work/poc/app && node run-backup.mjs` |
 | 実モデル（要キー） | `cd work/poc/conversation && PROVIDER=opencode MODEL_ID=deepseek-v4.1-flash node real.mjs` |

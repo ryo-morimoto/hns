@@ -178,6 +178,9 @@ export class Workspace {
 
   async #write({ path, content, expectedVersion, operationId }) {
     const { rel, abs } = await this.#resolve(path);
+    if (rel === ".git" || rel.startsWith(".git/")) {
+      throw new Denied("git is read-only");
+    }
     const bytes = typeof content === "string" ? enc.encode(content) : content;
     const contentHash = sha(bytes);
 
@@ -227,6 +230,14 @@ export class Workspace {
       throw error;
     }
     await this.#env.renameFile(rec.temp, abs, this.#context);
+    // If a parent was swapped for a link during the rename, the target may now resolve outside.
+    try {
+      const after = await this.#canonicalForWrite(abs);
+      if (after !== abs && !after.startsWith(this.#canonicalRoot + "/")) {
+        await this.#audit({ operationId, path: rel, reason: "escaped after rename", denied: true });
+        return this.#record(operationId, { status: "unknown", operationId, reason: "io" });
+      }
+    } catch {}
     this.#crash("rename");
 
     const outcome = await this.#record(operationId, { status: "applied", operationId, version: contentHash });

@@ -150,3 +150,9 @@ date: 2026-11-07 · by: user · issue: 0029
 会話は `deleted_at` で隠す。Durable の transcript は `session.sqlite` に残し、アプリからは見せない（物理削除の API が無い）。
 root 会話は削除できない（アプリの起点）。検索はタイトルのみ（本文検索は必要になってから）。
 一覧は `updated_at` の新しい順で、送信・完了のたびに更新する。
+## D025: sandbox は検出して fail closed
+date: 2026-11-07 · by: user · issue: 0030
+
+起動時に bubblewrap を `--version` と user namespace の実行使で検出し、使えなければ bash ツールを登録しない。
+`/api/health` に理由を出す。`.git` は読み取りのみ。rename の前後でパスを再確認し、外れたら `unknown`。
+復旧コードは同一 login で 5 回失敗したら 15 分止める。SSH は pi-env のフラグを検査済み（実接続は未）。

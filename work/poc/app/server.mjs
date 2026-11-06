@@ -21,7 +21,7 @@ import { createTailscaleVerifier, parseUsers } from "./tailscale.mjs";
 import { cronMatches } from "./cron.mjs";
 import { GraphError, interpolate, validateGraph } from "./workflow.mjs";
 import { Workspace } from "../workspace-core/workspace.mjs";
-import { createSandboxEnv } from "../workspace-core/sandbox.mjs";
+import { createSandboxEnv, detectSandbox } from "../workspace-core/sandbox.mjs";
 import { ollamaCloud, readOllamaKey } from "../conversation/ollama.mjs";
 import { opencodeGo, readOpenCodeKey } from "../conversation/opencode.mjs";
 
@@ -80,7 +80,7 @@ function viewEntry(entry) {
   return undefined;
 }
 
-export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false, auth = true, host = process.env.HOST ?? "127.0.0.1", tailscale = {}, limits = {} }) {
+export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false, auth = true, host = process.env.HOST ?? "127.0.0.1", tailscale = {}, limits = {}, bwrap = BWRAP }) {
   const token = await resolveToken(stateDir);
   const tailscaleMode = auth === "tailscale";
   const verifyTailscale = tailscaleMode
@@ -92,13 +92,15 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
     : undefined;
   const connection = new Connection({ command: [localDaemon()] });
   const raw = new LocalExecutionEnv({ cwd: root, connection });
-  const sandbox = createSandboxEnv(raw, { root, bwrap: BWRAP });
+  const sandboxStatus = await detectSandbox(bwrap);
+  const sandbox = createSandboxEnv(raw, { root, bwrap });
   const control = openControlPlane(join(stateDir, "control.sqlite"));
   control.pruneEvents(30);
   const secrets = new SecretStore({ stateDir, control });
   const passkey = createPasskey({ control });
   /** Data keys unlocked for a session; never written to storage. */
   const unlocks = new Map();
+  const recoveryAttempts = new Map();
   const ws = await new Workspace({ env: raw, root, journalPath: join(stateDir, "journal.json"), context: ctx }).open();
   await ws.recover();
 
@@ -147,7 +149,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         parameters: obj({ path: str(), content: str(), expectedVersion: str(), operationId: str() }),
         execute: async (args) => ({ output: [{ type: "text", text: JSON.stringify(await ws.write(args)) }] }),
       }),
-      createBashTool(),
+      ...(sandboxStatus.available ? [createBashTool()] : []),
     ],
   });
 
@@ -167,7 +169,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   };
   control.addEvent({
     event: "server.start",
-    detail: { provider: providerId, model: modelId, auth: String(auth), limits: limitsConfig, version: 1 },
+    detail: { provider: providerId, model: modelId, auth: String(auth), limits: limitsConfig, sandbox: sandboxStatus.available, version: 1 },
   });
   const recentChats = new Map();
   const activeChats = new Map();
@@ -501,6 +503,10 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         }
         if (url.pathname === "/api/passkey/recovery" && req.method === "POST") {
           const { login, code } = await bodyOf(req);
+          const attempt = recoveryAttempts.get(String(login ?? ""));
+          if (attempt && attempt.until > Date.now() && attempt.count >= 5) {
+            return json(res, 429, { error: "too many attempts", retryAfterMs: attempt.until - Date.now() });
+          }
           const user = control.getUserByLogin(String(login ?? ""));
           if (!user) return json(res, 401, { error: "invalid recovery code" });
           const key = control.listUserKeys(user.id).find((entry) => entry.kind === "recovery");
@@ -512,7 +518,14 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
             unlocks.set(session.id, dek);
             res.setHeader("set-cookie", "hns_session=" + session.id + "; HttpOnly; SameSite=Lax; Path=/; Max-Age=" + 30 * 24 * 3600);
             return json(res, 200, { recovered: true, user: { login: user.login } });
-          } catch { return json(res, 401, { error: "invalid recovery code" }); }
+          } catch {
+            const now = Date.now();
+            const current = recoveryAttempts.get(String(login ?? ""));
+            const next = current && current.until > now ? current : { count: 0, until: now + 15 * 60_000 };
+            next.count++;
+            recoveryAttempts.set(String(login ?? ""), next);
+            return json(res, 401, { error: "invalid recovery code" });
+          }
         }
         if (url.pathname === "/api/passkey/unlock" && req.method === "POST") {
           const session = sessionOf(req);
@@ -773,6 +786,17 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           level: url.searchParams.get("level") ?? undefined,
           since: url.searchParams.get("since") ?? undefined,
         }));
+      }
+      if (url.pathname === "/api/health" && req.method === "GET") {
+        return json(res, 200, {
+          ok: true,
+          version: 1,
+          provider: providerId,
+          model: modelId,
+          auth: String(auth),
+          sandbox: sandboxStatus,
+          limits: limitsConfig,
+        });
       }
       if (url.pathname === "/api/metrics" && req.method === "GET") {
         return json(res, 200, control.metrics());
