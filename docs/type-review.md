@@ -57,9 +57,9 @@
 
 高・中を `types.ts` に反映した。
 
-- `Message` → 判別可能ユニオン（user / assistant / tool）。
+- `Message` → 判別可能ユニオン（user / assistant / tool）。`timestamp` を全員に、`model` と `usage` を assistant に追加（実行履歴）。
 - `Conversation.archived` → `boolean`、`Health.auth` → `AuthMode`、`Health.version` → `ServerVersion`。
-- ID・日時・版を brand に（`ProjectId` / `ConversationId` / `TaskId` / `EventId` / `RequestId` / `OperationId` / `SubmissionId` / `FileVersion` / `ServerVersion` / `IsoDateTime`）。
+- brand は **`ProjectId` と `ConversationId` だけ**。日時・その他の ID・版は `string`（ISO 8601 などは JSDoc に書く）。
 - `Event.event` → `EventName`、`TaskView.state` → `TaskState`、`State.scheduling` → `Scheduling`。
 - `expectedVersion` → `FileVersion | "absent"`、`MutationResult.unknown.reason` → `"io" | "crash" | "timeout"`。
 - `SandboxStatus` を判別可能ユニオンに。

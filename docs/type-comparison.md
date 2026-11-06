@@ -17,7 +17,7 @@
 | export | 86 | 48 |
 | JSDoc 行 | 174 | 19（Produced by / Consumed by） |
 | readonly | 4 | 1（Brand） |
-| brand | 0 | 10 |
+| brand | 0 | 2 |
 | 判別可能ユニオン | Message / StopReason ほか | Message / MutationResult / SandboxStatus |
 
 ## 同じ選択をしているもの
@@ -38,7 +38,7 @@ hns の `Message` は `text` と `toolCalls` だけ。UI 表示には足りる�
 
 pi は `timestamp: number`（Unix ms）と `toolCallId: string`。単位はコメントで補う。**brand は使わない**。
 
-hns は `IsoDateTime` / `ProjectId` などの brand。DB・API・UI で同じ `string` が流れるので、取り違えを型で止められる。代わりに境界でキャストが要る。
+hns は `ProjectId` / `ConversationId` の brand だけ。日時は ISO 8601 の `string`。取り違えやすい ID だけを型で止める。
 
 **どちらが正しいというより、層の違い**。プロトコルをそのまま写す pi には brand の利点が薄い。自前の DB と API を持つ hns には効く。
 
@@ -64,7 +64,7 @@ pi は `strict: true` だが `exactOptionalPropertyTypes` は使わない（`?:`
 2. **単位と意味を JSDoc に書く**（"Unix timestamp in milliseconds"、"subset of output"）。とくに `duration_ms`・`cost`・`totalTokens`。
 3. **外部の列挙は開き、内部の列挙は閉じる**。
 4. **JsonValue の配列は readonly** にする（反映済み）。
-5. **Message のメタデータ**（model・usage・stopReason・durationMs）を出すかは UI 次第。実行履歴を出すなら必要。
+5. **Message のメタデータ**: `timestamp`（全員）と `model`・`usage`（assistant）を追加（実行履歴のため）。
 
 ## 学ばないこと
 

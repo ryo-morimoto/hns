@@ -4,16 +4,9 @@ declare const brand: unique symbol;
 /** Nominal wrapper: two ids of different kinds cannot be swapped. Built at the DB boundary. */
 export type Brand<T, B extends string> = T & { readonly [brand]: B };
 
+/** Only the ids that are easy to mix up get a brand. */
 export type ProjectId = Brand<string, "ProjectId">;
 export type ConversationId = Brand<string, "ConversationId">;
-export type TaskId = Brand<string, "TaskId">;
-export type EventId = Brand<string, "EventId">;
-export type RequestId = Brand<string, "RequestId">;
-export type OperationId = Brand<string, "OperationId">;
-export type SubmissionId = Brand<string, "SubmissionId">;
-export type FileVersion = Brand<string, "FileVersion">;
-export type ServerVersion = Brand<string, "ServerVersion">;
-export type IsoDateTime = Brand<string, "IsoDateTime">;
 
 export type TaskStatus = "todo" | "doing" | "done" | "blocked";
 export type RunStatus = "queued" | "running" | "waiting" | "done" | "failed";
@@ -65,18 +58,43 @@ export type JsonValue =
   | number
   | boolean
   | null
-  | JsonValue[]
+  | readonly JsonValue[]
   | { [key: string]: JsonValue };
 
-/** One turn as the UI sees it. Produced by /api/state; consumed by the transcript. */
-export type Message =
-  | { role: "user"; text: string }
-  | { role: "assistant"; text?: string | undefined; toolCalls?: string[] | undefined }
-  | { role: "tool"; toolName: string; text: string; isError?: boolean | undefined };
+interface MessageBase {
+  /** ISO 8601 (UTC). Ordering key for the transcript. */
+  timestamp: string;
+}
+
+export interface UserMessage extends MessageBase {
+  role: "user";
+  text: string;
+}
+
+export interface AssistantMessage extends MessageBase {
+  role: "assistant";
+  text?: string | undefined;
+  /** Names of the tools this turn asked for. */
+  toolCalls?: string[] | undefined;
+  /** The model that produced the turn (provider/model). */
+  model: string;
+  /** Usage of this turn, when the provider reported it. */
+  usage?: UsageBucket | undefined;
+}
+
+export interface ToolMessage extends MessageBase {
+  role: "tool";
+  toolName: string;
+  text: string;
+  isError?: boolean | undefined;
+}
+
+/** One turn. Produced by /api/state; consumed by the transcript. */
+export type Message = UserMessage | AssistantMessage | ToolMessage;
 
 /** A live Durable task. Produced by /api/state; consumed by the progress panel. */
 export interface TaskView {
-  id: TaskId;
+  id: string;
   kind: TaskKind;
   state: TaskState;
 }
@@ -85,7 +103,8 @@ export interface TaskView {
 export interface Project {
   id: ProjectId;
   name: string;
-  created_at: IsoDateTime;
+  /** ISO 8601. */
+  created_at: string;
 }
 
 /** Produced by /api/conversations; consumed by the conversation list and the header. */
@@ -93,10 +112,11 @@ export interface Conversation {
   id: ConversationId;
   project_id: ProjectId;
   title: string;
-  created_at: IsoDateTime;
-  updated_at: IsoDateTime | null;
+  /** ISO 8601. */
+  created_at: string;
+  updated_at: string | null;
   archived: boolean;
-  deleted_at: IsoDateTime | null;
+  deleted_at: string | null;
 }
 
 /** Any non-2xx response. Produced by every endpoint; consumed by the client error path. */
@@ -121,7 +141,8 @@ export interface Limits {
 /** Produced by /api/health; consumed by the login and settings views. */
 export interface Health {
   ok: boolean;
-  version: ServerVersion;
+  /** Server semver. */
+  version: string;
   provider: string;
   model: string;
   auth: AuthMode;
@@ -149,8 +170,9 @@ export interface ChatRequest {
 
 /** Produced by POST /api/chat; consumed by the client to follow the run. */
 export interface ChatResponse {
-  requestId: RequestId;
-  submissionId: SubmissionId;
+  requestId: string;
+  /** Opaque submission id. */
+  submissionId: number;
   conversationId: ConversationId;
 }
 
@@ -182,12 +204,13 @@ export interface TaskUpdate {
 
 /** Produced by /api/tasks; consumed by the task list. */
 export interface Task {
-  id: TaskId;
+  id: string;
   project_id: ProjectId;
   title: string;
   status: TaskStatus;
-  created_at: IsoDateTime;
-  updated_at: IsoDateTime;
+  /** ISO 8601. */
+  created_at: string;
+  updated_at: string;
 }
 
 /** Produced by the client, consumed by PUT /api/file. */
@@ -195,33 +218,34 @@ export interface FileWriteRequest {
   path: string;
   /** UTF-8 text. Binary content is out of scope for now. */
   content: string;
-  expectedVersion: FileVersion | "absent";
-  operationId: OperationId;
+  expectedVersion: string | "absent";
+  operationId: string;
 }
 
 export type MutationUnknownReason = "io" | "crash" | "timeout";
 
 /** Produced by PUT /api/file; consumed by the editor. */
 export type MutationResult =
-  | { status: "applied"; operationId: OperationId; version: FileVersion }
-  | { status: "conflict"; operationId: OperationId; currentVersion: FileVersion }
-  | { status: "unknown"; operationId: OperationId; reason: MutationUnknownReason };
+  | { status: "applied"; operationId: string; version: string }
+  | { status: "conflict"; operationId: string; currentVersion: string }
+  | { status: "unknown"; operationId: string; reason: MutationUnknownReason };
 
 /** Produced by GET /api/file; consumed by the editor. */
 export interface FileRead {
   path: string;
   /** UTF-8 text. */
   content: string;
-  version: FileVersion;
+  version: string;
 }
 
 /** Produced by /api/events; consumed by the observability view and tests. */
 export interface Event {
-  id: EventId;
-  at: IsoDateTime;
+  id: string;
+  /** ISO 8601. */
+  at: string;
   level: EventLevel;
   event: EventName;
-  request_id: RequestId | null;
+  request_id: string | null;
   conversation_id: ConversationId | null;
   status: number | null;
   duration_ms: number | null;
