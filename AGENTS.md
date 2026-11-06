@@ -33,38 +33,58 @@ scripts/with-node.sh npm install
 scripts/with-node.sh npm run check
 ```
 
-Read [CODING_STANDARDS.md](CODING_STANDARDS.md) before writing code. It is the only place coding rules live.
-
-Run the PoC app (optional, for manual checks):
-
-```bash
-scripts/with-node.sh node work/poc/app/serve.mjs /path/to/workspace
-# PROVIDER=ollama|opencode|faux  MODEL_ID=...  STATE_DIR=...  (prints the URL with a token)
-```
+`npm run check` is the gate: oxlint → oxfmt --check → tsc → test → build. It also runs from the pre-commit hook (install once with `scripts/install-hooks.sh`).
+Building is not proof of correctness; types and tests are.
 
 ## Build Commands
 
 | Command | What it does |
 | --- | --- |
-| `scripts/with-node.sh npm run check` | oxlint → oxfmt --check → tsc → test → build (all workspaces) |
+| `scripts/with-node.sh npm run check` | everything below, in order |
 | `scripts/with-node.sh npm test -w @hns/store` | tests for one package |
 | `scripts/with-node.sh npm run build -w @hns/store` | `dist/` for one package |
 | `scripts/with-node.sh npm run lint` | oxlint only |
 | `scripts/with-node.sh npm run fmt` | oxfmt, in place |
 
-`npm run check` is the gate. It also runs from the pre-commit hook (install once with `scripts/install-hooks.sh`).
-Building is not proof of correctness; types and tests are.
-
 ## Development
 
 ### Coding Patterns and Best Practices
 
-- All rules: [CODING_STANDARDS.md](CODING_STANDARDS.md). Do not restate them here
-- Parse rows in `store` with `parse*` (valibot). Never export a row type or a storage shape
-- A new event name, task status, or workflow status goes into the const array in `packages/core/src/types.ts`; the union derives from it
-- Use `ErrorCode` for expected API failures. Do not add new string error fields
-- Use `import type` for types and a separate value import for values
-- Public package surface is `exports` only; do not deep-import another package's `src/`
+**Types**
+
+- **The model is the source of truth.** `packages/core/src/types.ts` comes first; valibot schemas are written to fit it (`v.GenericSchema<unknown, T>`). A mismatch must fail to compile. Do not derive types from schemas
+- **No `any`.** `any` switches the checker off for every value that flows through it. Take `unknown` and parse it. If a third-party type is genuinely `any`, cast once at the edge into a named type and keep it out of public signatures
+- **Assertions need evidence.** `as` does nothing at runtime. Never assert on untrusted data. Where an assertion is unavoidable, put `// SAFETY: <invariant>` immediately before it (enforced by anti-slop)
+- **Optional, `null`, and absent are different.** `?:` means the key is missing, `null` means the value is missing. `exactOptionalPropertyTypes` is on; write `?: T | undefined`
+- **Brands are for confusable ids.** Brand a value only when the same primitive crosses scopes and mixing it up would break something. There is no fixed list; when adding one, name the mix-up it prevents (current examples: `ProjectId`, `ConversationId`)
+- **Unions are closed; `switch` is exhaustive.** Status and event vocabularies are `const` arrays with derived unions. Every `switch` lists every member and ends in `never`. Do not use `default` to absorb the rest
+
+**Validation**
+
+- **`unknown` stays `unknown` until parsed.** HTTP bodies, DB rows, environment variables, and JSON are external. Parse once at the boundary; trust the type inside. `satisfies` is not runtime validation
+- **Storage shapes never leave their package.** `archived: 0 | 1`, JSON strings, and sequence numbers stay inside `store`. Return the public model after `parse*`
+- **Invalid stored data fails loudly.** Unknown enum values and missing fields throw (valibot's `ValiError`). Never fall back to a default; a corrupt row must surface
+
+**Errors**
+
+- **Expected failures are typed.** API failures use the `ErrorCode` union (`invalid_request`, `unauthorized`, `not_found`, `conflict`, `rate_limited`, …). Do not add new string `error` fields; make it something the caller can branch on
+- **Throw `Error`, not values.** A thrown string or object loses the stack and every `instanceof` check downstream. Unexpected failures are `Error` subclasses
+- **Do not swallow failures.** No empty `catch`. Await the promise, or write `void` with a reason. Catch only the kind you expect and let the rest through
+
+**Safety**
+
+- **Secrets never enter the repo or logs.** Keys live in `~/.config/hns/`. Event logs keep the path and status, never bodies, headers, or tokens
+- **Authorization is checked at the boundary.** Never trust UI state or an id sent by the client. Mutations check the caller and the owner at the boundary
+- **Never trust input for paths or commands.** Normalize paths and confirm they stay under the workspace root. Run commands through the sandbox (bubblewrap); if the sandbox is unavailable, do not offer exec
+- **Fail closed.** Authentication, sandbox availability, and root identity are verified or refused. A check that cannot run is a denial
+
+**Code**
+
+- **Comments explain why, not what.** Two or three lines, hard ceiling five. Longer reasoning goes to a docstring, README, or decision, and the comment points there. Do not restate the same fact in several places
+- **Reuse existing guards and helpers.** Reimplementation is the most common AI-authored defect. Look in `packages/core` and the package you are editing first
+- **New abstractions need two call sites.** Build for what exists, not for a guessed future
+- **Match the surrounding code.** Naming, structure, and comment density come from the adjacent file. The type, validation, and safety rules above win over local style
+- **Generated files are not hand-edited.** Keep headers and regeneration commands intact
 
 ### Package Structure
 
@@ -72,8 +92,8 @@ Each package follows the pi layout:
 
 ```
 packages/store/
-├── package.json       # name, exports with the “source” condition, files, scripts
-├── tsconfig.json      # strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes, customConditions: [“source”]
+├── package.json       # name, exports with the "source" condition, files, scripts
+├── tsconfig.json      # strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes, customConditions: ["source"]
 ├── tsconfig.build.json
 ├── src/
 ├── test/              # node --test, *.test.ts
@@ -81,7 +101,21 @@ packages/store/
 └── CHANGELOG.md
 ```
 
+- **Dependencies are one-way.** Allowed edges and where types live are in [docs/packages.md](docs/packages.md)
+- **The public surface is `exports`.** Never deep-import another package's `src/`; internal types stay internal
+- **A new dependency needs a recorded reason.** One line in a decision; exact pin; if the standard library can do it, use that
+- **Static imports over dynamic.** Use `import()` only for a cycle, code splitting, or genuinely conditional loading
+
 To add a package: create the directory above, depend on `@hns/core` at the **same version**, run `npm install`, and add tests and a README. Update [docs/packages.md](docs/packages.md) and add a decision if the boundary changes.
+
+### Running the PoC App
+
+```bash
+scripts/with-node.sh node work/poc/app/serve.mjs /path/to/workspace
+# PROVIDER=ollama|opencode|faux  MODEL_ID=...  STATE_DIR=...  (prints the URL with a token)
+```
+
+The PoC is for manual checks only. New product work goes into `packages/`.
 
 ## Testing
 
@@ -90,9 +124,8 @@ To add a package: create the directory above, depend on `@hns/core` at the **sam
 - **Do not mock persistence.** Use real SQLite (`:memory:` or a temp file); the schema and constraints are part of what you test
 - **A test names the regression it catches.** If it cannot be said in one line, do not add it. Write `// Catches: <bug>` above the case
 - Cover failure paths: invalid input, illegal transitions, conflicts, unknown enum values
-- Test behavior, not implementation: no assertions on internal helper names, log wording, or CSS
-- One behavior per test. A test that passes when the logic is broken is not a test
-- Package-to-package imports in tests use `node --conditions=source` (already set in `@hns/store`'s test script)
+- Test behavior, not implementation: no assertions on internal helper names, log wording, or CSS. One behavior per test; a test that passes when the logic is broken is not a test
+- **Make sure the test runs.** `node --test` plus type stripping; package-to-package imports use `--conditions=source` (already set in `@hns/store`'s script)
 
 ### How to run tests
 
@@ -104,7 +137,7 @@ scripts/with-node.sh npm run check          # everything
 
 ### Test Structure
 
-Tests live in `packages/<pkg>/test/*.test.ts` and run with `node --test` plus type stripping. There is no shared fixture package yet: each file creates its own temp or in-memory SQLite database and closes it.
+Tests live in `packages/<pkg>/test/*.test.ts`. There is no shared fixture package yet: each file creates its own in-memory or temporary SQLite database and closes it.
 
 Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS_CHROME` to override the binary.
 
