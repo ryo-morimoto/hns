@@ -199,3 +199,22 @@ Node は 24.x（nixpkgs `nixos-25.11` の `nodejs_24`、いまは 24.18.0）に�
 同じ Node を実行し、PATH の node や `/nix/store` の glob（旧実装）は使わない。D026 の
 「Node 24」を再現可能にするための決定で、22.x は選ばない（`node:sqlite` の挙動を 24 に揃える）。
 flake を使えない環境では Node 24.18 以降を PATH に置く。CI での利用は 0041。
+
+## D033: exec は Linux の bubblewrap だけで提供し、他は出さない
+date: 2026-11-07 · by: coordinator · issue: 0006
+
+起動時に bwrap の所在（`BWRAP` / PATH）・バージョン・user namespace を、wrapper と同じ引数の実実行で確かめる。
+通らなければ exec を提供しない（生の exec にも、警告だけにもしない）。`/api/health` に
+`{ exec, code, reason, version, userNamespaces }` を出し、bash ツールとワークフローの tool ノードを止める。
+macOS の sandbox-exec と Windows の AppContainer は実機で検証できるまで実装しない
+（[調査](../work/research/sandbox-platforms.md)）。bwrap は 0.12.0 で検証し、下限は設けず毎回の probe で実効性を見る。
+
+## D034: TOCTOU は openat2 ではなく exec する helper で閉じる
+date: 2026-11-07 · by: agent · issue: 0005
+
+pi-env 1.5.0 の daemon はパスしか受けない（protocol に fd 相対の操作が無い）。足すのは pin した外部パッケージの
+fork になり、macOS / Windows はさらに別 API になる。そこで `rooted.mjs` を exec で 1 操作 1 プロセス起動し、
+`/proc/self/fd/<dirfd>/<name>` 経由の openat 相当で解決・再ハッシュ・rename をまとめて行う。
+Linux 以外・exec 無し・helper が届かないホストでは従来の再確認にフォールバックし、`Workspace.mode` で区別する。
+代替案: daemon に operation を足す（上流 fork）/ 独自 Worker（配布と起動コストが増える）/
+Node の `fs` だけで解決（daemon 越しに fd を渡せない）。上流が fd 相対の操作を出したら helper を捨てる。
