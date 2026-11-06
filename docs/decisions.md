@@ -138,3 +138,9 @@ date: 2026-11-06 · by: user · issue: 0027
 利用量はターン終了時に `usage` の差分を `usage_log` に残す。
 中断は `abortSubmission` では実行中のターンが止まらなかったため、`conversation.abort` を使う。
 予算超過は実行中のターンを止めず、次のターンから 429。
+## D023: 観測は events テーブルに集約する
+date: 2026-11-06 · by: user · issue: 0028
+
+HTTP・会話・中断・例外を `events` に残す。クエリ・ヘッダ・本文は記録しない（token を落とさない）。
+`x-request-id` で相関し、`/api/events` と `/api/metrics` で読む。30日で削除。
+時系列の保存や外部送出（OTLP/Prometheus）は必要になってから。

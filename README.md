@@ -43,7 +43,7 @@
 | 要件・決定 | 設計ベースライン（v0.3） |
 | Agent Runtime | Pi Durable **1.5.0 固定**、実API確認済み |
 | ファイル安全 | Workspace 契約 v0.1（実装前） |
-| 検証 | 部品 156 チェック合格、統合 E2E 12/12、ドメイン 15/15、Workflow 16/16、Automation 17/17、認証 9/9・tailnet 10/10・passkey 7/7・PRF 9/9・2台目 4/4・秘密 12/12、制限 12/12、バックアップ 5/5、実モデル 2プロバイダ |
+| 検証 | 部品 156 チェック合格、統合 E2E 12/12、ドメイン 15/15、Workflow 16/16、Automation 17/17、認証 9/9・tailnet 10/10・passkey 7/7・PRF 9/9・2台目 4/4・秘密 12/12、制限 12/12、観測 12/12、バックアップ 5/5、実モデル 2プロバイダ |
 | 実装 | 未着手 |
 
 ## 読む順
@@ -85,6 +85,7 @@ curl -s "$URL/events?cursor=0&limit=1"
 | PRF 暗号化 | `cd work/poc/app && node run-prf.mjs` |
 | 2台目のパスキー | `cd work/poc/app && node run-addpasskey.mjs` |
 | 利用量と制限 | `cd work/poc/app && node run-limits.mjs` |
+| 観測 | `cd work/poc/app && node run-observe.mjs` |
 | 秘密 | `cd work/poc/app && node run-secrets.mjs` |
 | バックアップ | `cd work/poc/app && node run-backup.mjs` |
 | 実モデル（要キー） | `cd work/poc/conversation && PROVIDER=opencode MODEL_ID=deepseek-v4.1-flash node real.mjs` |

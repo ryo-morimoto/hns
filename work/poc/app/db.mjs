@@ -68,6 +68,18 @@ export function openControlPlane(path) {
       transports TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      at TEXT NOT NULL,
+      level TEXT NOT NULL,
+      event TEXT NOT NULL,
+      request_id TEXT,
+      conversation_id TEXT,
+      status INTEGER,
+      duration_ms INTEGER,
+      detail TEXT
+    );
+    CREATE INDEX IF NOT EXISTS events_at ON events (at);
     CREATE TABLE IF NOT EXISTS usage_log (
       id TEXT PRIMARY KEY,
       conversation_id TEXT,
@@ -286,6 +298,38 @@ export function openControlPlane(path) {
     updateCounter(id, counter) {
       db.prepare("UPDATE credentials SET counter = ? WHERE id = ?").run(counter, id);
     },
+    addEvent({ level = "info", event, requestId, conversationId, status, durationMs, detail }) {
+      db.prepare("INSERT INTO events (id, at, level, event, request_id, conversation_id, status, duration_ms, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(randomUUID(), now(), level, event, requestId ?? null, conversationId ?? null, status ?? null, durationMs ?? null, detail === undefined ? null : JSON.stringify(detail));
+    },
+    listEvents({ limit = 100, level, since } = {}) {
+      const clauses = [];
+      const params = [];
+      if (level) { clauses.push("level = ?"); params.push(level); }
+      if (since) { clauses.push("at >= ?"); params.push(since); }
+      const where = clauses.length ? " WHERE " + clauses.join(" AND ") : "";
+      return db.prepare("SELECT * FROM events" + where + " ORDER BY at DESC LIMIT ?").all(...params, Math.min(Number(limit) || 100, 1000)).map(row);
+    },
+    pruneEvents(days = 30) {
+      const cutoff = new Date(Date.now() - days * 24 * 3600_000).toISOString();
+      db.prepare("DELETE FROM events WHERE at < ?").run(cutoff);
+    },
+    metrics() {
+      const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+      const byStatus = db.prepare("SELECT status, COUNT(*) AS count FROM events WHERE event = 'http' AND at >= ? GROUP BY status").all(since).map(row);
+      const durations = db.prepare("SELECT duration_ms AS ms FROM events WHERE event = 'http' AND at >= ? AND duration_ms IS NOT NULL ORDER BY duration_ms").all(since).map((entry) => entry.ms);
+      const percentile = (p) => durations.length === 0 ? 0 : durations[Math.min(durations.length - 1, Math.floor(durations.length * p))];
+      const group = (table) => db.prepare("SELECT status, COUNT(*) AS count FROM " + table + " GROUP BY status").all().map(row);
+      return {
+        http: { total: durations.length, byStatus, p50ms: percentile(0.5), p95ms: percentile(0.95) },
+        chats: Object.fromEntries(db.prepare("SELECT event, COUNT(*) AS count FROM events WHERE event IN ('chat.submitted', 'chat.settled') AND at >= ? GROUP BY event").all(since).map((row) => [row.event, row.count])),
+        workflowRuns: group("workflow_runs"),
+        firings: group("firings"),
+        errors: db.prepare("SELECT COUNT(*) AS count FROM events WHERE level = 'error' AND at >= ?").get(since).count,
+        tokensToday: this.usageToday(),
+      };
+    },
+
     addUsage({ conversationId, tokens, cost, requestId }) {
       db.prepare("INSERT INTO usage_log (id, conversation_id, at, tokens, cost, request_id) VALUES (?, ?, ?, ?, ?, ?)")
         .run(randomUUID(), conversationId ?? null, now(), Math.round(tokens), cost, requestId ?? null);

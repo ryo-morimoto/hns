@@ -93,6 +93,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const raw = new LocalExecutionEnv({ cwd: root, connection });
   const sandbox = createSandboxEnv(raw, { root, bwrap: BWRAP });
   const control = openControlPlane(join(stateDir, "control.sqlite"));
+  control.pruneEvents(30);
   const secrets = new SecretStore({ stateDir, control });
   const passkey = createPasskey({ control });
   /** Data keys unlocked for a session; never written to storage. */
@@ -341,8 +342,17 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   watch.start(async (call) => { if (call.kind === "value") broadcast(); });
 
   const server = createServer(async (req, res) => {
+    const startedAt = Date.now();
+    const requestId = String(req.headers["x-request-id"] ?? randomUUID()).slice(0, 36);
+    res.setHeader("x-request-id", requestId);
+    let statusCode = 0;
+    const writeHead = res.writeHead.bind(res);
+    res.writeHead = (code, ...rest) => { statusCode = code; return writeHead(code, ...rest); };
+    let pathname = "?";
+
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      pathname = url.pathname;
       const isHook = url.pathname.startsWith("/api/hooks/");
       const passkeyMode = auth === "passkey";
       const passkeyOpen = url.pathname.startsWith("/api/passkey/") || url.pathname === "/api/me";
@@ -650,6 +660,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         const requestId = "ui-" + now;
         const submission = await conversation.submit({ type: "input", content: message, requestId }, ctx);
         activeChats.set(key, { submissionId: submission.id, requestId });
+        control.addEvent({ event: "chat.submitted", conversationId: key, requestId });
         let timer;
         if (limitsConfig.turnTimeoutMs > 0) {
           timer = setTimeout(() => { void conversation.abort(ctx).catch(() => {}); }, limitsConfig.turnTimeoutMs);
@@ -660,6 +671,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           activeChats.delete(key);
           const after = usageTotals(await harness.usage(ctx));
           control.addUsage({ conversationId: key, tokens: after.tokens - before.tokens, cost: after.cost - before.cost, requestId });
+          control.addEvent({ event: "chat.settled", conversationId: key, requestId, durationMs: Date.now() - now });
           broadcast();
         })();
         return json(res, 202, { requestId, submissionId: submission.id, conversationId: key });
@@ -670,7 +682,18 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         const active = activeChats.get(String(conversation?.id));
         if (!active) return json(res, 404, { error: "no active chat" });
         await conversation.abort(ctx);
+        control.addEvent({ event: "chat.aborted", conversationId: String(conversation.id) });
         return json(res, 202, { outcome: "aborted" });
+      }
+      if (url.pathname === "/api/events" && req.method === "GET") {
+        return json(res, 200, control.listEvents({
+          limit: url.searchParams.get("limit") ?? 100,
+          level: url.searchParams.get("level") ?? undefined,
+          since: url.searchParams.get("since") ?? undefined,
+        }));
+      }
+      if (url.pathname === "/api/metrics" && req.method === "GET") {
+        return json(res, 200, control.metrics());
       }
       if (url.pathname === "/api/usage" && req.method === "GET") {
         return json(res, 200, { session: await harness.usage(ctx), today: control.usageToday(), limits: limitsConfig });
@@ -700,8 +723,11 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       }
       return json(res, 404, { error: "not found" });
     } catch (error) {
+      control.addEvent({ level: "error", event: "http.error", requestId, detail: { path: pathname, message: String(error?.message ?? error) } });
       if (error?.name === "Denied" || error?.constructor?.name === "Denied") return json(res, 403, { error: error.message });
       return json(res, 500, { error: String(error?.message ?? error) });
+    } finally {
+      control.addEvent({ event: "http", requestId, status: statusCode, durationMs: Date.now() - startedAt, detail: { method: req.method, path: pathname } });
     }
   });
 
