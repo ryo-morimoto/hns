@@ -188,6 +188,13 @@ hns の画面は「AI と会話する場所」ではなく、**人間が仕事�
 参考: [Linear AIG](https://linear.app/developers/aig) / [AI Design Guide — 39 patterns](https://www.aidesign.guide/agentic-ux-patterns) /
 [Setproduct — 16 patterns](https://www.setproduct.com/blog/ai-agent-ui-design-patterns)
 
+## 13. タッチとスワイプは補助にする
+
+- **条件**: モバイル・タブレット向けの操作（dismiss・drawer・一覧の行操作・タブ切替）を設計する
+- **命令**: スワイプを主操作にしない。同じ操作をボタン/メニュー/キーボードでも用意する。縦スクロールや画面端の戻るジェスチャと競合させない。閾値・速度・キャンセルを決め、破壊的操作には Undo か確認を付ける
+- **補足**: hns: モバイル/タブレット利用の増加を見込む。タップ領域は 44px を目安にし、hover 前提の操作を作らない
+- **Ref**: [Apple HIG — Gestures](https://developer.apple.com/design/human-interface-guidelines/gestures) / [Material 3 — Gestures](https://m3.material.io/foundations/interaction/gestures) / [WCAG 2.5.1](https://www.w3.org/WAI/WCAG22/Understanding/pointer-gestures.html) / [WCAG 2.5.7](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html)
+
 ## 参考: Agentic Workspace の5例
 
 | 例 | 取るもの | リンク |

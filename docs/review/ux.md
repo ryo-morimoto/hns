@@ -18,6 +18,7 @@
 | 頻度 | 毎日使う操作を実装するとき | 頻繁な操作に長い演出が入っていないか。演出が初回・完了・異常に寄っているか | [FigJam](https://www.figma.com/figjam/) |
 | 情報密度 | 一覧・詳細・設定を作るとき | 重要な情報が強く、補助が後退しているか。すべて同じ強さになっていないか | [Are.na](https://www.are.na) |
 | キーボード同等 | 主要操作を実装するとき | マウスでできることをキーボードでもできるか。フォーカスが見え、順序が自然か | [FigJam](https://www.figma.com/figjam/) |
+| タッチ / スワイプ | モバイル・タブレット向けの操作（dismiss・drawer・行の操作・タブ切替）を作るとき | スワイプは補助で、同じ操作をボタン/メニュー/キーボードでもできるか（WCAG 2.5.1 / 2.5.7）。縦スクロールや画面端の戻るジェスチャと競合しないか。閾値・速度・途中のキャンセルが一貫しているか。破壊的操作に Undo か確認があるか | [Apple HIG — Gestures](https://developer.apple.com/design/human-interface-guidelines/gestures) / [Material 3 — Gestures](https://m3.material.io/foundations/interaction/gestures) / [WCAG 2.5.1](https://www.w3.org/WAI/WCAG22/Understanding/pointer-gestures.html) / [WCAG 2.5.7](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html) |
 | 状態の網羅 | 画面・部品を作るとき | loading / empty / error / 権限なし / 保存中 / 競合 / undo があるか | [Linear](https://linear.app) |
 | 意図の確認 | Agent に依頼する画面を作るとき | 曖昧な依頼で1〜3個だけ聞くか。触ってよい範囲（パス・環境）が見えるか | [Setproduct](https://www.setproduct.com/blog/ai-agent-ui-design-patterns) |
 | 計画の可視化 | 実行前に計画を見せるとき | 計画を編集できるか。工数・費用の目安が出るか。ドライランがあるか | [Setproduct](https://www.setproduct.com/blog/ai-agent-ui-design-patterns) |
