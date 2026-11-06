@@ -227,3 +227,15 @@ D032 の Node 24 を 26.x に置き換える。nixpkgs の入力を `nixos-25.11
 25 は upstream EOL で nixpkgs からも削除済み、24 は保守のみ。`node:sqlite` と `node --test` の
 型ストリップは 26 でも同じで、ゲートと PoC は通った。最新へ上げ直すときは `nix flake update nixpkgs`
 → `scripts/with-node.sh npm run check`（lock を更新するまで再現性は保たれる）。
+
+
+## D036: workspace は core のファイル DTO を借り、helper はパッケージ同梱のプログラムとして exec する
+date: 2026-11-07 · by: agent · issue: 0033
+
+`@hns/workspace` の `read` / `write` は `/api/file` の DTO（`FileRead` / `MutationResult`）をそのまま返す。
+同じ形を二重に定義すると必ずずれるので、定義は `core` に置き、型だけ `workspace → core` を許す（実行時の依存は無い）。
+Journal・intent・dirfd の protocol は workspace の内部型として workspace に置く。
+
+dirfd の helper（0005 / D034）は、ビルドすると `dist/rooted-helper.js` になる独立したプログラムとして同梱する。
+呼ぶ側は `import.meta.url` の隣の `rooted-helper.ts`（source 条件）か `.js`（dist）を選ぶ。
+exec できない環境・Linux 以外では helper を諦めて `mode: "checks"` の経路に落ちる（保証の差は `Workspace.mode` で見える）。
