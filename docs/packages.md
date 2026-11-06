@@ -43,6 +43,26 @@ server ─┬─► agent ─┬─► workspace ─► pi-durable/env
 - `workspace` と `store` は互いに独立。
 - 逆向き（`store` → `server`、`core` → `workspace`）は禁止。境界検査は後で入れる。
 
+## 型の置き場所
+
+**型は、その不変条件を持つパッケージに置く。** 全部を `core` に集めない。
+
+| どこ | 何を置くか |
+| --- | --- |
+| `@hns/core` | 2つ以上のパッケージが使い、ワイヤーで約束するもの（ID・日時・状態・公開 DTO） |
+| `@hns/store` | Row 型（DB の形）と、Row → 公開型の変換 |
+| `@hns/agent` | 実行中の内部状態（Durable の検査結果など） |
+| `@hns/workspace` | ファイル操作の内部型（公開 DTO は core） |
+| `@hns/server` | リクエスト/レスポンスの封筒（`ErrorResponse`・`Health` など） |
+
+判断のしかた:
+
+- **1パッケージしか使わない型は `core` に置かない。**
+- Row（`archived: 0 | 1`、DB の連番）と公開型（`archived: boolean`）を混ぜない。境界で変換する。
+- Workflow / Automation を足すときは、公開 DTO と内部定義（グラフ・設定）を分ける。
+
+いまの `types.ts` は「公開モデル」であり、製品の全モデルではない。育つと Row 型と内部型が各パッケージに増える。
+
 ## exports の切り方
 
 - `@hns/core`: `.`（型・検証）。
