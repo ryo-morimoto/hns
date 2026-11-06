@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as s from "../src/contracts.ts";
+import * as v from "../src/validation.ts";
 import { openapiDocument } from "../src/openapi.ts";
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -71,40 +71,40 @@ test("GET /api/health", async () => {
   const response = await get("/api/health");
 
   assert.equal(response.status, 200);
-  parse(s.Health, response.body, "health");
+  parse(v.HealthSchema, response.body, "health");
 });
 
 test("GET /api/state", async () => {
   const response = await get("/api/state");
 
-  parse(s.State, response.body, "state");
+  parse(v.StateSchema, response.body, "state");
 });
 
 test("projects, tasks and conversations", async () => {
   const project = await send("/api/projects", "POST", { name: "contract" });
 
-  parse(s.Project, project.body, "project");
-  const projectBody = parse(s.Project, project.body, "project id");
+  parse(v.ProjectSchema, project.body, "project");
+  const projectBody = parse(v.ProjectSchema, project.body, "project id");
   const task = await send("/api/tasks", "POST", { projectId: projectBody.id, title: "t" });
 
-  parse(s.Task, task.body, "task");
-  const taskBody = parse(s.Task, task.body, "task id");
+  parse(v.TaskSchema, task.body, "task");
+  const taskBody = parse(v.TaskSchema, task.body, "task id");
   const updated = await send("/api/tasks/" + taskBody.id, "PATCH", { status: "doing" });
 
-  parse(s.Task, updated.body, "task update");
+  parse(v.TaskSchema, updated.body, "task update");
   const conversation = await send("/api/conversations", "POST", {
     projectId: projectBody.id,
     title: "c",
   });
 
-  parse(s.Conversation, conversation.body, "conversation");
+  parse(v.ConversationSchema, conversation.body, "conversation");
   const list = await get("/api/conversations");
 
   assert.equal(list.status, 200);
   assert.ok(Array.isArray(list.body));
 
   for (const entry of list.body) {
-    parse(s.Conversation, entry, "conversation list");
+    parse(v.ConversationSchema, entry, "conversation list");
   }
 });
 
@@ -112,7 +112,7 @@ test("chat and file writes", async () => {
   const chat = await send("/api/chat", "POST", { message: "hello" });
 
   assert.equal(chat.status, 202);
-  parse(s.ChatResponse, chat.body, "chat");
+  parse(v.ChatResponseSchema, chat.body, "chat");
   const write = await send("/api/file", "PUT", {
     path: "a.txt",
     content: "x",
@@ -121,10 +121,10 @@ test("chat and file writes", async () => {
   });
 
   assert.equal(write.status, 200);
-  parse(s.MutationResult, write.body, "write");
+  parse(v.MutationResultSchema, write.body, "write");
   const read = await get("/api/file?path=a.txt");
 
-  parse(s.FileRead, read.body, "read");
+  parse(v.FileReadSchema, read.body, "read");
   const conflict = await send("/api/file", "PUT", {
     path: "a.txt",
     content: "y",
@@ -133,7 +133,7 @@ test("chat and file writes", async () => {
   });
 
   assert.equal(conflict.status, 409);
-  parse(s.MutationResult, conflict.body, "conflict");
+  parse(v.MutationResultSchema, conflict.body, "conflict");
 });
 
 test("observability endpoints", async () => {
@@ -142,15 +142,15 @@ test("observability endpoints", async () => {
   assert.ok(Array.isArray(events.body));
 
   for (const entry of events.body) {
-    parse(s.Event, entry, "event");
+    parse(v.EventSchema, entry, "event");
   }
 
   const metrics = await get("/api/metrics");
 
-  parse(s.Metrics, metrics.body, "metrics");
+  parse(v.MetricsSchema, metrics.body, "metrics");
   const usage = await get("/api/usage");
 
-  parse(s.Usage, usage.body, "usage");
+  parse(v.UsageSchema, usage.body, "usage");
 });
 
 test("the OpenAPI document covers the routes", () => {

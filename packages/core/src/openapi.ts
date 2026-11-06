@@ -1,10 +1,8 @@
 import { z } from "zod";
-import * as s from "./contracts.ts";
+import * as v from "./validation.ts";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-
 type Content = { "application/json": { schema: JsonValue } };
-
 type Operation = {
   summary: string;
   requestBody?: { required: boolean; content: Content };
@@ -31,43 +29,51 @@ const route = (
 });
 
 export const routes = [
-  route("GET", "/api/health", "Health and sandbox status", { response: s.Health }),
+  route("GET", "/api/health", "Health and sandbox status", { response: v.HealthSchema }),
   route("GET", "/api/state", "Conversation view: messages, tasks, projects, conversations", {
-    response: s.State,
+    response: v.StateSchema,
   }),
   route("POST", "/api/chat", "Submit a message to a conversation", {
-    request: s.ChatRequest,
-    response: s.ChatResponse,
+    request: v.ChatRequestSchema,
+    response: v.ChatResponseSchema,
   }),
   route("POST", "/api/chat/abort", "Abort the active turn", {
     request: z.object({ conversationId: z.string().optional() }),
     response: z.object({ outcome: z.string() }),
   }),
-  route("GET", "/api/projects", "List projects", { response: z.array(s.Project) }),
+  route("GET", "/api/projects", "List projects", { response: z.array(v.ProjectSchema) }),
   route("POST", "/api/projects", "Create a project", {
-    request: s.ProjectCreate,
-    response: s.Project,
+    request: v.ProjectCreateSchema,
+    response: v.ProjectSchema,
   }),
-  route("GET", "/api/tasks", "List tasks", { response: z.array(s.Task) }),
-  route("POST", "/api/tasks", "Create a task", { request: s.TaskCreate, response: s.Task }),
-  route("PATCH", "/api/tasks/{id}", "Update a task", { request: s.TaskUpdate, response: s.Task }),
-  route("GET", "/api/conversations", "List conversations", { response: z.array(s.Conversation) }),
+  route("GET", "/api/tasks", "List tasks", { response: z.array(v.TaskSchema) }),
+  route("POST", "/api/tasks", "Create a task", {
+    request: v.TaskCreateSchema,
+    response: v.TaskSchema,
+  }),
+  route("PATCH", "/api/tasks/{id}", "Update a task", {
+    request: v.TaskUpdateSchema,
+    response: v.TaskSchema,
+  }),
+  route("GET", "/api/conversations", "List conversations", {
+    response: z.array(v.ConversationSchema),
+  }),
   route("POST", "/api/conversations", "Create a conversation", {
-    request: s.ConversationCreate,
-    response: s.Conversation,
+    request: v.ConversationCreateSchema,
+    response: v.ConversationSchema,
   }),
   route("PATCH", "/api/conversations/{id}", "Rename or archive a conversation", {
-    request: s.ConversationUpdate,
-    response: s.Conversation,
+    request: v.ConversationUpdateSchema,
+    response: v.ConversationSchema,
   }),
-  route("GET", "/api/file", "Read a file", { response: s.FileRead }),
+  route("GET", "/api/file", "Read a file", { response: v.FileReadSchema }),
   route("PUT", "/api/file", "Write a file with a version check", {
-    request: s.FileWriteRequest,
-    response: s.MutationResult,
+    request: v.FileWriteRequestSchema,
+    response: v.MutationResultSchema,
   }),
-  route("GET", "/api/events", "Recent events", { response: z.array(s.Event) }),
-  route("GET", "/api/metrics", "Aggregated metrics", { response: s.Metrics }),
-  route("GET", "/api/usage", "Usage totals", { response: s.Usage }),
+  route("GET", "/api/events", "Recent events", { response: z.array(v.EventSchema) }),
+  route("GET", "/api/metrics", "Aggregated metrics", { response: v.MetricsSchema }),
+  route("GET", "/api/usage", "Usage totals", { response: v.UsageSchema }),
 ] as const;
 
 export function openapiDocument() {
@@ -78,7 +84,6 @@ export function openapiDocument() {
     const item = paths[path] ?? {};
 
     paths[path] = item;
-
     const operation: Operation = {
       summary: entry.summary,
       responses: { "200": { description: "OK", content: json(entry.response) } },

@@ -161,7 +161,7 @@ date: 2026-11-07 · by: user · issue: 0031
 
 TypeScript strict / Node 24 / Fastify + zod / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / **oxlint + oxfmt** + vendored anti-slop / **npm workspaces**（pi の packages 構成に倣う）。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
 
-## D027: 契約は packages/core の zod が正本
+## D027: 型が正本（type first）
 date: 2026-11-07 · by: user · issue: 0031
 
 `packages/core` にリクエスト・レスポンス・SSE イベントを zod で書き、OpenAPI と型付きクライアントを生成する。契約テストは実サーバを起動して実 JSON を検証する（モックにしない）。UI は生成型だけを使う。
