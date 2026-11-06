@@ -12,7 +12,7 @@
 | root の差し替え | Journal の ID と root 内の marker を照合。欠落・不一致は開かない |
 | パス脱出 | 正規化 + canonical 化。symlink 脱出を拒否 |
 | `.git` の改変 | `Workspace` が書き込みを拒否（読み取りは可） |
-| rename 中の親差し替え | rename 直前に親を再確認し、後にも canonical を再確認。外れていれば `unknown` |
+| rename 中の親差し替え（dirfd 経路） | dirfd 相対で open / rename する。`checks` 経路は再確認のみで窓が残る（下記） |
 | 復旧コードの総当たり | 同一 login で 5 回失敗したら 15 分 429 |
 | SSH の事故 | pi-env の `sshArguments` を検査: `-T -a -x`、`BatchMode=yes`、転送なし、ホスト鍵は自前ファイルに厳格 |
 | 操作 ID で root の外に書く | workspace は temp 名を内部生成の UUID にし、`operationId` をパスに使わない（HTTP の境界は core の schema が `[A-Za-z0-9_-]{1,64}` に限定）。規則は1箇所だけ持つ |
@@ -24,7 +24,8 @@
 
 | 穴 | 影響 | 次の手 |
 | --- | --- | --- |
-| TOCTOU の最終窓 | 親の差し替えは dirfd で閉じた。同名ファイルを hash と rename の間に差し替える窓は残る（lost update のみ。root の外・秘密には影響しない） | v0.1 は許容（0054）。閉じるのは `renameat2` を出せる native helper の導入時（0006 / 0040） |
+| TOCTOU の最終窓（dirfd） | 同名ファイルを hash と rename の間に差し替える窓が残る。lost update のみで root の外には出ない | v0.1 は許容（0054）。閉じるのは `renameat2` を出せる native helper の導入時（0033 / 0040） |
+| TOCTOU の親の窓（`checks`） | ヘルパーを実行できない環境では、親の差し替えで root の外に書き・読める（再確認のみで窓が残る） | v0.1 は helper 任意のため許容（保証表の「破れる条件」）。閉じるのは `rooted: "required"` を既定にするか、配布で helper を確実にする（0040） |
 | SSH の実接続 | フラグは検証したが、実サーバとの接続は未検証 | 2台目が用意できたら 1 回通す |
 | 非 Linux と bwrap 未導入 | exec を出せない（封じ込めなしでは動かさない） | 検出は 0006 で完了。macOS / Windows の backend と配布は 0033 / 0040（[調査](../work/research/sandbox-platforms.md)） |
 | DEK の露出 | unlocked 中は `/api/passkey/dek` が DEK を返す。XSS で破れる | CSP、入力の扱い |

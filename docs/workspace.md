@@ -9,7 +9,7 @@ Editor と Agent が同じファイルに触るとき、黙って壊さない。
 | 層 | 保証 | 手段 | 破れる条件 |
 | --- | --- | --- | --- |
 | 観測 | 内容と版が対応 | 読取時に sha256 | 読取中の外部変更 |
-| 検出 | 古い版からの置換を拒否 | ヘルパー内で再ハッシュしてから rename | ヘルパーを実行できない環境 |
+| 検出 | 古い版からの置換を拒否 | ヘルパー内で再ハッシュしてから rename | ヘルパーを実行できない環境 / 同名差し替えの競合（両方が hash を通ると両方 applied になり得る） |
 | 封じ込め | 差し替えられた親を辿らない | root の dirfd から `O_NOFOLLOW` で開き、rename も dirfd 相対 | ヘルパーを実行できない環境 |
 | 原子性 | 途中状態を見せない | 同一ディレクトリの temp + rename | 別ファイルシステムへの移動 |
 | 冪等 | 再送で二重適用しない | Journal の intent / outcome | Journal の喪失 |
@@ -92,8 +92,8 @@ type MutationResult =
 パスの解決と open / rename を 1 回の解決にまとめる。ExecutionEnv のファイル API はパスしか取らないため、解決は別プロセスに任せる。
 
 - 書込: temp を root 直下に書いたあと、`rooted.mjs` が root の dirfd を開き、各親を `O_NOFOLLOW | O_DIRECTORY` で辿り、対象を再ハッシュして `expectedVersion` と比べ、**その親の dirfd から** rename する。親の差し替えはこれで閉じるが、**同名ファイルを hash と rename の間に差し替える窓は残る**（Linux に compare-and-rename は無い）。
-  - **v0.1 はこの窓を許容する**（0054）。同一ユーザーの別プロセスは root に直接書けるため、CAS は行儀の良い並行 writer のためのもので、攻撃者の境界ではない。失うのは差し替えた側の内容（lost update）だけで、root の外・秘密・可用性には影響しない。helper を使えない `checks` 経路も同じ窓を持つ。
-  - 閉じるには `renameat2(RENAME_EXCHANGE / RENAME_NOREPLACE)` を出せる native helper が要る。Node の `fs` は `renameat2` を公開しない（`fs.constants` に `RENAME_*` が無い）ため、native addon か同梱バイナリになり、配布（0006 / 0040）とセットで判断する。カーネル / FS が非対応なら `checks` へフォールバックする。
+  - **v0.1 はこの窓を許容する**（0054）。同一ユーザーの別プロセスは root に直接書けるため、CAS は行儀の良い並行 writer のためのもので、攻撃者の境界ではない。失うのは差し替えた側の内容（lost update）だけで、root の外・秘密・可用性には影響しない（これは **dirfd 経路**の話）。helper を使えない `checks` 経路は同じ窓に加えて**親の差し替えの窓も残り、root の外に書き・読める**（0005 の既知の穴）。
+  - 閉じるには `renameat2(RENAME_EXCHANGE / RENAME_NOREPLACE)` を出せる native helper が要る。Node の `fs` は `renameat2` を公開しない（`fs.constants` に `RENAME_*` が無い）ため、native addon か同梱バイナリになり、配布（0033 / 0040）とセットで判断する。EXCHANGE で交換した後、temp 側に移った旧対象をハッシュして比べる案は、不一致時の交換返しが原子的でなく、expected が absent の作成には NOREPLACE が要る。どちらも syscall が要る点は同じ。カーネル / FS が非対応なら **`checks` には落とさず**、dirfd のまま hash → rename に留める（この窓は許容）か、`rooted: "required"` で開かない。
 - 読取: 同じ辿りで最終コンポーネントを `O_NOFOLLOW` で開き、開いた fd から読む。内容は base64 で 1 本の stdout に返す。
 - root の同一性は `.hns/root.json` を dirfd 経由で読み、`probe` で記録した dev / ino と照合する。パスを差し替えられても別のディレクトリは開かない。
 - 起動時に `probe` を 1 回実行して可否を決める。失敗したら（Linux 以外・exec 無し・ヘルパーが届かないホスト）従来の再確認にフォールバックし、`Workspace.mode` が `checks` になる。
@@ -141,7 +141,7 @@ recover（applied / pending / unknown）を実装。**40/40 合格**（Node env 
 
 | 試験 | 内容 |
 | --- | --- |
-| T-03 | 同じ版から2クライアント → 片方 applied、片方 conflict。上書きなし |
+| T-03 | 同じ版から2クライアント → 通常は片方 applied、片方 conflict。両方が hash を通過すると両方 applied になり得る（lost update） |
 | T-04 | intent 後 / temp 後 / rename 後の停止 → pending / pending / applied。再送で二重適用なし |
 | - | rename 後に第三者が変更 → unknown（applied にも conflict にも丸めない） |
 | - | 同じ §operationId§ の再送は記録済みの結果を返し、後からの外部変更を上書きしない |
