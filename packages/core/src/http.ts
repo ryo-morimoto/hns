@@ -160,6 +160,14 @@ export interface ChatAbortRequest {
   conversationId: ConversationId;
 }
 
+export const CHAT_ABORT_OUTCOMES = ["aborted", "already_placed", "settled"] as const;
+export type ChatAbortOutcome = (typeof CHAT_ABORT_OUTCOMES)[number];
+
+/** Produced by POST /api/chat/abort. "settled" means the run finished before the abort arrived. */
+export interface ChatAbortResponse {
+  outcome: ChatAbortOutcome;
+}
+
 export interface WorkflowCreate {
   projectId?: ProjectId | undefined;
   name: string;
@@ -167,6 +175,8 @@ export interface WorkflowCreate {
 }
 
 export interface WorkflowUpdate {
+  /** The version the edit is based on; a mismatch is a 409, like the file API's expectedVersion. */
+  version: number;
   graph: WorkflowGraph;
 }
 

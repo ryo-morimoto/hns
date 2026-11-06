@@ -14,12 +14,19 @@ export type RouteRequest<K extends RouteKey> = SchemaOutput<
   NonNullable<(typeof ROUTES)[K]["request"]>
 >;
 
-/** The success body the route returns. */
-export type RouteResponse<K extends RouteKey> = SchemaOutput<(typeof ROUTES)[K]["response"]>;
+/** The success body the route returns; undefined when the route streams. */
+export type RouteResponse<K extends RouteKey> = SchemaOutput<
+  NonNullable<(typeof ROUTES)[K]["response"]>
+>;
+
+/** The path parameters the route accepts; undefined when the path has none. */
+export type RouteParams<K extends RouteKey> = SchemaOutput<
+  NonNullable<(typeof ROUTES)[K]["params"]>
+>;
 
 export interface ContractError {
   readonly route: RouteKey;
-  readonly kind: "request" | "response";
+  readonly kind: "request" | "params" | "response";
   readonly issues: readonly string[];
 }
 
@@ -39,11 +46,31 @@ export function parseRequest<K extends RouteKey>(
   return ok(parsed.output as RouteRequest<K>);
 }
 
+export function parseParams<K extends RouteKey>(
+  route: K,
+  input: JsonValue,
+): Result<RouteParams<K>, ContractError> {
+  const schema = ROUTES[route].params;
+  if (schema === undefined) {
+    // SAFETY: RouteParams is undefined exactly when the path has no parameters.
+    return ok(undefined as RouteParams<K>);
+  }
+  const parsed = v.safeParse(schema, input);
+  if (!parsed.success) return err({ route, kind: "params", issues: issuesOf(parsed.issues) });
+  // SAFETY: the schema in ROUTES[route] is the source of RouteParams<K>.
+  return ok(parsed.output as RouteParams<K>);
+}
+
 export function parseResponse<K extends RouteKey>(
   route: K,
   input: JsonValue,
 ): Result<RouteResponse<K>, ContractError> {
-  const parsed = v.safeParse(ROUTES[route].response, input);
+  const schema = ROUTES[route].response;
+  if (schema === undefined) {
+    // SAFETY: RouteResponse is undefined exactly when the route streams instead of returning a body.
+    return ok(undefined as RouteResponse<K>);
+  }
+  const parsed = v.safeParse(schema, input);
   if (!parsed.success) return err({ route, kind: "response", issues: issuesOf(parsed.issues) });
   // SAFETY: the schema in ROUTES[route] is the source of RouteResponse<K>.
   return ok(parsed.output as RouteResponse<K>);

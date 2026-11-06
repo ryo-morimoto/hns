@@ -2,11 +2,14 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import * as v from "valibot";
 import {
+  parseParams,
   parseRequest,
   parseResponse,
+  type RouteParams,
   type RouteRequest,
   type RouteResponse,
 } from "../src/contract.ts";
+import { ROUTES } from "../src/http-schemas.ts";
 import { FileWriteRequestSchema } from "../src/schemas.ts";
 
 const at = "2026-11-07T00:00:00.000Z";
@@ -98,4 +101,60 @@ test("query schemas take the strings the wire sends", () => {
   if (!events.ok) return;
   assert.equal(events.value.limit, 50);
   assert.equal(parseRequest("GET /api/events", { limit: "0" }).ok, false);
+});
+// Catches: path parameters were never parsed, so an id or a scope went from the URL to the store.
+test("path parameters are parsed with the route", () => {
+  const ok = parseParams("PATCH /api/projects/:id", { id: "p1" });
+  assert.equal(ok.ok, true);
+  assert.equal(parseParams("PATCH /api/projects/:id", { id: "" }).ok, false);
+  assert.equal(parseParams("PATCH /api/projects/:id", {}).ok, false);
+});
+
+test("a secret scope is one of the known scopes, not free text", () => {
+  assert.equal(parseParams("PUT /api/secrets/:scope/:name", { scope: "user", name: "k" }).ok, true);
+  assert.equal(
+    parseParams("PUT /api/secrets/:scope/:name", { scope: "admin", name: "k" }).ok,
+    false,
+  );
+});
+
+test("a route without path parameters parses to undefined", () => {
+  const none: RouteParams<"GET /api/health"> = undefined;
+
+  assert.equal(parseParams("GET /api/health", {}).ok, true);
+  assert.equal(none, undefined);
+});
+
+test("a streaming route has no response body", () => {
+  const parsed = parseResponse("GET /api/stream", {});
+
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.value, undefined);
+  assert.equal(parseRequest("GET /api/stream", { conversationId: "c1" }).ok, true);
+});
+
+// Catches: the route table could carry a path parameter that nothing validates.
+test("every route with a parameter validates it", () => {
+  for (const [key, contract] of Object.entries(ROUTES)) {
+    if (!contract.path.includes(":")) continue;
+    assert.notEqual(contract.params, undefined, key);
+  }
+});
+
+// Catches: authorization was decided only in the server, with no contract to disagree with.
+test("every route declares who may call it", () => {
+  const open = Object.entries(ROUTES).filter(([, contract]) => contract.auth !== "session");
+  const names = open.map(([key]) => key);
+
+  assert.ok(
+    names.every(
+      (key) =>
+        key.includes("/api/passkey/") || key === "GET /api/me" || key.includes("/api/hooks/"),
+    ),
+    names.join(","),
+  );
+  for (const [key, contract] of Object.entries(ROUTES)) {
+    assert.ok(["session", "public", "hook"].includes(contract.auth), key);
+  }
 });

@@ -108,7 +108,7 @@ type MutationResult =
 | `bwrap --version` が読める | `version-failed` | `unknown` |
 | wrapper と同じ引数で 1 回動く（user namespace・mount・shell） | `userns-unavailable` / `shell-missing` / `smoke-test-failed` | `blocked` / `unknown` |
 
-`/api/health` の `sandbox` は `{ available, exec, backend, bwrap, version, shell, userNamespaces, sysctls, code, reason, checkedAt }` を返す。バージョンは報告するが下限は設けない（0.12.0 で検証。実効性は毎回の probe で見る）。
+`/api/health` の `sandbox` は `available` で分かれる union。`true` は `exec: "enabled"`・`userNamespaces: "ok"`・`version`・`sysctls` を持ち、`false` は `exec: "disabled"` と失敗した `code` / `reason` を持つ（`backend` / `platform` / `shell` / `bwrap` / `checkedAt` は共通）。バージョンは報告するが下限は設けない（0.12.0 で検証。実効性は毎回の probe で見る）。
 
 shell は `/bin/sh` → `/usr/bin/sh` → `$SHELL` の順で存在するものを使う。NixOS のように `/bin/true` が無い環境で検出を誤らないため、probe も wrapper も同じ shell を使う。
 

@@ -175,22 +175,37 @@ export interface SandboxSysctls {
   apparmorRestrictUnprivilegedUserns: number | null;
 }
 
-/** Produced by /api/health; consumed by the login and settings views (docs/workspace.md, 0006). */
-export interface SandboxStatus {
+interface SandboxBase {
   backend: "bubblewrap";
   platform: string;
   shell: string;
   /** ISO 8601. */
   checkedAt: string;
-  available: boolean;
-  exec: SandboxExec;
   bwrap: string;
+}
+
+/** The probe passed: exec may be offered, and the version and sysctls are known. */
+export interface SandboxReady extends SandboxBase {
+  available: true;
+  exec: "enabled";
+  version: string;
+  userNamespaces: "ok";
+  sysctls: SandboxSysctls;
+}
+
+/** The probe failed: exec is off, and the first check that failed is named. */
+export interface SandboxUnavailable extends SandboxBase {
+  available: false;
+  exec: "disabled";
   version?: string | undefined;
   userNamespaces: SandboxUserNamespaces;
   sysctls?: SandboxSysctls | undefined;
-  code?: string | undefined;
-  reason?: string | undefined;
+  code: string;
+  reason: string;
 }
+
+/** Produced by /api/health; consumed by the login and settings views (docs/workspace.md, 0006). */
+export type SandboxStatus = SandboxReady | SandboxUnavailable;
 
 export interface Limits {
   /** 0 means unlimited. Never negative. */

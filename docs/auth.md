@@ -29,6 +29,13 @@
 - 実装: `passkey.mjs`、`/api/passkey/*`、`ui/login.html`。`auth: "passkey"` で切り替える。
 - credential は Control Plane に保存。セッションは `hns_session` の HttpOnly cookie（30日）。
 
+## ルートごとの認証（契約）
+
+どのルートが誰に開いているかは `packages/core/src/http-schemas.ts` の `ROUTES` が持つ（`auth: "session" | "public" | "hook"`）。
+`public` は passkey の入口と `/api/me`、`hook` はパスの token で認証する `/api/hooks/:token`、それ以外は `session`。
+token モードでは `/api/hooks` 以外の全 `/api/*` が同じ資格情報を要求する（PoC の挙動）。サーバは起動時に
+「マウントした全ルートが `auth` を宣言している」ことを確かめ、ルート表と認証ミドルウェアを二重管理しない。
+
 ## テスト手段（実装済み）
 
 ブラウザの認証器は Playwright の**仮想オーセンティケータ**で再現する。

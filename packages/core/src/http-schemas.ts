@@ -6,7 +6,6 @@ import {
   AUTOMATION_FIRING_STATUSES,
   EVENT_LEVELS,
   EVENT_NAMES,
-  SANDBOX_EXEC,
   SANDBOX_USER_NAMESPACES,
   SCHEDULING_STATES,
   TASK_STATES,
@@ -27,8 +26,8 @@ import {
   TaskUpdateSchema,
 } from "./schemas.ts";
 import type {
-  AuthMode,
   ChatResponse,
+  Health,
   Conversation,
   Event,
   FileRead,
@@ -45,9 +44,11 @@ import type {
   Usage,
   UsageBucket,
 } from "./types.ts";
+import { CHAT_ABORT_OUTCOMES } from "./http.ts";
 import type {
   Automation,
   AutomationAction,
+  ChatAbortResponse,
   AutomationCreate,
   AutomationTrigger,
   AutomationUpdate,
@@ -71,6 +72,7 @@ import type {
   SecretPutRequest,
   SecretPutResult,
   SecretSummary,
+  SseEventName,
   StateEvent,
   UnlockRequest,
   WebhookPayload,
@@ -190,39 +192,42 @@ export const StateSchema: v.GenericSchema<unknown, State> = v.object({
   counts: v.object({ conversations: v.number(), projects: v.number() }),
 });
 
-export const SandboxStatusSchema: v.GenericSchema<unknown, SandboxStatus> = v.object({
+const SysctlsSchema = v.object({
+  maxUserNamespaces: v.nullable(v.number()),
+  unprivilegedUsernsClone: v.nullable(v.number()),
+  apparmorRestrictUnprivilegedUserns: v.nullable(v.number()),
+});
+
+const sandboxBase = {
   backend: v.literal("bubblewrap"),
   platform: v.string(),
   shell: v.string(),
   checkedAt: iso,
-  available: v.boolean(),
-  exec: v.picklist(SANDBOX_EXEC),
   bwrap: v.string(),
-  version: v.optional(v.string()),
-  userNamespaces: v.picklist(SANDBOX_USER_NAMESPACES),
-  sysctls: v.optional(
-    v.object({
-      maxUserNamespaces: v.nullable(v.number()),
-      unprivilegedUsernsClone: v.nullable(v.number()),
-      apparmorRestrictUnprivilegedUserns: v.nullable(v.number()),
-    }),
-  ),
-  code: v.optional(v.string()),
-  reason: v.optional(v.string()),
-});
+};
 
-export const HealthSchema: v.GenericSchema<
-  unknown,
-  {
-    ok: boolean;
-    version: string;
-    provider: string;
-    model: string;
-    auth: AuthMode;
-    sandbox: SandboxStatus;
-    limits: Limits;
-  }
-> = v.object({
+export const SandboxStatusSchema: v.GenericSchema<unknown, SandboxStatus> = v.variant("available", [
+  v.object({
+    ...sandboxBase,
+    available: v.literal(true),
+    exec: v.literal("enabled"),
+    version: v.string(),
+    userNamespaces: v.literal("ok"),
+    sysctls: SysctlsSchema,
+  }),
+  v.object({
+    ...sandboxBase,
+    available: v.literal(false),
+    exec: v.literal("disabled"),
+    version: v.optional(v.string()),
+    userNamespaces: v.picklist(SANDBOX_USER_NAMESPACES),
+    sysctls: v.optional(SysctlsSchema),
+    code: v.string(),
+    reason: v.string(),
+  }),
+]);
+
+export const HealthSchema: v.GenericSchema<unknown, Health> = v.object({
   ok: v.boolean(),
   version: v.string(),
   provider: v.string(),
@@ -380,8 +385,11 @@ export const WorkflowCreateSchema: v.GenericSchema<unknown, WorkflowCreate> = v.
 });
 
 export const WorkflowUpdateSchema: v.GenericSchema<unknown, WorkflowUpdate> = v.object({
+  version: v.pipe(v.number(), v.integer(), v.minValue(1)),
   graph: WorkflowGraphSchema,
 });
+
+export const WorkflowListQuerySchema = v.object({ projectId: v.optional(ProjectIdSchema) });
 
 export const RunCreateSchema: v.GenericSchema<unknown, RunCreate> = v.object({
   input: v.optional(v.string()),
@@ -421,7 +429,7 @@ export const AutomationSchema: v.GenericSchema<unknown, Automation> = v.object({
   trigger: AutomationTriggerSchema,
   action: AutomationActionSchema,
   enabled: v.boolean(),
-  last_fired_at: v.nullable(v.string()),
+  last_fired_at: v.nullable(iso),
   created_at: iso,
   updated_at: iso,
 });
@@ -521,7 +529,9 @@ export const ConversationDeletedSchema = v.object({
   deleted: v.literal(true),
   durableDataKept: v.boolean(),
 });
-export const ChatAbortedSchema = v.object({ outcome: v.literal("aborted") });
+export const ChatAbortResponseSchema: v.GenericSchema<unknown, ChatAbortResponse> = v.object({
+  outcome: v.picklist(CHAT_ABORT_OUTCOMES),
+});
 export const RunStartedSchema = v.object({ id, version: v.number() });
 export const RunNodeCompletedSchema = v.object({ runId: id, node: WorkflowRunNodeSchema });
 export const HookAcceptedSchema = v.object({ accepted: v.literal(true) });
@@ -570,37 +580,89 @@ export const SecretListQuerySchema = v.object({ scope: v.optional(v.picklist(SEC
 export const FileListQuerySchema = v.object({ path: v.optional(v.string()) });
 export const FileQuerySchema = v.object({ path: v.optional(v.string()) });
 
+// ---- path parameters --------------------------------------------------------
+
+export const IdParams = v.object({ id });
+export const SecretParams = v.object({ scope: v.picklist(SECRET_SCOPES), name: id });
+export const HookParams = v.object({ token: id });
+export const RunNodeParams = v.object({ id, nodeId: id });
+
 // ---- route table ------------------------------------------------------------
 
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
-export interface RouteContract<TRequest = undefined, TResponse = unknown> {
+/**
+ * Who may call a route. "public" is part of reaching a session (the passkey flow and /api/me);
+ * "hook" authenticates by the token in its path. Everything else needs a session, and in token
+ * mode the server asks for that one credential on all of them (docs/auth.md).
+ */
+export const ROUTE_AUTH = ["session", "public", "hook"] as const;
+export type RouteAuth = (typeof ROUTE_AUTH)[number];
+
+export interface RouteContract<TRequest = undefined, TResponse = unknown, TParams = undefined> {
   readonly method: HttpMethod;
   readonly path: string;
-  /** Body or query parameters; absent when the route takes neither. */
-  readonly request?: v.GenericSchema<unknown, TRequest> | undefined;
-  /** The success body. Every route can also answer with ErrorResponseSchema. */
-  readonly response: v.GenericSchema<unknown, TResponse>;
+  /** Body or query parameters; undefined when the route takes neither. */
+  readonly request: v.GenericSchema<unknown, TRequest> | undefined;
+  /** Path parameters; undefined when the path has none. */
+  readonly params: v.GenericSchema<unknown, TParams> | undefined;
+  /** The success body; undefined when the route streams instead. */
+  readonly response: v.GenericSchema<unknown, TResponse> | undefined;
+  /** SSE event names the route streams; undefined for a plain JSON route. */
+  readonly stream: readonly SseEventName[] | undefined;
+  readonly auth: RouteAuth;
 }
 
-function route<TRequest = undefined, TResponse = unknown>(
+export interface RouteOptions<TParams = undefined> {
+  readonly params?: v.GenericSchema<unknown, TParams> | undefined;
+  readonly auth?: RouteAuth | undefined;
+}
+
+function route<TRequest = undefined, TResponse = unknown, TParams = undefined>(
   method: HttpMethod,
   path: string,
   response: v.GenericSchema<unknown, TResponse>,
   request?: v.GenericSchema<unknown, TRequest>,
-): RouteContract<TRequest, TResponse> {
-  return request === undefined ? { method, path, response } : { method, path, response, request };
+  options?: RouteOptions<TParams>,
+): RouteContract<TRequest, TResponse, TParams> {
+  return {
+    method,
+    path,
+    response,
+    request,
+    params: options?.params,
+    stream: undefined,
+    auth: options?.auth ?? "session",
+  };
+}
+
+function streamRoute<TRequest = undefined, TParams = undefined>(
+  method: HttpMethod,
+  path: string,
+  events: readonly SseEventName[],
+  request?: v.GenericSchema<unknown, TRequest>,
+  options?: RouteOptions<TParams>,
+): RouteContract<TRequest, undefined, TParams> {
+  return {
+    method,
+    path,
+    response: undefined,
+    request,
+    params: options?.params,
+    stream: events,
+    auth: options?.auth ?? "session",
+  };
 }
 
 export const ROUTES = {
   "GET /api/state": route("GET", "/api/state", StateSchema, StateQuerySchema),
-  "GET /api/stream": route("GET", "/api/stream", StateEventSchema, StateQuerySchema),
+  "GET /api/stream": streamRoute("GET", "/api/stream", ["state"], StateQuerySchema),
   "POST /api/chat": route("POST", "/api/chat", ChatResponseSchema, ChatRequestSchema),
   "POST /api/chat/abort": route(
     "POST",
     "/api/chat/abort",
-    ChatAbortedSchema,
+    ChatAbortResponseSchema,
     ChatAbortRequestSchema,
   ),
   "GET /api/projects": route("GET", "/api/projects", v.array(ProjectSchema)),
@@ -610,10 +672,13 @@ export const ROUTES = {
     "/api/projects/:id",
     ProjectSchema,
     ProjectRenameSchema,
+    { params: IdParams },
   ),
   "GET /api/tasks": route("GET", "/api/tasks", v.array(TaskSchema), TaskListQuerySchema),
   "POST /api/tasks": route("POST", "/api/tasks", TaskSchema, TaskCreateSchema),
-  "PATCH /api/tasks/:id": route("PATCH", "/api/tasks/:id", TaskSchema, TaskUpdateSchema),
+  "PATCH /api/tasks/:id": route("PATCH", "/api/tasks/:id", TaskSchema, TaskUpdateSchema, {
+    params: IdParams,
+  }),
   "GET /api/conversations": route(
     "GET",
     "/api/conversations",
@@ -631,75 +696,108 @@ export const ROUTES = {
     "/api/conversations/:id",
     ConversationSchema,
     ConversationUpdateSchema,
+    { params: IdParams },
   ),
   "DELETE /api/conversations/:id": route(
     "DELETE",
     "/api/conversations/:id",
     ConversationDeletedSchema,
+    undefined,
+    { params: IdParams },
   ),
   "GET /api/files": route("GET", "/api/files", v.array(FileEntrySchema), FileListQuerySchema),
   "GET /api/file": route("GET", "/api/file", FileReadSchema, FileQuerySchema),
   "PUT /api/file": route("PUT", "/api/file", MutationResultSchema, FileWriteRequestSchema),
-  "GET /api/me": route("GET", "/api/me", MeSchema),
+  "GET /api/me": route("GET", "/api/me", MeSchema, undefined, { auth: "public" }),
   "POST /api/passkey/register/options": route(
     "POST",
     "/api/passkey/register/options",
     PasskeyOptionsSchema,
     PasskeyLoginStartSchema,
+    { auth: "public" },
   ),
   "POST /api/passkey/register/verify": route(
     "POST",
     "/api/passkey/register/verify",
     PasskeyVerifiedSchema,
     PasskeyRegisterVerifySchema,
+    { auth: "public" },
   ),
-  "GET /api/passkey/dek": route("GET", "/api/passkey/dek", DekSchema),
-  "POST /api/passkey/add/options": route("POST", "/api/passkey/add/options", PasskeyOptionsSchema),
+  "GET /api/passkey/dek": route("GET", "/api/passkey/dek", DekSchema, undefined, {
+    auth: "public",
+  }),
+  "POST /api/passkey/add/options": route(
+    "POST",
+    "/api/passkey/add/options",
+    PasskeyOptionsSchema,
+    undefined,
+    { auth: "public" },
+  ),
   "POST /api/passkey/add/verify": route(
     "POST",
     "/api/passkey/add/verify",
     PasskeyVerifiedSchema,
     PasskeyAddVerifySchema,
+    { auth: "public" },
   ),
   "POST /api/passkey/recovery": route(
     "POST",
     "/api/passkey/recovery",
     RecoveredSchema,
     RecoveryLoginSchema,
+    { auth: "public" },
   ),
   "POST /api/passkey/unlock": route(
     "POST",
     "/api/passkey/unlock",
     UnlockedSchema,
     UnlockRequestSchema,
+    { auth: "public" },
   ),
   "POST /api/passkey/login/options": route(
     "POST",
     "/api/passkey/login/options",
     PasskeyOptionsSchema,
     PasskeyLoginStartSchema,
+    { auth: "public" },
   ),
   "POST /api/passkey/login/verify": route(
     "POST",
     "/api/passkey/login/verify",
     PasskeyVerifiedSchema,
     PasskeyLoginVerifySchema,
+    { auth: "public" },
   ),
-  "POST /api/passkey/logout": route("POST", "/api/passkey/logout", OkSchema),
+  "POST /api/passkey/logout": route("POST", "/api/passkey/logout", OkSchema, undefined, {
+    auth: "public",
+  }),
   "GET /api/secrets": route(
     "GET",
     "/api/secrets",
     v.array(SecretSummarySchema),
     SecretListQuerySchema,
   ),
-  "GET /api/secrets/:scope/:name": route("GET", "/api/secrets/:scope/:name", SecretSchema),
+  "GET /api/secrets/:scope/:name": route(
+    "GET",
+    "/api/secrets/:scope/:name",
+    SecretSchema,
+    undefined,
+    { params: SecretParams },
+  ),
   "PUT /api/secrets/:scope/:name": route(
     "PUT",
     "/api/secrets/:scope/:name",
     SecretPutResultSchema,
     SecretPutRequestSchema,
+    { params: SecretParams },
   ),
-  "DELETE /api/secrets/:scope/:name": route("DELETE", "/api/secrets/:scope/:name", DeletedSchema),
+  "DELETE /api/secrets/:scope/:name": route(
+    "DELETE",
+    "/api/secrets/:scope/:name",
+    DeletedSchema,
+    undefined,
+    { params: SecretParams },
+  ),
   "GET /api/automations": route(
     "GET",
     "/api/automations",
@@ -717,23 +815,27 @@ export const ROUTES = {
     "/api/automations/:id",
     AutomationSchema,
     AutomationUpdateSchema,
+    { params: IdParams },
   ),
   "GET /api/automations/:id/firings": route(
     "GET",
     "/api/automations/:id/firings",
     v.array(FiringSchema),
+    undefined,
+    { params: IdParams },
   ),
   "POST /api/hooks/:token": route(
     "POST",
     "/api/hooks/:token",
     HookAcceptedSchema,
     WebhookPayloadSchema,
+    { params: HookParams, auth: "hook" },
   ),
   "GET /api/workflows": route(
     "GET",
     "/api/workflows",
     v.array(WorkflowSchema),
-    AutomationListQuerySchema,
+    WorkflowListQuerySchema,
   ),
   "POST /api/workflows": route("POST", "/api/workflows", WorkflowSchema, WorkflowCreateSchema),
   "PUT /api/workflows/:id": route(
@@ -741,20 +843,25 @@ export const ROUTES = {
     "/api/workflows/:id",
     WorkflowSchema,
     WorkflowUpdateSchema,
+    { params: IdParams },
   ),
   "POST /api/workflows/:id/runs": route(
     "POST",
     "/api/workflows/:id/runs",
     RunStartedSchema,
     RunCreateSchema,
+    { params: IdParams },
   ),
   "GET /api/runs": route("GET", "/api/runs", v.array(WorkflowRunSchema), RunListQuerySchema),
-  "GET /api/runs/:id": route("GET", "/api/runs/:id", WorkflowRunSchema),
+  "GET /api/runs/:id": route("GET", "/api/runs/:id", WorkflowRunSchema, undefined, {
+    params: IdParams,
+  }),
   "POST /api/runs/:id/nodes/:nodeId": route(
     "POST",
     "/api/runs/:id/nodes/:nodeId",
     RunNodeCompletedSchema,
     RunNodeCompleteSchema,
+    { params: RunNodeParams },
   ),
   "GET /api/events": route("GET", "/api/events", v.array(EventSchema), EventListQuerySchema),
   "GET /api/health": route("GET", "/api/health", HealthSchema),

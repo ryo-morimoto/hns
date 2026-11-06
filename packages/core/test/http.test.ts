@@ -21,6 +21,9 @@ import {
   WorkflowGraphSchema,
   WorkflowRunSchema,
   WorkflowSchema,
+  SandboxStatusSchema,
+  ChatAbortResponseSchema,
+  WorkflowUpdateSchema,
 } from "../src/http-schemas.ts";
 
 const at = "2026-11-07T00:00:00.000Z";
@@ -374,4 +377,76 @@ test("every route key matches its method and path", () => {
 
 test("the route table covers the documented surface", () => {
   assert.equal(Object.keys(ROUTES).length, 49);
+});
+// Catches: SandboxStatus was a flat object, so impossible combinations parsed.
+test("a sandbox status couples availability with exec and its evidence", () => {
+  const base = {
+    backend: "bubblewrap",
+    platform: "linux",
+    shell: "/bin/sh",
+    checkedAt: at,
+    bwrap: "/usr/bin/bwrap",
+  };
+
+  assert.throws(() => v.parse(SandboxStatusSchema, { ...base, available: true, exec: "disabled" }));
+  assert.throws(() =>
+    v.parse(SandboxStatusSchema, {
+      ...base,
+      available: true,
+      exec: "enabled",
+      userNamespaces: "ok",
+    }),
+  );
+  assert.throws(() =>
+    v.parse(SandboxStatusSchema, { ...base, available: false, exec: "disabled" }),
+  );
+
+  const ready = v.parse(SandboxStatusSchema, {
+    ...base,
+    available: true,
+    exec: "enabled",
+    version: "0.12.0",
+    userNamespaces: "ok",
+    sysctls: {
+      maxUserNamespaces: 1,
+      unprivilegedUsernsClone: null,
+      apparmorRestrictUnprivilegedUserns: null,
+    },
+  });
+  assert.equal(ready.available, true);
+});
+
+// Catches: last_fired_at was any string while every other timestamp was ISO.
+test("an automation timestamp is ISO like the rest", () => {
+  const automation = {
+    id: "a1",
+    project_id: "p1",
+    name: "nightly",
+    trigger: { type: "schedule", cron: "0 3 * * *" },
+    action: { type: "task", title: "nightly" },
+    enabled: true,
+    last_fired_at: "yesterday",
+    created_at: at,
+    updated_at: at,
+  };
+
+  assert.throws(() => v.parse(AutomationSchema, automation));
+  assert.equal(v.parse(AutomationSchema, { ...automation, last_fired_at: at }).last_fired_at, at);
+});
+
+// Catches: the abort endpoint could only say "aborted", not what Durable actually decided.
+test("a chat abort reports the outcome Durable chose", () => {
+  for (const outcome of ["aborted", "already_placed", "settled"]) {
+    assert.equal(v.parse(ChatAbortResponseSchema, { outcome }).outcome, outcome);
+  }
+  assert.throws(() => v.parse(ChatAbortResponseSchema, { outcome: "cancelled" }));
+});
+
+// Catches: a workflow PUT could overwrite an edit it never saw, so it now carries its base version.
+test("a workflow update must name the version it is based on", () => {
+  const graph = { nodes: [{ id: "n1", type: "agent", prompt: "go" }], edges: [] };
+
+  assert.throws(() => v.parse(WorkflowUpdateSchema, { graph }));
+  assert.throws(() => v.parse(WorkflowUpdateSchema, { version: 0, graph }));
+  assert.equal(v.parse(WorkflowUpdateSchema, { version: 2, graph }).version, 2);
 });
