@@ -1,19 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import * as v from "valibot";
+import { IsoTimestampSchema, isoTimestamp, type IsoTimestamp } from "@hns/core";
 
 /** How to open the store. `path` is `:memory:` in tests and a file in the app. */
 export interface StoreOptions {
   readonly path: string;
-  /** Injected in tests so ids and timestamps are stable. */
-  readonly now?: (() => string) | undefined;
+  /** Injected in tests so ids and timestamps are stable. It must return an ISO timestamp. */
+  readonly now?: (() => IsoTimestamp) | undefined;
   readonly newId?: (() => string) | undefined;
 }
 
 /** The connection and the small helpers every repository shares. */
 export interface StoreContext {
   readonly db: DatabaseSync;
-  readonly now: () => string;
+  readonly now: () => IsoTimestamp;
   readonly newId: () => string;
   transaction<T>(run: () => T): T;
 }
@@ -39,7 +40,6 @@ export function transaction<T>(db: DatabaseSync, run: () => T): T {
 }
 
 const userVersionSchema = v.object({ user_version: v.number() });
-export const isoTimestampSchema = v.pipe(v.string(), v.isoTimestamp());
 
 export function readUserVersion(db: DatabaseSync): number {
   const row = db.prepare("PRAGMA user_version").get();
@@ -51,10 +51,10 @@ export function writeUserVersion(db: DatabaseSync, version: number): void {
 }
 
 export function createContext(db: DatabaseSync, options: StoreOptions): StoreContext {
-  const source = options.now ?? (() => new Date().toISOString());
+  const source = options.now ?? (() => isoTimestamp(new Date().toISOString()));
   // Fail at open, before any write: every repository assumes an ISO clock. Cache the first
   // tick so a sequence clock's first write still sees the value checked at open.
-  let first: string | undefined = v.parse(isoTimestampSchema, source());
+  let first: IsoTimestamp | undefined = v.parse(IsoTimestampSchema, source());
   return {
     db,
     now: () => {
@@ -63,7 +63,7 @@ export function createContext(db: DatabaseSync, options: StoreOptions): StoreCon
         first = undefined;
         return value;
       }
-      return v.parse(isoTimestampSchema, source());
+      return v.parse(IsoTimestampSchema, source());
     },
     newId: options.newId ?? randomUUID,
     transaction: (run) => transaction(db, run),

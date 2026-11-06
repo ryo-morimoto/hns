@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
-import { ConversationIdSchema, ProjectIdSchema } from "@hns/core";
+import { ConversationIdSchema, ProjectIdSchema, isoTimestamp } from "@hns/core";
+import type { IsoTimestamp } from "@hns/core";
 import type { WorkflowGraph } from "@hns/core";
 import { test } from "vitest";
 import { openDatabase, readUserVersion } from "../src/db.ts";
@@ -13,7 +14,7 @@ import { openStore, type Store } from "../src/store.ts";
 function clock(start = "2026-01-01T00:00:00.000Z") {
   let at = Date.parse(start);
   return () => {
-    const value = new Date(at).toISOString();
+    const value = isoTimestamp(new Date(at).toISOString());
     at += 1000;
     return value;
   };
@@ -300,14 +301,14 @@ test("automations keep JSON triggers and firings", () => {
 
     const firing = store.automations.createFiring({
       automationId: automation.id,
-      at: "2026-01-01T00:00:00.000Z",
+      at: isoTimestamp("2026-01-01T00:00:00.000Z"),
       status: "running",
     });
     assert.equal(store.automations.listFirings(automation.id).length, 1);
     const settled = store.automations.updateFiring(firing.id, { status: "done", runId: "run-1" });
     assert.equal(settled?.status, "done");
     assert.equal(settled?.run_id, "run-1");
-    store.automations.setLastFiredAt(automation.id, "2026-01-01T00:01:00.000Z");
+    store.automations.setLastFiredAt(automation.id, isoTimestamp("2026-01-01T00:01:00.000Z"));
     assert.equal(store.automations.get(automation.id)?.last_fired_at, "2026-01-01T00:01:00.000Z");
     assert.equal(store.automations.delete(automation.id), true);
     assert.equal(store.automations.get(automation.id), undefined);
@@ -324,7 +325,9 @@ test("an automation rejects a non-ISO last_fired_at before writing", () => {
       trigger: { type: "webhook" },
       action: { type: "task" },
     });
-    assert.throws(() => store.automations.setLastFiredAt(automation.id, "2026-01-01T00:01"));
+    // SAFETY: a JS caller can bypass the type; the setter must still refuse a non-ISO value.
+    const hostileTime = "2026-01-01T00:01" as IsoTimestamp;
+    assert.throws(() => store.automations.setLastFiredAt(automation.id, hostileTime));
     assert.equal(store.automations.get(automation.id)?.last_fired_at, null);
   });
 });
@@ -399,7 +402,9 @@ test("a non-ISO clock is refused before any write", async () => {
   const dir = await mkdtemp(join(tmpdir(), "hns-store-"));
   const path = join(dir, "store.sqlite");
   try {
-    assert.throws(() => openStore({ path, now: () => "2026-01-01" }));
+    // SAFETY: a JS caller can bypass the type; the store must refuse a non-ISO clock.
+    const hostileNow = () => "2026-01-01" as IsoTimestamp;
+    assert.throws(() => openStore({ path, now: hostileNow }));
     const db = openDatabase(path);
     try {
       const row = db

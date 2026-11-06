@@ -1,4 +1,5 @@
 export * from "./types.ts";
+export * from "./codecs.ts";
 export * from "./schemas.ts";
 export * from "./http.ts";
 export * from "./http-schemas.ts";

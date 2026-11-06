@@ -6,6 +6,7 @@ import {
   ConversationIdSchema,
   EVENT_LEVELS,
   EVENT_NAMES,
+  IsoTimestampSchema,
   ProjectIdSchema,
   TASK_STATUSES,
   WORKFLOW_NODE_STATUSES,
@@ -91,8 +92,8 @@ const workflowRowSchema = v.object({
   name: v.string(),
   version: v.number(),
   graph_json: v.string(),
-  created_at: v.pipe(v.string(), v.isoTimestamp()),
-  updated_at: v.pipe(v.string(), v.isoTimestamp()),
+  created_at: IsoTimestampSchema,
+  updated_at: IsoTimestampSchema,
 });
 
 export const WorkflowRowSchema: v.GenericSchema<unknown, Workflow> = v.pipe(
@@ -114,8 +115,8 @@ export const WorkflowRunNodeRowSchema: v.GenericSchema<unknown, WorkflowRunNode>
   prompt: v.nullable(v.string()),
   output: v.nullable(v.string()),
   conversation_id: v.nullable(ConversationIdSchema),
-  started_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
-  finished_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
+  started_at: v.nullable(IsoTimestampSchema),
+  finished_at: v.nullable(IsoTimestampSchema),
 });
 
 const workflowRunRowSchema = v.object({
@@ -125,8 +126,8 @@ const workflowRunRowSchema = v.object({
   status: v.picklist(WORKFLOW_RUN_STATUSES),
   input: v.string(),
   output: v.nullable(v.string()),
-  created_at: v.pipe(v.string(), v.isoTimestamp()),
-  finished_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
+  created_at: IsoTimestampSchema,
+  finished_at: v.nullable(IsoTimestampSchema),
   nodes: v.optional(v.array(WorkflowRunNodeRowSchema)),
 });
 
@@ -154,9 +155,9 @@ const automationRowSchema = v.object({
   trigger_json: v.string(),
   action_json: v.string(),
   enabled: v.picklist([0, 1]),
-  last_fired_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
-  created_at: v.pipe(v.string(), v.isoTimestamp()),
-  updated_at: v.pipe(v.string(), v.isoTimestamp()),
+  last_fired_at: v.nullable(IsoTimestampSchema),
+  created_at: IsoTimestampSchema,
+  updated_at: IsoTimestampSchema,
 });
 
 export const AutomationRowSchema: v.GenericSchema<unknown, Automation> = v.pipe(
@@ -177,11 +178,11 @@ export const AutomationRowSchema: v.GenericSchema<unknown, Automation> = v.pipe(
 export const FiringRowSchema: v.GenericSchema<unknown, Firing> = v.object({
   id: v.string(),
   automation_id: v.string(),
-  at: v.pipe(v.string(), v.isoTimestamp()),
+  at: IsoTimestampSchema,
   status: v.picklist(AUTOMATION_FIRING_STATUSES),
   detail: v.nullable(v.string()),
   run_id: v.nullable(v.string()),
-  created_at: v.pipe(v.string(), v.isoTimestamp()),
+  created_at: IsoTimestampSchema,
 });
 
 export type UsageToday = Usage["today"];

@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { OperationIdSchema } from "./codecs.ts";
 import { ERROR_CODES, TASK_STATUSES } from "./types.ts";
 import type {
   ChatRequest,
@@ -12,12 +13,6 @@ import type {
   TaskCreate,
   TaskUpdate,
 } from "./types.ts";
-
-/** One mutation's id on the wire. It is opaque to the workspace, which never uses it as a path. */
-export const OperationIdSchema: v.GenericSchema<unknown, string> = v.pipe(
-  v.string(),
-  v.regex(/^[A-Za-z0-9_-]{1,64}$/, "operationId must be 1-64 characters of [A-Za-z0-9_-]"),
-);
 
 export const ProjectIdSchema: v.GenericSchema<unknown, ProjectId> = v.pipe(
   v.string(),

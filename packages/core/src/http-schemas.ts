@@ -14,6 +14,7 @@ import {
   WORKFLOW_RUN_STATUSES,
 } from "./types.ts";
 import { FILE_KINDS, SECRET_SCOPES } from "./http.ts";
+import { IsoTimestampSchema } from "./codecs.ts";
 import {
   ChatRequestSchema,
   ConversationIdSchema,
@@ -87,7 +88,7 @@ import type {
 } from "./http.ts";
 
 const id = v.pipe(v.string(), v.minLength(1));
-const iso = v.pipe(v.string(), v.isoTimestamp());
+const iso = IsoTimestampSchema;
 const jsonValue: v.GenericSchema<JsonValue, JsonValue> = v.lazy(() =>
   v.union([
     v.string(),

@@ -8,7 +8,8 @@ import type {
   FileWatcher,
   Result,
 } from "@earendil-works/pi-durable/env";
-import type { FileRead, MutationResult } from "@hns/core";
+import { operationId } from "@hns/core";
+import type { FileRead, MutationResult, OperationId } from "@hns/core";
 import { Crash, Denied, FileFailure, Unavailable } from "./errors.ts";
 import type { CrashPoint } from "./errors.ts";
 import { emptyJournal, parseJournal } from "./journal.ts";
@@ -444,12 +445,18 @@ export class Workspace {
 
   /** Replace one file if it is still at expectedVersion. */
   async write(input: FileWrite): Promise<MutationResult> {
+    let opId: OperationId;
     try {
-      return await this.#write(input);
+      opId = operationId(input.operationId);
+    } catch {
+      throw new Denied("invalid operationId");
+    }
+    try {
+      return await this.#write({ ...input, operationId: opId });
     } catch (error) {
       if (error instanceof Denied) {
         await this.#audit({
-          operationId: input.operationId,
+          operationId: opId,
           path: input.path,
           reason: error.message,
           denied: true,

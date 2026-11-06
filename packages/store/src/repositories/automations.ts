@@ -10,7 +10,9 @@ import {
   type Firing,
   type ProjectId,
 } from "@hns/core";
-import { isoTimestampSchema, type StoreContext } from "../db.ts";
+import type { IsoTimestamp } from "@hns/core";
+import { IsoTimestampSchema } from "@hns/core";
+import type { StoreContext } from "../db.ts";
 import { parseAutomation, parseFiring } from "../parse.ts";
 
 export interface AutomationCreateInput {
@@ -28,10 +30,10 @@ export interface AutomationRepository {
   create(input: AutomationCreateInput): Automation;
   update(id: string, patch: AutomationUpdate): Automation | undefined;
   delete(id: string): boolean;
-  setLastFiredAt(id: string, at: string): void;
+  setLastFiredAt(id: string, at: IsoTimestamp): void;
   createFiring(input: {
     automationId: string;
-    at: string;
+    at: IsoTimestamp;
     status: AutomationFiringStatus;
     detail?: string | undefined;
     runId?: string | undefined;
@@ -143,7 +145,7 @@ export function automationRepository(context: StoreContext): AutomationRepositor
       });
     },
     setLastFiredAt(id, at) {
-      const value = v.parse(isoTimestampSchema, at);
+      const value = v.parse(IsoTimestampSchema, at);
       transaction(() => {
         db.prepare("UPDATE automations SET last_fired_at = ? WHERE id = ?").run(value, id);
       });

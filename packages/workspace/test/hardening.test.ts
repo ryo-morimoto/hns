@@ -74,8 +74,9 @@ for (const kind of KINDS) {
 }
 
 for (const kind of KINDS) {
-  // Catches: operationId was spliced into the temp path, so "../" wrote outside the root.
-  test(kind + ": operationId never reaches a path, even a hostile one", async () => {
+  // Catches: operationId was spliced into the temp path. Invalid ids are refused; valid
+  // ids never reach the internal temp name.
+  test(kind + ": operationId never reaches a path", async () => {
     await withTarget(kind, async (target) => {
       const name = "op-id";
       const workspace = await openWorkspace(target, name);
@@ -83,17 +84,15 @@ for (const kind of KINDS) {
         path: "a.txt",
         content: "one",
         expectedVersion: "absent",
-        operationId: "../../escape",
+        operationId: "escape",
       });
 
       assert.equal(applied.status, "applied");
-      const escaped = (await readdir(target.base)).filter((entry) => entry.includes("escape"));
-      assert.deepEqual(escaped, []);
       const journal = v.parse(
         v.object({ ops: v.record(v.string(), v.object({ temp: v.string() })) }),
         JSON.parse(await readFile(join(target.base, "journal-" + name + ".json"), "utf8")),
       );
-      const temp = journal.ops["../../escape"]?.temp ?? "";
+      const temp = journal.ops.escape?.temp ?? "";
       assert.match(temp, /\/\.hns-tmp-[0-9a-f-]{36}$/);
       assert.equal(temp.includes("escape"), false);
       await workspace.close();
@@ -209,6 +208,28 @@ for (const kind of KINDS) {
 
       assert.equal(retry.status, "conflict");
       assert.equal((await workspace.read("a.txt")).content, "v1");
+      await workspace.close();
+    });
+  });
+
+  // Catches: a direct workspace.write caller could bypass the HTTP operationId rule.
+  test(kind + ": an invalid operationId is refused before writing", async () => {
+    await withTarget(kind, async (target) => {
+      const workspace = await openWorkspace(target, "op-invalid");
+      const root = rootOf(target, "op-invalid");
+      await assert.rejects(
+        workspace.write({
+          path: "bad.txt",
+          content: "x",
+          expectedVersion: "absent",
+          operationId: "bad id",
+        }),
+        Denied,
+      );
+      assert.deepEqual(
+        (await readdir(root)).filter((name) => name === "bad.txt"),
+        [],
+      );
       await workspace.close();
     });
   });

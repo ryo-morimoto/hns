@@ -9,6 +9,7 @@ npm run build           # dist/ に型
 
 - `src/types.ts` — Project / Task / Conversation / Event / Metrics などの型（正本）。
 - `src/schemas.ts` — 境界の valibot schema。`v.GenericSchema<unknown, T>` で型に縛る。
+- `src/codecs.ts` — IsoTimestamp / OperationId の brand・schema・constructor。規則の owner はここ1箇所。
 - `src/workflow.ts` — Workflow / Automation の状態遷移表。
 
 ## 型と持ち主
@@ -27,3 +28,10 @@ npm run build           # dist/ に型
 | `ErrorResponse`                                    | 全エンドポイント                           | クライアントのエラー処理 |
 
 `types.ts` の各型の JSDoc にも「Produced by / Consumed by」を書いてある。
+
+## codec
+
+- `IsoTimestamp` は ISO 8601 の文字列だけを型にし、store の clock と timestamp 入力に使う。
+  `IsoTimestampSchema` / `isoTimestamp()` 以外で作らない。
+- `OperationId` は `[A-Za-z0-9_-]{1,64}` だけを型にし、workspace.write の入口でも parse する。
+- package 間で codec を再定義していないことは `test/codecs.test.ts` が確認する。
