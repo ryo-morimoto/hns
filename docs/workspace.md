@@ -70,7 +70,12 @@ type MutationResult =
 
 ## イベント
 
-`seq` カーソル。`overflow` は全再読込。内容の正本は `readFile`。
+Journal が §seq§ を発番し、§watch(cursor)§ が履歴を再生してから購読する。内容の正本は §readFile§。
+
+- 自分の書き込みは §applied§ の後に §created§ / §changed§ を発行する。
+- 外部変更は §ExecutionEnv.watch§ で拾い、パスごとに 100ms まとめてから再ハッシュして発行する。
+- 同じ版なら発行しない（自分の書き込みと watcher の二重を防ぐ）。
+- §overflow§ は「全体を読み直せ」の合図。クライアントはパス単位の信頼を捨てる。
 
 ## 保証しない
 

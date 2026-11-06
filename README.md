@@ -40,11 +40,28 @@
 
 [ARCH.md](ARCH.md) → [docs/workspace.md](docs/workspace.md) → [docs/decisions.md](docs/decisions.md) → [work/BOARD.md](work/BOARD.md)
 
-## 再実行
+## 触ってみる
 
 ```bash
-cd work/poc/env-conformance && npm install
-node run.mjs local   # 29/29（pi-env daemon）
+cd work/poc/walking-skeleton && npm install
+node server.mjs        # root と url を表示する
 ```
+
+表示された url を使って:
+
+```bash
+curl -s -X POST $URL/write -d '{"path":"a.txt","content":"hello","expectedVersion":"absent","operationId":"w1"}'
+curl -s "$URL/read?path=a.txt"
+curl -s "$URL/events?cursor=0&limit=1"
+```
+
+## 検証
+
+| 対象 | コマンド |
+| --- | --- |
+| T-01 適合 | `cd work/poc/env-conformance && node run.mjs local` |
+| T-02 封じ込め | `cd work/poc/root-containment && node run.mjs` |
+| T-03/T-04 | `cd work/poc/workspace-core && node run.mjs` |
+| Walking Skeleton | `cd work/poc/walking-skeleton && node run.mjs` |
 
 node はこのマシンの PATH に無い（issue 0004）。
