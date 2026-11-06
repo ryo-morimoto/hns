@@ -58,18 +58,19 @@ Node 26 を [flake.nix](flake.nix) で固定している（nixpkgs `nixpkgs-unst
 ```bash
 nix develop        # Node と npm が入ったシェルに入る
 npm install
+git config core.hooksPath .githooks   # コミット時に npm run check を回す（任意・nix develop 内で）
 ```
 
 flake を使えない環境では Node 26.13 以降（26.x）を PATH に置く。24.x・22.x は使わない（D035）。
-最新へ上げるには `nix flake update nixpkgs` のあと `scripts/with-node.sh npm run check`。
-`node` は `nix develop` の中か `scripts/with-node.sh` 経由で実行する。
+最新へ上げるには `nix flake update nixpkgs` のあと `npm run check`。
+`node` は `nix develop` の中で実行する。
 
 まっさらな環境からの再現:
 
 ```bash
 nix develop
 npm install
-scripts/with-node.sh npm run check          # 製品コードのゲート
+npm run check                               # 製品コードのゲート
 work/poc/install.sh                         # PoC の依存（隣のディレクトリを import する）
 cd work/poc/app && node run.mjs             # PoC の統合 E2E
 ```
@@ -117,11 +118,11 @@ curl -s "$URL/events?cursor=0&limit=1"
 | 網羅（全イベント） | `cd work/poc/app && node run-journal.mjs` |
 | 会話の管理 | `cd work/poc/app && node run-conversations.mjs` |
 | 安全 | `cd work/poc/app && node run-safety.mjs` |
-| まとめて検査 | `scripts/check.sh`（oxlint / oxfmt / tsc / build） |
+| まとめて検査 | `npm run check`（oxlint / oxfmt / tsc / test / build） |
 | 秘密 | `cd work/poc/app && node run-secrets.mjs` |
 | バックアップ | `cd work/poc/app && node run-backup.mjs` |
 | 実モデル（要キー） | `cd work/poc/conversation && PROVIDER=opencode MODEL_ID=deepseek-v4.1-flash node real.mjs` |
 | T-03/T-04 | `cd work/poc/workspace-core && node run.mjs` |
 | Walking Skeleton | `cd work/poc/walking-skeleton && node run.mjs` |
 
-Node 26 は [flake.nix](flake.nix) が固定する（issue 0004）。`nix develop` か `scripts/with-node.sh` を通して実行する。
+Node 26 は [flake.nix](flake.nix) が固定する（issue 0004）。`nix develop` の中で実行する。

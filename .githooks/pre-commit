@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-exec scripts/with-node.sh npm run check
+command -v node >/dev/null || { echo "pre-commit: run inside nix develop" >&2; exit 1; }
+exec npm run check

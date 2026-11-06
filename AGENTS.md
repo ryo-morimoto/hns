@@ -14,7 +14,6 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
   - `work/poc/` — the integrated PoC app (plain JS). **Not product code.** Do not add features here
   - `work/BOARD.md`, `work/issues/` — the backlog and per-issue notes
 - `docs/` — flat specs: architecture decisions, auth, safety, observability, packages, type review
-- `scripts/` — `check.sh`, `with-node.sh` (runs commands through `nix develop`), `install-hooks.sh`
 - `.githooks/` — `pre-commit` runs the full check
 
 ### Architecture Notes
@@ -29,24 +28,27 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
 ## Quick Start
 
 ```bash
-scripts/with-node.sh npm install
-scripts/with-node.sh npm run check
+nix develop
+npm install
+npm run check
 ```
 
-Node 26 is pinned by `flake.nix`; `scripts/with-node.sh` enters the dev shell for you, so run anything that needs `node`/`npm` through it.
+Node 26 is pinned by `flake.nix`. Run anything that needs `node`/`npm` inside `nix develop` (or prefix it with `nix develop --command`).
 
-`npm run check` is the gate: oxlint → oxfmt --check → tsc → test → build. It also runs from the pre-commit hook (install once with `scripts/install-hooks.sh`).
+`npm run check` is the gate: oxlint → oxfmt --check → tsc → test → build. It also runs from the pre-commit hook after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`).
 Building is not proof of correctness; types and tests are.
 
 ## Build Commands
 
 | Command | What it does |
 | --- | --- |
-| `scripts/with-node.sh npm run check` | everything below, in order |
-| `scripts/with-node.sh npm test -w @hns/store` | tests for one package |
-| `scripts/with-node.sh npm run build -w @hns/store` | `dist/` for one package |
-| `scripts/with-node.sh npm run lint` | oxlint only |
-| `scripts/with-node.sh npm run fmt` | oxfmt, in place |
+| `npm run check` | everything below, in order |
+| `npm test -w @hns/store` | tests for one package |
+| `npm run build -w @hns/store` | `dist/` for one package |
+| `npm run lint` | oxlint only |
+| `npm run fmt` | oxfmt, in place |
+
+Run these inside `nix develop`.
 
 ## Development
 
@@ -114,7 +116,7 @@ To add a package: create the directory above, depend on `@hns/core` at the **sam
 
 ```bash
 work/poc/install.sh   # once, inside the dev shell; installs the PoC dependencies
-scripts/with-node.sh node work/poc/app/serve.mjs /path/to/workspace
+node work/poc/app/serve.mjs /path/to/workspace
 # PROVIDER=ollama|opencode|faux  MODEL_ID=...  STATE_DIR=...  (prints the URL with a token)
 ```
 
@@ -133,10 +135,12 @@ The PoC is for manual checks only. New product work goes into `packages/`.
 ### How to run tests
 
 ```bash
-scripts/with-node.sh npm test -w @hns/core
-scripts/with-node.sh npm test -w @hns/store
-scripts/with-node.sh npm run check          # everything
+npm test -w @hns/core
+npm test -w @hns/store
+npm run check          # everything
 ```
+
+Inside `nix develop`.
 
 ### Test Structure
 
