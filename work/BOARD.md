@@ -58,6 +58,15 @@
 | [0053](issues/0053-operationid-validation.md) | operationId の検証位置を決める | open | 0045 |
 | [0054](issues/0054-same-name-swap.md) | 同名ファイルの差し替え窓（TOCTOU） | open | 0005 |
 | [0055](issues/0055-journal-save-batching.md) | Journal の保存を write 単位でまとめる | open | 0045 |
+| [0056](issues/0056-workspace-temp-cleanup.md) | workspace の temp を後片付けする | open | 0045 |
+| [0057](issues/0057-workspace-journal-temp-name.md) | journal の一時ファイル名を一意にする | open | 0045 |
+| [0058](issues/0058-workspace-audit-immutable.md) | auditLog を不変にする | open | 0045 |
+| [0059](issues/0059-agent-observe-bash.md) | agent の bash も観測する | open | 0034 |
+| [0060](issues/0060-workspace-helper-reply-length.md) | helper の応答に長さの検証を入れる | open | 0033 |
+| [0061](issues/0061-workspace-intent-temp-type.md) | JournalIntent.temp の「無い」を型で表す | open | 0045 |
+| [0062](issues/0062-core-empty-patch.md) | 空の PATCH をどう扱うか決める | open | 0037 |
+| [0063](issues/0063-core-contract-error-path.md) | ContractError に path を残す | open | 0037 |
+| [0064](issues/0064-core-schema-naming.md) | スキーマの id と名前の命名を分ける | open | 0037 |
 | [0024](issues/0024-secret-scopes.md) | 秘密のスコープ分離（14） | **done** | 0019 |
 
 ## ゲート
