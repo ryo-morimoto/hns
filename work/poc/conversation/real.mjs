@@ -13,7 +13,7 @@ import { createSandboxEnv } from "../workspace-core/sandbox.mjs";
 import { ollamaCloud, readOllamaKey } from "./ollama.mjs";
 import { opencodeGo, readOpenCodeKey } from "./opencode.mjs";
 
-const BWRAP = process.env.BWRAP ?? "/nix/store/mvj6y8k3xs35cj7kq937xi44q4hl3r93-bubblewrap-0.12.0/bin/bwrap";
+const BWRAP = process.env.BWRAP || "bwrap";
 const kind = process.env.PROVIDER ?? "ollama";
 const model = process.env.MODEL_ID ?? (kind === "opencode" ? "deepseek-v4.1-flash" : "gpt-oss:120b");
 const providerId = kind === "opencode" ? "opencode-go" : "ollama-cloud";

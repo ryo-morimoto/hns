@@ -13,7 +13,7 @@ import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-e
 import { Workspace } from "../workspace-core/workspace.mjs";
 import { createSandboxEnv } from "../workspace-core/sandbox.mjs";
 
-const BWRAP = process.env.BWRAP ?? "/nix/store/mvj6y8k3xs35cj7kq937xi44q4hl3r93-bubblewrap-0.12.0/bin/bwrap";
+const BWRAP = process.env.BWRAP || "bwrap";
 const sha = (text) => "sha256:" + createHash("sha256").update(text).digest("hex");
 let pass = 0, fail = 0;
 const check = (ok, name, detail) => { ok ? pass++ : fail++; console.log(ok ? "PASS" : "FAIL", name, ok ? "" : detail ?? ""); };

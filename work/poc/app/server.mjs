@@ -21,11 +21,11 @@ import { createTailscaleVerifier, parseUsers } from "./tailscale.mjs";
 import { cronMatches } from "./cron.mjs";
 import { GraphError, interpolate, validateGraph } from "./workflow.mjs";
 import { Workspace } from "../workspace-core/workspace.mjs";
-import { createSandboxEnv, detectSandbox } from "../workspace-core/sandbox.mjs";
+import { createNoExecEnv, createSandboxEnv, detectSandbox } from "../workspace-core/sandbox.mjs";
 import { ollamaCloud, readOllamaKey } from "../conversation/ollama.mjs";
 import { opencodeGo, readOpenCodeKey } from "../conversation/opencode.mjs";
 
-const BWRAP = process.env.BWRAP ?? "/nix/store/mvj6y8k3xs35cj7kq937xi44q4hl3r93-bubblewrap-0.12.0/bin/bwrap";
+const BWRAP = process.env.BWRAP || "bwrap";
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css" };
 
 const json = (res, status, body) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
@@ -93,7 +93,8 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const connection = new Connection({ command: [localDaemon()] });
   const raw = new LocalExecutionEnv({ cwd: root, connection });
   const sandboxStatus = await detectSandbox(bwrap);
-  const sandbox = createSandboxEnv(raw, { root, bwrap });
+  // Fail closed: without a passing probe the environment keeps file access but refuses exec.
+  const sandbox = sandboxStatus.available ? createSandboxEnv(raw, { root, bwrap: sandboxStatus.bwrap }) : createNoExecEnv(raw, sandboxStatus);
   const control = openControlPlane(join(stateDir, "control.sqlite"));
   control.pruneEvents(30);
   const secrets = new SecretStore({ stateDir, control });
@@ -169,7 +170,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   };
   control.addEvent({
     event: "server.start",
-    detail: { provider: providerId, model: modelId, auth: String(auth), limits: limitsConfig, sandbox: sandboxStatus.available, version: 1 },
+    detail: { provider: providerId, model: modelId, auth: String(auth), limits: limitsConfig, sandbox: { exec: sandboxStatus.exec, available: sandboxStatus.available, code: sandboxStatus.code, version: sandboxStatus.version }, version: 1 },
   });
   const recentChats = new Map();
   const activeChats = new Map();
