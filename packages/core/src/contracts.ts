@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { EVENT_LEVELS, MESSAGE_ROLES, TASK_STATUSES } from "./types.ts";
 
 /** One message as the UI sees it. Tool results carry the tool name, not the content of the file. */
 export const Message = z.object({
-  role: z.enum(["user", "assistant", "tool"]),
+  role: z.enum(MESSAGE_ROLES),
   text: z.string().optional(),
   toolName: z.string().optional(),
   toolCalls: z.array(z.string()).optional(),
@@ -86,7 +87,7 @@ export const Task = z.object({
   id: z.string(),
   project_id: z.string(),
   title: z.string(),
-  status: z.string(),
+  status: z.enum(TASK_STATUSES),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -109,7 +110,7 @@ export const FileRead = z.object({ path: z.string(), content: z.string(), versio
 export const Event = z.object({
   id: z.string(),
   at: z.string(),
-  level: z.string(),
+  level: z.enum(EVENT_LEVELS),
   event: z.string(),
   request_id: z.string().nullable(),
   conversation_id: z.string().nullable(),

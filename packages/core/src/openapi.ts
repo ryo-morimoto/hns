@@ -1,5 +1,5 @@
 import { z } from "zod";
-import * as s from "./schemas.ts";
+import * as s from "./contracts.ts";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 

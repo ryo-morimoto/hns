@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as s from "../src/schemas.ts";
+import * as s from "../src/contracts.ts";
 import { openapiDocument } from "../src/openapi.ts";
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };

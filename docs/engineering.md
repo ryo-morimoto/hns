@@ -20,15 +20,13 @@
 ## 2. コード構造
 
 ```text
-apps/
-  server/     HTTP・SSE・認証・ユースケースの組み立て
-  web/        React UI（会話・進捗・エディタ）
-  worker/     （後）マシン側の常駐エージェント
 packages/
-  schema/     API 契約（zod・OpenAPI・型付きクライアント）
+  core/       types.ts（ドメイン語彙）+ contracts.ts（zod）+ OpenAPI。pi-ai の types.ts と同じ位置づけ
   workspace/  Workspace（版・Journal・認可・sandbox）
   providers/  Ollama / OpenCode などのアダプタ
   config/     環境変数の zod パース
+  server/     app。HTTP・SSE・認証。bin を持つ（coding-agent の package.json に倣う）
+  web/        React UI（会話・進捗・エディタ）
 
 各パッケージは [pi の packages](https://github.com/earendil-works/pi/tree/main/packages) に倣う。
 

@@ -89,7 +89,7 @@ curl -s "$URL/events?cursor=0&limit=1"
 | 網羅（全イベント） | `cd work/poc/app && node run-journal.mjs` |
 | 会話の管理 | `cd work/poc/app && node run-conversations.mjs` |
 | 安全 | `cd work/poc/app && node run-safety.mjs` |
-| 契約（schema） | `npm test --workspace @hns/schema` |
+| 契約（core） | `npm test --workspace @hns/core` |
 | まとめて検査 | `scripts/check.sh`（oxlint / oxfmt / tsc / 契約テスト） |
 | 秘密 | `cd work/poc/app && node run-secrets.mjs` |
 | バックアップ | `cd work/poc/app && node run-backup.mjs` |

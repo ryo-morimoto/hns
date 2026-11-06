@@ -1,7 +1,7 @@
 {
-  "name": "@hns/schema",
+  "name": "@hns/core",
   "version": "0.1.0",
-  "description": "API contracts for hns: zod schemas, OpenAPI, and shared types",
+  "description": "Domain types and API contracts for hns (zod, OpenAPI)",
   "files": [
     "dist",
     "README.md",

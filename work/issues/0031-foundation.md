@@ -10,7 +10,7 @@ PoC を製品コードへ移す土台を作る。契約を先に書き、実サ�
 
 ## Acceptance criteria
 
-- [x] `packages/schema` に主要 API の zod スキーマ
+- [x] `packages/core` にドメイン型（types.ts）と zod 契約
 - [x] 契約テスト: 実サーバのレスポンスをスキーマで検証
 - [x] OpenAPI 生成（3.1）。型付きクライアントは未
 - [x] oxlint + oxfmt + vendored anti-slop。knip / boundaries は未
@@ -21,4 +21,4 @@ PoC を製品コードへ移す土台を作る。契約を先に書き、実サ�
 - 2026-11-07: 方針を [engineering.md](../../docs/engineering.md) に固定（D026〜D028）。
 - 2026-11-07: `packages/protocol` を作成。契約テスト 6/6、型検査も通る。
 - 2026-11-07: anti-slop を vendored し、oxlint / oxfmt / 契約テストを `scripts/check.sh` にまとめた。
-- 2026-11-07: pi の packages 構成に合わせ、`packages/schema`（npm workspaces、`exports` の source 条件、`tsconfig.build.json`、README/CHANGELOG）に作り直した。
+- 2026-11-07: pi の packages 構成に合わせ、`packages/core`（npm workspaces、`exports` の source 条件、`tsconfig.build.json`、README/CHANGELOG）に作り直した。
