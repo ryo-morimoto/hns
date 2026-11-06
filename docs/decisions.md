@@ -104,3 +104,12 @@ date: 2026-11-06 · by: user · issue: 0021
 `auth: "tailscale"` のとき、接続元 IP を `tailscale whois` で引いて LoginName を取る。
 許可リストで絞り、whois が失敗したら拒否。ループバックは既定で拒否（`HNS_ALLOW_LOCAL=1` で許可）。
 `tailscale serve` のヘッダは信じない。passkey は設計だけ残し、ブラウザ認証器が要るので後回し。
+## D017: passkey は WebAuthn + セッション cookie
+date: 2026-11-06 · by: user · issue: 0022
+
+登録・ログインは WebAuthn（`@simplewebauthn/server`）。credential は Control Plane に保存し、ログイン後はサーバ発行の `hns_session`（HttpOnly、30日）で通す。`auth: "passkey"` で切り替え。ブラウザの認証器は Playwright の仮想オーセンティケータでテストする。
+
+## D018: 秘密は user / service のスコープに分ける
+date: 2026-11-06 · by: user · issue: 0024
+
+`user` は人の秘密、`service` は Automation とバックグラウンド実行の資格情報。AES-256-GCM で保存し、Automation 側は `getService` だけを使う。`user` は将来 PRF で包む。

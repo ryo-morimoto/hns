@@ -13,6 +13,8 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { obj, str } from "@earendil-works/pi-schema";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
 import { openControlPlane } from "./db.mjs";
+import { createPasskey } from "./passkey.mjs";
+import { SecretStore, SCOPES } from "./secrets.mjs";
 import { createTailscaleVerifier, parseUsers } from "./tailscale.mjs";
 import { cronMatches } from "./cron.mjs";
 import { GraphError, interpolate, validateGraph } from "./workflow.mjs";
@@ -89,6 +91,9 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const connection = new Connection({ command: [localDaemon()] });
   const raw = new LocalExecutionEnv({ cwd: root, connection });
   const sandbox = createSandboxEnv(raw, { root, bwrap: BWRAP });
+  const control = openControlPlane(join(stateDir, "control.sqlite"));
+  const secrets = new SecretStore({ stateDir, control });
+  const passkey = createPasskey({ control });
   const ws = await new Workspace({ env: raw, root, journalPath: join(stateDir, "journal.json"), context: ctx }).open();
   await ws.recover();
 
@@ -103,11 +108,11 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
       : fauxAssistantMessage(fauxToolCall(step.toolCall, step.arguments ?? {}), { stopReason: "toolUse" }));
     faux.setResponses(script);
   } else if (provider === "opencode") {
-    const built = opencodeGo({ apiKey: readOpenCodeKey(), model: model ?? "deepseek-v4.1-flash" });
+    const built = opencodeGo({ apiKey: readOpenCodeKey() ?? secrets.getService("provider.opencode"), model: model ?? "deepseek-v4.1-flash" });
     models.setProvider(built.provider);
     providerId = "opencode-go";
   } else {
-    const built = ollamaCloud({ apiKey: readOllamaKey(), model: model ?? "gpt-oss:120b" });
+    const built = ollamaCloud({ apiKey: readOllamaKey() ?? secrets.getService("provider.ollama"), model: model ?? "gpt-oss:120b" });
     models.setProvider(built.provider);
     providerId = "ollama-cloud";
   }
@@ -142,7 +147,6 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   });
 
   const storage = await openNodeSqliteStorage(join(stateDir, "session.sqlite"));
-  const control = openControlPlane(join(stateDir, "control.sqlite"));
   const registry = createRegistry();
   registry.install(tools);
   const harness = await Harness.open(storage, { models, registry, env: () => sandbox }, ctx);
@@ -321,8 +325,14 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       const isHook = url.pathname.startsWith("/api/hooks/");
-      if (auth && url.pathname.startsWith("/api/") && !isHook) {
-        if (tailscaleMode) {
+      const passkeyMode = auth === "passkey";
+      const passkeyOpen = url.pathname.startsWith("/api/passkey/") || url.pathname === "/api/me";
+      if (auth && url.pathname.startsWith("/api/") && !isHook && !(passkeyMode && passkeyOpen)) {
+        if (passkeyMode) {
+          if (!control.getSession(cookieOf(req.headers.cookie, "hns_session"))) {
+            return json(res, 401, { error: "unauthorized" });
+          }
+        } else if (tailscaleMode) {
           const verdict = await verifyTailscale(req.socket.remoteAddress);
           if (!verdict.ok) return json(res, 401, { error: "unauthorized", reason: verdict.reason });
         } else {
@@ -364,6 +374,65 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           const task = control.updateTask(id, await bodyOf(req));
           return task ? json(res, 200, task) : json(res, 404, { error: "task not found" });
         } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+      }
+      if (url.pathname === "/api/me" && req.method === "GET") {
+        const session = control.getSession(cookieOf(req.headers.cookie, "hns_session"));
+        const user = session ? control.getUser(session.user_id) : undefined;
+        return json(res, 200, { user: user ? { login: user.login } : null });
+      }
+      if (url.pathname.startsWith("/api/passkey/")) {
+        const hostHeader = req.headers.host ?? "localhost";
+        const rpID = hostHeader.split(":")[0];
+        const origin = "http://" + hostHeader;
+        if (url.pathname === "/api/passkey/register/options" && req.method === "POST") {
+          const { login } = await bodyOf(req);
+          if (!login) return json(res, 400, { error: "login is required" });
+          return json(res, 200, await passkey.registrationOptions({ login, rpID }));
+        }
+        if (url.pathname === "/api/passkey/register/verify" && req.method === "POST") {
+          const { login, response } = await bodyOf(req);
+          try { return json(res, 200, await passkey.verifyRegistration({ login, response, origin, rpID })); }
+          catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+        }
+        if (url.pathname === "/api/passkey/login/options" && req.method === "POST") {
+          const { login } = await bodyOf(req);
+          if (!login) return json(res, 400, { error: "login is required" });
+          return json(res, 200, await passkey.authenticationOptions({ login, rpID }));
+        }
+        if (url.pathname === "/api/passkey/login/verify" && req.method === "POST") {
+          const { login, response } = await bodyOf(req);
+          try {
+            const result = await passkey.verifyAuthentication({ login, response, origin, rpID });
+            if (result.verified) {
+              res.setHeader("set-cookie", "hns_session=" + result.session.id + "; HttpOnly; SameSite=Lax; Path=/; Max-Age=" + 30 * 24 * 3600);
+            }
+            return json(res, 200, { verified: result.verified, user: result.verified ? { login: result.user.login } : null });
+          } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+        }
+        if (url.pathname === "/api/passkey/logout" && req.method === "POST") {
+          const id = cookieOf(req.headers.cookie, "hns_session");
+          if (id) control.deleteSession(id);
+          res.setHeader("set-cookie", "hns_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+          return json(res, 200, { ok: true });
+        }
+      }
+      if (url.pathname === "/api/secrets" && req.method === "GET") {
+        const scope = url.searchParams.get("scope") ?? "user";
+        if (!SCOPES.includes(scope)) return json(res, 400, { error: "unknown scope" });
+        return json(res, 200, secrets.list(scope));
+      }
+      if (url.pathname.startsWith("/api/secrets/")) {
+        const parts = url.pathname.split("/").filter(Boolean); // api, secrets, scope, name
+        if (parts.length === 4 && !SCOPES.includes(parts[2])) return json(res, 400, { error: "unknown scope" });
+        if (parts.length === 4 && req.method === "PUT") {
+          const { value } = await bodyOf(req);
+          if (typeof value !== "string") return json(res, 400, { error: "value is required" });
+          return json(res, 200, secrets.put(parts[2], parts[3], value));
+        }
+        if (parts.length === 4 && req.method === "DELETE") {
+          secrets.delete(parts[2], parts[3]);
+          return json(res, 200, { deleted: true });
+        }
       }
       if (url.pathname === "/api/automations") {
         if (req.method === "GET") return json(res, 200, control.listAutomations(url.searchParams.get("projectId") ?? undefined));

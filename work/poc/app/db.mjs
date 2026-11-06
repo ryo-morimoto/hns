@@ -53,6 +53,35 @@ export function openControlPlane(path) {
       finished_at TEXT,
       PRIMARY KEY (run_id, node_id)
     );
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      login TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS credentials (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      counter INTEGER NOT NULL DEFAULT 0,
+      transports TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS secrets (
+      scope TEXT NOT NULL,
+      name TEXT NOT NULL,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (scope, name)
+    );
     CREATE TABLE IF NOT EXISTS automations (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -209,6 +238,52 @@ export function openControlPlane(path) {
     setNodeWaiting(runId, nodeId, prompt) {
       db.prepare("UPDATE workflow_nodes SET status = 'waiting', prompt = ?, started_at = ? WHERE run_id = ? AND node_id = ?")
         .run(prompt, now(), runId, nodeId);
+    },
+
+    getUserByLogin: (login) => row(db.prepare("SELECT * FROM users WHERE login = ?").get(login)),
+    getUser: (id) => row(db.prepare("SELECT * FROM users WHERE id = ?").get(id)),
+    createUser(login) {
+      const user = { id: randomUUID(), login, created_at: now() };
+      db.prepare("INSERT INTO users (id, login, created_at) VALUES (?, ?, ?)").run(user.id, user.login, user.created_at);
+      return user;
+    },
+    addCredential({ id, userId, publicKey, counter, transports }) {
+      db.prepare("INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, userId, publicKey, counter ?? 0, JSON.stringify(transports ?? []), now());
+    },
+    listCredentials(userId) {
+      return db.prepare("SELECT * FROM credentials WHERE user_id = ?").all(userId).map(row);
+    },
+    getCredential: (id) => row(db.prepare("SELECT * FROM credentials WHERE id = ?").get(id)),
+    updateCounter(id, counter) {
+      db.prepare("UPDATE credentials SET counter = ? WHERE id = ?").run(counter, id);
+    },
+    createSession(userId, ttlMs) {
+      const session = { id: randomUUID(), user_id: userId, expires_at: new Date(Date.now() + ttlMs).toISOString(), created_at: now() };
+      db.prepare("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)").run(session.id, session.user_id, session.expires_at, session.created_at);
+      return session;
+    },
+    getSession(id) {
+      if (!id) return undefined;
+      const session = row(db.prepare("SELECT * FROM sessions WHERE id = ?").get(id));
+      if (!session) return undefined;
+      if (new Date(session.expires_at).getTime() < Date.now()) { db.prepare("DELETE FROM sessions WHERE id = ?").run(id); return undefined; }
+      return session;
+    },
+    deleteSession(id) { db.prepare("DELETE FROM sessions WHERE id = ?").run(id); },
+
+    putSecret({ scope, name, ciphertext, iv, tag }) {
+      db.prepare("INSERT INTO secrets (scope, name, ciphertext, iv, tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope, name) DO UPDATE SET ciphertext = excluded.ciphertext, iv = excluded.iv, tag = excluded.tag, updated_at = excluded.updated_at")
+        .run(scope, name, ciphertext, iv, tag, now(), now());
+    },
+    getSecret(scope, name) {
+      return row(db.prepare("SELECT * FROM secrets WHERE scope = ? AND name = ?").get(scope, name));
+    },
+    listSecretNames(scope) {
+      return db.prepare("SELECT name, updated_at FROM secrets WHERE scope = ? ORDER BY name").all(scope).map(row);
+    },
+    deleteSecret(scope, name) {
+      db.prepare("DELETE FROM secrets WHERE scope = ? AND name = ?").run(scope, name);
     },
 
     createAutomation({ projectId, name, trigger, action, enabled = true }) {

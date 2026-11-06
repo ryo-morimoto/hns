@@ -21,15 +21,30 @@
 `tailscale serve` のヘッダ（`Tailscale-User-Login`）を信じる方式は採らない。
 アプリが他経路からも届くなら詐称できるため、whois の方が安全。
 
-## passkey（設計・未実装）
+## passkey（実装済み）
 
 - 登録・ログインは WebAuthn。`@simplewebauthn/server` で challenge を発行・検証し、
   credential（id / publicKey / counter）を Control Plane に保存する。
 - ログイン後はサーバ署名の HttpOnly セッション cookie。端末ごとに失効できる。
-- まだ作らない理由: ブラウザの認証器が要るため、この環境では自動テストが組めない。
-  tailnet で足りる間は優先度を下げる。
+- 実装: `passkey.mjs`、`/api/passkey/*`、`ui/login.html`。`auth: "passkey"` で切り替える。
+- credential は Control Plane に保存。セッションは `hns_session` の HttpOnly cookie（30日）。
 
-## 暗号化・復号化（設計）
+## テスト手段（実装済み）
+
+ブラウザの認証器は Playwright の**仮想オーセンティケータ**で再現する。
+
+- `playwright-core` + Nix の Chromium（`HNS_CHROME` で上書き）。
+- CDP: `WebAuthn.enable` → `WebAuthn.addVirtualAuthenticator`（ctap2 / internal / UV 済み）。
+- `run-passkey.mjs` が 登録 → 未ログインで 401 → ログイン → セッションで 200 まで通す。
+- Chromium が無い環境では SKIP する。
+
+## 暗号化・復号化（一部実装）
+
+秘密は**スコープで分ける**（実装済み）。§user§ は人のもの、§service§ は Automation 用。
+§secrets.mjs§ が AES-256-GCM で保存し、§getService§ は §user§ を読めない。
+Provider 鍵は §service/provider.<name>§ に置けば、ファイルや env を汚さずに使える。
+
+以下は PRF を使う案（未実装）。
 
 WebAuthn には「鍵を渡す」機能が無い。使えるのは **PRF 拡張**（認証器の hmac-secret）。
 

@@ -6,7 +6,11 @@ const params = new URLSearchParams(location.search);
 if (params.get("token")) sessionStorage.setItem("hns_token", params.get("token"));
 const token = sessionStorage.getItem("hns_token");
 const withToken = (url) => url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token ?? "");
-const apiFetch = (url, options) => fetch(withToken(url), options);
+const apiFetch = async (url, options) => {
+  const response = await fetch(withToken(url), options);
+  if (response.status === 401 && !token && !location.pathname.endsWith("/login.html")) location.href = "/login.html";
+  return response;
+};
 const messagesEl = $("#messages"), liveEl = $("#live"), inputEl = $("#input"), tasksEl = $("#tasks");
 let lastMessageCount = -1;
 const filesEl = $("#files"), textEl = $("#text"), diffEl = $("#diff"), pathEl = $("#path");
