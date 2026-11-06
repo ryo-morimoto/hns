@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 
 export const OPENCODE_KEY_PATHS = [
+  join(homedir(), ".config", "hns", "opencode-go.key"),
   join(homedir(), ".config", "hns", "opencode.key"),
   join(process.cwd(), ".work", "opencode.key"),
 ];

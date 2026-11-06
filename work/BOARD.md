@@ -16,6 +16,7 @@
 | [0010](issues/0010-wasm-editor.md) | WASM エディタ（Want・保留） | **保留** | — |
 | [0011](issues/0011-diff-limit.md) | diff の上限撤廃 | **done** | 0009 |
 | [0012](issues/0012-real-provider.md) | 実 Provider（Ollama Cloud） | **done** | — |
+| [0013](issues/0013-opencode-go.md) | 2プロバイダ目（OpenCode Go） | **done** | 0012 |
 
 ## ゲート
 
