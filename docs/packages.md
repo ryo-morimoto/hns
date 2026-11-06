@@ -53,7 +53,7 @@ server ─┬─► agent ─┬─► workspace ─► pi-durable/env
 | `@hns/store` | Row 型（DB の形）と、Row → 公開型の変換 |
 | `@hns/agent` | 実行中の内部状態（Durable の検査結果など） |
 | `@hns/workspace` | ファイル操作の内部型（公開 DTO は core） |
-| `@hns/server` | リクエスト/レスポンスの封筒（`ErrorResponse`・`Health` など） |
+| `@hns/server` | リクエスト/レスポンスの組み立て（型は core の公開 DTO を使う） |
 
 判断のしかた:
 
