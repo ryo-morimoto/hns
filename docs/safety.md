@@ -24,7 +24,7 @@
 
 | 穴 | 影響 | 次の手 |
 | --- | --- | --- |
-| TOCTOU の最終窓 | 親の差し替えは dirfd で閉じた。同名ファイルを hash と rename の間に差し替える窓は残る | `renameat2(RENAME_EXCHANGE)` で交換して検証する（0005 の残り） |
+| TOCTOU の最終窓 | 親の差し替えは dirfd で閉じた。同名ファイルを hash と rename の間に差し替える窓は残る（lost update のみ。root の外・秘密には影響しない） | v0.1 は許容（0054）。閉じるのは `renameat2` を出せる native helper の導入時（0006 / 0040） |
 | SSH の実接続 | フラグは検証したが、実サーバとの接続は未検証 | 2台目が用意できたら 1 回通す |
 | 非 Linux と bwrap 未導入 | exec を出せない（封じ込めなしでは動かさない） | 検出は 0006 で完了。macOS / Windows の backend と配布は 0033 / 0040（[調査](../work/research/sandbox-platforms.md)） |
 | DEK の露出 | unlocked 中は `/api/passkey/dek` が DEK を返す。XSS で破れる | CSP、入力の扱い |

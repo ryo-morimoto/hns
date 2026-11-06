@@ -92,6 +92,8 @@ type MutationResult =
 パスの解決と open / rename を 1 回の解決にまとめる。ExecutionEnv のファイル API はパスしか取らないため、解決は別プロセスに任せる。
 
 - 書込: temp を root 直下に書いたあと、`rooted.mjs` が root の dirfd を開き、各親を `O_NOFOLLOW | O_DIRECTORY` で辿り、対象を再ハッシュして `expectedVersion` と比べ、**その親の dirfd から** rename する。親の差し替えはこれで閉じるが、**同名ファイルを hash と rename の間に差し替える窓は残る**（Linux に compare-and-rename は無い）。
+  - **v0.1 はこの窓を許容する**（0054）。同一ユーザーの別プロセスは root に直接書けるため、CAS は行儀の良い並行 writer のためのもので、攻撃者の境界ではない。失うのは差し替えた側の内容（lost update）だけで、root の外・秘密・可用性には影響しない。helper を使えない `checks` 経路も同じ窓を持つ。
+  - 閉じるには `renameat2(RENAME_EXCHANGE / RENAME_NOREPLACE)` を出せる native helper が要る。Node の `fs` は `renameat2` を公開しない（`fs.constants` に `RENAME_*` が無い）ため、native addon か同梱バイナリになり、配布（0006 / 0040）とセットで判断する。カーネル / FS が非対応なら `checks` へフォールバックする。
 - 読取: 同じ辿りで最終コンポーネントを `O_NOFOLLOW` で開き、開いた fd から読む。内容は base64 で 1 本の stdout に返す。
 - root の同一性は `.hns/root.json` を dirfd 経由で読み、`probe` で記録した dev / ino と照合する。パスを差し替えられても別のディレクトリは開かない。
 - 起動時に `probe` を 1 回実行して可否を決める。失敗したら（Linux 以外・exec 無し・ヘルパーが届かないホスト）従来の再確認にフォールバックし、`Workspace.mode` が `checks` になる。
