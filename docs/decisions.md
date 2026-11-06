@@ -239,3 +239,12 @@ Journal・intent・dirfd の protocol は workspace の内部型として worksp
 dirfd の helper（0005 / D034）は、ビルドすると `dist/rooted-helper.js` になる独立したプログラムとして同梱する。
 呼ぶ側は `import.meta.url` の隣の `rooted-helper.ts`（source 条件）か `.js`（dist）を選ぶ。
 exec できない環境・Linux 以外では helper を諦めて `mode: "checks"` の経路に落ちる（保証の差は `Workspace.mode` で見える）。
+
+## D037: agent の失敗は値で返し、できる操作は型で分ける
+date: 2026-11-07 · by: agent · issue: 0034
+
+ツールの拒否（`denied` / `conflict` / `unknown`）は例外ではなく JSON の値でモデルに返す。1 つの拒否で run を落とさず、
+モデルが読み直して直せるようにするため（[typescript.md](typescript.md) §3）。想定外の失敗（defect）はそのまま投げる。
+`ShellAccess = sandboxed | disabled` で「exec を出せるか」を型にし、`disabled` のときは bash ツールを登録しない
+（生の exec に落ちる経路を作らない。0006 / D033）。依存（storage / models / workspace / shell）は `openAgent()` だけで受け取り、
+import 時に接続しない。永続 storage（再起動をまたぐ resume）は store 側の実装（0035）で差し替える。
