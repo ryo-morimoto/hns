@@ -156,3 +156,17 @@ date: 2026-11-07 · by: user · issue: 0030
 起動時に bubblewrap を `--version` と user namespace の実行使で検出し、使えなければ bash ツールを登録しない。
 `/api/health` に理由を出す。`.git` は読み取りのみ。rename の前後でパスを再確認し、外れたら `unknown`。
 復旧コードは同一 login で 5 回失敗したら 15 分止める。SSH は pi-env のフラグを検査済み（実接続は未）。
+## D026: 技術スタックを固定する
+date: 2026-11-07 · by: user · issue: 0031
+
+TypeScript strict / Node 24 / Fastify + zod / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / ESLint (type-aware) + Prettier + boundaries / pnpm workspaces。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
+
+## D027: 契約は packages/protocol の zod が正本
+date: 2026-11-07 · by: user · issue: 0031
+
+リクエスト・レスポンス・SSE イベントを zod で書き、OpenAPI と型付きクライアントを生成する。契約テストは実サーバを起動して実 JSON を検証する（モックにしない）。UI は生成型だけを使う。
+
+## D028: AI slop はゲートで止める
+date: 2026-11-07 · by: user · issue: 0031
+
+契約テスト、noUncheckedIndexedAccess、no-explicit-any / no-unsafe-*、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。

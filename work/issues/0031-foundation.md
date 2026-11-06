@@ -1,0 +1,22 @@
+# 0031: 製品の土台（protocol・契約テスト・ゲート）
+
+status: in-progress
+depends-on: 0014
+touches: packages/protocol, apps, docs/engineering.md
+
+## Goal
+
+PoC を製品コードへ移す土台を作る。契約を先に書き、実サーバで検証する。
+
+## Acceptance criteria
+
+- [x] `packages/protocol` に主要 API の zod スキーマ
+- [x] 契約テスト: 実サーバのレスポンスをスキーマで検証
+- [x] OpenAPI 生成（3.1）。型付きクライアントは未
+- [ ] ESLint（type-aware）+ knip + boundaries の設定
+- [ ] CI（typecheck / lint / unit / contract）
+
+## Log
+
+- 2026-11-07: 方針を [engineering.md](../../docs/engineering.md) に固定（D026〜D028）。
+- 2026-11-07: `packages/protocol` を作成。契約テスト 6/6、型検査も通る。

@@ -33,6 +33,7 @@
 | [0028](issues/0028-observability.md) | 観測（17） | **done** | 0014 |
 | [0029](issues/0029-conversation-management.md) | 会話の管理（20） | **done** | 0016 |
 | [0030](issues/0030-safety.md) | 安全の残り（18） | **done** | 0014 |
+| [0031](issues/0031-foundation.md) | 製品の土台（protocol・契約テスト） | in-progress | 0014 |
 | [0024](issues/0024-secret-scopes.md) | 秘密のスコープ分離（14） | **done** | 0019 |
 
 ## ゲート
@@ -100,7 +101,7 @@
 
 - **UI の作り込みは最後**（D011）。今は API と契約を固める。
 - 2マシン（T-05）は**一旦下げる**。1マシンの実用性を先に固める。
-- 次: Workflow の実用（ノード種別・再開）、API の固め。設計は [domain.md](../docs/domain.md)。
+- 次: 製品の土台（0031）。方針は [engineering.md](../docs/engineering.md)。
 
 ## 制約
 
