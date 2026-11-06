@@ -1,6 +1,6 @@
 # Workspace Execution Contract v0.1
 
-2026-11-06 / 草案（実装前） / 前提: [ADR-0001](../decisions/0001-pi-durable-1.5.0.md)
+2026-11-06 / 草案（実装前） / 前提: [D001](decisions.md)
 
 Editor と Agent が同じファイルに触るとき、黙って壊さない。exactly-once は目的ではない。
 

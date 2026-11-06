@@ -1,6 +1,6 @@
 # Board
 
-残作業の索引。1 issue = 1ファイル（`work/issues/`）。ファイル形式は [README.md](README.md)。
+残作業の索引。1 issue = 1ファイル（`work/issues/`）。形式は [README.md](README.md)。
 
 | # | 作業 | 状態 | 依存 |
 | --- | --- | --- | --- |
@@ -13,10 +13,16 @@
 
 | # | 論点 | 案 |
 | --- | --- | --- |
-| D-1 | ADR-0001 の採用 | 採用 |
-| D-2 | 要件#2 の解釈（各マシンで Core Agent / 中央Harness+遠隔Tool） | まず後者で PoC |
+| D-1 | D001（1.5.0固定・Workspace層）の採用 | 採用 |
+| D-2 | 要件#2（各マシンで Core Agent / 中央Harness+遠隔Tool） | まず後者で PoC |
 | D-3 | MVP 範囲 | 1マシンで 会話→編集→差分→再開 |
 | D-4 | プロダクト名（`hns`） | 未定のまま進行可 |
+
+## 調査・検証
+
+- [research/pi-durable-1.5.0.md](research/pi-durable-1.5.0.md): API・適合・失更新・封じ込め
+- [research/](research/): 提供資料の原文（agentics / agent engineering / 開発プロセス / 設計プレイブック）
+- [poc/](poc/): conformance / mutation-gap / root-containment
 
 ## 制約
 

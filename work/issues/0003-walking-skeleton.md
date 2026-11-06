@@ -2,7 +2,7 @@
 
 status: open
 depends-on: 0002
-touches: poc/, docs/design
+touches: work/poc/, docs/design
 
 ## Goal
 

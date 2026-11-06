@@ -2,33 +2,48 @@
 
 複数マシンのAI Agentを、セルフホストの単一UIから操作するプラットフォーム。**設計段階**。
 
-- **境界**: Agent Runtime は Pi Durable（1.5.0固定）。ファイルの安全（条件付き書き込み・Journal・認可）は Workspace 層。
-- **主画面**: Conversation / Progress。Editor・Git Diff は必要時に開く。
-- **実測済み**: ExecutionEnv 適合 29/29、Root 封じ込め 7/7、失更新の再現。
+## やりたいこと
+
+1. インターフェースをセルフホストできる
+2. 複数マシンで Core Agent を動かせる
+3. 一箇所の UI から全マシンの Agent を操作する
+4. 普通のチャットとして使える
+5. プロジェクト管理
+6. ワークフローグラフ設定
+7. タスク管理
+8. 複数 Model Provider
+9. Editor（Zed の操作モデルを参考にする）
+10. Git Diff Viewer（Want）
+11. Web UI Grabber Extension（Want）
+
+- Must は 1〜9。主画面は **Conversation / Progress** で、Editor First にはしない。
+- 最初の利用者は「複数開発マシンを持つ個人開発者」（仮説）。
+- MVP 候補: セルフホスト起動、会話、2マシン接続、権限つきファイル編集、再開。**範囲は未承認**。
+
+## やらないこと
+
+- Zed の見た目・GPUI の Web 移植
+- Agent Loop と永続化の再実装（Pi Durable を借りる）
+- チーム向け RBAC、公開 SaaS
+
+## 状態
+
+| 領域 | 状態 |
+| --- | --- |
+| 要件・決定 | 設計ベースライン（v0.3） |
+| Agent Runtime | Pi Durable **1.5.0 固定**、実API確認済み |
+| ファイル安全 | Workspace 契約 v0.1（実装前） |
+| 検証 | T-01 29/29、T-02 部分 7/7、失更新の再現 |
+| 実装 | 未着手 |
 
 ## 読む順
 
-| 目的 | 場所 |
-| --- | --- |
-| 要件・決定・未決 | [requirements-design-state-v0.3.md](docs/requirements/requirements-design-state-v0.3.md) |
-| ファイルの安全契約 | [workspace-execution-contract.md](docs/design/workspace-execution-contract.md) |
-| Pi Durable の実測 | [pi-durable-1.5.0.md](docs/research/pi-durable-1.5.0.md) |
-| 版固定の決定 | [0001-pi-durable-1.5.0.md](docs/decisions/0001-pi-durable-1.5.0.md) |
-| **残作業** | [work/BOARD.md](work/BOARD.md) |
-| 提供資料の原文 | docs/sources/ |
-
-## 構成
-
-```
-docs/   sources / requirements / design / research / decisions
-work/   BOARD.md, issues/
-poc/    T-01 conformance, mutation-gap, root-containment
-```
+[ARCH.md](ARCH.md) → [docs/workspace.md](docs/workspace.md) → [docs/decisions.md](docs/decisions.md) → [work/BOARD.md](work/BOARD.md)
 
 ## 再実行
 
 ```bash
-cd poc/env-conformance && npm install
+cd work/poc/env-conformance && npm install
 node run.mjs local   # 29/29（pi-env daemon）
 ```
 

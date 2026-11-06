@@ -2,12 +2,12 @@
 
 status: open
 depends-on: -
-touches: poc/root-containment, docs/design
+touches: work/poc/root-containment, docs/design
 
 ## Goal
 
 Root 封じ込めを「読める/拒否できる」から「監査できて、Worker 越しでも同じ」にする。
-traversal と symlink 脱出は 7/7 で拒否済み（`poc/root-containment`）。
+traversal と symlink 脱出は 7/7 で拒否済み（`work/poc/root-containment`）。
 
 ## Acceptance criteria
 

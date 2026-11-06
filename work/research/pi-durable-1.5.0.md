@@ -20,10 +20,10 @@
 
 | 検証 | 結果 | コード |
 | --- | --- | --- |
-| T-01 適合（LocalExecutionEnv） | **29/29** | `poc/env-conformance` |
+| T-01 適合（LocalExecutionEnv） | **29/29** | `work/work/poc/env-conformance` |
 | T-01 適合（NodeExecutionEnv） | 24/29（listFiles 5件未実装） | 同上 |
-| 失更新 | 2クライアント同時書き込みで後勝ち、エラーなし | `poc/mutation-gap` |
-| T-02 部分（traversal・symlink） | **7/7 拒否** | `poc/root-containment` |
+| 失更新 | 2クライアント同時書き込みで後勝ち、エラーなし | `work/work/poc/mutation-gap` |
+| T-02 部分（traversal・symlink） | **7/7 拒否** | `work/work/poc/root-containment` |
 
 ## 含意
 

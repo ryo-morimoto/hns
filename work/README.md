@@ -1,10 +1,12 @@
 # Work tracking
 
-残作業はこのディレクトリにファイルで置く。
+残作業と検証はこのディレクトリ。
 
 - `BOARD.md`: 状態・依存の索引。
-- `issues/NNNN-slug.md`: 1 issue 1ファイル。作業した人が status・log・result を更新する。
-- `scratch/`: gitignore。一時ファイル。
+- `issues/NNNN-slug.md`: 1 issue 1ファイル。
+- `research/`: 提供資料の原文と実測ノート。書き換えない。
+- `poc/`: 検証コード。
+- `scratch/`: gitignore。
 
 ## Issue 形式
 

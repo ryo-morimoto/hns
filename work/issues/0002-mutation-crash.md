@@ -2,7 +2,7 @@
 
 status: open
 depends-on: 0001
-touches: poc/, docs/design
+touches: work/poc/, docs/design
 
 ## Goal
 
@@ -13,7 +13,7 @@ touches: poc/, docs/design
 - [ ] 2クライアントが同じ版から書く → 片方 `applied`、片方 `conflict`（T-03）
 - [ ] intent 後 / rename 前 / outcome 前に停止 → 表どおり applied / conflict / unknown（T-04）
 - [ ] 同じ `operationId` の再送で二重適用しない
-- [ ] 失更新の再現（`poc/mutation-gap`）が `conflict` になる
+- [ ] 失更新の再現（`work/poc/mutation-gap`）が `conflict` になる
 
 ## Log
 

@@ -2,7 +2,7 @@
 
 status: open
 depends-on: -
-touches: README.md, poc/
+touches: README.md, work/poc/
 
 ## Goal
 
