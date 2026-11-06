@@ -61,7 +61,7 @@ Web UI（Conversation / Progress first）
 | M1 | ExecutionEnv の実証 | T-01 合格、契約 v0.1（完了） |
 | M2 | Mutation・会話・Editor | 完了（diff は 0009） |
 | M2.5 | 統合 MVP（1マシン） | 完了（0014・0015、E2E 12/12） |
-| M3 | Project / Task / Workflow | 設計は [docs/domain.md](docs/domain.md) |
+| M3 | Project / Task / Workflow | Project/Task 完了、Workflow は最小（0017） |
 | M4 | 2マシン（**一旦下げ**） | T-05 |
 | M5 | UI / UX の作り込み | 最後に集中（D011） |
 

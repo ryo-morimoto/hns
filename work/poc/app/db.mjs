@@ -22,6 +22,37 @@ export function openControlPlane(path) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS workflows (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      graph_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id TEXT PRIMARY KEY,
+      workflow_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      graph_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      input TEXT NOT NULL,
+      output TEXT,
+      created_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS workflow_nodes (
+      run_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      prompt TEXT,
+      output TEXT,
+      conversation_id TEXT,
+      started_at TEXT,
+      finished_at TEXT,
+      PRIMARY KEY (run_id, node_id)
+    );
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -81,6 +112,70 @@ export function openControlPlane(path) {
         : "SELECT * FROM conversations ORDER BY created_at";
       return (projectId ? db.prepare(sql).all(projectId) : db.prepare(sql).all()).map(row);
     },
+    createWorkflow({ projectId, name, graph }) {
+      const workflow = { id: randomUUID(), project_id: projectId, name, version: 1, graph_json: JSON.stringify(graph), created_at: now(), updated_at: now() };
+      db.prepare("INSERT INTO workflows (id, project_id, name, version, graph_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(workflow.id, workflow.project_id, workflow.name, workflow.version, workflow.graph_json, workflow.created_at, workflow.updated_at);
+      return workflow;
+    },
+    listWorkflows(projectId) {
+      const sql = projectId
+        ? "SELECT * FROM workflows WHERE project_id = ? ORDER BY created_at"
+        : "SELECT * FROM workflows ORDER BY created_at";
+      return (projectId ? db.prepare(sql).all(projectId) : db.prepare(sql).all()).map(row);
+    },
+    getWorkflow: (id) => row(db.prepare("SELECT * FROM workflows WHERE id = ?").get(id)),
+    updateWorkflow(id, graph) {
+      const current = this.getWorkflow(id);
+      if (!current) return undefined;
+      db.prepare("UPDATE workflows SET version = version + 1, graph_json = ?, updated_at = ? WHERE id = ?")
+        .run(JSON.stringify(graph), now(), id);
+      return this.getWorkflow(id);
+    },
+    createRun({ workflowId, input }) {
+      const workflow = this.getWorkflow(workflowId);
+      if (!workflow) return undefined;
+      const run = { id: randomUUID(), workflow_id: workflowId, version: workflow.version, graph_json: workflow.graph_json, status: "queued", input, created_at: now() };
+      db.prepare("INSERT INTO workflow_runs (id, workflow_id, version, graph_json, status, input, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(run.id, run.workflow_id, run.version, run.graph_json, run.status, run.input, run.created_at);
+      const graph = JSON.parse(workflow.graph_json);
+      for (const node of graph.nodes) {
+        db.prepare("INSERT INTO workflow_nodes (run_id, node_id, status) VALUES (?, ?, 'pending')").run(run.id, node.id);
+      }
+      return run;
+    },
+    getRun(id) {
+      const run = row(db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(id));
+      if (!run) return undefined;
+      run.nodes = db.prepare("SELECT * FROM workflow_nodes WHERE run_id = ? ORDER BY rowid").all(id).map(row);
+      return run;
+    },
+    listRuns(workflowId) {
+      const rows = workflowId
+        ? db.prepare("SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY created_at DESC").all(workflowId)
+        : db.prepare("SELECT * FROM workflow_runs ORDER BY created_at DESC").all();
+      return rows.map(row);
+    },
+    setRunStatus(id, status) {
+      db.prepare("UPDATE workflow_runs SET status = ? WHERE id = ?").run(status, id);
+    },
+    finishRun(id, status, output) {
+      db.prepare("UPDATE workflow_runs SET status = ?, output = ?, finished_at = ? WHERE id = ?").run(status, output ?? null, now(), id);
+    },
+    setNodeRunning(runId, nodeId, prompt) {
+      db.prepare("UPDATE workflow_nodes SET status = 'running', prompt = ?, started_at = ? WHERE run_id = ? AND node_id = ?")
+        .run(prompt, now(), runId, nodeId);
+    },
+    setNodeResult(runId, nodeId, status, output, conversationId) {
+      db.prepare("UPDATE workflow_nodes SET status = ?, output = ?, conversation_id = ?, finished_at = ? WHERE run_id = ? AND node_id = ?")
+        .run(status, output, conversationId ?? null, now(), runId, nodeId);
+    },
+    /** A run left running by a crash is not resumable yet. */
+    reconcileRuns() {
+      db.prepare("UPDATE workflow_runs SET status = 'interrupted', finished_at = ? WHERE status IN ('queued', 'running')").run(now());
+      db.prepare("UPDATE workflow_nodes SET status = 'interrupted' WHERE status = 'running'").run();
+    },
+
     registerConversation({ id, projectId, title }) {
       db.prepare("INSERT INTO conversations (id, project_id, title, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, title = excluded.title")
         .run(id, projectId, title, now());

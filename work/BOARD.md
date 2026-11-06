@@ -20,6 +20,7 @@
 | [0014](issues/0014-integrated-mvp.md) | 統合 MVP（1マシン） | **done** | 0002 |
 | [0015](issues/0015-progress-stream.md) | 進捗のストリーミング | **done** | 0014 |
 | [0016](issues/0016-project-task.md) | Project と Task | **done** | 0014 |
+| [0017](issues/0017-workflow.md) | Workflow の最小 | **done** | 0016 |
 
 ## ゲート
 
@@ -45,7 +46,7 @@
 
 - **UI の作り込みは最後**（D011）。今は API と契約を固める。
 - 2マシン（T-05）は**一旦下げる**。1マシンの実用性を先に固める。
-- 次: Project / Task（要件5・7）→ Workflow（6）。設計は [domain.md](../docs/domain.md)。
+- 次: Workflow の実用（ノード種別・再開）、API の固め。設計は [domain.md](../docs/domain.md)。
 
 ## 制約
 

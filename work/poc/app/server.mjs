@@ -11,6 +11,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { obj, str } from "@earendil-works/pi-schema";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
 import { openControlPlane } from "./db.mjs";
+import { GraphError, interpolate, validateGraph } from "./workflow.mjs";
 import { Workspace } from "../workspace-core/workspace.mjs";
 import { createSandboxEnv } from "../workspace-core/sandbox.mjs";
 import { ollamaCloud, readOllamaKey } from "../conversation/ollama.mjs";
@@ -103,6 +104,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
 
   const storage = await openNodeSqliteStorage(join(stateDir, "session.sqlite"));
   const control = openControlPlane(join(stateDir, "control.sqlite"));
+  control.reconcileRuns();
   const registry = createRegistry();
   registry.install(tools);
   const harness = await Harness.open(storage, { models, registry, env: () => sandbox }, ctx);
@@ -118,6 +120,43 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
     const found = await harness.conversation(Number(id), ctx);
     if (found) conversations.set(String(found.id), found);
     return found;
+  };
+
+  const lastAssistantText = async (conversation) => {
+    const transcript = await conversation.entries({}, 20, undefined, ctx);
+    const last = transcript.items.filter((entry) => entry.kind === "pi.assistant").at(-1);
+    const content = last?.model?.[0]?.content ?? [];
+    return Array.isArray(content) ? content.filter((block) => block.type === "text").map((block) => block.text).join("") : "";
+  };
+
+  const executeRun = async (runId) => {
+    const run = control.getRun(runId);
+    if (!run) return;
+    let parsed;
+    try { parsed = validateGraph(JSON.parse(run.graph_json)); }
+    catch (error) { control.finishRun(runId, "failed", String(error?.message ?? error)); return; }
+    const values = { input: run.input };
+    control.setRunStatus(runId, "running");
+    try {
+      for (const id of parsed.order) {
+        const node = parsed.nodes.find((candidate) => candidate.id === id);
+        const prompt = interpolate(node.prompt, values);
+        control.setNodeRunning(runId, id, prompt);
+        const conversation = await harness.createConversation({
+          ownership: { kind: "ownerless" },
+          agent: { model: { provider: providerId, modelId }, cwd: root },
+        }, ctx);
+        const submission = await conversation.submit({ type: "input", content: prompt, requestId: `run-${runId}-${id}` }, ctx);
+        const settled = await submission.wait(ctx);
+        const text = settled.status === "done" ? await lastAssistantText(conversation) : "";
+        values[id] = text;
+        control.setNodeResult(runId, id, settled.status === "done" ? "done" : "failed", text, String(conversation.id));
+        if (settled.status !== "done") throw new Error("node failed: " + id);
+      }
+      control.finishRun(runId, "done", JSON.stringify(values));
+    } catch (error) {
+      control.finishRun(runId, "failed", JSON.stringify({ error: String(error?.message ?? error), values }));
+    }
   };
 
   const clients = new Set();
@@ -191,6 +230,39 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           const task = control.updateTask(id, await bodyOf(req));
           return task ? json(res, 200, task) : json(res, 404, { error: "task not found" });
         } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+      }
+      if (url.pathname === "/api/workflows") {
+        if (req.method === "GET") return json(res, 200, control.listWorkflows(url.searchParams.get("projectId") ?? undefined));
+        if (req.method === "POST") {
+          const { projectId = "default", name, graph } = await bodyOf(req);
+          try { validateGraph(graph); }
+          catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+          if (!name) return json(res, 400, { error: "name is required" });
+          return json(res, 201, control.createWorkflow({ projectId, name, graph }));
+        }
+      }
+      if (url.pathname.startsWith("/api/workflows/") && req.method === "PUT") {
+        const id = url.pathname.slice("/api/workflows/".length);
+        const { graph } = await bodyOf(req);
+        try { validateGraph(graph); }
+        catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+        const workflow = control.updateWorkflow(id, graph);
+        return workflow ? json(res, 200, workflow) : json(res, 404, { error: "workflow not found" });
+      }
+      if (url.pathname.startsWith("/api/workflows/") && url.pathname.endsWith("/runs") && req.method === "POST") {
+        const id = url.pathname.slice("/api/workflows/".length, -"/runs".length);
+        const { input = "" } = await bodyOf(req);
+        const run = control.createRun({ workflowId: id, input });
+        if (!run) return json(res, 404, { error: "workflow not found" });
+        void executeRun(run.id);
+        return json(res, 202, { id: run.id, version: run.version });
+      }
+      if (url.pathname.startsWith("/api/runs/") && req.method === "GET") {
+        const run = control.getRun(url.pathname.slice("/api/runs/".length));
+        return run ? json(res, 200, run) : json(res, 404, { error: "run not found" });
+      }
+      if (url.pathname === "/api/runs" && req.method === "GET") {
+        return json(res, 200, control.listRuns(url.searchParams.get("workflowId") ?? undefined));
       }
       if (url.pathname === "/api/conversations") {
         if (req.method === "GET") return json(res, 200, control.listConversations(url.searchParams.get("projectId") ?? undefined));
