@@ -28,7 +28,7 @@
 | 試験 | マイルストーン | 状態 |
 | --- | --- | --- |
 | T-01 ExecutionEnv Conformance | M1 | **合格**（29/29, LocalExecutionEnv） |
-| T-02 Workspace Access | M1 | 未実施 |
+| T-02 Workspace Access | M1 | **部分**（パス/symlink 7/7、監査・Worker越しは未） |
 | T-03 Version Conflict | M2 | 未実施 |
 | T-04 Crash/Mutation | M2 | 未実施 |
 | T-05 Worker Connection | M3 | 未実施 |

@@ -14,7 +14,8 @@
 | Agent Runtime（Pi Durable） | **1.5.0 に固定して実APIを確認済み**（[調査](docs/research/01-pi-durable-1.5.0-executionenv.md)） |
 | ExecutionEnv 適合（T-01） | ローカルdaemon経由で 29/29 合格（[PoC](poc/env-conformance/)） |
 | Workspace Execution Contract | [v0.1 草案](docs/design/workspace-execution-contract-v0.1.md)（実装前） |
-| T-02〜T-07 | 未実施 |
+| T-02 | 部分実施（パス/symlink 封じ込め 7/7） |
+| T-03〜T-07 | 未実施 |
 
 ## 何が分かっているか（要約）
 

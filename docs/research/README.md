@@ -7,3 +7,4 @@
 | 番号 | 内容 | 日付 |
 | --- | --- | --- |
 | 01 | [Pi Durable 1.5.0 — ExecutionEnv と永続化の実測](01-pi-durable-1.5.0-executionenv.md) | 2026-11-06 |
+| 02 | [Root 封じ込めの先行検証（T-02 の部分）](02-root-containment.md) | 2026-11-06 |

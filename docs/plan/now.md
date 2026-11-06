@@ -17,15 +17,14 @@ Agent の会話・モデル接続・UI は、この境界が固まるまで作�
 | Pi Durable / pi-env の版を特定（1.5.0, tag `f9a2636`） | [調査01](../research/01-pi-durable-1.5.0-executionenv.md) |
 | ExecutionEnv の実API確認（条件付き書き込みが無いこと） | 同上 §3 |
 | **T-01 実行**: 適合テスト 29/29（LocalExecutionEnv） | [poc/env-conformance](../../poc/env-conformance/) |
+| **T-02（部分）**: Root 封じ込め 7/7（traversal・symlink 脱出） | [検証02](../research/02-root-containment.md) |
 | 失更新・シェル迂回の再現 | [poc/mutation-gap](../../poc/mutation-gap/) |
 | Workspace Execution Contract v0.1 | [設計](../design/workspace-execution-contract-v0.1.md) |
 | ADR-0001（1.5.0固定・境界） | [決定](../decisions/0001-pin-pi-durable-1.5.0.md) |
 
 ## 次にやること（順序）
 
-1. **T-02: Root 封じ込めの PoC**
-   `..`、絶対パス、symlink 脱出、Root 置換を試し、拒否と監査が成立するかを見る。
-   合格条件は契約 §6・§10。
+1. **T-02 の残り**: 監査ログ、Root 差し替え、Worker 越し（RemoteExecutionEnv）での同じ検証。
 2. **T-03/T-04: Mutation の故障注入**
    2クライアントの同時編集（conflict）と、intent 後・rename 前・outcome 前の停止（unknown 照合）。
 3. **Workspace 層の Walking Skeleton**
