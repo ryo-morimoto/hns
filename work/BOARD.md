@@ -14,14 +14,14 @@
 | # | 論点 | 案 |
 | --- | --- | --- |
 | D-1 | D001（1.5.0固定・Workspace層） | **採用済み** |
-| D-2 | 要件#2 の配置（A 中央+遠隔 / B 各マシン） | **比較中**: [topology.md](../docs/topology.md) |
+| D-2 | 要件#2 の配置（A' 中央+Machine Agent / B 各マシン） | **比較中**: [topology.md](../docs/topology.md) |
 | D-3 | MVP 範囲 | **採用済み**（D003） |
 
 ## 調査・検証
 
 - [research/pi-durable-1.5.0.md](research/pi-durable-1.5.0.md): API・適合・失更新・封じ込め
 - [research/](research/): 提供資料の原文（agentics / agent engineering / 開発プロセス / 設計プレイブック / 要件状態 v0.3）
-- [poc/](poc/): conformance / mutation-gap / root-containment
+- [poc/](poc/): conformance / mutation-gap / root-containment / daemon-life
 
 ## 制約
 
