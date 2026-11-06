@@ -1,5 +1,7 @@
 // Integrated MVP: one process with the conversation, the workspace, and the UI.
 import { createServer } from "node:http";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
@@ -22,6 +24,32 @@ const BWRAP = process.env.BWRAP ?? "/nix/store/mvj6y8k3xs35cj7kq937xi44q4hl3r93-
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css" };
 
 const json = (res, status, body) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
+
+/** The app token: HNS_TOKEN, or a file in the state directory, generated once. */
+async function resolveToken(stateDir) {
+  if (process.env.HNS_TOKEN) return process.env.HNS_TOKEN.trim();
+  const path = join(stateDir, "token");
+  await mkdir(stateDir, { recursive: true }).catch(() => {});
+  try { const existing = (await readFile(path, "utf8")).trim(); if (existing) return existing; } catch {}
+  const token = randomUUID().replaceAll("-", "");
+  await writeFile(path, token, { mode: 0o600 });
+  await chmod(path, 0o600).catch(() => {});
+  return token;
+}
+
+const same = (a, b) => {
+  const left = Buffer.from(String(a));
+  const right = Buffer.from(String(b));
+  return left.length === right.length && timingSafeEqual(left, right);
+};
+
+function cookieOf(header, name) {
+  for (const part of String(header ?? "").split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return rest.join("=");
+  }
+  return undefined;
+}
 const bodyOf = (req) => new Promise((resolve, reject) => {
   let text = "";
   req.setEncoding("utf8");
@@ -47,7 +75,8 @@ function viewEntry(entry) {
   return undefined;
 }
 
-export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false }) {
+export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false, auth = true, host = process.env.HOST ?? "127.0.0.1" }) {
+  const token = await resolveToken(stateDir);
   const connection = new Connection({ command: [localDaemon()] });
   const raw = new LocalExecutionEnv({ cwd: root, connection });
   const sandbox = createSandboxEnv(raw, { root, bwrap: BWRAP });
@@ -282,6 +311,12 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      const isHook = url.pathname.startsWith("/api/hooks/");
+      if (auth && url.pathname.startsWith("/api/") && !isHook) {
+        const bearer = (req.headers.authorization ?? "").startsWith("Bearer ") ? req.headers.authorization.slice(7) : undefined;
+        const candidate = bearer ?? url.searchParams.get("token") ?? cookieOf(req.headers.cookie, "hns_token");
+        if (!same(candidate ?? "", token)) return json(res, 401, { error: "unauthorized" });
+      }
       if (url.pathname === "/api/state" && req.method === "GET") {
         const conversation = await conversationById(url.searchParams.get("conversationId"));
         if (!conversation) return json(res, 404, { error: "conversation not found" });
@@ -451,10 +486,11 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
     }
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(0, host, resolve));
   const { port } = server.address();
   return {
-    url: "http://127.0.0.1:" + port,
+    url: "http://" + (host === "0.0.0.0" ? "127.0.0.1" : host) + ":" + port,
+    token,
     close: async () => {
       clearInterval(timer);
       await watch.stop().catch(() => {});

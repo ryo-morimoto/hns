@@ -15,7 +15,7 @@ const app = await startApp({
   model: process.env.MODEL_ID,
   webDirs: [join(import.meta.dirname, "ui"), join(import.meta.dirname, "../editor")],
 });
-console.log("url:   " + app.url);
+console.log("url:   " + app.url + "/?token=" + app.token);
 console.log("root:  " + root);
 console.log("state: " + stateDir);
 console.log("model: " + provider + " / " + (process.env.MODEL_ID ?? "(default)"));

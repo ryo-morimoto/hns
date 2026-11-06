@@ -86,3 +86,15 @@ date: 2026-11-06 · by: user · issue: 0018
 trigger は webhook（token 付き URL）と schedule（5 フィールド cron、ローカル時刻）。
 action は workflow / chat / task。実行状態は Automation に持たせず、Workflow Run と Firing に残す。
 同時実行は Automation ごとに 1 つ、重なった分は `skipped`。落ちた実行は再試行しない。
+## D014: アプリの入口は token、既定は loopback
+date: 2026-11-06 · by: user · issue: 0019
+
+`HNS_TOKEN` か state の `token`（0600）を使う。API は Bearer / query / cookie を受け、無ければ 401。
+Webhook は Automation ごとの token で動き、アプリ token を要求しない。既定の bind は 127.0.0.1。
+UI は `?token=` で受け取って `sessionStorage` に置く。複数ユーザーと RBAC はまだ無い。
+## D015: バックアップは VACUUM INTO、復元は停止中に
+date: 2026-11-06 · by: user · issue: 0020
+
+動いている間に取れる一貫したスナップショットとして `VACUUM INTO` を使う。`journal.json` と `token` はコピー。
+復元はアプリを止めて行い、`-wal` / `-shm` を消してから置き換える。
+`control.sqlite` は `user_version` でスキーマ版を持ち、変更はそこに足す。

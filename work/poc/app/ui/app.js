@@ -2,6 +2,11 @@ import { EditorBuffer } from "/buffer.mjs";
 import { diffHunks, diffLines } from "/diff.mjs";
 
 const $ = (id) => document.querySelector(id);
+const params = new URLSearchParams(location.search);
+if (params.get("token")) sessionStorage.setItem("hns_token", params.get("token"));
+const token = sessionStorage.getItem("hns_token");
+const withToken = (url) => url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token ?? "");
+const apiFetch = (url, options) => fetch(withToken(url), options);
 const messagesEl = $("#messages"), liveEl = $("#live"), inputEl = $("#input"), tasksEl = $("#tasks");
 let lastMessageCount = -1;
 const filesEl = $("#files"), textEl = $("#text"), diffEl = $("#diff"), pathEl = $("#path");
@@ -32,7 +37,7 @@ function renderState(state) {
   }
 }
 
-const stream = new EventSource("/api/stream");
+const stream = new EventSource(withToken("/api/stream"));
 stream.addEventListener("state", (event) => renderState(JSON.parse(event.data)));
 
 $("#compose").addEventListener("submit", async (event) => {
@@ -40,16 +45,16 @@ $("#compose").addEventListener("submit", async (event) => {
   const message = inputEl.value.trim();
   if (!message) return;
   inputEl.value = "";
-  await fetch("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
+  await apiFetch("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
 });
 
 // Editor
 const read = async (path) => {
-  const response = await fetch("/api/file?path=" + encodeURIComponent(path));
+  const response = await apiFetch("/api/file?path=" + encodeURIComponent(path));
   if (!response.ok) throw new Error("read failed");
   return response.json();
 };
-const save = async (input) => (await fetch("/api/file", { method: "PUT", body: JSON.stringify(input) })).json();
+const save = async (input) => (await apiFetch("/api/file", { method: "PUT", body: JSON.stringify(input) })).json();
 const buffer = new EditorBuffer({ read, save });
 
 function showDiff(before, after) {
@@ -101,7 +106,7 @@ function render() {
 async function openFile(path) { await buffer.open(path); render(); }
 
 async function refreshFiles() {
-  const files = await (await fetch("/api/files?path=.")).json();
+  const files = await (await apiFetch("/api/files?path=.")).json();
   filesEl.replaceChildren(...files.filter((entry) => entry.kind === "file").slice(0, 200).map((entry) => {
     const button = document.createElement("button");
     button.textContent = entry.path;

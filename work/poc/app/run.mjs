@@ -58,7 +58,7 @@ const script = [
 ];
 const webDirs = [join(import.meta.dirname, "ui"), join(import.meta.dirname, "../editor")];
 
-const first = await startApp({ stateDir, root, provider: "faux", fauxScript: script, webDirs });
+const first = await startApp({ stateDir, root, provider: "faux", auth: false, fauxScript: script, webDirs });
 const stream = openStream(first.url + "/api/stream");
 const initial = await waitFor(() => stream.events.length > 0);
 check(initial === true, "stream sends the initial state");
@@ -85,7 +85,7 @@ stream.close();
 await first.close();
 
 // Restart against the same state directory.
-const second = await startApp({ stateDir, root, provider: "faux", fauxScript: [{ text: "done2" }], webDirs });
+const second = await startApp({ stateDir, root, provider: "faux", auth: false, fauxScript: [{ text: "done2" }], webDirs });
 const restored = await (await fetch(second.url + "/api/state")).json();
 check(restored.messages.some((m) => m.role === "assistant" && m.text === "done1"), "transcript survives restart");
 check((await (await fetch(second.url + "/api/file?path=a.txt")).json()).content === "v2", "file survives restart");

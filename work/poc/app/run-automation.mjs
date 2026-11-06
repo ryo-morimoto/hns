@@ -31,7 +31,7 @@ await writeFile(join(root, "a.txt"), "v1");
 
 const webDirs = [join(import.meta.dirname, "ui"), join(import.meta.dirname, "../editor")];
 const script = Array.from({ length: 20 }, () => ({ text: "auto-out" }));
-const app = await startApp({ stateDir, root, provider: "faux", fauxScript: script, webDirs, allowDebug: true });
+const app = await startApp({ stateDir, root, provider: "faux", auth: false, fauxScript: script, webDirs, allowDebug: true });
 const api = async (path, options) => {
   const response = await fetch(app.url + path, options);
   return { status: response.status, body: await response.json() };

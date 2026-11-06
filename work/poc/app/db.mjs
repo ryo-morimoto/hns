@@ -82,6 +82,9 @@ export function openControlPlane(path) {
     );
   `);
 
+  const version = db.prepare("PRAGMA user_version").get().user_version ?? 0;
+  if (version < 1) db.exec("PRAGMA user_version = 1");
+
   const now = () => new Date().toISOString();
   const row = (value) => (value === undefined ? undefined : { ...value });
 

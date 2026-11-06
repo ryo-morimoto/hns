@@ -20,7 +20,7 @@ await writeFile(join(root, "a.txt"), "v1");
 
 const webDirs = [join(import.meta.dirname, "ui"), join(import.meta.dirname, "../editor")];
 const script = Array.from({ length: 8 }, (_, i) => ({ text: i === 1 ? "review-out" : "plan-out" }));
-const app = await startApp({ stateDir, root, provider: "faux", fauxScript: script, webDirs });
+const app = await startApp({ stateDir, root, provider: "faux", auth: false, fauxScript: script, webDirs });
 const api = async (path, options) => {
   const response = await fetch(app.url + path, options);
   return { status: response.status, body: await response.json() };
@@ -90,7 +90,7 @@ const waiting2 = await post("/api/workflows/" + mixed.body.id + "/runs", { input
 await waitFor(async () => (await api("/api/runs/" + waiting2.body.id)).body.status === "waiting");
 await app.close();
 
-const second = await startApp({ stateDir, root, provider: "faux", fauxScript: [], webDirs });
+const second = await startApp({ stateDir, root, provider: "faux", auth: false, fauxScript: [], webDirs });
 const restored = await (await fetch(second.url + "/api/runs/" + waiting2.body.id)).json();
 check(restored.status === "waiting", "a waiting run survives restart", restored.status);
 await fetch(second.url + "/api/runs/" + waiting2.body.id + "/nodes/approve", { method: "POST", body: JSON.stringify({ output: "later" }) });

@@ -19,7 +19,7 @@ await mkdir(stateDir); await mkdir(root);
 await writeFile(join(root, "a.txt"), "v1");
 
 const webDirs = [join(import.meta.dirname, "ui"), join(import.meta.dirname, "../editor")];
-const app = await startApp({ stateDir, root, provider: "faux", fauxScript: [{ text: "hello2" }], webDirs });
+const app = await startApp({ stateDir, root, provider: "faux", auth: false, fauxScript: [{ text: "hello2" }], webDirs });
 const api = async (path, options) => {
   const response = await fetch(app.url + path, options);
   return { status: response.status, body: await response.json() };
@@ -65,7 +65,7 @@ check(!rootState.body.messages.some((m) => m.text === "hello2"), "the root conve
 await app.close();
 
 // Persistence of the control plane across a restart.
-const again = await startApp({ stateDir, root, provider: "faux", fauxScript: [], webDirs });
+const again = await startApp({ stateDir, root, provider: "faux", auth: false, fauxScript: [], webDirs });
 const projectsAfter = await (await fetch(again.url + "/api/projects")).json();
 const tasksAfter = await (await fetch(again.url + "/api/tasks")).json();
 check(projectsAfter.some((p) => p.name === "p1-renamed"), "projects survive restart");
