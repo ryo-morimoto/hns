@@ -21,7 +21,7 @@
 ## 調査・検証
 
 - [research/pi-durable-1.5.0.md](research/pi-durable-1.5.0.md): API・適合・失更新・封じ込め
-- [research/](research/): 提供資料の原文（agentics / agent engineering / 開発プロセス / 設計プレイブック）
+- [research/](research/): 提供資料の原文（agentics / agent engineering / 開発プロセス / 設計プレイブック / 要件状態 v0.3）
 - [poc/](poc/): conformance / mutation-gap / root-containment
 
 ## 制約
