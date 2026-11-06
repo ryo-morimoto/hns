@@ -54,6 +54,8 @@ Run these inside `nix develop`.
 
 ### Coding Patterns and Best Practices
 
+Each rule's condition and source links are in [docs/design.md](docs/design.md).
+
 **Types**
 
 - **The model is the source of truth.** `packages/core/src/types.ts` comes first; valibot schemas are written to fit it (`v.GenericSchema<unknown, T>`). A mismatch must fail to compile. Do not derive types from schemas
@@ -148,6 +150,14 @@ Tests live in `packages/<pkg>/test/*.test.ts`. There is no shared fixture packag
 
 Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS_CHROME` to override the binary.
 
+## Review
+
+- **The goal is a change that safely fulfills its contract, not a perfect diff.** Judge behavior over appearance, evidence over suspicion, this change's regressions over pre-existing problems, and signal over volume
+- **Independent review after implementation, before commit.** Your own reading is not review. A change in scope is done when `npm run check` passes *and* an agent that wrote none of the code returns `PASS`. The procedure is [docs/review.md](docs/review.md); read only the invariant files the change touches
+- **Only regressions block.** What this change made worse is blocking; what pre-dates it becomes an issue, not a blocker (definition: [docs/review.md](docs/review.md)). Ask for the smallest correction that restores the contract
+- **A fix is re-reviewed.** The fix diff is where new defects enter (hns shipped two in one round). The reviewer checks the fix against the boundary schemas and docs it touched
+- **Record it.** Verdict, reviewer, HEAD, and blocking findings go in the issue's `## Result`. No record, no `done`
+
 ## Linting & Formatting
 
 - **oxlint** with the vendored [anti-slop](https://github.com/dmmulroy/anti-slop) rules (`tools/oxlint/anti-slop/`). Read a rule before disabling it; do not edit the vendored copy without recording it in `UPSTREAM.md`
@@ -172,5 +182,7 @@ Read on demand — not every session:
 | Why a decision was made | `docs/decisions.md` (append-only) |
 | Stack, tooling, AI-slop gates | `docs/engineering.md` |
 | How to review a type | `docs/type-review.md` |
+| How to review a finished slice | `docs/review.md` (checks; sources linked per item) |
+| Design rules, conditions and sources | `docs/design.md` (read before designing) |
 | Comparison with the golden examples | `docs/typescript.md` |
 | Current backlog | `work/BOARD.md`, `work/issues/` |
