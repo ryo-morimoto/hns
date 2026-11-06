@@ -32,3 +32,9 @@ date: 2026-11-06 · by: user · issue: -
 常駐サービスとポートは A では無理だが MVP の対象外（[分解](topology.md)）。
 前提: 対象マシンへ到達できる / git・gh・tooling は既に設定済み / sudo と対話は人手。
 A'（常駐 Agent）に上げる条件は、マシン初期化・資格情報管理・常駐サービスを製品機能にするとき。
+## D005: Agent の Tool は Workspace と sandbox を経由する
+date: 2026-11-06 · by: user · issue: 0007
+
+組み込みの `read`/`write` は使わず、`read_file`/`write_file` を自前で登録して Workspace の版チェックを通す。
+`bash` は `createBashTool` を sandbox（`createSandboxEnv`）越しに動かす。
+組み込み Tool は `api.env` を直接触るため、条件付き保存も root 封じ込めも通らない。

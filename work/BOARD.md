@@ -10,10 +10,11 @@
 | [0004](issues/0004-dev-env.md) | 開発環境の固定（node） | open | — |
 | [0005](issues/0005-toctou.md) | TOCTOU の窓を閉じる（openat2 / dirfd） | open | — |
 | [0006](issues/0006-sandbox-deploy.md) | sandbox の前提（bwrap の検出・配布） | open | — |
+| [0007](issues/0007-conversation.md) | 会話の実結線 | **done** | — |
 
 ## ゲート
 
-- [0001 M2 → 会話の実結線](gates/0001-m2-to-conversation.md): **Go with Conditions（未承認）**
+- [0001 M2 → 会話の実結線](gates/0001-m2-to-conversation.md): **Go with Conditions（承認済み・完了）**
 
 ## ユーザー判断待ち
 
