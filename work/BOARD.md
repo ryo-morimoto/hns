@@ -21,6 +21,7 @@
 ## ゲート
 
 - [0001 M2 → 会話の実結線](gates/0001-m2-to-conversation.md): **Go with Conditions（承認済み・完了）**
+- [0002 統合 MVP](gates/0002-integrated-mvp.md): **Go with Conditions（未承認）**
 
 ## ユーザー判断待ち
 
