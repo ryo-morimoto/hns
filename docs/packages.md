@@ -24,7 +24,7 @@
 | パッケージ | 責任（公開するもの） | 依存 |
 | --- | --- | --- |
 | `@hns/core` | モデル（types.ts） | — |
-| `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離 | pi-durable/env |
+| `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離 | core, pi-durable/env |
 | `@hns/agent` | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode） | core, workspace, pi-durable, pi-ai |
 | `@hns/store` | SQLite、migration、リポジトリ。`./identity` で token・tailnet・passkey・セッション・秘密 | node:sqlite |
 | `@hns/server` | HTTP / SSE / 認証の組み立て、Workflow・Automation、bin（`hns`） | 全部 |
@@ -34,14 +34,23 @@
 
 ```text
 web ───────────────► core
-server ─┬─► agent ─┬─► workspace ─► pi-durable/env
+server ─┬─► agent ─┬─► workspace ─► core
+        │          │            └─► pi-durable/env
         │          └─► core
         └─► store ─► core
 ```
 
 - `agent` は pi-ai と pi-durable に依存する。`providers` は分けず、`agent/src/providers/` に置く。
 - `workspace` と `store` は互いに独立。
-- 逆向き（`store` → `server`、`core` → `workspace`）は禁止。境界検査は後で入れる。
+- 逆向き（`store` → `server`、`core` → `workspace`）は禁止。`oxlint.config.ts` の `no-restricted-imports` がこの表と import を照合する（0042）。
+
+## 境界の検査
+
+`npm run check` の oxlint が、各パッケージの `@hns/*` import をこの表と照合し、違反で落とす。設定は `oxlint.config.ts` の `overrides` にあり、パッケージごとに許可する辺だけを残す。
+
+未使用の export・依存・ファイルの検出は knip を使う（[0042](../work/issues/0042-boundaries-knip.md) で導入）。
+
+パッケージを足すときは、この表と `oxlint.config.ts` の該当ブロックを同時に更新する。
 
 ## 型の置き場所
 

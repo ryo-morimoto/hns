@@ -26,4 +26,53 @@ export default defineConfig({
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
   },
+  // Dependency direction from docs/packages.md. A package may import only the @hns/*
+  // entries on its row; add a package or edge here and in that table together (0042).
+  overrides: [
+    {
+      files: ["packages/core/**/*.ts"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              { group: ["@hns/*"], message: "core depends on no @hns package (docs/packages.md)" },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      files: ["packages/store/**/*.ts", "packages/workspace/**/*.ts", "packages/web/**/*.ts"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["@hns/*", "!@hns/core"],
+                message: "only @hns/core is allowed here (docs/packages.md)",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      files: ["packages/agent/**/*.ts"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["@hns/*", "!@hns/core", "!@hns/workspace"],
+                message: "agent may import core and workspace only (docs/packages.md)",
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ],
 });
