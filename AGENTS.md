@@ -14,7 +14,7 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
   - `work/poc/` — the integrated PoC app (plain JS). **Not product code.** Do not add features here
   - `work/BOARD.md`, `work/issues/` — the backlog and per-issue notes
 - `docs/` — flat specs: architecture decisions, auth, safety, observability, packages, type review
-- `scripts/` — `check.sh`, `with-node.sh`, `install-hooks.sh`
+- `scripts/` — `check.sh`, `with-node.sh` (runs commands through `nix develop`), `install-hooks.sh`
 - `.githooks/` — `pre-commit` runs the full check
 
 ### Architecture Notes
@@ -32,6 +32,8 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
 scripts/with-node.sh npm install
 scripts/with-node.sh npm run check
 ```
+
+Node 24 is pinned by `flake.nix`; `scripts/with-node.sh` enters the dev shell for you, so run anything that needs `node`/`npm` through it.
 
 `npm run check` is the gate: oxlint → oxfmt --check → tsc → test → build. It also runs from the pre-commit hook (install once with `scripts/install-hooks.sh`).
 Building is not proof of correctness; types and tests are.
@@ -111,6 +113,7 @@ To add a package: create the directory above, depend on `@hns/core` at the **sam
 ### Running the PoC App
 
 ```bash
+work/poc/install.sh   # once, inside the dev shell; installs the PoC dependencies
 scripts/with-node.sh node work/poc/app/serve.mjs /path/to/workspace
 # PROVIDER=ollama|opencode|faux  MODEL_ID=...  STATE_DIR=...  (prints the URL with a token)
 ```

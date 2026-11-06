@@ -50,10 +50,35 @@
 
 [ARCH.md](ARCH.md) → [docs/workspace.md](docs/workspace.md) → [docs/decisions.md](docs/decisions.md) → [work/BOARD.md](work/BOARD.md)
 
+## 開発環境
+
+Node 24 を [flake.nix](flake.nix) で固定している（nixpkgs `nixos-25.11`、いまは Node 24.18.0 / npm 11.16.0）。
+`nix-command` と `flakes` を有効にした nix を用意し、リポジトリの根から:
+
+```bash
+nix develop        # Node と npm が入ったシェルに入る
+npm install
+```
+
+flake を使えない環境では Node 24.18 以降（24.x）を PATH に置く。22.x は使わない（D032）。
+`node` は `nix develop` の中か `scripts/with-node.sh` 経由で実行する。
+
+まっさらな環境からの再現:
+
+```bash
+nix develop
+npm install
+scripts/with-node.sh npm run check          # 製品コードのゲート
+work/poc/install.sh                         # PoC の依存（隣のディレクトリを import する）
+cd work/poc/app && node run.mjs             # PoC の統合 E2E
+```
+
 ## 触ってみる
 
 ```bash
-cd work/poc/app && npm install
+nix develop
+work/poc/install.sh
+cd work/poc/app
 PROVIDER=ollama node serve.mjs ~/some/dir   # url を開く
 ```
 
@@ -66,6 +91,8 @@ curl -s "$URL/events?cursor=0&limit=1"
 ```
 
 ## 検証
+
+すべて `nix develop` の中で、リポジトリの根から実行する。PoC の依存は先に `work/poc/install.sh` で入れる。
 
 | 対象 | コマンド |
 | --- | --- |
@@ -96,4 +123,4 @@ curl -s "$URL/events?cursor=0&limit=1"
 | T-03/T-04 | `cd work/poc/workspace-core && node run.mjs` |
 | Walking Skeleton | `cd work/poc/walking-skeleton && node run.mjs` |
 
-node はこのマシンの PATH に無い（issue 0004）。
+Node 24 は [flake.nix](flake.nix) が固定する（issue 0004）。`nix develop` か `scripts/with-node.sh` を通して実行する。

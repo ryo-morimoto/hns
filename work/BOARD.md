@@ -7,7 +7,7 @@
 | [0001](issues/0001-t02-remainder.md) | T-02 の残り（監査・Root差し替え・Worker越し） | **done** | — |
 | [0002](issues/0002-mutation-crash.md) | T-03/T-04 Mutation の故障注入 | **done** | 0001 |
 | [0003](issues/0003-walking-skeleton.md) | Workspace Walking Skeleton | **done** | 0002 |
-| [0004](issues/0004-dev-env.md) | 開発環境の固定（node） | open | — |
+| [0004](issues/0004-dev-env.md) | 開発環境の固定（node） | **done** | — |
 | [0005](issues/0005-toctou.md) | TOCTOU の窓を閉じる（openat2 / dirfd） | open | — |
 | [0006](issues/0006-sandbox-deploy.md) | sandbox の前提（bwrap の検出・配布） | open | — |
 | [0007](issues/0007-conversation.md) | 会話の実結線 | **done** | — |
@@ -99,7 +99,7 @@
 | 16 | データの保全 | 取得・復元（0020）。定期化は未 |
 | 17 | 観測 | 全ライフサイクルのイベント（0028）。時系列と外部送出は未 |
 | 18 | 安全 | sandbox 検出・.git 拒否・試行制限（0030）。TOCTOU と SSH 実接続は残 |
-| 19 | 開発・検証基盤 | node 未固定（0004）、CI なし |
+| 19 | 開発・検証基盤 | node は固定（0004）、CI なし（0041） |
 | 20 | 会話の管理 | 改名・アーカイブ・論理削除・タイトル検索（0029） |
 | 21 | UI / UX の仕上げ | 最小のまま（D011） |
 

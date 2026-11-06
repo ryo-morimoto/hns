@@ -190,3 +190,12 @@ date: 2026-11-07 · by: user · issue: 0032
 - API のエラーは `ErrorCode` の union（`ErrorResponse { code, message }`）。
 - Workflow / Automation の状態は const array 由来の union。遷移は `packages/core/src/workflow.ts` の表だけ。
 - SQLite はコンテナ不要。実 SQLite（インメモリ/ファイル）でテストする。外部サービスが増えたら testcontainers。
+
+## D032: Node 24 を flake で固定する
+date: 2026-11-07 · by: coordinator · issue: 0004
+
+Node は 24.x（nixpkgs `nixos-25.11` の `nodejs_24`、いまは 24.18.0）に固定し、`flake.nix` と
+`flake.lock` で nixpkgs の rev ごと固定する。`scripts/with-node.sh` は `nix develop` 経由で
+同じ Node を実行し、PATH の node や `/nix/store` の glob（旧実装）は使わない。D026 の
+「Node 24」を再現可能にするための決定で、22.x は選ばない（`node:sqlite` の挙動を 24 に揃える）。
+flake を使えない環境では Node 24.18 以降を PATH に置く。CI での利用は 0041。
