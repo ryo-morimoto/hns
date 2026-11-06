@@ -47,3 +47,20 @@
   pi-agent-core の Transport は "sse" | "websocket" | "websocket-cached" | "auto" で、実行を委譲する口ではない。
 
 つまり **同じ会話に対しては代替**（二重ループ・二重トランスクリプトになる）。**用途を分ければ併用できる**。
+## delegate 中に中断したら（実測: abort.mjs）
+
+外側 Durable の会話でツール（delegate）が走っている最中に conversation.abort() した結果:
+
+- submission は { status: "unanswered", reason: "aborted" } で返る。回答は生成されない。
+- ツールは pi.tool-result として 1 件記録される。内容は「api.output() で出していた途中経過」+
+  <harness>[error] Tool delegate was aborted</harness>。data.diagnostics は
+  [{ severity: "error", code: "aborted", message: "Tool delegate was aborted" }]。
+- abort 後に api.output() した内容は結果に入らない（abort 時点の slot から組み立てるため）。
+- ツールの context.abortSignal は実際に発火する。ここを agent.abort() に繋いでいなければ、
+  Durable は "aborted" と記録するのに内側のループは走り続ける（トークンだけ消費し、結果は捨てられる）。
+- 会話は idle に戻り、次の submit を受け付ける。
+- クラッシュ（プロセス kill）は別経路: 既定 replay: "unsafe" なので再実行されず、code "interrupted"
+  （may have partially run）として記録され、run は unanswered / reason "interrupted" で終わる。
+
+根拠: scheduler.js:445（mark + signal + idle 待ち）、tool.js:143（ToolTask.abort → settleFromSlot → settle）、
+tool.js:657（pi.tool-result 追記）、generation.js:286（endRun unanswered/aborted）。
