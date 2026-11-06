@@ -5,6 +5,8 @@
 ## 何を残すか
 
 - `events` テーブル。すべての HTTP リクエスト（method・path・status・所要）、会話の開始と終了（`chat.submitted` / `chat.settled`）、中断、サーバ側の例外。
+- エージェントのターン（`agent.response`: provider/model・stopReason・トークン・コスト・エラー）。
+- ツールの呼び出しと結果（`tool.call` / `tool.result`: 名前・callId・所要・isError・診断コード）。引数と出力の中身は残さない。
 - クエリ文字列・ヘッダ・本文は残さない（token をログに落とさない）。
 - 30日より古いイベントは起動時に削除する（`pruneEvents`）。
 
@@ -13,7 +15,7 @@
 | API | 返すもの |
 | --- | --- |
 | `GET /api/events?limit=&level=&since=` | 新しい順のイベント |
-| `GET /api/metrics` | 24時間の HTTP 件数・status 別・p50/p95、chat 件数、Workflow / Firing の status 別、エラー数、今日の利用量 |
+| `GET /api/metrics` | 24時間の HTTP 件数・status 別・p50/p95、chat 件数、agent ターン数・ツール呼び出し数・ツールエラー数、Workflow / Firing の status 別、エラー数、今日の利用量 |
 
 - 各レスポンスに `x-request-id` を返す。指定があれば引き継ぐ。
 - 相関は `requestId` / `conversationId` / `runId` で追える。

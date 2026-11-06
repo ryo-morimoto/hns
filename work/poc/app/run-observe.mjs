@@ -16,7 +16,7 @@ const webDirs = [join(import.meta.dirname, "ui"), join(import.meta.dirname, "../
 async function makeApp(options = {}) {
   const base = await mkdtemp(join(tmpdir(), "hns-obs-"));
   await mkdir(join(base, "state")); await mkdir(join(base, "root"));
-  const app = await startApp({ stateDir: join(base, "state"), root: join(base, "root"), provider: "faux", fauxScript: [{ text: "hi" }], webDirs, ...options });
+  const app = await startApp({ stateDir: join(base, "state"), root: join(base, "root"), provider: "faux", fauxScript: [{ toolCall: "read_file", arguments: { path: "a.txt" } }, { text: "hi" }], webDirs, ...options });
   const call = async (path, opts) => { const response = await fetch(app.url + path, opts); return { status: response.status, body: await response.json().catch(() => ({})) }; };
   const cleanup = async () => { await app.close(); await rm(base, { recursive: true, force: true }); };
   return { app, call, cleanup };
@@ -28,6 +28,7 @@ async function makeApp(options = {}) {
   check(okResponse.status === 200 && Boolean(okResponse.headers.get("x-request-id")), "responses carry a request id");
 
   await fetch(app.url + "/api/missing");
+  await fetch(app.url + "/api/file", { method: "PUT", body: JSON.stringify({ path: "a.txt", content: "x", expectedVersion: "absent", operationId: "setup" }) });
   await fetch(app.url + "/api/chat", { method: "POST", body: JSON.stringify({ message: "hello" }) });
   await waitFor(async () => (await call("/api/events?limit=200")).body.some((event) => event.event === "chat.settled"));
 
@@ -35,6 +36,12 @@ async function makeApp(options = {}) {
   check(events.some((event) => event.event === "http" && event.status === 200), "http 200 is logged");
   check(events.some((event) => event.event === "http" && event.status === 404), "http 404 is logged");
   check(events.some((event) => event.event === "chat.submitted") && events.some((event) => event.event === "chat.settled"), "chat lifecycle is logged");
+  const toolCall = events.find((event) => event.event === "tool.call");
+  const toolResult = events.find((event) => event.event === "tool.result");
+  check(toolCall?.detail?.tool === "read_file", "a tool call is logged", JSON.stringify(toolCall));
+  check(toolResult?.detail?.tool === "read_file" && toolResult?.detail?.isError === false && typeof toolResult.duration_ms === "number", "a tool result is logged with its duration", JSON.stringify(toolResult));
+  const responses = events.filter((event) => event.event === "agent.response");
+  check(responses.length >= 2 && responses[0].detail?.model === "faux/faux-1", "agent responses are logged", JSON.stringify(responses.slice(0, 2)));
   check(events.every((event) => !JSON.stringify(event).includes("token=")), "query strings are not logged");
 
   const metrics = (await call("/api/metrics")).body;
@@ -43,6 +50,8 @@ async function makeApp(options = {}) {
   check(metrics.http.p95ms >= 0, "percentiles are computed");
   check(metrics.chats["chat.submitted"] >= 1, "chat submissions are counted", JSON.stringify(metrics.chats));
   check(metrics.tokensToday.turns >= 1, "usage feeds the metrics", JSON.stringify(metrics.tokensToday));
+  check(metrics.toolCalls >= 1 && metrics.toolErrors === 0, "tool calls are aggregated", JSON.stringify({ calls: metrics.toolCalls, errors: metrics.toolErrors }));
+  check(metrics.agentResponses >= 2, "agent turns are aggregated", String(metrics.agentResponses));
   await cleanup();
 }
 

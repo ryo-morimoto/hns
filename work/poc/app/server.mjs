@@ -13,6 +13,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { obj, str } from "@earendil-works/pi-schema";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
 import { openControlPlane } from "./db.mjs";
+import { createObserveExtension } from "./observe.mjs";
 import { createPasskey } from "./passkey.mjs";
 import { openRecovery } from "./recovery.mjs";
 import { SecretStore, SCOPES } from "./secrets.mjs";
@@ -153,6 +154,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const storage = await openNodeSqliteStorage(join(stateDir, "session.sqlite"));
   const registry = createRegistry();
   registry.install(tools);
+  registry.install(createObserveExtension({ control }));
   const harness = await Harness.open(storage, { models, registry, env: () => sandbox }, ctx);
   const rootConversation = await harness.root(ctx, { agent: { model: { provider: providerId, modelId }, cwd: root } });
   control.registerConversation({ id: String(rootConversation.id), projectId: "default", title: "main" });

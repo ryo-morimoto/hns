@@ -308,7 +308,11 @@ export function openControlPlane(path) {
       if (level) { clauses.push("level = ?"); params.push(level); }
       if (since) { clauses.push("at >= ?"); params.push(since); }
       const where = clauses.length ? " WHERE " + clauses.join(" AND ") : "";
-      return db.prepare("SELECT * FROM events" + where + " ORDER BY at DESC LIMIT ?").all(...params, Math.min(Number(limit) || 100, 1000)).map(row);
+      return db.prepare("SELECT * FROM events" + where + " ORDER BY at DESC LIMIT ?").all(...params, Math.min(Number(limit) || 100, 1000)).map((entry) => {
+        const event = row(entry);
+        if (typeof event.detail === "string") { try { event.detail = JSON.parse(event.detail); } catch {} }
+        return event;
+      });
     },
     pruneEvents(days = 30) {
       const cutoff = new Date(Date.now() - days * 24 * 3600_000).toISOString();
@@ -326,6 +330,9 @@ export function openControlPlane(path) {
         workflowRuns: group("workflow_runs"),
         firings: group("firings"),
         errors: db.prepare("SELECT COUNT(*) AS count FROM events WHERE level = 'error' AND at >= ?").get(since).count,
+        toolCalls: db.prepare("SELECT COUNT(*) AS count FROM events WHERE event = 'tool.result' AND at >= ?").get(since).count,
+        toolErrors: db.prepare("SELECT COUNT(*) AS count FROM events WHERE event = 'tool.result' AND level = 'warn' AND at >= ?").get(since).count,
+        agentResponses: db.prepare("SELECT COUNT(*) AS count FROM events WHERE event = 'agent.response' AND at >= ?").get(since).count,
         tokensToday: this.usageToday(),
       };
     },
