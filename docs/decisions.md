@@ -68,3 +68,9 @@ date: 2026-11-06 · by: user · issue: 0015
 D009 のポーリングを `GET /api/stream`（SSE）に置き換える。送信の起点は Durable の `conversation.watch`。
 未完了タスクは `harness.inspect` から取り、transcript と同じスナップショットに載せる。
 `/api/state` は残す（テストと初期表示の保険）。
+## D011: UI は最後。最終段で UX に集中する
+date: 2026-11-06 · by: user · issue: -
+
+いまの UI は機能確認のための最小（会話・ファイル・diff・タスク）。作り込みは最終段に回す。
+そのときは、見た目より「迷わない・戻れる・待ちが分かる」を基準に、まとめて詰める。
+それまでは API と契約を先に固め、UI の都合で境界を曲げない。

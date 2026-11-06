@@ -60,9 +60,10 @@ Web UI（Conversation / Progress first）
 | M0 | 設計ベースライン | 境界と未決が説明できる（完了） |
 | M1 | ExecutionEnv の実証 | T-01 合格、契約 v0.1（完了） |
 | M2 | Mutation・会話・Editor | 完了（diff は 0009） |
-| M2.5 | 統合 MVP（1マシン） | 完了（0014、E2E 8/8） |
-| M3 | 2マシン（**一旦下げ**） | T-05 は後回し。投影は 0015 で先行 |
-| M4 | 最初の実用版 | 会話→編集→差分→再開 |
+| M2.5 | 統合 MVP（1マシン） | 完了（0014・0015、E2E 12/12） |
+| M3 | Project / Task / Workflow | 設計は [docs/domain.md](docs/domain.md) |
+| M4 | 2マシン（**一旦下げ**） | T-05 |
+| M5 | UI / UX の作り込み | 最後に集中（D011） |
 
 ## Open questions
 
