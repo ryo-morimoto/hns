@@ -238,12 +238,17 @@ for (const kind of KINDS) {
         [],
       );
       const journal = v.parse(
-        v.object({ ops: v.record(v.string(), v.unknown()) }),
+        v.object({
+          ops: v.record(v.string(), v.unknown()),
+          audit: v.array(
+            v.object({ operationId: v.nullable(v.string()), denied: v.literal(true) }),
+          ),
+        }),
         JSON.parse(await readFile(join(target.base, "journal-" + name + ".json"), "utf8")),
       );
       assert.deepEqual(Object.keys(journal.ops), []);
       assert.deepEqual(
-        workspace.auditLog.map((entry) => [entry.operationId, entry.denied]),
+        journal.audit.map((entry) => [entry.operationId, entry.denied]),
         [[null, true]],
       );
       await workspace.close();

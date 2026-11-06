@@ -27,7 +27,7 @@ test("operation ids are derived from arbitrary text inside the rule", () => {
 
 // Catches: a copy of the ISO validator or of the operationId alphabet outside the codec.
 // A text scan: it cannot see a rule retyped in another form, so the claim stays this narrow.
-test("the codec's ISO and operationId literals are not repeated outside codecs.ts", async () => {
+test("no package source calls v.isoTimestamp or repeats the operationId alphabet", async () => {
   const root = join(import.meta.dirname, "../../..");
   const sourceFiles = await readdir(join(root, "packages"), {
     recursive: true,
