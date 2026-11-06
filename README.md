@@ -33,7 +33,7 @@
 | 要件・決定 | 設計ベースライン（v0.3） |
 | Agent Runtime | Pi Durable **1.5.0 固定**、実API確認済み |
 | ファイル安全 | Workspace 契約 v0.1（実装前） |
-| 検証 | T-01〜T-04 全合格、Skeleton 13/13、Sandbox 7/7、会話 10/10、Editor 14/14 |
+| 検証 | T-01〜T-04 全合格、Skeleton 13/13、Sandbox 7/7、会話 10/10、Editor 22/22 |
 | 実装 | 未着手 |
 
 ## 読む順

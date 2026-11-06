@@ -1,6 +1,6 @@
 # 0009: diff の表示
 
-status: open
+status: done
 depends-on: 0008
 touches: work/poc/editor, docs/workspace.md
 
@@ -10,10 +10,17 @@ touches: work/poc/editor, docs/workspace.md
 
 ## Acceptance criteria
 
-- [ ] 競合時に外部版との差分を表示
-- [ ] 保存前の変更を diff で確認できる
-- [ ] 大きいファイルで固まらない（行数上限かストリーム）
+- [x] 競合時に外部版との差分を表示
+- [x] 保存前の変更を diff で確認できる
+- [x] 大きいファイルで固まらない（行数・セル数の上限）
 
 ## Log
 
-- 2026-11-06: 作成。今は local content を保持するだけ。
+- 2026-11-06: 作成。
+- 2026-11-06: `diff.mjs` と UI の Diff ボタンを実装。22/22 合格。
+
+## Result
+
+- 行差分は前後の共通部分を削って LCS。5,000行 / 100万セルを超えたら「大きすぎる」。
+- 競合時は外部の内容も保持し、外部版とローカルの差を見せる。
+- 保存前は保存済みの内容との差を見せる。

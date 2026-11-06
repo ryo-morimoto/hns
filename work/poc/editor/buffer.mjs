@@ -32,7 +32,8 @@ export class EditorBuffer {
       this.savedContent = this.content;
       this.conflict = null;
     } else if (outcome.status === "conflict") {
-      this.conflict = { currentVersion: outcome.currentVersion };
+      const external = await this.#read(this.path).catch(() => undefined);
+      this.conflict = { currentVersion: outcome.currentVersion, external };
     }
     return outcome;
   }

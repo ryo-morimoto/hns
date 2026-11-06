@@ -12,6 +12,10 @@
     header, footer { padding: 6px 10px; border-bottom: 1px solid #ddd; display: flex; gap: 8px; align-items: center; }
     footer { border-top: 1px solid #ddd; border-bottom: 0; }
     textarea { flex: 1; border: 0; padding: 10px; resize: none; font: inherit; outline: none; }
+    #diff { flex: 1; margin: 0; padding: 10px; overflow: auto; white-space: pre; }
+    #diff .add { background: #ecfdf5; color: #065f46; }
+    #diff .del { background: #fef2f2; color: #991b1b; }
+    #diff .same { color: #6b7280; }
     .dirty { color: #b45309; }
     .conflict { background: #fef2f2; color: #991b1b; padding: 6px 10px; }
     .ok { color: #166534; }
@@ -24,10 +28,12 @@
       <strong id="path">(no file)</strong>
       <button id="save">Save</button>
       <button id="reload">Reload</button>
+      <button id="diff">Diff</button>
       <span id="status"></span>
     </header>
     <div id="conflict" class="conflict" hidden></div>
     <textarea id="text" spellcheck="false"></textarea>
+    <pre id="diff" hidden></pre>
     <footer><span id="version">-</span></footer>
   </main>
   <script type="module" src="/app.js"></script>

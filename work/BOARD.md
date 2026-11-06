@@ -12,7 +12,7 @@
 | [0006](issues/0006-sandbox-deploy.md) | sandbox の前提（bwrap の検出・配布） | open | — |
 | [0007](issues/0007-conversation.md) | 会話の実結線 | **done** | — |
 | [0008](issues/0008-editor.md) | Editor の最小（dirty・保存・競合） | **done** | — |
-| [0009](issues/0009-diff-view.md) | diff の表示 | open | 0008 |
+| [0009](issues/0009-diff-view.md) | diff の表示 | **done** | 0008 |
 
 ## ゲート
 

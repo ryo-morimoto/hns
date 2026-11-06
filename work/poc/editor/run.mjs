@@ -7,9 +7,29 @@ import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { getOrThrow } from "@earendil-works/pi-durable/env";
 import { startServer } from "../walking-skeleton/server.mjs";
 import { EditorBuffer } from "./buffer.mjs";
+import { diffLines } from "./diff.mjs";
 
 let pass = 0, fail = 0;
 const check = (ok, name, detail) => { ok ? pass++ : fail++; console.log(ok ? "PASS" : "FAIL", name, ok ? "" : detail ?? ""); };
+
+// 0. Line diff.
+{
+  const same = diffLines("a\nb\nc", "a\nb\nc");
+  check(!same.tooLarge && same.ops.every((op) => op.type === "same") && same.added === 0 && same.removed === 0, "diff: identical");
+
+  const changed = diffLines("a\nb\nc", "a\nB\nc");
+  check(changed.ops.some((op) => op.type === "del" && op.text === "b") && changed.ops.some((op) => op.type === "add" && op.text === "B"), "diff: replaced line", JSON.stringify(changed.ops));
+
+  const inserted = diffLines("a\nc", "a\nb\nc");
+  check(inserted.added === 1 && inserted.removed === 0, "diff: insertion", JSON.stringify(inserted));
+  const deleted = diffLines("a\nb\nc", "a\nc");
+  check(deleted.removed === 1 && deleted.added === 0, "diff: deletion", JSON.stringify(deleted));
+
+  const huge = diffLines(Array.from({ length: 6000 }, (_, i) => String(i)).join("\n"), "x");
+  check(huge.tooLarge === true, "diff: line guard");
+  const wide = diffLines(Array.from({ length: 3000 }, (_, i) => "a" + i).join("\n"), Array.from({ length: 3000 }, (_, i) => "b" + i).join("\n"));
+  check(wide.tooLarge === true, "diff: cell guard");
+}
 
 // 1. Buffer state machine with fake IO.
 {
@@ -35,6 +55,7 @@ const check = (ok, name, detail) => { ok ? pass++ : fail++; console.log(ok ? "PA
   const conflict = await buffer.save("op-2");
   check(conflict.status === "conflict" && buffer.dirty, "save: conflict keeps the local content");
   check(buffer.content === "three" && buffer.conflict?.currentVersion === "v-3", "conflict: local content and version kept");
+  check(buffer.conflict?.external?.content === "external", "conflict: external content kept for the diff", JSON.stringify(buffer.conflict));
 
   await buffer.reload();
   check(buffer.content === "external" && !buffer.dirty && buffer.conflict === null, "reload: takes the workspace content");
@@ -75,6 +96,7 @@ const check = (ok, name, detail) => { ok ? pass++ : fail++; console.log(ok ? "PA
   const conflict = await buffer.save("e2");
   check(conflict.status === "conflict" && buffer.dirty, "HTTP conflict detected", JSON.stringify(conflict));
   check((await env.readTextFile(join(root, "a.txt"), ctx)).value === "from another process", "HTTP conflict did not overwrite");
+  check(buffer.conflict?.external?.content === "from another process", "HTTP conflict carries the external content for the diff", JSON.stringify(buffer.conflict));
 
   await app.close();
   await env.cleanup?.(ctx);
