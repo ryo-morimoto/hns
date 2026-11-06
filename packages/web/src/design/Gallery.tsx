@@ -30,8 +30,13 @@ const TOKENS = [
  * A dev-only page for reviewing the design system by hand (0101). It is not part of the
  * product: open /#/design while the dev server runs and use light/dark plus the keyboard.
  */
+function initialTheme(): ThemeChoice {
+  const value = new URLSearchParams(window.location.search).get("theme");
+  return value === "light" || value === "dark" ? value : "system";
+}
+
 export function Gallery() {
-  const [theme, setTheme] = useState<ThemeChoice>("system");
+  const [theme, setTheme] = useState<ThemeChoice>(initialTheme);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,7 +45,19 @@ export function Gallery() {
   }, [theme]);
 
   return (
-    <main style={{ padding: 24, display: "grid", gap: 28, maxWidth: 960, margin: "0 auto" }}>
+    <main
+      style={{
+        padding: 24,
+        display: "grid",
+        gap: 28,
+        maxWidth: 960,
+        margin: "0 auto",
+        minHeight: "100vh",
+        background: "var(--bg)",
+        color: "var(--text)",
+        fontFamily: "var(--sans)",
+      }}
+    >
       <header style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0, fontSize: 18 }}>hns design system</h1>
         <span style={{ flex: 1 }} />
@@ -121,43 +138,47 @@ export function Gallery() {
       </Section>
 
       <Section title="Dialog">
-        <Dialog
-          trigger={<Button>仕事を頼む</Button>}
-          title="仕事を頼む"
-          description="ゴールを一行で書く。Esc で閉じ、focus は trigger に戻る。"
-          footer={<Button>開始</Button>}
-        >
-          <div style={{ display: "grid", gap: 6 }}>
-            <label htmlFor="gallery-goal" style={{ fontSize: 12, color: "var(--text-2)" }}>
-              ゴール
-            </label>
-            <input
-              id="gallery-goal"
-              placeholder="例: 0102 の App shell を作る"
-              style={{
-                height: 30,
-                padding: "0 8px",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                background: "var(--surface)",
-                color: "var(--text)",
-              }}
-            />
-          </div>
-        </Dialog>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Dialog
+            trigger={<Button>仕事を頼む</Button>}
+            title="仕事を頼む"
+            description="ゴールを一行で書く。Esc で閉じ、focus は trigger に戻る。"
+            footer={<Button>開始</Button>}
+          >
+            <div style={{ display: "grid", gap: 6 }}>
+              <label htmlFor="gallery-goal" style={{ fontSize: 12, color: "var(--text-2)" }}>
+                ゴール
+              </label>
+              <input
+                id="gallery-goal"
+                placeholder="例: 0102 の App shell を作る"
+                style={{
+                  height: 30,
+                  padding: "0 8px",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  background: "var(--surface)",
+                  color: "var(--text)",
+                }}
+              />
+            </div>
+          </Dialog>
+        </div>
       </Section>
 
       <Section title="Menu">
-        <Menu
-          label="操作"
-          trigger={<Button variant="ghost">操作</Button>}
-          items={[
-            { label: "改名", shortcut: "R", onSelect: () => setToast("改名を選んだ") },
-            { label: "複製", shortcut: "D", onSelect: () => setToast("複製を選んだ") },
-            { label: "アーカイブ", disabled: true, onSelect: () => setToast("起きない") },
-            { label: "削除", danger: true, onSelect: () => setToast("削除を選んだ") },
-          ]}
-        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <Menu
+            label="操作"
+            trigger={<Button variant="ghost">操作</Button>}
+            items={[
+              { label: "改名", shortcut: "R", onSelect: () => setToast("改名を選んだ") },
+              { label: "複製", shortcut: "D", onSelect: () => setToast("複製を選んだ") },
+              { label: "アーカイブ", disabled: true, onSelect: () => setToast("起きない") },
+              { label: "削除", danger: true, onSelect: () => setToast("削除を選んだ") },
+            ]}
+          />
+        </div>
       </Section>
 
       <Section title="Toast">
