@@ -20,12 +20,22 @@ export type WorkflowNodeStatus = (typeof WORKFLOW_NODE_STATUSES)[number];
 export const AUTOMATION_FIRING_STATUSES = ["running", "done", "failed", "skipped"] as const;
 export type AutomationFiringStatus = (typeof AUTOMATION_FIRING_STATUSES)[number];
 export type RunStatus = "queued" | "running" | "waiting" | "done" | "failed";
-export type AuthMode = "token" | "tailscale" | "passkey" | "none";
+export const AUTH_MODES = ["token", "tailscale", "passkey", "none"] as const;
+export type AuthMode = (typeof AUTH_MODES)[number];
 export const EVENT_LEVELS = ["info", "warn", "error"] as const;
 export type EventLevel = (typeof EVENT_LEVELS)[number];
 export type MessageRole = "user" | "assistant" | "tool";
-export type Scheduling = "paused" | "running" | "closing";
-export type TaskState = "running" | "pending" | "waiting" | "sleeping" | "completing" | "blocked";
+export const SCHEDULING_STATES = ["paused", "running", "closing"] as const;
+export type Scheduling = (typeof SCHEDULING_STATES)[number];
+export const TASK_STATES = [
+  "running",
+  "pending",
+  "waiting",
+  "sleeping",
+  "completing",
+  "blocked",
+] as const;
+export type TaskState = (typeof TASK_STATES)[number];
 export type TaskKind = string;
 
 export const EVENT_NAMES = [
@@ -36,6 +46,8 @@ export const EVENT_NAMES = [
   "chat.submitted",
   "chat.settled",
   "chat.aborted",
+  "chat.rate_limited",
+  "chat.budget_exceeded",
   "agent.response",
   "tool.call",
   "tool.result",
@@ -151,10 +163,34 @@ export interface ErrorResponse {
   retryAfterMs?: number | undefined;
 }
 
-/** Produced by /api/health; consumed by the login and settings views. */
-export type SandboxStatus =
-  | { available: true; bwrap: string; version: string }
-  | { available: false; reason: string };
+export const SANDBOX_EXEC = ["enabled", "disabled"] as const;
+export type SandboxExec = (typeof SANDBOX_EXEC)[number];
+export const SANDBOX_USER_NAMESPACES = ["ok", "blocked", "unknown"] as const;
+export type SandboxUserNamespaces = (typeof SANDBOX_USER_NAMESPACES)[number];
+
+/** The sysctls the probe reads; null when the host does not expose one. */
+export interface SandboxSysctls {
+  maxUserNamespaces: number | null;
+  unprivilegedUsernsClone: number | null;
+  apparmorRestrictUnprivilegedUserns: number | null;
+}
+
+/** Produced by /api/health; consumed by the login and settings views (docs/workspace.md, 0006). */
+export interface SandboxStatus {
+  backend: "bubblewrap";
+  platform: string;
+  shell: string;
+  /** ISO 8601. */
+  checkedAt: string;
+  available: boolean;
+  exec: SandboxExec;
+  bwrap: string;
+  version?: string | undefined;
+  userNamespaces: SandboxUserNamespaces;
+  sysctls?: SandboxSysctls | undefined;
+  code?: string | undefined;
+  reason?: string | undefined;
+}
 
 export interface Limits {
   /** 0 means unlimited. Never negative. */

@@ -37,7 +37,7 @@
 | [0032](issues/0032-migrate-packages.md) | 6パッケージへの移植 | in-progress | 0031 |
 | [0033](issues/0033-workspace-package.md) | workspace パッケージ（移植） | open | 0031 |
 | [0034](issues/0034-agent-package.md) | agent パッケージ（移植） | open | 0033 |
-| [0037](issues/0037-http-contracts.md) | HTTP 契約と型付きクライアント | open | 0031 |
+| [0037](issues/0037-http-contracts.md) | HTTP 契約と型付きクライアント | in-progress | 0031 |
 | [0035](issues/0035-server-package.md) | server パッケージ（移植） | open | 0034, 0037 |
 | [0038](issues/0038-workflow-runtime.md) | Workflow / Automation の実行基盤 | open | 0035 |
 | [0039](issues/0039-observability-product.md) | 観測の製品化 | open | 0035 |

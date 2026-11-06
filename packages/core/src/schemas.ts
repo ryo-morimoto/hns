@@ -13,7 +13,7 @@ import type {
   TaskUpdate,
 } from "./types.ts";
 
-const projectId = v.pipe(
+export const ProjectIdSchema: v.GenericSchema<unknown, ProjectId> = v.pipe(
   v.string(),
   v.transform((value): ProjectId => {
     // SAFETY: the value is a validated string; the brand exists only in the type.
@@ -21,7 +21,7 @@ const projectId = v.pipe(
   }),
 );
 
-const conversationId = v.pipe(
+export const ConversationIdSchema: v.GenericSchema<unknown, ConversationId> = v.pipe(
   v.string(),
   v.transform((value): ConversationId => {
     // SAFETY: the value is a validated string; the brand exists only in the type.
@@ -31,11 +31,11 @@ const conversationId = v.pipe(
 
 export const ChatRequestSchema: v.GenericSchema<unknown, ChatRequest> = v.object({
   message: v.pipe(v.string(), v.minLength(1)),
-  conversationId: v.optional(conversationId),
+  conversationId: v.optional(ConversationIdSchema),
 });
 
 export const ConversationCreateSchema: v.GenericSchema<unknown, ConversationCreate> = v.object({
-  projectId: v.optional(projectId),
+  projectId: v.optional(ProjectIdSchema),
   title: v.optional(v.string()),
 });
 
@@ -49,7 +49,7 @@ export const ProjectCreateSchema: v.GenericSchema<unknown, ProjectCreate> = v.ob
 });
 
 export const TaskCreateSchema: v.GenericSchema<unknown, TaskCreate> = v.object({
-  projectId,
+  projectId: ProjectIdSchema,
   title: v.pipe(v.string(), v.minLength(1)),
 });
 
