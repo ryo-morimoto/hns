@@ -17,6 +17,7 @@ touches: work/issues/0004, .github
 
 ## Notes
 
+- 優先度は低い（2026-11-07 のユーザー判断）。0042 / 0047 の後でよい。
 - 0046 で決めた runner をそのまま CI で回す。CI だけ別 runner にしない。
 - Node 26 の固定方法（nix か setup-node か）は 0004 の決定に合わせる。
 
