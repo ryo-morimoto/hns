@@ -2,17 +2,23 @@
   "name": "hns",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
-    "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
-    "test:protocol": "cd packages/protocol && node --test test/*.test.ts",
-    "typecheck:protocol": "cd packages/protocol && node node_modules/typescript/bin/tsc --noEmit"
+    "check": "bash scripts/check.sh",
+    "lint": "oxlint packages",
+    "lint:fix": "oxlint --fix packages",
+    "fmt": "oxfmt packages",
+    "fmt:check": "oxfmt --check packages",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
   },
   "devDependencies": {
     "oxlint": "1.78.0",
     "@oxlint/plugins": "1.78.0",
-    "oxfmt": "latest"
+    "oxfmt": "0.77.0"
   }
 }

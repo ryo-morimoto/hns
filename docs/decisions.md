@@ -159,12 +159,12 @@ date: 2026-11-07 · by: user · issue: 0030
 ## D026: 技術スタックを固定する
 date: 2026-11-07 · by: user · issue: 0031
 
-TypeScript strict / Node 24 / Fastify + zod / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / **oxlint + oxfmt** + vendored anti-slop / pnpm workspaces。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
+TypeScript strict / Node 24 / Fastify + zod / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / **oxlint + oxfmt** + vendored anti-slop / **npm workspaces**（pi の packages 構成に倣う）。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
 
-## D027: 契約は packages/protocol の zod が正本
+## D027: 契約は packages/schema の zod が正本
 date: 2026-11-07 · by: user · issue: 0031
 
-リクエスト・レスポンス・SSE イベントを zod で書き、OpenAPI と型付きクライアントを生成する。契約テストは実サーバを起動して実 JSON を検証する（モックにしない）。UI は生成型だけを使う。
+`packages/schema` にリクエスト・レスポンス・SSE イベントを zod で書き、OpenAPI と型付きクライアントを生成する。契約テストは実サーバを起動して実 JSON を検証する（モックにしない）。UI は生成型だけを使う。
 
 ## D028: AI slop はゲートで止める
 date: 2026-11-07 · by: user · issue: 0031

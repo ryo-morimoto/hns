@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Everything a change must pass. Run from the repository root.
+# Everything a change must pass. Run from the repository root (or `npm run check`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-node --version >/dev/null
-oxlint packages apps 2>/dev/null || oxlint packages
-oxfmt --check packages apps 2>/dev/null || oxfmt --check packages
-(cd packages/protocol && node node_modules/typescript/bin/tsc --noEmit)
-(cd packages/protocol && node --test test/*.test.ts)
+oxlint packages
+oxfmt --check packages
+npm run typecheck --workspaces --if-present
+npm test --workspaces --if-present
+npm run build --workspaces --if-present

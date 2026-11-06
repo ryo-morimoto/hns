@@ -15,7 +15,7 @@
 | エディタ | CodeMirror 6 | 軽い。diff は自前で持っている | Monaco（重い） |
 | テスト | Vitest（unit / contract）+ Playwright（E2E） | 契約テストを速く回す | Jest（遅い） |
 | Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored） | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
-| パッケージ | pnpm workspaces | 依存の固定と workspace 参照 | npm workspaces（hoisting が緩い） |
+| パッケージ | **npm workspaces**（`packages/*` + `apps/*`） | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直 | pnpm（今のところ利点より設定が増える） |
 
 ## 2. コード構造
 
@@ -25,10 +25,17 @@ apps/
   web/        React UI（会話・進捗・エディタ）
   worker/     （後）マシン側の常駐エージェント
 packages/
-  protocol/   zod スキーマ・OpenAPI・型付きクライアント
+  schema/     API 契約（zod・OpenAPI・型付きクライアント）
   workspace/  Workspace（版・Journal・認可・sandbox）
   providers/  Ollama / OpenCode などのアダプタ
   config/     環境変数の zod パース
+
+各パッケージは [pi の packages](https://github.com/earendil-works/pi/tree/main/packages) に倣う。
+
+- 独立した §package.json§（name / version / description / §exports§ の §source§ 条件 / §files§ / scripts）。
+- §tsconfig.build.json§ で §dist§ にビルド。テストはパッケージ内の §test/§。
+- §README.md§ と §CHANGELOG.md§。版は揃えて進める。
+- ルートは workspaces で束ね、§check§ / §test§ / §build§ を一括で回す。
 ```
 
 - 依存方向は **apps → packages** の一方向。`workspace` は pi-durable にだけ依存する。
