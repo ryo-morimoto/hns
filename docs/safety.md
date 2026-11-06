@@ -15,7 +15,7 @@
 | rename 中の親差し替え | rename 直前に親を再確認し、後にも canonical を再確認。外れていれば `unknown` |
 | 復旧コードの総当たり | 同一 login で 5 回失敗したら 15 分 429 |
 | SSH の事故 | pi-env の `sshArguments` を検査: `-T -a -x`、`BatchMode=yes`、転送なし、ホスト鍵は自前ファイルに厳格 |
-| 操作 ID で root の外に書く | `operationId` を `[A-Za-z0-9_-]{1,64}` に限定（core の schema と workspace の両方）。temp 名は内部生成の UUID で、呼び出し側の文字列をパスに使わない |
+| 操作 ID で root の外に書く | workspace は temp 名を内部生成の UUID にし、`operationId` をパスに使わない（HTTP の境界は core の schema が `[A-Za-z0-9_-]{1,64}` に限定）。規則は1箇所だけ持つ |
 | agent の bash にサーバの env（鍵・token）が漏れる | sandbox で `--clearenv`。`PATH` と `HOME`（root）などだけを `--setenv` で戻す |
 | agent の bash から鍵ファイルが読める | `createSandboxEnv({ hide })` が指定ディレクトリを tmpfs で隠す（呼び出し側が `~/.config/hns` を渡す） |
 | watcher がディレクトリ作成で落ちる | `is_directory` はイベント対象外にし、未知の失敗は `overflow` に落とす。`void` の reject も必ず処理する |

@@ -48,7 +48,7 @@ type MutationResult =
 1. Root 内であることを検証（下記）
 2. 現在の版を計算し、`expectedVersion` と比較。違えば `conflict`
 3. Journal に intent を記録（`operationId`, ref, expected, contentHash, temp）
-4. root 直下に temp を書き、flush（名前は内部生成の UUID。`operationId` はトークンで、パスには使わない）
+4. root 直下に temp を書き、flush（名前は内部生成の UUID。`operationId` は journal のキーだけで、パスには使わない）
 5. ヘルパー内で再ハッシュして確認し、dirfd 相対で rename して置換（下記「TOCTOU」）
 6. Journal に outcome を記録し、イベントを追記
 

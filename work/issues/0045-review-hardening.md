@@ -23,9 +23,10 @@ touches: packages/workspace, packages/core, docs/safety.md, docs/workspace.md
 
 ## Result
 
-- **C-1**: `operationId` は `[A-Za-z0-9_-]{1,64}` のトークン（core schema + workspace の二重チェック）。
-  temp 名は内部生成の UUID にし、呼び出し側の文字列をパスに使わない。回帰テストは
-  `packages/workspace/test/hardening.test.ts`（hostile id で外に何も出ない、journal の temp に id が無い）。
+- **C-1**: temp 名を内部生成の UUID にし、`operationId` をパスに使わない（構造で解く）。
+  HTTP の境界は core の `OperationIdSchema` がトークンに限定するが、workspace 側に同じ規則は置かない
+  （二重の規則は持たない）。回帰テストは `packages/workspace/test/hardening.test.ts` の 1 ケースで、
+  hostile な id でも外に出ないことと temp 名に id が混ざらないことを固定する。
 - **C-2**: `is_directory` はイベント対象外、未知の失敗は `overflow`。`void` の reject を必ず処理。
   回帰テストは watcher 中に `mkdir` して unhandled rejection が無いこと。
 - **H-1**: sandbox が `--clearenv` で env を落とし、`PATH`・`HOME`（root）などだけを戻す。
@@ -41,3 +42,5 @@ touches: packages/workspace, packages/core, docs/safety.md, docs/workspace.md
 ## Log
 
 - 2026-11-07: レビュー（C-1〜M-4）を受けて修正。テストは各パッケージの `test/` に追加。
+- 2026-11-07: 再レビュー。workspace 側の重複した operationId 規則と未使用 helper（`searchParamsObject`）を削除。
+  境界は HTTP の schema 1箇所、封じ込めは temp の内部生成で担保する。重複していた回帰テストも統合した。

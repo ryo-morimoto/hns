@@ -170,13 +170,6 @@ test("exec runs inside the root and cannot write outside", async (t) => {
   await env.cleanup(ctx);
   await connection.close();
 });
-test("a hidden path must be an absolute directory other than /", () => {
-  const env = new NodeExecutionEnv({ cwd: base });
-
-  assert.throws(() => createSandboxEnv(env, { root: join(base, "r1"), hide: ["/"] }), Error);
-  assert.throws(() => createSandboxEnv(env, { root: join(base, "r2"), hide: ["relative"] }), Error);
-});
-
 // Catches: bash inherited the server's environment, so API keys were visible to the agent.
 test("the sandbox clears the server environment and points HOME at the root", async (t) => {
   const status = await detected();

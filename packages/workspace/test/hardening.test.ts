@@ -3,46 +3,34 @@ import assert from "node:assert/strict";
 import * as v from "valibot";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Denied, FileFailure } from "../src/index.ts";
+import { FileFailure } from "../src/index.ts";
 import { KINDS, openWorkspace, rootOf, withTarget } from "./support.ts";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 for (const kind of KINDS) {
   // Catches: operationId was spliced into the temp path, so "../" wrote outside the root.
-  test(kind + ": a hostile operationId is refused and nothing escapes", async () => {
+  test(kind + ": operationId never reaches a path, even a hostile one", async () => {
     await withTarget(kind, async (target) => {
-      const workspace = await openWorkspace(target, "op-id");
-      for (const operationId of ["../escape", "a/b", "..", "x\u0000y", "x".repeat(65)]) {
-        await assert.rejects(
-          workspace.write({ path: "a.txt", content: "x", expectedVersion: "absent", operationId }),
-          Denied,
-        );
-      }
-
-      const outside = (await readdir(target.base)).filter((name) => name.includes("escape"));
-      assert.deepEqual(outside, []);
-      await workspace.close();
-    });
-  });
-
-  // Catches: the journal stored the caller's id in the temp path, which is what escaped.
-  test(kind + ": the temp name is ours, not the caller's id", async () => {
-    await withTarget(kind, async (target) => {
-      const name = "temp-name";
+      const name = "op-id";
       const workspace = await openWorkspace(target, name);
-      await workspace.write({
+      const applied = await workspace.write({
         path: "a.txt",
         content: "one",
         expectedVersion: "absent",
-        operationId: "op-1",
+        operationId: "../../escape",
       });
+
+      assert.equal(applied.status, "applied");
+      const escaped = (await readdir(target.base)).filter((entry) => entry.includes("escape"));
+      assert.deepEqual(escaped, []);
       const journal = v.parse(
         v.object({ ops: v.record(v.string(), v.object({ temp: v.string() })) }),
         JSON.parse(await readFile(join(target.base, "journal-" + name + ".json"), "utf8")),
       );
-
-      assert.equal(journal.ops["op-1"]?.temp.includes("op-1"), false);
+      const temp = journal.ops["../../escape"]?.temp ?? "";
+      assert.match(temp, /\/\.hns-tmp-[0-9a-f-]{36}$/);
+      assert.equal(temp.includes("escape"), false);
       await workspace.close();
     });
   });

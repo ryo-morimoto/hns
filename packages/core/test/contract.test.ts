@@ -4,7 +4,6 @@ import * as v from "valibot";
 import {
   parseRequest,
   parseResponse,
-  searchParamsObject,
   type RouteRequest,
   type RouteResponse,
 } from "../src/contract.ts";
@@ -99,10 +98,4 @@ test("query schemas take the strings the wire sends", () => {
   if (!events.ok) return;
   assert.equal(events.value.limit, 50);
   assert.equal(parseRequest("GET /api/events", { limit: "0" }).ok, false);
-});
-
-test("search params become the object a query schema parses", () => {
-  const params = new URLSearchParams("includeArchived=1&q=hello");
-
-  assert.deepEqual(searchParamsObject(params), { includeArchived: "1", q: "hello" });
 });

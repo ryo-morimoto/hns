@@ -30,10 +30,6 @@ const dec = new TextDecoder();
 const sha = (bytes: Uint8Array): Version =>
   "sha256:" + createHash("sha256").update(bytes).digest("hex");
 
-// The same shape as core's OPERATION_ID_PATTERN. It is duplicated because the workspace must not
-// import @hns/core at runtime: a test run would depend on core's built dist (npm test before build).
-const JOURNAL_KEY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-
 /** ExecutionEnv reports file failures as FileError; the workspace speaks FileFailure. */
 function asFileFailure(error: Error): Error {
   if (error instanceof FileFailure) return error;
@@ -428,7 +424,6 @@ export class Workspace {
   }
 
   async #write(input: FileWrite): Promise<MutationResult> {
-    if (!JOURNAL_KEY_PATTERN.test(input.operationId)) throw new Denied("invalid operationId");
     const { rel, abs } = await this.#resolve(input.path);
     if (rel === ".git" || rel.startsWith(".git/")) throw new Denied("git is read-only");
     const bytes = input.content instanceof Uint8Array ? input.content : enc.encode(input.content);
@@ -471,7 +466,7 @@ export class Workspace {
         rel,
         expectedVersion,
         contentHash,
-        // Never derived from the caller's id: it is only a journal key.
+        // operationId is only a journal key. Never put it in a path; the temp name is ours.
         temp: this.#canonicalRoot + "/.hns-tmp-" + randomUUID(),
       };
       this.#journal.ops[operationId] = intent;
