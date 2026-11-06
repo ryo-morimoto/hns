@@ -1,7 +1,7 @@
-// The model. Types are the source of truth.
+// The model. Types are the source of truth. Each type names who produces and who consumes it.
 
 declare const brand: unique symbol;
-/** Nominal wrapper: two ids of different kinds cannot be swapped. */
+/** Nominal wrapper: two ids of different kinds cannot be swapped. Built at the DB boundary. */
 export type Brand<T, B extends string> = T & { readonly [brand]: B };
 
 export type ProjectId = Brand<string, "ProjectId">;
@@ -21,9 +21,7 @@ export type AuthMode = "token" | "tailscale" | "passkey" | "none";
 export type EventLevel = "info" | "warn" | "error";
 export type MessageRole = "user" | "assistant" | "tool";
 export type Scheduling = "paused" | "running" | "closing";
-/** The Durable task that is live. */
 export type TaskState = "running" | "pending" | "waiting" | "sleeping" | "completing" | "blocked";
-/** The task definition's name. Open by design: extensions add tasks. */
 export type TaskKind = string;
 
 export type EventName =
@@ -70,24 +68,27 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-/** One turn as the UI sees it. The role decides which fields exist. */
+/** One turn as the UI sees it. Produced by /api/state; consumed by the transcript. */
 export type Message =
   | { role: "user"; text: string }
   | { role: "assistant"; text?: string | undefined; toolCalls?: string[] | undefined }
   | { role: "tool"; toolName: string; text: string; isError?: boolean | undefined };
 
+/** A live Durable task. Produced by /api/state; consumed by the progress panel. */
 export interface TaskView {
   id: TaskId;
   kind: TaskKind;
   state: TaskState;
 }
 
+/** Produced by GET/POST /api/projects; consumed by the project list. */
 export interface Project {
   id: ProjectId;
   name: string;
   created_at: IsoDateTime;
 }
 
+/** Produced by /api/conversations; consumed by the conversation list and the header. */
 export interface Conversation {
   id: ConversationId;
   project_id: ProjectId;
@@ -98,12 +99,14 @@ export interface Conversation {
   deleted_at: IsoDateTime | null;
 }
 
+/** Any non-2xx response. Produced by every endpoint; consumed by the client error path. */
 export interface ErrorResponse {
   error: string;
   reason?: string | undefined;
   retryAfterMs?: number | undefined;
 }
 
+/** Produced by /api/health; consumed by the login and settings views. */
 export type SandboxStatus =
   | { available: true; bwrap: string; version: string }
   | { available: false; reason: string };
@@ -115,6 +118,7 @@ export interface Limits {
   turnTimeoutMs: number;
 }
 
+/** Produced by /api/health; consumed by the login and settings views. */
 export interface Health {
   ok: boolean;
   version: ServerVersion;
@@ -125,6 +129,7 @@ export interface Health {
   limits: Limits;
 }
 
+/** The chat view. Produced by /api/state; consumed by the chat view and the progress panel. */
 export interface State {
   messages: Message[];
   tasks: TaskView[];
@@ -136,22 +141,26 @@ export interface State {
   counts: { conversations: number; projects: number };
 }
 
+/** Produced by the client, consumed by POST /api/chat. */
 export interface ChatRequest {
   message: string;
   conversationId?: ConversationId | undefined;
 }
 
+/** Produced by POST /api/chat; consumed by the client to follow the run. */
 export interface ChatResponse {
   requestId: RequestId;
   submissionId: SubmissionId;
   conversationId: ConversationId;
 }
 
+/** Produced by the client, consumed by POST /api/conversations. */
 export interface ConversationCreate {
   projectId?: ProjectId | undefined;
   title?: string | undefined;
 }
 
+/** Produced by the client, consumed by PATCH /api/conversations/:id. */
 export interface ConversationUpdate {
   title?: string | undefined;
   archived?: boolean | undefined;
@@ -171,6 +180,7 @@ export interface TaskUpdate {
   status?: TaskStatus | undefined;
 }
 
+/** Produced by /api/tasks; consumed by the task list. */
 export interface Task {
   id: TaskId;
   project_id: ProjectId;
@@ -180,6 +190,7 @@ export interface Task {
   updated_at: IsoDateTime;
 }
 
+/** Produced by the client, consumed by PUT /api/file. */
 export interface FileWriteRequest {
   path: string;
   /** UTF-8 text. Binary content is out of scope for now. */
@@ -190,11 +201,13 @@ export interface FileWriteRequest {
 
 export type MutationUnknownReason = "io" | "crash" | "timeout";
 
+/** Produced by PUT /api/file; consumed by the editor. */
 export type MutationResult =
   | { status: "applied"; operationId: OperationId; version: FileVersion }
   | { status: "conflict"; operationId: OperationId; currentVersion: FileVersion }
   | { status: "unknown"; operationId: OperationId; reason: MutationUnknownReason };
 
+/** Produced by GET /api/file; consumed by the editor. */
 export interface FileRead {
   path: string;
   /** UTF-8 text. */
@@ -202,6 +215,7 @@ export interface FileRead {
   version: FileVersion;
 }
 
+/** Produced by /api/events; consumed by the observability view and tests. */
 export interface Event {
   id: EventId;
   at: IsoDateTime;
@@ -224,6 +238,7 @@ export interface StatusCount {
   count: number;
 }
 
+/** Produced by /api/metrics; consumed by the dashboard. */
 export interface Metrics {
   http: {
     total: number;
@@ -251,6 +266,7 @@ export interface UsageBucket {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
 }
 
+/** Produced by /api/usage; consumed by the dashboard and the limits banner. */
 export interface Usage {
   session: { models: Record<string, UsageBucket>; tools: Record<string, UsageBucket> };
   today: { turns: number; tokens: number; cost: number };
