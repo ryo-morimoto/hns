@@ -68,6 +68,9 @@
 | [0063](issues/0063-core-contract-error-path.md) | ContractError に path を残す | open | 0037 |
 | [0064](issues/0064-core-schema-naming.md) | スキーマの id と名前の命名を分ける | open | 0037 |
 | [0065](issues/0065-store-low-followups.md) | store の low 残件（clock・ISO・comment） | open | 0047 |
+| [0066](issues/0066-invariant-codecs.md) | 不変条件を型と codec に寄せる | **done** | 0047 |
+| [0067](issues/0067-findings-registry.md) | レビュー findings の記録場所 | **done** | — |
+| [0068](issues/0068-codec-low-followups.md) | codec review の low 残件 | open | 0066 |
 | [0024](issues/0024-secret-scopes.md) | 秘密のスコープ分離（14） | **done** | 0019 |
 
 ## ゲート
