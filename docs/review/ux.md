@@ -19,6 +19,16 @@
 | 情報密度 | 一覧・詳細・設定 | 重要な情報が強く、補助が後退しているか。すべて同じ強さになっていないか | [Are.na](https://www.are.na) |
 | キーボード同等 | 主要操作 | マウスでできることをキーボードでもできるか。フォーカスが見え、順序が自然か | [FigJam](https://www.figma.com/figjam/) |
 | 状態の網羅 | 画面・部品 | loading / empty / error / 権限なし / 保存中 / 競合 / undo があるか | [Linear](https://linear.app) |
+| 意図の確認 | Agent に依頼する画面 | 曖昧な依頼で1〜3個だけ聞くか。触ってよい範囲（パス・環境）が見えるか | [Setproduct](https://www.setproduct.com/blog/ai-agent-ui-design-patterns) |
+| 計画の可視化 | 実行前 | 計画を編集できるか。工数・費用の目安が出るか。ドライランがあるか | [Setproduct](https://www.setproduct.com/blog/ai-agent-ui-design-patterns) |
+| 実行台帳 | 実行中 | 何をしたかが1行ずつ積まれるか。ツール呼び出しに引数と結果があるか。失敗は既定で開くか | [AI Design Guide](https://www.aidesign.guide/agentic-ux-patterns) |
+| 承認の粒度 | 権限・承認の画面 | 危険度で止め方が変わるか。同種の承認を束ねられるか。「今後は聞かない」があるか | [AI Design Guide](https://www.aidesign.guide/agentic-ux-patterns) |
+| 中断と引き継ぎ | 実行中・計画段階 | 停止して人間が操作できるか（Take Control）。指示を変えられるか。別の人へ渡せるか | [Setproduct](https://www.setproduct.com/blog/ai-agent-ui-design-patterns) |
+| 結果の提示 | 完了 | 変更の footprint が先か。確信度と未解決が分かれているか | [Setproduct](https://www.setproduct.com/blog/ai-agent-ui-design-patterns) |
+| 監査と取消 | 完了後 | 各操作が見つかるか。Undo・チェックポイント・ハンク単位の Keep/Undo/Apply があるか | [AI Design Guide](https://www.aidesign.guide/agentic-ux-patterns) |
+| 自律度 | 実行の設定 | 計画だけ / 編集まで / 自動 を選べるか。既定は安全側か | [AI Design Guide](https://www.aidesign.guide/agentic-ux-patterns) |
+| 再入場 | タブを戻る・通知から戻る | 何が起きたか1画面で分かるか。受信箱（Needs input / Working / Completed）と件数が合うか | [AI Design Guide](https://www.aidesign.guide/agentic-ux-patterns) |
+| 入力の入口 | 入力・コマンド・パネル | ⌘K で移動と AI 依頼の両方ができるか。sparkle・ドックパネルなど入口が散らばっていないか。何を文脈に入れているか表示されるか | [AI Design Guide](https://www.aidesign.guide/agentic-ux-patterns) |
 
 ## 証拠
 
