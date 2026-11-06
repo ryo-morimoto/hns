@@ -195,6 +195,13 @@ hns の画面は「AI と会話する場所」ではなく、**人間が仕事�
 - **補足**: hns: モバイル/タブレット利用の増加を見込む。タップ領域は 44px を目安にし、hover 前提の操作を作らない
 - **Ref**: [Apple HIG — Gestures](https://developer.apple.com/design/human-interface-guidelines/gestures) / [Material 3 — Gestures](https://m3.material.io/foundations/interaction/gestures) / [WCAG 2.5.1](https://www.w3.org/WAI/WCAG22/Understanding/pointer-gestures.html) / [WCAG 2.5.7](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html)
 
+## 14. 頻度で置き場所を決める（モバイルは下、稀な操作は上）
+
+- **条件**: 画面の操作を配置するとき。特にモバイル・タブレット
+- **命令**: 頻度が高い操作は画面下部（親指の届く範囲）に集約し、難しいものはスワイプで行えるようにする。頻度が低い操作は上部・メニューでよい。agentic system では **コンテキストスイッチ（プロジェクト/会話）とタスクスイッチ（実行/Needs you）** が最も頻度が高い
+- **補足**: hns: 下部の候補は現在地・Needs you・タスク一覧・コマンド。上部は接続・テーマ・設定など稀な操作。スワイプは代替操作を必ず持つ（原則13・WCAG 2.5.1/2.5.7）。hover 前提にしない
+- **Ref**: [Apple HIG — Tab bars](https://developer.apple.com/design/human-interface-guidelines/tab-bars) / [Material 3 — Navigation bar](https://m3.material.io/components/navigation-bar/overview) / [Linear AIG](https://linear.app/developers/aig)
+
 ## 参考: Agentic Workspace の5例
 
 | 例 | 取るもの | リンク |
