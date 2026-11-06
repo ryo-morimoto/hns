@@ -5,3 +5,15 @@ import { afterEach } from "vitest";
 afterEach(() => {
   cleanup();
 });
+
+// jsdom has no layout engine; Base UI's popups consult these two (0101).
+if (!("ResizeObserver" in globalThis)) {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  globalThis.ResizeObserver = ResizeObserverStub;
+}
+
+Element.prototype.scrollIntoView = function scrollIntoView(): void {};

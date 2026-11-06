@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { createWebClient } from "./api/client.ts";
 import { createFixtureFetch } from "./api/fixtures.ts";
+import "./design/system.css";
 
 const fixtures = import.meta.env.VITE_HNS_FIXTURES === "1";
 const client = createWebClient({ baseUrl: "", fetch: fixtures ? createFixtureFetch() : fetch });

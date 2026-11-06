@@ -1,0 +1,397 @@
+/* hns design tokens and primitives (0101). Light is warm paper, dark is ink. The same classes
+   serve both: light-dark() follows the OS preference, and data-theme on <html> overrides it.
+   Text tokens clear 4.5:1 on bg/surface in both themes, and --focus clears 3:1 as a ring. */
+
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#fbfbfa, #0e0e10);
+  --surface: light-dark(#ffffff, #151517);
+  --surface-2: light-dark(#f6f6f4, #1a1a1d);
+  --surface-3: light-dark(#ededeb, #232327);
+  --border: light-dark(#e6e6e2, #27272c);
+  --border-strong: light-dark(#d5d5cf, #3a3a42);
+  --text: light-dark(#1c1c1a, #eaeaea);
+  --text-2: light-dark(#5b5b56, #a0a0a8);
+  --text-3: light-dark(#74746e, #8a8a93);
+  --accent: light-dark(#5b63d3, #7b83ea);
+  --accent-hover: light-dark(#4b53c2, #8b92f0);
+  --accent-text: light-dark(#4b53c2, #9aa1f2);
+  --accent-soft: light-dark(rgba(91, 99, 211, 0.09), rgba(123, 131, 234, 0.14));
+  --accent-contrast: light-dark(#ffffff, #0f0f12);
+  --danger: light-dark(#b23d3d, #e06a6a);
+  --danger-soft: light-dark(rgba(194, 72, 72, 0.09), rgba(224, 106, 106, 0.12));
+  --warn: light-dark(#8a6114, #d3a44a);
+  --warn-soft: light-dark(rgba(162, 116, 26, 0.11), rgba(211, 164, 74, 0.12));
+  --ok: light-dark(#21754f, #5abf8d);
+  --ok-soft: light-dark(rgba(45, 138, 95, 0.1), rgba(90, 191, 141, 0.12));
+  --focus: light-dark(#4b53c2, #9aa1f2);
+  --hover: light-dark(rgba(28, 28, 26, 0.045), rgba(255, 255, 255, 0.055));
+  --shadow-sm: 0 1px 2px light-dark(rgba(20, 20, 18, 0.05), rgba(0, 0, 0, 0.4));
+  --shadow-pop:
+    0 10px 30px light-dark(rgba(20, 20, 18, 0.14), rgba(0, 0, 0, 0.5)),
+    0 1px 2px light-dark(rgba(20, 20, 18, 0.08), rgba(0, 0, 0, 0.4));
+  --radius: 6px;
+  --radius-lg: 10px;
+  --sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI",
+    sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---- Button ------------------------------------------------------------ */
+
+.hns-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  font: 500 12px/1 var(--sans);
+  white-space: nowrap;
+  transition:
+    background 0.12s var(--ease),
+    border-color 0.12s var(--ease),
+    color 0.12s var(--ease);
+}
+
+.hns-button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.hns-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hns-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: var(--shadow-sm);
+}
+
+.hns-button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-contrast);
+}
+
+.hns-button--primary:disabled {
+  background: var(--accent);
+}
+
+.hns-button--ghost {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.hns-button--ghost:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.hns-button--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--accent-contrast);
+}
+
+.hns-button--danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--accent-contrast);
+  filter: brightness(0.94);
+}
+
+.hns-button--icon {
+  width: 28px;
+  padding: 0;
+  border-color: transparent;
+  color: var(--text-3);
+}
+
+.hns-button--icon:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.hns-button--loading:disabled {
+  cursor: progress;
+}
+
+.hns-button__spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: hns-spin 0.7s linear infinite;
+}
+
+@keyframes hns-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- Badge ------------------------------------------------------------- */
+
+.hns-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font: 500 9.5px/1 var(--sans);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.hns-badge--accent {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.hns-badge--ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.hns-badge--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.hns-badge--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ---- Icon / Skeleton --------------------------------------------------- */
+
+.hns-icon {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.hns-skeleton {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 37%,
+    var(--surface-2) 63%
+  );
+  background-size: 400% 100%;
+  animation: hns-shimmer 1.4s ease infinite;
+}
+
+.hns-skeleton--lg {
+  border-radius: 7px;
+}
+
+@keyframes hns-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* ---- Dialog (Base UI) -------------------------------------------------- */
+
+.hns-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: light-dark(rgba(20, 20, 18, 0.32), rgba(0, 0, 0, 0.6));
+  transition: opacity 0.15s var(--ease);
+}
+
+.hns-dialog-backdrop[data-starting-style],
+.hns-dialog-backdrop[data-ending-style] {
+  opacity: 0;
+}
+
+.hns-dialog-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 51;
+  width: min(440px, calc(100vw - 32px));
+  transform: translate(-50%, -50%);
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  transition:
+    opacity 0.15s var(--ease),
+    transform 0.15s var(--ease);
+}
+
+.hns-dialog-popup[data-starting-style],
+.hns-dialog-popup[data-ending-style] {
+  opacity: 0;
+  transform: translate(-50%, -48%) scale(0.98);
+}
+
+.hns-dialog-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hns-dialog-description {
+  margin: 0 0 12px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.hns-dialog-body {
+  margin: 0 0 16px;
+}
+
+.hns-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- Menu (Base UI) ---------------------------------------------------- */
+
+.hns-menu-positioner {
+  z-index: 60;
+}
+
+.hns-menu-popup {
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+}
+
+.hns-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: default;
+}
+
+.hns-menu-item[data-highlighted] {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.hns-menu-item[data-disabled] {
+  opacity: 0.45;
+}
+
+.hns-menu-item--danger {
+  color: var(--danger);
+}
+
+.hns-menu-shortcut {
+  color: var(--text-3);
+  font: 11px var(--mono);
+}
+
+/* ---- Toast ------------------------------------------------------------- */
+
+.hns-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+  animation: hns-toast-in 0.18s var(--ease);
+}
+
+.hns-toast__icon {
+  color: var(--text-3);
+}
+
+.hns-toast--info .hns-toast__icon {
+  color: var(--ok);
+}
+
+.hns-toast--error .hns-toast__icon {
+  color: var(--danger);
+}
+
+.hns-toast__message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@keyframes hns-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- Motion ------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .hns-button,
+  .hns-skeleton,
+  .hns-dialog-backdrop,
+  .hns-dialog-popup,
+  .hns-toast,
+  .hns-button__spinner {
+    transition: none;
+    animation: none;
+  }
+}
