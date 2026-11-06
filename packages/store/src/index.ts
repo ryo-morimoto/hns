@@ -1,2 +1,2 @@
-export * from "./rows.ts";
+export * from "./schemas.ts";
 export * from "./parse.ts";

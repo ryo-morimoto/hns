@@ -7,7 +7,9 @@ npm run typecheck
 npm run build           # dist/ に型
 ```
 
-- `src/types.ts` — Project / Task / Conversation / Event / Metrics などの型。実行時の検証層は持たない。
+- `src/types.ts` — Project / Task / Conversation / Event / Metrics などの型（正本）。
+- `src/schemas.ts` — 境界の valibot schema。`v.GenericSchema<unknown, T>` で型に縛る。
+- `src/workflow.ts` — Workflow / Automation の状態遷移表。
 
 ## 型と持ち主
 

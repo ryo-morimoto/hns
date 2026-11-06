@@ -41,15 +41,16 @@ packages/
 - 逆流（`protocol` → `server` など）は `eslint-plugin-boundaries` で落とす。
 - 1ファイル 400行、1関数 60行、分岐 10 を超えたら分割を検討する（ESLint で警告）。
 
-## 3. type first
+## 3. type first + parse
 
-**型が唯一の正本。** `@hns/core/src/types.ts` にモデルを書き、実装と UI はその型だけを使う。
+**型が唯一の正本。** 境界は valibot で parse する。
 
 1. `types.ts` にモデルを書く。
-2. サーバと UI をその型で書く。境界（HTTP の入口など）で実行時の検証が要るなら、その場所に書く。
-3. 型を変えたら、コンパイルが落ちる場所で追従する。
+2. `schemas.ts` に valibot の schema を書き、`v.GenericSchema<unknown, T>` で型に縛る。合わなければコンパイルが落ちる。
+3. HTTP の入口と DB の読み出しで `v.parse` する。
+4. 型を変えたら、コンパイルが落ちる場所で追従する。
 
-- スキーマ層は持たない（型を二重に定義しない）。
+- スキーマは型の写しではなく、境界の検証。型と schema の不一致はコンパイルエラー。
 - SSE のイベントも型で表す。
 
 ## 4. AI slop を防ぐ

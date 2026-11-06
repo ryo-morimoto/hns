@@ -183,3 +183,10 @@ date: 2026-11-07 · by: user · issue: 0032
 `core` は公開モデル（2つ以上のパッケージが使い、ワイヤーで約束するもの）だけ。Row 型は `store`、
 実行中の内部状態は `agent`、ファイル操作の内部型は `workspace` に置く。1パッケージしか使わない型は core に置かない。
 `@hns/store` の Row 型と変換から実装を始めた（`packages/store`）。brand は `ProjectId` と `ConversationId` のみ。
+## D031: 境界は valibot、エラーはコード、遷移は1箇所
+date: 2026-11-07 · by: user · issue: 0032
+
+- HTTP の入口と DB の読み出しは valibot で parse する（`packages/core/src/schemas.ts`・`packages/store/src/schemas.ts`）。
+- API のエラーは `ErrorCode` の union（`ErrorResponse { code, message }`）。
+- Workflow / Automation の状態は const array 由来の union。遷移は `packages/core/src/workflow.ts` の表だけ。
+- SQLite はコンテナ不要。実 SQLite（インメモリ/ファイル）でテストする。外部サービスが増えたら testcontainers。

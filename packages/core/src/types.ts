@@ -8,50 +8,61 @@ export type Brand<T, B extends string> = T & { readonly [brand]: B };
 export type ProjectId = Brand<string, "ProjectId">;
 export type ConversationId = Brand<string, "ConversationId">;
 
-export type TaskStatus = "todo" | "doing" | "done" | "blocked";
+export const TASK_STATUSES = ["todo", "doing", "done", "blocked"] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const WORKFLOW_RUN_STATUSES = ["queued", "running", "waiting", "done", "failed"] as const;
+export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
+
+export const WORKFLOW_NODE_STATUSES = ["pending", "running", "waiting", "done", "failed"] as const;
+export type WorkflowNodeStatus = (typeof WORKFLOW_NODE_STATUSES)[number];
+
+export const AUTOMATION_FIRING_STATUSES = ["running", "done", "failed", "skipped"] as const;
+export type AutomationFiringStatus = (typeof AUTOMATION_FIRING_STATUSES)[number];
 export type RunStatus = "queued" | "running" | "waiting" | "done" | "failed";
 export type AuthMode = "token" | "tailscale" | "passkey" | "none";
-export type EventLevel = "info" | "warn" | "error";
+export const EVENT_LEVELS = ["info", "warn", "error"] as const;
+export type EventLevel = (typeof EVENT_LEVELS)[number];
 export type MessageRole = "user" | "assistant" | "tool";
 export type Scheduling = "paused" | "running" | "closing";
 export type TaskState = "running" | "pending" | "waiting" | "sleeping" | "completing" | "blocked";
 export type TaskKind = string;
 
-export type EventName =
-  | "server.start"
-  | "auth.denied"
-  | "http"
-  | "http.error"
-  | "chat.submitted"
-  | "chat.settled"
-  | "chat.aborted"
-  | "chat.rate_limited"
-  | "chat.budget_exceeded"
-  | "agent.response"
-  | "tool.call"
-  | "tool.result"
-  | "conversation.created"
-  | "conversation.updated"
-  | "conversation.deleted"
-  | "project.created"
-  | "project.renamed"
-  | "task.created"
-  | "task.updated"
-  | "secret.put"
-  | "secret.delete"
-  | "file.write"
-  | "workflow.created"
-  | "workflow.updated"
-  | "workflow.run.started"
-  | "workflow.run.finished"
-  | "workflow.run.failed"
-  | "workflow.node.started"
-  | "workflow.node.finished"
-  | "workflow.node.waiting"
-  | "automation.created"
-  | "automation.fired"
-  | "automation.skipped"
-  | "automation.finished";
+export const EVENT_NAMES = [
+  "server.start",
+  "auth.denied",
+  "http",
+  "http.error",
+  "chat.submitted",
+  "chat.settled",
+  "chat.aborted",
+  "agent.response",
+  "tool.call",
+  "tool.result",
+  "conversation.created",
+  "conversation.updated",
+  "conversation.deleted",
+  "project.created",
+  "project.renamed",
+  "task.created",
+  "task.updated",
+  "secret.put",
+  "secret.delete",
+  "file.write",
+  "workflow.created",
+  "workflow.updated",
+  "workflow.run.started",
+  "workflow.run.finished",
+  "workflow.run.failed",
+  "workflow.node.started",
+  "workflow.node.finished",
+  "workflow.node.waiting",
+  "automation.created",
+  "automation.fired",
+  "automation.skipped",
+  "automation.finished",
+] as const;
+export type EventName = (typeof EVENT_NAMES)[number];
 
 export type JsonValue =
   | string
@@ -120,9 +131,23 @@ export interface Conversation {
 }
 
 /** Any non-2xx response. Produced by every endpoint; consumed by the client error path. */
+export const ERROR_CODES = [
+  "invalid_request",
+  "unauthorized",
+  "forbidden",
+  "not_found",
+  "conflict",
+  "rate_limited",
+  "budget_exceeded",
+  "unsupported",
+  "internal",
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** Any non-2xx response. Produced by every endpoint; consumed by the client error path. */
 export interface ErrorResponse {
-  error: string;
-  reason?: string | undefined;
+  code: ErrorCode;
+  message: string;
   retryAfterMs?: number | undefined;
 }
 
