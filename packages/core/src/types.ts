@@ -1,4 +1,4 @@
-// The model. Types are the source of truth; validation must fit them (see validation.ts).
+// The model. Types are the source of truth.
 
 export type TaskStatus = "todo" | "doing" | "done" | "blocked";
 export type RunStatus = "queued" | "running" | "waiting" | "done" | "failed";
