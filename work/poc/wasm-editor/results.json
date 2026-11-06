@@ -1,0 +1,52 @@
+{
+  "parse": {
+    "bytes": 317779,
+    "lines": 4000,
+    "acornMs": 99.00438799999995,
+    "swcImportMs": 29.487130000000093,
+    "swcMs": 90.36379899999997,
+    "treeSitter": "error:  (grammar ABI likely newer than web-tree-sitter)"
+  },
+  "transport": {
+    "sizes": {
+      "op": {
+        "json": 151,
+        "msgpack": 129
+      },
+      "batch50": {
+        "json": 7541,
+        "msgpack": 6453
+      },
+      "snapshot": {
+        "json": 217904,
+        "msgpack": 213898
+      },
+      "baseBytes": 213779
+    },
+    "crdt": {
+      "edits": 2000,
+      "updateBytes": 261517,
+      "perEdit": 131,
+      "fullSyncBytes": 267756,
+      "snapshotPerEditBytes": 427558000
+    },
+    "batching": [
+      {
+        "rttMs": 5,
+        "unbunchedOpsPerSecond": 200,
+        "batched10OpsPerSecond": 2000
+      },
+      {
+        "rttMs": 20,
+        "unbunchedOpsPerSecond": 50,
+        "batched10OpsPerSecond": 500
+      },
+      {
+        "rttMs": 50,
+        "unbunchedOpsPerSecond": 20,
+        "batched10OpsPerSecond": 200
+      }
+    ]
+  },
+  "at": "2026-11-06T12:53:23.373Z"
+}

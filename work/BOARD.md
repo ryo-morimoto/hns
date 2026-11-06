@@ -13,6 +13,7 @@
 | [0007](issues/0007-conversation.md) | 会話の実結線 | **done** | — |
 | [0008](issues/0008-editor.md) | Editor の最小（dirty・保存・競合） | **done** | — |
 | [0009](issues/0009-diff-view.md) | diff の表示 | **done** | 0008 |
+| [0010](issues/0010-wasm-editor.md) | WASM エディタ（Want・保留） | **保留** | — |
 
 ## ゲート
 
@@ -29,6 +30,7 @@
 ## 調査・検証
 
 - [research/pi-durable-1.5.0.md](research/pi-durable-1.5.0.md): API・適合・失更新・封じ込め
+- [research/wasm-editor.md](research/wasm-editor.md): WASM・CRDT・通信の測定
 - [research/](research/): 提供資料の原文（agentics / agent engineering / 開発プロセス / 設計プレイブック / 要件状態 v0.3）
 - [poc/](poc/): conformance / mutation-gap / root-containment / root-swap / daemon-life / workspace-core / walking-skeleton / sandbox
 
