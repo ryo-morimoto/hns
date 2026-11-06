@@ -14,6 +14,7 @@
 | [0008](issues/0008-editor.md) | Editor の最小（dirty・保存・競合） | **done** | — |
 | [0009](issues/0009-diff-view.md) | diff の表示 | **done** | 0008 |
 | [0010](issues/0010-wasm-editor.md) | WASM エディタ（Want・保留） | **保留** | — |
+| [0011](issues/0011-diff-limit.md) | diff の上限撤廃 | **done** | 0009 |
 
 ## ゲート
 

@@ -43,3 +43,8 @@ Zed 相当の編集体験を Web で出すとき、WASM は速度と可用性を
 1. CRDT（Yjs）をバッファの下に入れる。今の状態機械（dirty / conflict）はそのまま使える。
 2. イベントを patch + batching に変える。NDJSON 全量を置き換える。
 3. tree-sitter は `web-tree-sitter` と grammar の版を固定し、wasm を CI でビルドする。
+## 追記（2026-11-06）
+
+5,000行の上限は WASM ではなく**アルゴリズムの制約**だった。前後の共通部分を削り、一意な行でアンカーを
+打って間だけ LCS にしたところ、JS のままで 100k行 18ms / 500k行 106ms。上限は撤廃した（[0011](../issues/0011-diff-limit.md)）。
+「上限を外すために WASM」という理由は消えた。

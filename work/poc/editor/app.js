@@ -1,5 +1,5 @@
 import { EditorBuffer } from "/buffer.mjs";
-import { diffLines } from "/diff.mjs";
+import { diffHunks, diffLines } from "/diff.mjs";
 
 const filesEl = document.querySelector("#files");
 const textEl = document.querySelector("#text");
@@ -22,18 +22,27 @@ const save = async (input) => {
 };
 const buffer = new EditorBuffer({ read, save });
 
-function showDiff(before, after, label) {
-  const result = diffLines(before, after);
+function showDiff(before, after) {
+  const { hunks } = diffHunks(diffLines(before, after).ops);
   diffEl.replaceChildren();
-  if (result.tooLarge) {
-    diffEl.textContent = "差分が大きすぎます。";
+  if (hunks.length === 0) {
+    diffEl.textContent = "変更はありません。";
     return;
   }
-  for (const op of result.ops) {
-    const line = document.createElement("div");
-    line.className = op.type;
-    line.textContent = (op.type === "add" ? "+" : op.type === "del" ? "-" : " ") + op.text;
-    diffEl.append(line);
+  for (const part of hunks) {
+    if (part.type === "skip") {
+      const skip = document.createElement("div");
+      skip.className = "same";
+      skip.textContent = `… ${part.count} 行`;
+      diffEl.append(skip);
+      continue;
+    }
+    for (const op of part.ops) {
+      const line = document.createElement("div");
+      line.className = op.type;
+      line.textContent = (op.type === "add" ? "+" : op.type === "del" ? "-" : " ") + op.text;
+      diffEl.append(line);
+    }
   }
 }
 
