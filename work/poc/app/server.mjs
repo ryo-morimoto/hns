@@ -76,6 +76,15 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
     name: "workspace-tools",
     tools: [
       defineTool({
+        name: "slow_tool",
+        description: "Do nothing for 1.5 seconds. For progress tests.",
+        parameters: obj({}),
+        execute: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          return { output: [{ type: "text", text: "slow done" }] };
+        },
+      }),
+      defineTool({
         name: "read_file",
         description: "Read a workspace file. Returns JSON {content, version}.",
         parameters: obj({ path: str() }),
@@ -98,15 +107,52 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   const conversation = await harness.root(ctx, { agent: { model: { provider: providerId, modelId }, cwd: root } });
   harness.resume();
 
+  const clients = new Set();
+  const snapshot = async () => {
+    const transcript = await conversation.entries({}, 100, undefined, ctx);
+    const messages = transcript.items.map(viewEntry).filter(Boolean);
+    const inspection = await harness.inspect(ctx);
+    const tasks = (inspection.tasks ?? []).map((task) => ({
+      id: String(task.record.id),
+      kind: task.record.kind,
+      state: task.state.kind,
+    }));
+    return {
+      messages,
+      tasks,
+      queued: (inspection.submissions ?? []).length,
+      scheduling: inspection.scheduling,
+      provider: providerId,
+      model: modelId,
+    };
+  };
+  let pending = false;
+  const broadcast = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => {
+      pending = false;
+      if (clients.size === 0) return;
+      const data = JSON.stringify(await snapshot());
+      for (const client of clients) client.write(`event: state\ndata: ${data}\n\n`);
+    }, 30);
+  };
+  const watch = await conversation.watch(ctx);
+  watch.start(async (call) => { if (call.kind === "value") broadcast(); });
+
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       if (url.pathname === "/api/state" && req.method === "GET") {
-        const transcript = await conversation.entries({}, 100, undefined, ctx);
-        const messages = transcript.items.map(viewEntry).filter(Boolean);
-        const inspection = await harness.inspect(ctx);
-        const live = (inspection.tasks ?? []).filter((task) => task.status === "running" || task.status === "pending").length;
-        return json(res, 200, { messages, live, provider: providerId, model: modelId });
+        return json(res, 200, await snapshot());
+      }
+      if (url.pathname === "/api/stream" && req.method === "GET") {
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+        clients.add(res);
+        res.write(`event: state\ndata: ${JSON.stringify(await snapshot())}\n\n`);
+        const heartbeat = setInterval(() => res.write(": ping\n\n"), 15000);
+        req.on("close", () => { clearInterval(heartbeat); clients.delete(res); });
+        return;
       }
       if (url.pathname === "/api/chat" && req.method === "POST") {
         const { message } = await bodyOf(req);
@@ -148,6 +194,9 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   return {
     url: "http://127.0.0.1:" + port,
     close: async () => {
+      await watch.stop().catch(() => {});
+      for (const client of clients) client.end();
+      clients.clear();
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
       await Promise.race([harness.close(ctx).catch(() => {}), new Promise((resolve) => setTimeout(resolve, 3000))]);

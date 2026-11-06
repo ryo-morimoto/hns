@@ -62,3 +62,9 @@ date: 2026-11-06 · by: user · issue: 0014
 会話（Durable）・ファイル（Workspace）・UI を1プロセスに載せる。保存は Durable の SQLite。
 進捗はまず1秒ポーリングで足りる。ストリーミングは必要になってから足す。
 これで MVP の「会話→編集→差分→再開」が1マシンで成立した。
+## D010: 進捗は SSE、未完了タスクは inspect から
+date: 2026-11-06 · by: user · issue: 0015
+
+D009 のポーリングを `GET /api/stream`（SSE）に置き換える。送信の起点は Durable の `conversation.watch`。
+未完了タスクは `harness.inspect` から取り、transcript と同じスナップショットに載せる。
+`/api/state` は残す（テストと初期表示の保険）。

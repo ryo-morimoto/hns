@@ -2,14 +2,14 @@ import { EditorBuffer } from "/buffer.mjs";
 import { diffHunks, diffLines } from "/diff.mjs";
 
 const $ = (id) => document.querySelector(id);
-const messagesEl = $("#messages"), liveEl = $("#live"), inputEl = $("#input");
+const messagesEl = $("#messages"), liveEl = $("#live"), inputEl = $("#input"), tasksEl = $("#tasks");
+let lastMessageCount = -1;
 const filesEl = $("#files"), textEl = $("#text"), diffEl = $("#diff"), pathEl = $("#path");
 const statusEl = $("#status"), versionEl = $("#version"), conflictEl = $("#conflict");
 let counter = 0, diffMode = false;
 
-// Chat
-async function refreshState() {
-  const state = await (await fetch("/api/state")).json();
+// Chat: one SSE stream carries the transcript and the unfinished tasks.
+function renderState(state) {
   messagesEl.replaceChildren(...state.messages.map((message) => {
     const div = document.createElement("div");
     div.className = "msg " + message.role + (message.text?.includes("isError") ? " error" : "");
@@ -19,8 +19,21 @@ async function refreshState() {
     return div;
   }));
   messagesEl.scrollTop = messagesEl.scrollHeight;
-  liveEl.textContent = state.live ? `running: ${state.live}` : "";
+  tasksEl.replaceChildren(...state.tasks.map((task) => {
+    const div = document.createElement("div");
+    div.className = "task";
+    div.textContent = `${task.kind} — ${task.state} (#${task.id})`;
+    return div;
+  }));
+  liveEl.textContent = state.tasks.length ? `tasks: ${state.tasks.length}` : "";
+  if (state.messages.length !== lastMessageCount) {
+    lastMessageCount = state.messages.length;
+    refreshFiles();
+  }
 }
+
+const stream = new EventSource("/api/stream");
+stream.addEventListener("state", (event) => renderState(JSON.parse(event.data)));
 
 $("#compose").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -28,7 +41,6 @@ $("#compose").addEventListener("submit", async (event) => {
   if (!message) return;
   inputEl.value = "";
   await fetch("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
-  refreshState();
 });
 
 // Editor
@@ -104,5 +116,3 @@ $("#reload").onclick = () => buffer.reload().then(render);
 $("#diffToggle").onclick = () => { diffMode = !diffMode; render(); };
 
 await refreshFiles();
-await refreshState();
-setInterval(refreshState, 1000);

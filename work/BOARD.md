@@ -18,6 +18,7 @@
 | [0012](issues/0012-real-provider.md) | 実 Provider（Ollama Cloud） | **done** | — |
 | [0013](issues/0013-opencode-go.md) | 2プロバイダ目（OpenCode Go） | **done** | 0012 |
 | [0014](issues/0014-integrated-mvp.md) | 統合 MVP（1マシン） | **done** | 0002 |
+| [0015](issues/0015-progress-stream.md) | 進捗のストリーミング | **done** | 0014 |
 
 ## ゲート
 
@@ -38,6 +39,10 @@
 - [research/wasm-editor.md](research/wasm-editor.md): WASM・CRDT・通信の測定
 - [research/](research/): 提供資料の原文（agentics / agent engineering / 開発プロセス / 設計プレイブック / 要件状態 v0.3）
 - [poc/](poc/): conformance / mutation-gap / root-containment / root-swap / daemon-life / workspace-core / walking-skeleton / sandbox
+
+## 優先度
+
+- 2マシン（T-05）は**一旦下げる**。1マシンの実用性を先に固める。
 
 ## 制約
 

@@ -12,6 +12,8 @@
   header, footer { padding: 6px 10px; border-bottom: 1px solid #ddd; display: flex; gap: 6px; align-items: center; }
   footer { border-top: 1px solid #ddd; border-bottom: 0; }
   #messages { flex: 1; overflow: auto; padding: 8px; }
+  #tasks { padding: 4px 10px; border-bottom: 1px solid #eee; font-size: 12px; color: #374151; }
+  #tasks .task { padding: 1px 0; }
   .msg { margin: 6px 0; padding: 6px 8px; border-radius: 4px; white-space: pre-wrap; }
   .user { background: #eef2ff; }
   .assistant { background: #f8fafc; }
@@ -34,6 +36,7 @@
 <body>
   <section id="chat">
     <header><strong>conversation</strong><span id="live"></span></header>
+    <div id="tasks"></div>
     <div id="messages"></div>
     <form id="compose"><input id="input" placeholder="message" autocomplete="off"><button>Send</button></form>
   </section>
