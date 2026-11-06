@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import * as v from "valibot";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";

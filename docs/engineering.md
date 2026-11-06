@@ -12,9 +12,11 @@
 | DB | SQLite（`node:sqlite`） | Durable と同じ。バックアップが簡単 | Postgres（今は不要） |
 | UI | React 19 + Vite + TanStack Query | 最終段の UX を詰めやすい。状態の取り回しが明確 | 素の DOM（UI が育たない） |
 | エディタ | CodeMirror 6 | 軽い。diff は自前で持っている | Monaco（重い） |
-| テスト | Vitest（unit / API）+ Playwright（E2E） | API のテストを速く回す | Jest（遅い） |
+| テスト | Vitest 5（unit / contract / repository / API）+ Playwright（E2E） | 1 runner で backend と将来の React を同じ規律に。型ストリップに依存しない | Jest（重い）、node:test（UI で二重化） |
 | Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored） | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
 | パッケージ | **npm workspaces**（`packages/*` + `apps/*`） | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直 | pnpm（今のところ利点より設定が増える） |
+
+テストの層・禁じ手・flaky の扱いは [testing.md](testing.md)。
 
 ## 2. コード構造
 

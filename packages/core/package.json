@@ -22,7 +22,7 @@
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.ts"
+    "test": "vitest run --root ../.. --project core"
   },
   "dependencies": {
     "valibot": "^1.5.0"

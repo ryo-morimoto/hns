@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { Denied, FileFailure } from "@hns/workspace";
 import { failureOf, fixedKeySource, opencodeGo, ollamaCloud, readKey } from "../src/index.ts";

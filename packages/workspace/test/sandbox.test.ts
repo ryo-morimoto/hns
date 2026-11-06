@@ -1,4 +1,4 @@
-import test, { after } from "node:test";
+import { afterAll, test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -44,7 +44,7 @@ function detected(): Promise<SandboxReport> {
   return detectedPromise;
 }
 
-after(async () => {
+afterAll(async () => {
   await rm(base, { recursive: true, force: true });
 });
 

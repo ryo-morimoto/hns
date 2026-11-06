@@ -100,7 +100,7 @@ packages/store/
 ├── tsconfig.json      # strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes, customConditions: ["source"]
 ├── tsconfig.build.json
 ├── src/
-├── test/              # node --test, *.test.ts
+├── test/              # vitest, *.test.ts
 ├── README.md
 └── CHANGELOG.md
 ```
@@ -130,7 +130,7 @@ The PoC is for manual checks only. New product work goes into `packages/`.
 - **A test names the regression it catches.** If it cannot be said in one line, do not add it. Write `// Catches: <bug>` above the case
 - Cover failure paths: invalid input, illegal transitions, conflicts, unknown enum values
 - Test behavior, not implementation: no assertions on internal helper names, log wording, or CSS. One behavior per test; a test that passes when the logic is broken is not a test
-- **Make sure the test runs.** `node --test` plus type stripping; package-to-package imports use `--conditions=source` (already set in `@hns/store`'s script)
+- **Make sure the test runs.** Vitest 5 (`vitest run`); assertions use `node:assert/strict`. The full discipline is in [docs/testing.md](docs/testing.md)
 
 ### How to run tests
 
@@ -140,7 +140,7 @@ npm test -w @hns/store
 npm run check          # everything
 ```
 
-Inside `nix develop`.
+Inside `nix develop`. Tests use Vitest; the layers and rules are in [docs/testing.md](docs/testing.md).
 
 ### Test Structure
 

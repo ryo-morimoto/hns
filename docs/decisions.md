@@ -248,3 +248,13 @@ date: 2026-11-07 · by: agent · issue: 0034
 `ShellAccess = sandboxed | disabled` で「exec を出せるか」を型にし、`disabled` のときは bash ツールを登録しない
 （生の exec に落ちる経路を作らない。0006 / D033）。依存（storage / models / workspace / shell）は `openAgent()` だけで受け取り、
 import 時に接続しない。永続 storage（再起動をまたぐ resume）は store 側の実装（0035）で差し替える。
+
+## D038: テストは Vitest 1本と node:assert、層は5つ
+date: 2026-11-07 · by: coordinator · issue: 0046
+
+D026 の Vitest を維持し、node:test から移行した（124 tests）。Vitest 5.1.0 を exact pin し、
+`vitest.config.ts` の `projects` でパッケージを分ける。層は unit / contract / repository / API / E2E。
+永続化はモックせず実 SQLite、HTTP は `fastify.inject`、E2E は Playwright だけ。
+アサーションは `node:assert/strict` に統一し、`expect` は使わない。flaky はリトライしない。
+Trigger.dev / Medusa / Twenty / Payload / Effect の層分けを参考にした（[testing.md](testing.md)）。
+

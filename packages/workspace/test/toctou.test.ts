@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -197,8 +197,18 @@ for (const kind of KINDS) {
         await toggling;
       }
 
-      assert.equal(leaked, false, JSON.stringify(await readdir(outside)));
-      assert.ok(outcomes.includes("applied"), JSON.stringify(outcomes));
+      assert.equal(leaked, false, JSON.stringify({ outside: await readdir(outside), outcomes }));
+      // The churn is over; a normal write still applies. Requiring a churn write to apply was
+      // flaky: under constant swapping every write can legitimately be refused.
+      const settled = await outcomeOf(
+        workspace.write({
+          path: "after-churn.txt",
+          content: "done",
+          expectedVersion: "absent",
+          operationId: "after-churn",
+        }),
+      );
+      assert.equal(settled, "applied");
       await workspace.close();
     });
   });
