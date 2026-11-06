@@ -21,7 +21,7 @@
 | [0015](issues/0015-progress-stream.md) | 進捗のストリーミング | **done** | 0014 |
 | [0016](issues/0016-project-task.md) | Project と Task | **done** | 0014 |
 | [0017](issues/0017-workflow.md) | Workflow（agent/tool/human・再開） | **done** | 0016 |
-| [0018](issues/0018-automations.md) | Automations（Schedule / Webhook） | open | 0017 |
+| [0018](issues/0018-automations.md) | Automations（Schedule / Webhook） | **done** | 0017 |
 
 ## ゲート
 

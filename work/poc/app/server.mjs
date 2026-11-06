@@ -11,6 +11,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { obj, str } from "@earendil-works/pi-schema";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
 import { openControlPlane } from "./db.mjs";
+import { cronMatches } from "./cron.mjs";
 import { GraphError, interpolate, validateGraph } from "./workflow.mjs";
 import { Workspace } from "../workspace-core/workspace.mjs";
 import { createSandboxEnv } from "../workspace-core/sandbox.mjs";
@@ -46,7 +47,7 @@ function viewEntry(entry) {
   return undefined;
 }
 
-export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [] }) {
+export async function startApp({ stateDir, root, provider = "faux", model, fauxScript, webDirs = [], allowDebug = false }) {
   const connection = new Connection({ command: [localDaemon()] });
   const raw = new LocalExecutionEnv({ cwd: root, connection });
   const sandbox = createSandboxEnv(raw, { root, bwrap: BWRAP });
@@ -183,6 +184,64 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
     }
   };
 
+  const runningAutomations = new Set();
+
+  const runAction = async (automation, payload) => {
+    const action = JSON.parse(automation.action_json);
+    if (action.type === "task") {
+      const task = control.createTask({ projectId: automation.project_id, title: action.title ?? automation.name });
+      return { detail: "task " + task.id };
+    }
+    if (action.type === "chat") {
+      const conversation = await conversationById(action.conversationId);
+      if (!conversation) throw new Error("conversation not found");
+      const content = action.prompt + (payload?.body ? "\n\n" + payload.body : "");
+      const submission = await conversation.submit({ type: "input", content, requestId: "auto-" + Date.now() }, ctx);
+      const settled = await submission.wait(ctx);
+      return { detail: settled.status };
+    }
+    const run = control.createRun({ workflowId: action.workflowId, input: action.input ?? payload?.body ?? "" });
+    if (!run) throw new Error("workflow not found");
+    await advance(run.id);
+    return { runId: run.id, detail: control.getRun(run.id).status };
+  };
+
+  const fire = async (automation, payload, origin) => {
+    if (!automation.enabled) return { skipped: "disabled" };
+    if (runningAutomations.has(automation.id)) {
+      control.createFiring({ automationId: automation.id, at: new Date().toISOString(), status: "skipped", detail: "already running" });
+      return { skipped: "already running" };
+    }
+    runningAutomations.add(automation.id);
+    const firing = control.createFiring({ automationId: automation.id, at: new Date().toISOString(), status: "running", detail: origin });
+    try {
+      const result = await runAction(automation, payload);
+      control.updateFiring(firing.id, { status: "done", detail: result.detail, runId: result.runId });
+    } catch (error) {
+      control.updateFiring(firing.id, { status: "failed", detail: String(error?.message ?? error) });
+    } finally {
+      runningAutomations.delete(automation.id);
+    }
+    return { firing: control.getFiring(firing.id) };
+  };
+
+  const tick = async (at = new Date()) => {
+    const minute = at.toISOString().slice(0, 16);
+    for (const automation of control.listAutomations()) {
+      if (!automation.enabled) continue;
+      const trigger = JSON.parse(automation.trigger_json);
+      if (trigger.type !== "schedule") continue;
+      let matches = false;
+      try { matches = cronMatches(trigger.cron, at); } catch { continue; }
+      if (!matches || automation.last_fired_at === minute) continue;
+      control.setLastFiredAt(automation.id, minute);
+      void fire(automation, {}, "schedule");
+    }
+  };
+  const timer = setInterval(() => void tick(), 30_000);
+  timer.unref?.();
+  if (allowDebug) void tick();
+
   const clients = new Set();
   const snapshot = async (conversation = rootConversation) => {
     const transcript = await conversation.entries({}, 100, undefined, ctx);
@@ -256,6 +315,39 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           const task = control.updateTask(id, await bodyOf(req));
           return task ? json(res, 200, task) : json(res, 404, { error: "task not found" });
         } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+      }
+      if (url.pathname === "/api/automations") {
+        if (req.method === "GET") return json(res, 200, control.listAutomations(url.searchParams.get("projectId") ?? undefined));
+        if (req.method === "POST") {
+          const { projectId = "default", name, trigger, action, enabled = true } = await bodyOf(req);
+          if (!name || !trigger?.type || !action?.type) return json(res, 400, { error: "name, trigger, and action are required" });
+          try { return json(res, 201, control.createAutomation({ projectId, name, trigger, action, enabled })); }
+          catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+        }
+      }
+      if (url.pathname.startsWith("/api/automations/")) {
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (parts.length === 3 && req.method === "PATCH") {
+          const automation = control.updateAutomation(parts[2], await bodyOf(req));
+          return automation ? json(res, 200, automation) : json(res, 404, { error: "automation not found" });
+        }
+        if (parts.length === 4 && parts[3] === "firings" && req.method === "GET") {
+          return json(res, 200, control.listFirings(parts[2]));
+        }
+      }
+      if (url.pathname.startsWith("/api/hooks/") && req.method === "POST") {
+        const automation = control.getAutomationByToken(url.pathname.slice("/api/hooks/".length));
+        if (!automation) return json(res, 404, { error: "unknown hook" });
+        if (!automation.enabled) return json(res, 409, { error: "disabled" });
+        const payload = await bodyOf(req).catch(() => ({}));
+        const body = typeof payload.body === "string" ? payload.body : JSON.stringify(payload);
+        void fire(automation, { body }, "webhook");
+        return json(res, 202, { accepted: true });
+      }
+      if (allowDebug && url.pathname === "/api/debug/tick" && req.method === "POST") {
+        const { at } = await bodyOf(req);
+        await tick(at ? new Date(at) : new Date());
+        return json(res, 200, { ok: true });
       }
       if (url.pathname === "/api/workflows") {
         if (req.method === "GET") return json(res, 200, control.listWorkflows(url.searchParams.get("projectId") ?? undefined));
@@ -364,6 +456,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
   return {
     url: "http://127.0.0.1:" + port,
     close: async () => {
+      clearInterval(timer);
       await watch.stop().catch(() => {});
       for (const client of clients) client.end();
       clients.clear();

@@ -61,7 +61,7 @@ Web UI（Conversation / Progress first）
 | M1 | ExecutionEnv の実証 | T-01 合格、契約 v0.1（完了） |
 | M2 | Mutation・会話・Editor | 完了（diff は 0009） |
 | M2.5 | 統合 MVP（1マシン） | 完了（0014・0015、E2E 12/12） |
-| M3 | Project / Task / Workflow / Automation | Workflow 完了（0017）、Automation は設計済み（0018） |
+| M3 | Project / Task / Workflow / Automation | 完了（0016〜0018） |
 | M4 | 2マシン（**一旦下げ**） | T-05 |
 | M5 | UI / UX の作り込み | 最後に集中（D011） |
 
@@ -81,7 +81,7 @@ Web UI（Conversation / Progress first）
 | U-11 | Grabber のデータと権限 | 中 | Extension PoC |
 | U-12 | チーム利用と RBAC | 中 | 外部共有前 |
 | U-13 | Progress イベント schema | 中 | Watch 適合試験 |
-| U-22 | Automation の cron と同時実行 | 中 | 0018 実装時 |
+| U-22 | Automation の cron と同時実行 | 低 | 実装済み（0018）。外部公開前に認証を見直す |
 
 U-02（Pi Durable API）は 1.5.0 の実測で解消（[work/research/pi-durable-1.5.0.md](work/research/pi-durable-1.5.0.md)）。
 

@@ -1,6 +1,6 @@
 # Automations: スケジュール / Webhook
 
-2026-11-06 / 設計（実装前）。要件12。Workflow（0017）の上に置く。
+2026-11-06 / **実装済み（0018）**。要件12。Workflow（0017）の上に置く。
 
 ## 何を自動化するか
 
@@ -17,13 +17,16 @@
 | Action | workflow（workflowId / input）・chat（conversationId / prompt）・task（title） |
 | Firing | id, automationId, at, status（queued/running/done/failed）, detail, runId |
 
-## 案
+## 決めたこと
 
 - 実行は既存の Workflow Run に委譲する。Automation は実行状態を持たず、Firing だけ残す。
 - Webhook は `POST /api/hooks/<token>`。token は Automation ごとに発行し、本文を input として渡す。
 - 同時実行は Automation ごとに 1 つ。実行中に来たものは 1 件だけキューし、それ以外は落とす。
 - 落ちた実行は再試行しない。Firing に理由を残す。時刻の取りこぼしは遡らない（最新のみ）。
 - 停止は `enabled = false`。実行中のものは止めない（次の機会から止まる）。
+- cron は 5 フィールド、**サーバのローカル時刻**。DOM と DOW を両方指定したときは OR（標準 cron）。
+- 同じ分に二度は発火しない（`last_fired_at`）。Webhook は 202 を返し、実行は非同期。
+- テスト用に `POST /api/debug/tick`（`allowDebug` のときだけ）で任意の時刻を流せる。
 
 ## 未決
 

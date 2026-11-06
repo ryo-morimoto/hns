@@ -53,6 +53,27 @@ export function openControlPlane(path) {
       finished_at TEXT,
       PRIMARY KEY (run_id, node_id)
     );
+    CREATE TABLE IF NOT EXISTS automations (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      trigger_json TEXT NOT NULL,
+      action_json TEXT NOT NULL,
+      token TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_fired_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS firings (
+      id TEXT PRIMARY KEY,
+      automation_id TEXT NOT NULL,
+      at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      detail TEXT,
+      run_id TEXT,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -185,6 +206,55 @@ export function openControlPlane(path) {
     setNodeWaiting(runId, nodeId, prompt) {
       db.prepare("UPDATE workflow_nodes SET status = 'waiting', prompt = ?, started_at = ? WHERE run_id = ? AND node_id = ?")
         .run(prompt, now(), runId, nodeId);
+    },
+
+    createAutomation({ projectId, name, trigger, action, enabled = true }) {
+      if (!this.getProject(projectId)) throw new Error("project not found");
+      if (trigger?.type === "webhook" && !trigger.token) trigger = { ...trigger, token: randomUUID().replaceAll("-", "") };
+      const automation = {
+        id: randomUUID(), project_id: projectId, name,
+        trigger_json: JSON.stringify(trigger), action_json: JSON.stringify(action),
+        token: trigger?.token ?? null, enabled: enabled ? 1 : 0,
+        created_at: now(), updated_at: now(),
+      };
+      db.prepare("INSERT INTO automations (id, project_id, name, trigger_json, action_json, token, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(automation.id, automation.project_id, automation.name, automation.trigger_json, automation.action_json, automation.token, automation.enabled, automation.created_at, automation.updated_at);
+      return this.getAutomation(automation.id);
+    },
+    getAutomation: (id) => row(db.prepare("SELECT * FROM automations WHERE id = ?").get(id)),
+    getAutomationByToken: (token) => row(db.prepare("SELECT * FROM automations WHERE token = ?").get(token)),
+    listAutomations(projectId) {
+      const sql = projectId
+        ? "SELECT * FROM automations WHERE project_id = ? ORDER BY created_at"
+        : "SELECT * FROM automations ORDER BY created_at";
+      return (projectId ? db.prepare(sql).all(projectId) : db.prepare(sql).all()).map(row);
+    },
+    updateAutomation(id, patch) {
+      const current = this.getAutomation(id);
+      if (!current) return undefined;
+      db.prepare("UPDATE automations SET name = ?, enabled = ?, trigger_json = ?, action_json = ?, updated_at = ? WHERE id = ?")
+        .run(patch.name ?? current.name, patch.enabled === undefined ? current.enabled : (patch.enabled ? 1 : 0),
+          patch.trigger ? JSON.stringify(patch.trigger) : current.trigger_json,
+          patch.action ? JSON.stringify(patch.action) : current.action_json, now(), id);
+      return this.getAutomation(id);
+    },
+    setLastFiredAt(id, at) {
+      db.prepare("UPDATE automations SET last_fired_at = ? WHERE id = ?").run(at, id);
+    },
+    createFiring({ automationId, at, status, detail, runId }) {
+      const firing = { id: randomUUID(), automation_id: automationId, at, status, detail: detail ?? null, run_id: runId ?? null, created_at: now() };
+      db.prepare("INSERT INTO firings (id, automation_id, at, status, detail, run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(firing.id, firing.automation_id, firing.at, firing.status, firing.detail, firing.run_id, firing.created_at);
+      return firing;
+    },
+    updateFiring(id, { status, detail, runId }) {
+      db.prepare("UPDATE firings SET status = ?, detail = COALESCE(?, detail), run_id = COALESCE(?, run_id) WHERE id = ?")
+        .run(status, detail ?? null, runId ?? null, id);
+      return this.getFiring(id);
+    },
+    getFiring: (id) => row(db.prepare("SELECT * FROM firings WHERE id = ?").get(id)),
+    listFirings(automationId) {
+      return db.prepare("SELECT * FROM firings WHERE automation_id = ? ORDER BY created_at DESC").all(automationId).map(row);
     },
 
     registerConversation({ id, projectId, title }) {
