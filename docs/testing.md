@@ -20,9 +20,10 @@
 | repository | migration・Row・parse | `packages/store/test` | **実 SQLite**。モック禁止 |
 | integration | 実 FS・実プロセス・sandbox | `packages/workspace/test`, `packages/agent/test` | temp dir。bwrap 無しは `t.skip` |
 | API | Fastify inject・SSE | `packages/server/test` | 実 port を開けない。実 store/workspace |
-| E2E | browser | `packages/web/test/e2e`（0043） | Playwright。Chromium 無しは skip |
+| E2E | browser | `packages/web/test/e2e`（0043） | ツールは 0043 で決める。Chromium 無しは skip |
 
-- Vitest のファイルは `packages/<pkg>/test/*.test.ts`。Playwright は `*.spec.ts` を別ディレクトリ。
+- Vitest のファイルは `packages/<pkg>/test/*.test.ts`。E2E は別ディレクトリに置く（ツールは 0043 で決める）。
+- E2E は `npm run check` に入れない。別コマンドと CI ジョブにする（0043）。
 - fixture はパッケージ内の `test/support.ts`。共有 fixture パッケージは作らない。
 - DB は `:memory:` か temp file。テストごとに開いて閉じる。スキーマは本物を通す。
 

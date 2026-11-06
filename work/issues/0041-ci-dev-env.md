@@ -12,7 +12,7 @@ touches: work/issues/0004, .github
 
 - [ ] node を固定する（0004 を閉じる）
 - [ ] npm run check を CI で回す
-- [ ] 可能なら Playwright の主要シナリオも回す
+- [ ] 可能なら E2E の主要シナリオも回す（0043）
 - [ ] キャッシュと失敗時のログ
 
 ## Notes
@@ -22,5 +22,5 @@ touches: work/issues/0004, .github
 
 ## やらないこと
 
-- Playwright の E2E は 0043 の後。
+- E2E は 0043 の後。ツールは 0043 で決める。
 - デプロイ・配布（0040）。
