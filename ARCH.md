@@ -16,7 +16,6 @@
 | Project / Task / Workflow / Run / Machine | Control Plane DB | Application |
 | 未保存の編集 | クライアント | Editor Buffer |
 | Git の状態 | Git | Git |
-| マシンの接続・セットアップ・常駐サービス | Machine Agent | Machine |
 
 Agent の Checkpoint とファイル変更は同一トランザクションではない（INV-05）。
 
@@ -29,9 +28,10 @@ Web UI（Conversation / Progress first）
        │        └─ ExecutionEnv
        └─ Workspace（版・Journal・認可・イベント）
                 └─ ExecutionEnv = FileSystem + Shell
-                     └─ Machine Agent（外向き接続、常駐）
-                          ├─ pi-env daemon（file / exec / pty）
-                          └─ セットアップ・サービス・ポート
+                     ├─ NodeExecutionEnv（同一マシン）
+                     └─ RemoteExecutionEnv（SSH + pi-env daemon）
+
+常駐 Machine Agent は ExecutionEnv の別実装として後から差し替える（[D004](docs/decisions.md)）。
 ```
 
 ## 主要フロー
