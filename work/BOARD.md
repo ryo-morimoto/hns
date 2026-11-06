@@ -49,7 +49,7 @@
 | [0044](issues/0044-multi-machine.md) | マルチマシン（保留） | **保留** | 0040 |
 | [0045](issues/0045-review-hardening.md) | レビュー指摘の修正（C/H/M） | **done** | 0004, 0033, 0037 |
 | [0046](issues/0046-test-discipline.md) | テストの規律とランナーの固定 | **done** | — |
-| [0047](issues/0047-store-sqlite.md) | store の SQLite 基盤（migrations + repositories） | open | 0046 |
+| [0047](issues/0047-store-sqlite.md) | store の SQLite 基盤（migrations + repositories） | **done** | 0046 |
 | [0048](issues/0048-store-identity.md) | store/identity（認証・秘密） | open | 0047 |
 | [0049](issues/0049-agent-conversations.md) | agent の複数会話 API | open | 0034, 0046 |
 | [0050](issues/0050-sse-events.md) | SSE の token / tool イベント | open | 0037, 0046 |
@@ -67,6 +67,7 @@
 | [0062](issues/0062-core-empty-patch.md) | 空の PATCH をどう扱うか決める | open | 0037 |
 | [0063](issues/0063-core-contract-error-path.md) | ContractError に path を残す | open | 0037 |
 | [0064](issues/0064-core-schema-naming.md) | スキーマの id と名前の命名を分ける | open | 0037 |
+| [0065](issues/0065-store-low-followups.md) | store の low 残件（clock・ISO・comment） | open | 0047 |
 | [0024](issues/0024-secret-scopes.md) | 秘密のスコープ分離（14） | **done** | 0019 |
 
 ## ゲート
