@@ -14,7 +14,7 @@
 | UI | React 19 + Vite + TanStack Query | 最終段の UX を詰めやすい。状態の取り回しが明確 | 素の DOM（UI が育たない） |
 | エディタ | CodeMirror 6 | 軽い。diff は自前で持っている | Monaco（重い） |
 | テスト | Vitest（unit / contract）+ Playwright（E2E） | 契約テストを速く回す | Jest（遅い） |
-| Lint | ESLint（type-aware）+ Prettier + `eslint-plugin-boundaries` | 型情報を使った禁止則と依存方向の検査 | Biome（型情報の規則が弱い） |
+| Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored） | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
 | パッケージ | pnpm workspaces | 依存の固定と workspace 参照 | npm workspaces（hoisting が緩い） |
 
 ## 2. コード構造
@@ -48,14 +48,25 @@ packages/
 
 ## 4. AI slop を防ぐ
 
+### anti-slop（vendored）
+
+[dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) の汎用ルールを §tools/oxlint/anti-slop/§ に vendored している（MIT）。
+npm 依存ではなく**コピー**として持つ。読んで、必要なら自分たちで変える（上流もそう勧めている）。
+
+- 有効: 18 ルール（型のごまかし、低信号な配列操作、オブジェクト引数、§unknown§ の流入、§as§ の根拠要求など）。
+- 無効: §require-readable-spacing§。oxfmt が空白を持つので、空行の要求が衝突するため。
+- 更新: 上流の §src/§ を置き換え、差分を読む。ローカルの変更は §UPSTREAM.md§ に記録する。
+
+### ゲート
+
 **slop の定義**: 動くように見えるが、契約と合わない・誰も使わない・根拠のない抽象化・重複した実装。
 
 | 仕組み | 何を止めるか |
 | --- | --- |
 | 契約テスト（実サーバ） | 実装と契約の乖離、想像で書いたレスポンス |
 | `noUncheckedIndexedAccess` と境界の zod | 未検証の JSON、`any` の伝播 |
-| ESLint: `no-explicit-any`・`no-unsafe-*`・`consistent-type-assertions` | 型を捨てる近道 |
-| ESLint: `no-empty`・`no-console`（server）・`no-floating-promises` | 握りつぶし、投げっぱなし |
+| anti-slop: `no-unknown-parameters`・`no-unsafe-dictionary-type`・`no-widen-then-assert`・`require-safety-comment-for-type-assertion` | 型を捨てる近道、根拠のない `as` |
+| anti-slop: `no-object-parameters`・`no-array-filter-map`・`no-reduce-accumulator-copy`・`no-module-mocking` | 低信号な実装パターン |
 | `knip` | 未使用の export・依存・ファイル |
 | 依存の追加ルール | 「便利そう」で増える依存。追加は ADR 1枚と exact pin を要求 |
 | 生成コードの明示 | 手で直される生成物（ヘッダに `generated` と再生成コマンド） |

@@ -10,6 +10,7 @@ export const Message = z.object({
 
 export const TaskView = z.object({ id: z.string(), kind: z.string(), state: z.string() });
 export const Project = z.object({ id: z.string(), name: z.string(), created_at: z.string() });
+
 export const Conversation = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -61,18 +62,26 @@ export const State = z.object({
 });
 
 export const ChatRequest = z.object({ message: z.string(), conversationId: z.string().optional() });
+
 export const ChatResponse = z.object({
   requestId: z.string(),
   submissionId: z.number(),
   conversationId: z.string(),
 });
 
-export const ConversationCreate = z.object({ projectId: z.string().optional(), title: z.string().optional() });
-export const ConversationUpdate = z.object({ title: z.string().optional(), archived: z.boolean().optional() });
+export const ConversationCreate = z.object({
+  projectId: z.string().optional(),
+  title: z.string().optional(),
+});
+export const ConversationUpdate = z.object({
+  title: z.string().optional(),
+  archived: z.boolean().optional(),
+});
 
 export const ProjectCreate = z.object({ name: z.string() });
 export const TaskCreate = z.object({ projectId: z.string(), title: z.string() });
 export const TaskUpdate = z.object({ title: z.string().optional(), status: z.string().optional() });
+
 export const Task = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -130,8 +139,26 @@ export const Metrics = z.object({
   byEvent: z.array(NamedCount),
 });
 
+export const UsageBucket = z.object({
+  input: z.number(),
+  output: z.number(),
+  cacheRead: z.number(),
+  cacheWrite: z.number(),
+  totalTokens: z.number(),
+  cost: z.object({
+    input: z.number(),
+    output: z.number(),
+    cacheRead: z.number(),
+    cacheWrite: z.number(),
+    total: z.number(),
+  }),
+});
+
 export const Usage = z.object({
-  session: z.object({ models: z.record(z.string(), z.unknown()), tools: z.record(z.string(), z.unknown()) }),
+  session: z.object({
+    models: z.record(z.string(), UsageBucket),
+    tools: z.record(z.string(), UsageBucket),
+  }),
   today: z.object({ turns: z.number(), tokens: z.number(), cost: z.number() }),
   limits: Limits,
 });

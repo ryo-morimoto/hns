@@ -159,7 +159,7 @@ date: 2026-11-07 · by: user · issue: 0030
 ## D026: 技術スタックを固定する
 date: 2026-11-07 · by: user · issue: 0031
 
-TypeScript strict / Node 24 / Fastify + zod / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / ESLint (type-aware) + Prettier + boundaries / pnpm workspaces。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
+TypeScript strict / Node 24 / Fastify + zod / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / **oxlint + oxfmt** + vendored anti-slop / pnpm workspaces。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
 
 ## D027: 契約は packages/protocol の zod が正本
 date: 2026-11-07 · by: user · issue: 0031
@@ -169,4 +169,4 @@ date: 2026-11-07 · by: user · issue: 0031
 ## D028: AI slop はゲートで止める
 date: 2026-11-07 · by: user · issue: 0031
 
-契約テスト、noUncheckedIndexedAccess、no-explicit-any / no-unsafe-*、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。
+契約テスト、noUncheckedIndexedAccess、vendored anti-slop（18 ルール。require-readable-spacing は oxfmt と衝突するため無効）、tsc --noEmit、oxfmt --check、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。
