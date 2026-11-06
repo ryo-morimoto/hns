@@ -70,7 +70,7 @@ Web UI（Conversation / Progress first）
 | U-01 | 中央 Harness か各マシン Core Agent か | 高 | [比較](docs/topology.md) → BOARD D-2 |
 | U-03 | Worker 認証・Shell 隔離 | 高 | Remote Tool 公開前の脅威モデル |
 | U-04 | Mutation の原子性・冪等性 | 高 | T-03/T-04 |
-| U-05 | Provider / OAuth の正式方式 | 高 | Provider 実装直前 |
+| U-05 | Provider / OAuth の正式方式 | 中 | Ollama Cloud で1つ確認済み。正式 API は鍵待ち |
 | U-06 | `commandgode` の実体 | 中 | 名称保留 |
 | U-07 | UI / Editor ライブラリ | 低 | Buffer PoC |
 | U-08 | Editor Buffer の永続化 | 中 | 再起動・切断試験 |

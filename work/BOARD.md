@@ -15,6 +15,7 @@
 | [0009](issues/0009-diff-view.md) | diff の表示 | **done** | 0008 |
 | [0010](issues/0010-wasm-editor.md) | WASM エディタ（Want・保留） | **保留** | — |
 | [0011](issues/0011-diff-limit.md) | diff の上限撤廃 | **done** | 0009 |
+| [0012](issues/0012-real-provider.md) | 実 Provider（Ollama Cloud） | **done** | — |
 
 ## ゲート
 

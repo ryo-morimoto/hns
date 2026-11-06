@@ -44,3 +44,9 @@ date: 2026-11-06 · by: user · issue: 0008
 MVP の受入は「会話→編集→差分→再開」。会話は faux で通ったので、次は人間側の編集を成立させる。
 実 Provider（U-05）は API 鍵がこの環境に無く、検証できないため後回しにする。
 Editor は Workspace の競合契約を人間の操作で確かめる場でもある。
+## D007: 最初の実 Provider は Ollama Cloud
+date: 2026-11-06 · by: user · issue: 0012
+
+`https://ollama.com/v1`（OpenAI 互換）を `openai-completions` API で使う。既定モデルは `gpt-oss:120b`。
+鍵は `~/.config/hns/ollama.key` か `OLLAMA_API_KEY`（リポジトリには置かない）。
+`qwen3-coder:480b` は退役していたため使わない。正式な OpenAI / Anthropic / Google は鍵が来たら足す。

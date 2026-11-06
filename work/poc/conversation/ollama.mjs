@@ -18,7 +18,7 @@ export function readOllamaKey() {
   return undefined;
 }
 
-export function ollamaCloud({ apiKey = readOllamaKey(), model = "qwen3-coder:480b", baseUrl = "https://ollama.com/v1" } = {}) {
+export function ollamaCloud({ apiKey = readOllamaKey(), model = "gpt-oss:120b", baseUrl = "https://ollama.com/v1" } = {}) {
   const provider = createProvider({
     id: "ollama-cloud",
     name: "Ollama Cloud",

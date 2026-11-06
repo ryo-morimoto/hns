@@ -78,8 +78,9 @@ console.log("tool results:", toolResults.length, toolResults.map((entry) => text
 console.log("answer:", lastAssistant ? textOf(lastAssistant.model?.[0]?.content) : "(none)");
 
 const ok = finalText === "hello from ollama" && toolResults.length >= 2;
-await harness.close(ctx);
-await raw.cleanup?.(ctx);
-await connection.close();
+await Promise.race([harness.close(ctx).catch(() => {}), new Promise((resolve) => setTimeout(resolve, 5000))]);
+await raw.cleanup?.(ctx).catch(() => {});
+await Promise.race([connection.close(), new Promise((resolve) => setTimeout(resolve, 2000))]);
 await rm(base, { recursive: true, force: true });
-process.exitCode = ok ? 0 : 1;
+console.log(ok ? "OK" : "FAIL");
+process.exit(ok ? 0 : 1);
