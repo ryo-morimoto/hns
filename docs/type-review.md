@@ -53,3 +53,19 @@
 - `expectTypeOf`（vitest）や `tsd` で「代入できてはいけない」を固定する。
 - `@ts-expect-error` を「不正な状態の見本」として置く（消えたら気づける）。
 - 実データのフィクスチャを `satisfies` で受ける（型と実物のズレを一度は目で見る）。
+## 反映（2026-11-07）
+
+高・中を `types.ts` に反映した。
+
+- `Message` → 判別可能ユニオン（user / assistant / tool）。
+- `Conversation.archived` → `boolean`、`Health.auth` → `AuthMode`、`Health.version` → `ServerVersion`。
+- ID・日時・版を brand に（`ProjectId` / `ConversationId` / `TaskId` / `EventId` / `RequestId` / `OperationId` / `SubmissionId` / `FileVersion` / `ServerVersion` / `IsoDateTime`）。
+- `Event.event` → `EventName`、`TaskView.state` → `TaskState`、`State.scheduling` → `Scheduling`。
+- `expectedVersion` → `FileVersion | "absent"`、`MutationResult.unknown.reason` → `"io" | "crash" | "timeout"`。
+- `SandboxStatus` を判別可能ユニオンに。
+- `State` は件数（`counts`）だけを持ち、一覧は別 API に。
+- ファイルの中身は UTF-8 テキストと明記。
+
+境界では brand を作る必要がある（`value as ProjectId`）。キャストは SAFETY コメント付きで、DB の行を読む場所に閉じ込める。
+
+残り（低）: 命名の統一（snake_case と camelCase）、`readonly`、`Metrics` の重複、Workflow / Automation / Run の型。
