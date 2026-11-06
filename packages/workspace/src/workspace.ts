@@ -125,7 +125,7 @@ export class Workspace {
     this.#beforeRename = options.beforeRename;
     this.#rootedAllowed = options.rooted !== false;
     this.#rootedRequired = options.rooted === "required";
-    this.#maxSettledOps = options.maxSettledOps ?? DEFAULT_MAX_SETTLED_OPS;
+    this.#maxSettledOps = Math.max(1, options.maxSettledOps ?? DEFAULT_MAX_SETTLED_OPS);
   }
 
   /** Pin the root, load the journal, and decide whether the helper can hold it. */

@@ -9,8 +9,16 @@ import { failureOf } from "./failure.ts";
 import type { ReadReply, ToolFailure } from "./failure.ts";
 import type { ShellAccess } from "./shell.ts";
 
-/** Model-facing read size. A larger file reports its version but only this head. */
-const MAX_READ_CONTENT = 64 * 1024;
+/** Model-facing read size, in characters. Worst-case JSON escaping is 6x, so 256 KiB covers it. */
+const MAX_READ_CONTENT = 32 * 1024;
+
+/**
+ * The wire's OperationIdSchema allows [A-Za-z0-9_-]{1,64}; pi-durable call ids look like
+ * "tool:<ms>:<id>". Keep the id unique and inside the rule the HTTP boundary enforces.
+ */
+export function operationIdFor(callId: string): string {
+  return ("call-" + callId.replaceAll(/[^A-Za-z0-9_-]/g, "-")).slice(0, 64);
+}
 
 export interface WorkspaceToolsOptions {
   readonly workspace: Workspace;
@@ -60,7 +68,7 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
         "Read a workspace file. Returns JSON {ok, content, version} or {ok:false, status, message}.",
       parameters: obj({ path: str() }),
       // The tool bounds its own content; give the harness room so it does not cut the JSON.
-      outputLimits: { maxBytes: 96 * 1024, maxLines: 4000, retain: "head" },
+      outputLimits: { maxBytes: 256 * 1024, maxLines: 40_000, retain: "head" },
       execute: (args) =>
         observed("read_file", onEvent, async () => {
           try {
@@ -97,7 +105,7 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
               path: args.path,
               content: args.content,
               expectedVersion: args.expectedVersion,
-              operationId: "tool:" + api.callId,
+              operationId: operationIdFor(api.callId),
             });
             return { output: text(outcome), isError: outcome.status !== "applied" };
           } catch (error) {

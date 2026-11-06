@@ -4,8 +4,8 @@ Durable の組み立て。Workspace のツール、観測イベント、モデ�
 
 - `src/agent.ts` — `openAgent()` が Harness・conversation・ツール・観測を 1 箇所で組み立てる。依存（storage / models / workspace / shell）はここで受け取り、import 時に接続しない。
 - `src/tools.ts` — `read_file` / `write_file` は Workspace を通し、拒否は**値**（`{ok:false, status, message}`）でモデルに返す。
-  - `write_file` の `operationId` はモデルではなく**ツール呼び出し**から作る（`tool:<callId>`）。モデルが id を使い回して書き込みが消えるのを防ぐ。
-  - `read_file` は 64 KiB で切って `truncated` と `characters` を返す（`version` は全体の版）。
+  - `write_file` の `operationId` はモデルではなく**ツール呼び出し**から作る（`call-<callId>` を wire の書式に整えたもの）。モデルが id を使い回して書き込みが消えるのを防ぐ。
+  - `read_file` は 32 K 文字で切って `truncated` と `characters` を返す（`version` は全体の版）。
   - `bash` は sandbox があるときだけ登録する（無い環境では出さない）。
 - `openAgent()` は `cwd` が Workspace の root 配下かを `workspace.contains()` で検査し、外なら `Denied`。
 - `src/failure.ts` — 想定内の失敗の型。想定外はそのまま投げる（defect）。

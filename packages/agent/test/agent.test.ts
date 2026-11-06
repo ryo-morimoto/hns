@@ -16,7 +16,9 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { Workspace } from "@hns/workspace";
 import { createNoExecEnv, createSandboxEnv, detectSandbox } from "@hns/workspace/sandbox";
 import { Denied } from "@hns/workspace";
-import { openAgent } from "../src/index.ts";
+import { OperationIdSchema } from "@hns/core";
+import * as v from "valibot";
+import { openAgent, operationIdFor } from "../src/index.ts";
 import type { Agent, AgentEvent, ShellAccess } from "../src/index.ts";
 
 type Faux = ReturnType<typeof fauxProvider>;
@@ -314,4 +316,12 @@ test("a cwd outside the workspace root is refused", async () => {
     await workspace.close();
     await rm(base, { recursive: true, force: true });
   }
+});
+// Catches: the agent's operationId had a colon, which the wire's OperationIdSchema rejects.
+test("the agent's operationId obeys the wire format", () => {
+  const callId = "tool:1793992940083:qazzmqq70wo";
+
+  assert.doesNotThrow(() => v.parse(OperationIdSchema, operationIdFor(callId)));
+  assert.notEqual(operationIdFor(callId), operationIdFor(callId + "x"));
+  assert.equal(operationIdFor("a".repeat(100)).length, 64);
 });

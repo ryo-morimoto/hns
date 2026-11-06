@@ -36,3 +36,5 @@ workspace の入口でも弾くかどうかを決め、決めた方針を実装�
 - 2026-11-07: レビュー指摘への対応で、workspace は「同じ operationId を別の内容で使う」ことを `Denied` にし、
   agent の `write_file` はモデルから `operationId` を受け取らず `tool:<callId>` を内部生成するようにした。
   形式の検証（`OperationIdSchema` の parse）は本 issue のまま残す。
+- 2026-11-07: agent が作る id を wire の書式（`[A-Za-z0-9_-]{1,64}`）に合わせた（`call-` + 整えた callId）。
+  workspace の入口で `OperationIdSchema` を parse しても agent の経路が壊れない状態になった。
