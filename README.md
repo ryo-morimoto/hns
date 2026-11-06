@@ -16,8 +16,17 @@
 10. Git Diff Viewer（Want）
 11. Web UI Grabber Extension（Want）
 12. Automations（スケジュール / Webhook で Workflow・会話を起動）
+13. 認証・認可と公開範囲（単一ユーザーでも入口を閉じる）
+14. 秘密の管理（Provider 鍵・Webhook token の保存とローテーション）
+15. 利用量と制限（コスト、レート制限、タイムアウト、中断）
+16. データの保全（バックアップ・復元・スキーマ移行）
+17. 観測（ログ・実行履歴・メトリクス）
+18. 安全（TOCTOU の残余・sandbox の配布・SSH 経路の検証）
+19. 開発・検証基盤（node の固定・CI・テスト集約）
+20. 会話の管理（一覧・名前・削除・検索）
+21. UI / UX の仕上げ（最終段、D011）
 
-- Must は 1〜9 と 12。主画面は **Conversation / Progress** で、Editor First にはしない。
+- Must は 1〜9 と 12〜21（10・11 は Want）。主画面は **Conversation / Progress** で、Editor First にはしない。
 - 最初の利用者は「複数開発マシンを持つ個人開発者」（仮説）。
 - MVP 候補: セルフホスト起動、会話、2マシン接続、権限つきファイル編集、再開。**範囲は未承認**。
 
