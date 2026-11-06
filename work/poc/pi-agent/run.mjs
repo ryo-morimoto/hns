@@ -160,5 +160,40 @@ console.log("\nmessages:", agent.state.messages.length, "events:", [...new Set(e
 console.log("pi-agent-core tools:", tools.map((tool) => tool.name).join(","));
 await workspace.close();
 await rm(base, { recursive: true, force: true });
+// 7. both runtimes in one process, sharing one Models and one Workspace
+{
+  const { MemoryStorage, Harness, createRegistry, defineExtension, defineTool } = await import("@earendil-works/pi-durable");
+  const registry = createRegistry();
+  registry.install(
+    defineExtension({
+      name: "probe-durable-tools",
+      tools: [
+        defineTool({
+          name: "read_file",
+          description: "Read a workspace file.",
+          parameters: obj({ path: str() }),
+          execute: async (args) => ({ output: [{ type: "text", text: JSON.stringify(await workspace.read(args.path)) }] }),
+        }),
+      ],
+    }),
+  );
+  const harness = await Harness.open(new MemoryStorage(), { models, registry, env: () => env }, ctx);
+  const conversation = await harness.root(ctx, {
+    agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: root },
+  });
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("read_file", { path: "a.txt" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("durable answer"),
+  ]);
+  const submission = await conversation.submit({ type: "input", content: "read it", requestId: "both-1" }, ctx);
+  const settled = await submission.wait(ctx);
+  check(settled.status === "done", "Durable Harness ran in the same process", JSON.stringify(settled).slice(0, 120));
+
+  faux.setResponses([fauxAssistantMessage("agent-core answer")]);
+  await agent.prompt("say something");
+  const last = agent.state.messages.filter((message) => message.role === "assistant").at(-1);
+  check(JSON.stringify(last).includes("agent-core answer"), "pi-agent-core ran beside it", JSON.stringify(last).slice(0, 120));
+}
+
 console.log("\n" + pass + "/" + (pass + fail) + " passed");
 process.exitCode = fail ? 1 : 0;

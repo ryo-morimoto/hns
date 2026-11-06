@@ -31,3 +31,19 @@
 
 **結論**: 使える。落とすのは「耐久実行」で、代わりに会話の保存・復旧を自分で持つことになる。
 どちらを選ぶかは設計判断で、技術的な不可は無い。
+## pi-durable と併用できるか（実測と実ソース）
+
+**同居はできる。** 同じプロセスで、pi-durable の Harness の会話と pi-agent-core の Agent を、
+同じ Models と 同じ Workspace に対して両方動かせた（run.mjs の 7 番。12/12）。
+
+根拠（実ソース）:
+
+- 依存は衝突しない。pi-durable 1.5.0 も pi-agent-core 1.5.0 も、pi-ai 1.5.0 と pi-schema 1.5.0 を exact pin。
+  npm は 1 つに dedupe するので Context / Message / Models の型は同一。pi-durable は pi-agent-core に依存していない（別実装）。
+- ただし**ループの所有者が重なる**。pi-durable の GenerationTask は runtime.models.streamSimple() を直接呼び、
+  GenerationCheckpoint（prepare / request / retry / poll）を Storage に保存する。ToolTask も独自に checkpoint する。
+  pi-agent-core の Agent は streamFn でモデル呼び出しだけ差し替え、状態はメモリの state.messages。
+- 差し替え口が無い。pi-durable の HarnessOptions にループを渡す口は無い（models / registry / settings / env / now / timers / telemetry / identity）。
+  pi-agent-core の Transport は "sse" | "websocket" | "websocket-cached" | "auto" で、実行を委譲する口ではない。
+
+つまり **同じ会話に対しては代替**（二重ループ・二重トランスクリプトになる）。**用途を分ければ併用できる**。
