@@ -14,6 +14,7 @@ import { obj, str } from "@earendil-works/pi-schema";
 import { LocalExecutionEnv, Connection, localDaemon } from "@earendil-works/pi-env";
 import { openControlPlane } from "./db.mjs";
 import { createPasskey } from "./passkey.mjs";
+import { openRecovery } from "./recovery.mjs";
 import { SecretStore, SCOPES } from "./secrets.mjs";
 import { createTailscaleVerifier, parseUsers } from "./tailscale.mjs";
 import { cronMatches } from "./cron.mjs";
@@ -385,7 +386,7 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
         return json(res, 200, {
           user: user ? { login: user.login } : null,
           unlocked: Boolean(session && unlocks.has(session.id)),
-          hasWrapped: Boolean(user?.wrapped_dek),
+          hasWrapped: Boolean(user && control.listUserKeys(user.id).length > 0),
         });
       }
       if (url.pathname.startsWith("/api/passkey/")) {
@@ -398,12 +399,34 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           return json(res, 200, await passkey.registrationOptions({ login, rpID }));
         }
         if (url.pathname === "/api/passkey/register/verify" && req.method === "POST") {
-          const { login, response, wrappedDek, dekIv } = await bodyOf(req);
+          const { login, response, wrapped, recovery } = await bodyOf(req);
           try {
             const result = await passkey.verifyRegistration({ login, response, origin, rpID });
-            if (result.verified && wrappedDek && dekIv) control.setWrappedDek(result.user.id, { wrappedDek, dekIv });
+            if (result.verified) {
+              if (wrapped?.wrappedDek && wrapped.dekIv) {
+                control.addUserKey({ userId: result.user.id, kind: "passkey", credentialId: response.id, wrappedDek: wrapped.wrappedDek, iv: wrapped.dekIv });
+              }
+              if (recovery?.wrappedDek && recovery.iv && recovery.salt) {
+                control.addUserKey({ userId: result.user.id, kind: "recovery", wrappedDek: recovery.wrappedDek, iv: recovery.iv, salt: recovery.salt });
+              }
+            }
             return json(res, 200, { verified: result.verified });
           } catch (error) { return json(res, 400, { error: String(error.message ?? error) }); }
+        }
+        if (url.pathname === "/api/passkey/recovery" && req.method === "POST") {
+          const { login, code } = await bodyOf(req);
+          const user = control.getUserByLogin(String(login ?? ""));
+          if (!user) return json(res, 401, { error: "invalid recovery code" });
+          const key = control.listUserKeys(user.id).find((entry) => entry.kind === "recovery");
+          if (!key) return json(res, 401, { error: "invalid recovery code" });
+          try {
+            const dek = openRecovery({ code, salt: key.salt, wrappedDek: key.wrapped_dek, iv: key.iv });
+            if (dek.length !== 32) throw new Error("bad key");
+            const session = control.createSession(user.id, 30 * 24 * 3600_000);
+            unlocks.set(session.id, dek);
+            res.setHeader("set-cookie", "hns_session=" + session.id + "; HttpOnly; SameSite=Lax; Path=/; Max-Age=" + 30 * 24 * 3600);
+            return json(res, 200, { recovered: true, user: { login: user.login } });
+          } catch { return json(res, 401, { error: "invalid recovery code" }); }
         }
         if (url.pathname === "/api/passkey/unlock" && req.method === "POST") {
           const session = sessionOf(req);
@@ -419,10 +442,10 @@ export async function startApp({ stateDir, root, provider = "faux", model, fauxS
           if (!login) return json(res, 400, { error: "login is required" });
           const options = await passkey.authenticationOptions({ login, rpID });
           const user = control.getUserByLogin(login);
-          return json(res, 200, {
-            ...options,
-            wrapped: user?.wrapped_dek ? { wrappedDek: user.wrapped_dek, dekIv: user.dek_iv } : null,
-          });
+          const wraps = (user ? control.listUserKeys(user.id) : [])
+            .filter((entry) => entry.kind === "passkey")
+            .map((entry) => ({ credentialId: entry.credential_id, wrappedDek: entry.wrapped_dek, iv: entry.iv }));
+          return json(res, 200, { ...options, wraps });
         }
         if (url.pathname === "/api/passkey/login/verify" && req.method === "POST") {
           const { login, response } = await bodyOf(req);

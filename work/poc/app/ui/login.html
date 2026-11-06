@@ -1,16 +1,26 @@
 <!doctype html>
 <html lang="ja">
 <head><meta charset="utf-8"><title>hns — sign in</title>
-<style>body{font:14px/1.5 ui-monospace,monospace;max-width:560px;margin:10vh auto;padding:0 16px}
-input,button{font:inherit;padding:6px 8px}pre{background:#f6f6f6;padding:8px;white-space:pre-wrap}</style>
+<style>body{font:14px/1.5 ui-monospace,monospace;max-width:600px;margin:8vh auto;padding:0 16px}
+input,button{font:inherit;padding:6px 8px}pre{background:#f6f6f6;padding:8px;white-space:pre-wrap}
+section{margin:18px 0;padding-top:12px;border-top:1px solid #ddd}</style>
 </head>
 <body>
 <h1>hns</h1>
-<p>passkey で登録・ログインします。PRF 対応の認証器なら、秘密はログイン中だけ復号できます。</p>
+<p>passkey で登録・ログインします。PRF 対応なら秘密はログイン中だけ復号され、復旧コードでも開けます。</p>
 <p><input id="login" placeholder="login" autocomplete="username"> <button id="register">register</button> <button id="signin">sign in</button></p>
 <pre id="status"></pre>
+<pre id="recovery" hidden></pre>
+
+<section>
+  <strong>recovery code</strong>
+  <p>端末を失ったときは、ここにコードを入れて開きます。</p>
+  <p><input id="code" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"> <button id="recover">recover</button></p>
+</section>
 <script type="module">
 const PRF_SALT = new TextEncoder().encode("hns-prf-v1");
+const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const ITERATIONS = 600000;
 const toBytes = (value) => {
   const base = value.replace(/-/g, "+").replace(/_/g, "/");
   const binary = atob(base + "=".repeat((4 - (base.length % 4)) % 4));
@@ -21,6 +31,13 @@ const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const unb64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 const status = (text) => { document.querySelector("#status").textContent = text; };
 const login = () => document.querySelector("#login").value.trim();
+const normalize = (code) => String(code ?? "").toUpperCase().replace(/[^A-Z2-9]/g, "");
+
+function newCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(25));
+  const chars = Array.from(bytes, (value) => ALPHABET[value % ALPHABET.length]);
+  return Array.from({ length: 5 }, (_, i) => chars.slice(i * 5, i * 5 + 5).join("")).join("-");
+}
 
 async function post(path, body) {
   const response = await fetch(path, { method: "POST", body: JSON.stringify(body) });
@@ -37,6 +54,14 @@ async function deriveKek(prfOutput) {
   );
 }
 
+async function deriveRecoveryKek(code, salt) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(normalize(code)), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: unb64(salt), iterations: ITERATIONS, hash: "SHA-256" },
+    base, { name: "AES-GCM", length: 256 }, false, ["wrapKey", "unwrapKey"],
+  );
+}
+
 document.querySelector("#register").onclick = async () => {
   try {
     status("registering…");
@@ -47,15 +72,21 @@ document.querySelector("#register").onclick = async () => {
     options.extensions = { prf: { eval: { first: PRF_SALT } } };
     const created = await navigator.credentials.create({ publicKey: options });
 
-    let wrapped = {};
+    const dek = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    let wrapped = null;
     const prf = created.getClientExtensionResults().prf?.results?.first;
     if (prf) {
       const kek = await deriveKek(prf);
-      const dek = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
       const iv = crypto.getRandomValues(new Uint8Array(12));
       const wrappedBytes = await crypto.subtle.wrapKey("raw", dek, kek, { name: "AES-GCM", iv });
       wrapped = { wrappedDek: b64(wrappedBytes), dekIv: b64(iv) };
     }
+
+    const code = newCode();
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const recoveryKek = await deriveRecoveryKek(code, b64(salt));
+    const recoveryIv = crypto.getRandomValues(new Uint8Array(12));
+    const recoveryBytes = await crypto.subtle.wrapKey("raw", dek, recoveryKek, { name: "AES-GCM", iv: recoveryIv });
 
     const response = {
       id: created.id, type: created.type, rawId: fromBytes(created.rawId),
@@ -65,8 +96,16 @@ document.querySelector("#register").onclick = async () => {
         transports: created.response.getTransports?.() ?? [],
       },
     };
-    await post("/api/passkey/register/verify", { login: login(), response, ...wrapped });
-    status(prf ? "registered. sign in." : "registered, but this authenticator has no PRF: user secrets stay unavailable.");
+    await post("/api/passkey/register/verify", {
+      login: login(), response,
+      wrapped: wrapped ?? undefined,
+      recovery: { wrappedDek: b64(recoveryBytes), iv: b64(recoveryIv), salt: b64(salt) },
+    });
+
+    const box = document.querySelector("#recovery");
+    box.hidden = false;
+    box.textContent = "recovery code (write this down, shown once): " + code;
+    status("registered. sign in.");
   } catch (error) { status("error: " + error.message); }
 };
 
@@ -74,8 +113,8 @@ document.querySelector("#signin").onclick = async () => {
   try {
     status("signing in…");
     const options = await post("/api/passkey/login/options", { login: login() });
-    const wrapped = options.wrapped;
-    delete options.wrapped;
+    const wraps = options.wraps ?? [];
+    delete options.wraps;
     options.challenge = toBytes(options.challenge);
     for (const credential of options.allowCredentials ?? []) credential.id = toBytes(credential.id);
     options.extensions = { prf: { eval: { first: PRF_SALT } } };
@@ -92,19 +131,33 @@ document.querySelector("#signin").onclick = async () => {
     };
     await post("/api/passkey/login/verify", { login: login(), response });
 
+    let dek = null;
     const prf = assertion.getClientExtensionResults().prf?.results?.first;
-    if (prf && wrapped) {
+    if (prf) {
       const kek = await deriveKek(prf);
-      const dek = await crypto.subtle.unwrapKey(
-        "raw", unb64(wrapped.wrappedDek), kek, { name: "AES-GCM", iv: unb64(wrapped.dekIv) },
-        { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"],
-      );
+      for (const wrap of wraps) {
+        try {
+          dek = await crypto.subtle.unwrapKey("raw", unb64(wrap.wrappedDek), kek, { name: "AES-GCM", iv: unb64(wrap.iv) }, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+          break;
+        } catch {}
+      }
+    }
+    if (dek) {
       const raw = await crypto.subtle.exportKey("raw", dek);
       await post("/api/passkey/unlock", { dek: b64(raw) });
       status("signed in and unlocked.");
     } else {
-      status("signed in. secrets are locked (no PRF or no wrapped key).");
+      status("signed in. secrets are locked; use a recovery code or a PRF-capable device.");
     }
+    location.href = "/";
+  } catch (error) { status("error: " + error.message); }
+};
+
+document.querySelector("#recover").onclick = async () => {
+  try {
+    status("recovering…");
+    await post("/api/passkey/recovery", { login: login(), code: document.querySelector("#code").value });
+    status("recovered. loading…");
     location.href = "/";
   } catch (error) { status("error: " + error.message); }
 };

@@ -50,7 +50,7 @@ await page.waitForURL(pageOrigin + "/", { timeout: 15000 });
 check(true, "passkey login redirects to the app");
 const me = await page.evaluate(async () => (await fetch("/api/me")).json());
 check(me.user?.login === "ryo", "the session identifies the user", JSON.stringify(me));
-check(me.hasWrapped === false && me.unlocked === false, "an authenticator without PRF registers but keeps user secrets locked", JSON.stringify(me));
+check(me.hasWrapped === true && me.unlocked === false, "an authenticator without PRF registers (recovery wrap only) and stays locked", JSON.stringify(me));
 check((await page.evaluate(async () => (await fetch("/api/state")).status)) === 200, "the session opens the API");
 
 // No cookie at all.

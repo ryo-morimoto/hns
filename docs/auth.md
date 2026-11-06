@@ -36,7 +36,7 @@
 - `playwright-core` + Nix の Chromium（`HNS_CHROME` で上書き）。
 - CDP: `WebAuthn.enable` → `WebAuthn.addVirtualAuthenticator`（ctap2 / internal / UV 済み）。
 - `run-passkey.mjs` が 登録 → 未ログインで 401 → ログイン → セッションで 200 まで通す。
-- `hasPrf: true` の仮想認証器で `run-prf.mjs` が PRF の包み・開き・再起動後のロックまで通す。
+- `hasPrf: true` の仮想認証器で `run-prf.mjs` が PRF の包み・復旧コード・再起動後のロックまで通す。
 - Chromium が無い環境では SKIP する。
 
 ## 暗号化・復号化（実装済み）
@@ -47,10 +47,10 @@ Provider 鍵は §service/provider.<name>§ に置けば、ファイルや env �
 
 ### PRF で包む（実装済み）
 
-- 登録時: 認証器の PRF 出力から HKDF で KEK を作り、ブラウザでデータ鍵（DEK）を包んで送る。サーバは包んだ DEK だけ保存する。
+- 登録時: データ鍵（DEK）を作り、**複数の包み**を保存する。PRF から HKDF で作った KEK で包む包みと、復旧コードから PBKDF2 で作った KEK で包む包み。
 - ログイン時: 同じ KEK で DEK を開き、`/api/passkey/unlock` でセッションに渡す。DEK は**メモリだけ**に置く。
 - 再起動やログアウトで DEK は消える。その状態で `user` の秘密を読むと `423 locked`。
-- PRF 非対応の認証器では包まない。`user` は使えないが、`service` とアプリ自体は動く。
+- PRF 非対応の認証器でも復旧コードの包みは作る。その端末ではパスキーでは開けないが、復旧コードで開ける。
 - Automation は `service` しか使わないので、誰もログインしていなくても動く。
 
 WebAuthn には「鍵を渡す」機能が無い。使えるのは **PRF 拡張**（認証器の hmac-secret）。
@@ -73,6 +73,6 @@ WebAuthn には「鍵を渡す」機能が無い。使えるのは **PRF 拡張*
 | ID | 論点 | 案 |
 | --- | --- | --- |
 | AR-01 | passkey を第一手段にするか tailnet の補助か | tailnet があれば補助 |
-| AR-02 | PRF 非対応の認証器 | 復旧コード（DEK を別の鍵で包む）と、1つの DEK に複数の包みを持たせる |
+| AR-02 | PRF 非対応の認証器 | 復旧コードで開ける（実装済み） |
 | AR-03 | 復旧 | リカバリコードを紙で保管 |
 | AR-04 | セッションの寿命と失効 | 端末ごと、30 日 + 明示ログアウト |

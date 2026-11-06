@@ -68,6 +68,17 @@ export function openControlPlane(path) {
       transports TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS user_keys (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      credential_id TEXT,
+      wrapped_dek TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      salt TEXT,
+      label TEXT,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -121,6 +132,7 @@ export function openControlPlane(path) {
     }
   }
   if (version < 2) db.exec("PRAGMA user_version = 2");
+  if (version < 3) db.exec("PRAGMA user_version = 3");
 
   const now = () => new Date().toISOString();
   const row = (value) => (value === undefined ? undefined : { ...value });
@@ -265,6 +277,15 @@ export function openControlPlane(path) {
     getCredential: (id) => row(db.prepare("SELECT * FROM credentials WHERE id = ?").get(id)),
     updateCounter(id, counter) {
       db.prepare("UPDATE credentials SET counter = ? WHERE id = ?").run(counter, id);
+    },
+    addUserKey({ userId, kind, credentialId, wrappedDek, iv, salt, label }) {
+      const key = { id: randomUUID(), user_id: userId, kind, credential_id: credentialId ?? null, wrapped_dek: wrappedDek, iv, salt: salt ?? null, label: label ?? null, created_at: now() };
+      db.prepare("INSERT INTO user_keys (id, user_id, kind, credential_id, wrapped_dek, iv, salt, label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(key.id, key.user_id, key.kind, key.credential_id, key.wrapped_dek, key.iv, key.salt, key.label, key.created_at);
+      return key;
+    },
+    listUserKeys(userId) {
+      return db.prepare("SELECT * FROM user_keys WHERE user_id = ? ORDER BY created_at").all(userId).map(row);
     },
     setWrappedDek(userId, { wrappedDek, dekIv }) {
       db.prepare("UPDATE users SET wrapped_dek = ?, dek_iv = ? WHERE id = ?").run(wrappedDek, dekIv, userId);
