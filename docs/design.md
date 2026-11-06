@@ -16,6 +16,7 @@
 4. [data.md](design/data.md) — 永続化、並行、上限、移行
 5. [http.md](design/http.md) — HTTP API
 6. [security.md](design/security.md) — 認可、秘密、sandbox
+7. [interface.md](design/interface.md) — UI/UX、Agentic Workspace の原則
 
 ## 対象別の入口
 
@@ -27,6 +28,7 @@
 | 保存形式・journal・再送 | data.md（冪等 → 原子性 → 互換） |
 | HTTP のルート・一覧・エラー | http.md（ページネーション → safe/idempotent → problem details） |
 | 認可・秘密・sandbox | security.md（OWASP → PAGNI → fail closed） |
+| 画面・操作・状態 | interface.md（仕事が主役 → 注意の順序 → 直接編集） |
 
 ## 進め方
 

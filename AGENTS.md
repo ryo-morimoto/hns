@@ -179,6 +179,7 @@ Read on demand — not every session:
 | --- | --- |
 | Requirements and scope | `README.md`, `ARCH.md` |
 | Research, requirements, tech selection, gates | `docs/process.md` |
+| UI/UX and agentic workspace examples | `docs/design/interface.md` (before) / `docs/review/ux.md` (review) |
 | Package boundaries and where types live | `docs/packages.md` |
 | Why a decision was made | `docs/decisions.md` (append-only) |
 | Stack, tooling, AI-slop gates | `docs/engineering.md` |

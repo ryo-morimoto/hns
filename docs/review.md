@@ -12,6 +12,7 @@
 | パス・コマンド・秘密・sandbox・認可・既定値・降格 | [security.md](review/security.md) |
 | 永続化・書込・再送・並行・上限 | [persistence.md](review/persistence.md) |
 | wire / schema / signature / イベント名 / 互換 | [contracts.md](review/contracts.md) |
+| 画面・操作・状態・文言（UI/UX） | [ux.md](review/ux.md) |
 | 観点を足す・削るときだけ | [eval.md](review/eval.md) |
 
 観点の根拠は [design.md](design.md) の各項目（原典リンク付き。設計時の命令もそこにある）。迷ったら diff のファイル名で決める（`sandbox` → security、`journal` / `store` / `migrate` → persistence、
