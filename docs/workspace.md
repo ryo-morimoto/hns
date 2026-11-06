@@ -1,6 +1,6 @@
 # Workspace Execution Contract v0.1
 
-2026-11-06 / 草案（実装前） / 前提: [D001](decisions.md)
+2026-11-06 / **v0.1 実装済み（PoC）** / 前提: [D001](decisions.md)
 
 Editor と Agent が同じファイルに触るとき、黙って壊さない。exactly-once は目的ではない。
 
@@ -75,6 +75,26 @@ type MutationResult =
 ## 保証しない
 
 bash・外部エディタ・別プロセス / exactly-once / Root をまたぐ移動 / 時計順序 / 8 MiB 超。
+
+## 検証
+
+`work/poc/workspace-core` が §expectedVersion§ の比較、temp + rename、Journal の intent/outcome、
+recover（applied / pending / unknown）を実装。**40/40 合格**（Node env と pi-env daemon の両方）。
+
+| 試験 | 内容 |
+| --- | --- |
+| T-03 | 同じ版から2クライアント → 片方 applied、片方 conflict。上書きなし |
+| T-04 | intent 後 / temp 後 / rename 後の停止 → pending / pending / applied。再送で二重適用なし |
+| - | rename 後に第三者が変更 → unknown（applied にも conflict にも丸めない） |
+| - | 同じ §operationId§ の再送は記録済みの結果を返し、後からの外部変更を上書きしない |
+
+## 限界（実装で確認したもの）
+
+- Journal の保存は §writeFile§（非原子）。原子的な追記ログにする必要がある。
+- temp は root 直下の §.hns-tmp-<opId>§。Agent から見える。制御用ディレクトリに逃がす。
+- 比較と rename の間の窓は残る（TOCTOU）。
+- ディレクトリの fsync をしないため、rename の耐久性は保証しない。
+- create-if-absent の競合、巨大ファイル、パッチは未対応。
 
 ## 未決
 

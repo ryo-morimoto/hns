@@ -1,6 +1,6 @@
 # 0002: T-03/T-04 Mutation の故障注入
 
-status: open
+status: done
 depends-on: 0001
 touches: work/poc/, docs/design
 
@@ -18,3 +18,10 @@ touches: work/poc/, docs/design
 ## Log
 
 - 2026-11-06: 作成。
+- 2026-11-06: `work/poc/workspace-core` を実装。40/40 合格（Node / pi-env daemon）。
+
+## Result
+
+- `Workspace.write` が expectedVersion を比較し、intent → temp + flush → 再確認 → rename → outcome の順で適用。
+- `recover()` が intent だけ残った操作を applied / pending / unknown に分類。再送は記録済みの結果を返す。
+- 残り: Journal の原子化、temp の置き場所、ディレクトリ fsync、create-if-absent、パッチ（docs/workspace.md の限界）。
