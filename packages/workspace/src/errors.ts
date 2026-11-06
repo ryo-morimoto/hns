@@ -23,6 +23,14 @@ export class Crash extends Error {
   }
 }
 
+/** The environment cannot provide a guarantee that was required. */
+export class Unavailable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "Unavailable";
+  }
+}
+
 /** A file failure in pi-durable's vocabulary, so callers branch on code, not message. */
 export class FileFailure extends Error {
   readonly code: FileErrorCode;

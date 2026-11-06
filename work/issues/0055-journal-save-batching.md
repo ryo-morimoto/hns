@@ -30,3 +30,6 @@ temp + flush + rename の原子的保存にしたため 1 回あたりの fs op 
 ## Log
 
 - 2026-11-07: 作成（0045 の原子的保存の副作用として）。
+
+- 2026-11-07: 決着済み operation を既定 500 件で切り捨てるようにした（`maxSettledOps`）。journal の伸びは止めたが、
+  保存回数の削減（batching）は本 issue のまま残す。

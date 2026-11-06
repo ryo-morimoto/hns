@@ -18,7 +18,15 @@ export type ToolFailure =
 export type WriteReply = MutationResult | ToolFailure;
 
 export type ReadReply =
-  | { readonly ok: true; readonly content: string; readonly version: string }
+  | {
+      readonly ok: true;
+      readonly content: string;
+      readonly version: string;
+      /** True when the file is larger than the tool returns; the version still names the whole file. */
+      readonly truncated: boolean;
+      /** Characters in the whole file. */
+      readonly characters: number;
+    }
   | ToolFailure;
 
 /** Map an expected workspace failure to a value; anything else is a defect and propagates. */

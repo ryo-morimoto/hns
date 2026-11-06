@@ -13,7 +13,7 @@ import type {
   ShellExecResult,
 } from "@earendil-works/pi-durable/env";
 import { ForwardingEnv } from "../src/env.ts";
-import { Workspace } from "../src/index.ts";
+import { Unavailable, Workspace } from "../src/index.ts";
 import { KINDS, openWorkspace, rootOf, swapParent, withTarget } from "./support.ts";
 import type { Target } from "./support.ts";
 
@@ -304,3 +304,13 @@ for (const kind of KINDS) {
     });
   });
 }
+test("a required rooted helper refuses to open without exec", async () => {
+  for (const kind of KINDS) {
+    await withTarget(kind, async (target) => {
+      await assert.rejects(
+        openWorkspace(target, "required", { env: new NoExecEnv(target.env), rooted: "required" }),
+        Unavailable,
+      );
+    });
+  }
+});

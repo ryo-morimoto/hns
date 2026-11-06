@@ -15,6 +15,7 @@ import type { EntryRecord } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { Workspace } from "@hns/workspace";
 import { createNoExecEnv, createSandboxEnv, detectSandbox } from "@hns/workspace/sandbox";
+import { Denied } from "@hns/workspace";
 import { openAgent } from "../src/index.ts";
 import type { Agent, AgentEvent, ShellAccess } from "../src/index.ts";
 
@@ -102,7 +103,6 @@ test("a turn reads a file and replaces it with the version it read", async () =>
           path: "a.txt",
           content: "v2",
           expectedVersion: version,
-          operationId: "op-1",
         }),
         { stopReason: "toolUse" },
       ),
@@ -125,7 +125,6 @@ test("a write from a stale version comes back as a conflict value", async () => 
           path: "a.txt",
           content: "stale",
           expectedVersion: "sha256:old",
-          operationId: "op-2",
         }),
         { stopReason: "toolUse" },
       ),
@@ -217,4 +216,102 @@ test("bash runs inside the root and cannot write outside it", async (t) => {
     assert.equal((await readFile(join(root, "b.txt"), "utf8")).trim(), "inside");
     await assert.rejects(readFile(join(root, "..", "escape.txt"), "utf8"));
   });
+});
+// Catches: the model chose operationId, so repeating one silently swallowed the next write.
+test("two writes in one turn both apply, because the call names the operation", async () => {
+  await withAgent(async ({ agent, workspace, root, faux }) => {
+    const first = (await workspace.read("a.txt")).version;
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("write_file", { path: "a.txt", content: "v2", expectedVersion: first }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage(fauxToolCall("read_file", { path: "a.txt" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    await agent.send("first write");
+    const second = (await workspace.read("a.txt")).version;
+    assert.notEqual(second, first);
+    assert.equal(await readFile(join(root, "a.txt"), "utf8"), "v2");
+
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("write_file", { path: "a.txt", content: "v3", expectedVersion: second }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+    ]);
+    await agent.send("second write");
+
+    assert.equal(await readFile(join(root, "a.txt"), "utf8"), "v3");
+  });
+});
+
+// Catches: read_file put the whole file in the model context (up to the 8 MiB workspace cap).
+test("a large file is truncated in the tool result", async () => {
+  await withAgent(async ({ agent, root, faux, workspace }) => {
+    const big = "x".repeat(100 * 1024);
+    await workspace.write({
+      path: "big.txt",
+      content: big,
+      expectedVersion: "absent",
+      operationId: "seed-big",
+    });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("read_file", { path: "big.txt" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("read it"),
+    ]);
+
+    await agent.send("read the big file");
+    const result = toolResults(await agent.transcript()).find((text) =>
+      text.startsWith('{"ok":true'),
+    );
+
+    assert.ok(result !== undefined, "no read result");
+    const parsed = JSON.parse(result);
+    assert.equal(parsed.truncated, true);
+    assert.equal(parsed.characters, big.length);
+    assert.ok(parsed.content.length < big.length);
+    assert.equal(await readFile(join(root, "big.txt"), "utf8"), big);
+  });
+});
+
+// Catches: a cwd outside the root was accepted, so every relative tool path meant nothing.
+test("a cwd outside the workspace root is refused", async () => {
+  const base = await mkdtemp(join(tmpdir(), "hns-agent-cwd-"));
+  const root = join(base, "root");
+  await mkdir(root);
+  const env = new NodeExecutionEnv({ cwd: root });
+  const workspace = await Workspace.open({
+    env,
+    root,
+    journalPath: join(base, "journal.json"),
+    context: ctx,
+  });
+  const faux = fauxProvider();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const status = await detectSandbox();
+  const shell: ShellAccess = status.available
+    ? { kind: "sandboxed", env: createSandboxEnv(env, { root, bwrap: status.bwrap }) }
+    : { kind: "disabled", env: createNoExecEnv(env, status), reason: status.reason };
+  try {
+    await assert.rejects(
+      openAgent({
+        storage: new MemoryStorage(),
+        models,
+        workspace,
+        shell,
+        model: { provider: "faux", modelId: "faux-1" },
+        cwd: base,
+        context: ctx,
+      }),
+      Denied,
+    );
+  } finally {
+    await workspace.close();
+    await rm(base, { recursive: true, force: true });
+  }
 });

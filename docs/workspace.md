@@ -53,6 +53,8 @@ type MutationResult =
 6. Journal に outcome を記録し、イベントを追記
 
 再送は `operationId` で outcome を返す。outcome が無ければ次で照合する。
+`operationId` は 1 回の試行に 1 つ。同じ id で別の内容（`contentHash` か `expectedVersion` が違う）を送ると `denied`。
+古い決着済み operation は既定 500 件で切り捨てる（`maxSettledOps`）ので、それより前の再送は新しい書き込みになる。
 
 | 観測 | 判定 |
 | --- | --- |
@@ -71,6 +73,8 @@ type MutationResult =
 - 操作ごとに root の存在を確認。消えていたら `denied`（書き込みで再作成しない）
 - 拒否は `operationId` 付きで Journal の `audit` に残す
 - **root の同一性**: Journal の `id` と root 内の `.hns/root.json` を照合する。欠落・不一致なら開かない（fail closed）
+- **cwd**: `contains(path)` が書き込みと同じ解決で root 配下かを返す。agent の cwd はこれで検査する
+- **helper の必須化**: `rooted: "required"` は、ヘルパーが動かない環境では開かない（既定は `mode: "checks"` へフォールバック）
 - **exec の隔離**: 起動時に bubblewrap を検出し、通らなければ exec を出さない（fail closed）。通ったときは `createSandboxEnv` で root だけ書き込み可能・他は読み取り専用。ネットワークは残す
 - **TOCTOU**: 解決と使用を同じ dirfd で行う（下記）。ヘルパーを実行できない環境では、rename 直前に親の canonical を再確認し、変わっていれば `unknown` に落とす（窓は残る）
 - **exec の環境**: sandbox は `--clearenv` でサーバの env を落とし、`PATH` と `HOME`（root）などだけを戻す。`SandboxOptions.hide` のディレクトリは tmpfs で隠す（鍵のディレクトリは呼び出し側が渡す）
@@ -145,7 +149,7 @@ recover（applied / pending / unknown）を実装。**40/40 合格**（Node env 
 
 ## 限界（実装で確認したもの）
 
-- Journal の保存は §writeFile§（非原子）。原子的な追記ログにする必要がある。
+- Journal の保存は temp + flush + rename で原子的。ただし全体の書き換えなので、件数に比例して重い（追記ログは未対応）。
 - temp は root 直下の §.hns-tmp-<uuid>§（内部生成）。Agent から見える。制御用ディレクトリに逃がす。
 - 親の差し替えは dirfd で閉じた。**同名ファイルの差し替え**は hash と rename の間に残る。ヘルパーが動かない環境では親の窓も残る（`Workspace.mode === "checks"`）。
 - `SandboxOptions.hide` は既定で空。サーバの composition root が鍵のディレクトリを渡す。

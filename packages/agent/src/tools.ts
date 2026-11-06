@@ -9,6 +9,9 @@ import { failureOf } from "./failure.ts";
 import type { ReadReply, ToolFailure } from "./failure.ts";
 import type { ShellAccess } from "./shell.ts";
 
+/** Model-facing read size. A larger file reports its version but only this head. */
+const MAX_READ_CONTENT = 64 * 1024;
+
 export interface WorkspaceToolsOptions {
   readonly workspace: Workspace;
   readonly shell: ShellAccess;
@@ -56,12 +59,22 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
       description:
         "Read a workspace file. Returns JSON {ok, content, version} or {ok:false, status, message}.",
       parameters: obj({ path: str() }),
+      // The tool bounds its own content; give the harness room so it does not cut the JSON.
+      outputLimits: { maxBytes: 96 * 1024, maxLines: 4000, retain: "head" },
       execute: (args) =>
         observed("read_file", onEvent, async () => {
           try {
             const read = await workspace.read(args.path);
+            const truncated = read.content.length > MAX_READ_CONTENT;
+            const content = truncated ? read.content.slice(0, MAX_READ_CONTENT) : read.content;
             return {
-              output: text({ ok: true, content: read.content, version: read.version }),
+              output: text({
+                ok: true,
+                content,
+                version: read.version,
+                truncated,
+                characters: read.content.length,
+              }),
               isError: false,
             };
           } catch (error) {
@@ -75,15 +88,16 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
       description:
         "Replace a workspace file. expectedVersion is the version from read_file, or 'absent'. Returns JSON " +
         "{status:'applied'|'conflict'|'unknown'} so a conflict can be re-read instead of retried blindly.",
-      parameters: obj({ path: str(), content: str(), expectedVersion: str(), operationId: str() }),
-      execute: (args) =>
+      parameters: obj({ path: str(), content: str(), expectedVersion: str() }),
+      execute: (args, api) =>
         observed("write_file", onEvent, async () => {
           try {
+            // The idempotency key is the tool call, not something the model can repeat.
             const outcome = await workspace.write({
               path: args.path,
               content: args.content,
               expectedVersion: args.expectedVersion,
-              operationId: args.operationId,
+              operationId: "tool:" + api.callId,
             });
             return { output: text(outcome), isError: outcome.status !== "applied" };
           } catch (error) {

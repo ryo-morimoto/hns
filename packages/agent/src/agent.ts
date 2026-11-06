@@ -3,6 +3,7 @@ import type { createModels } from "@earendil-works/pi-ai/models";
 import type { Context } from "@earendil-works/chord";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import type { Conversation, EntryRecord, Storage, Submission } from "@earendil-works/pi-durable";
+import { Denied } from "@hns/workspace";
 import type { Workspace } from "@hns/workspace";
 import type { AgentEvent, AgentEventSink } from "./events.ts";
 import type { ShellAccess } from "./shell.ts";
@@ -53,6 +54,10 @@ export interface Agent {
  * (docs/typescript.md section 4); nothing connects at import time.
  */
 export async function openAgent(options: AgentOptions): Promise<Agent> {
+  // The agent works inside the workspace: a cwd outside it would make every relative tool path meaningless.
+  if (!(await options.workspace.contains(options.cwd))) {
+    throw new Denied("the agent cwd is outside the workspace root");
+  }
   const extension = workspaceTools({
     workspace: options.workspace,
     shell: options.shell,

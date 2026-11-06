@@ -3,10 +3,75 @@ import assert from "node:assert/strict";
 import * as v from "valibot";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { FileFailure } from "../src/index.ts";
+import { Denied, FileFailure } from "../src/index.ts";
 import { KINDS, openWorkspace, rootOf, withTarget } from "./support.ts";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+for (const kind of KINDS) {
+  // Catches: reusing an operationId for different content silently returned the old outcome.
+  test(kind + ": an operationId cannot carry two different writes", async () => {
+    await withTarget(kind, async (target) => {
+      const workspace = await openWorkspace(target, "op-reuse");
+      await workspace.write({
+        path: "a.txt",
+        content: "one",
+        expectedVersion: "absent",
+        operationId: "same",
+      });
+      const current = (await workspace.read("a.txt")).version;
+
+      await assert.rejects(
+        workspace.write({
+          path: "a.txt",
+          content: "two",
+          expectedVersion: current,
+          operationId: "same",
+        }),
+        Denied,
+      );
+      assert.equal((await workspace.read("a.txt")).content, "one");
+      await workspace.close();
+    });
+  });
+
+  // Catches: the journal kept every settled operation, so each write rewrote a growing file.
+  test(kind + ": settled operations are trimmed from the journal", async () => {
+    await withTarget(kind, async (target) => {
+      const name = "op-trim";
+      const workspace = await openWorkspace(target, name, { maxSettledOps: 2 });
+      for (let index = 0; index < 5; index += 1) {
+        await workspace.write({
+          path: "f-" + index + ".txt",
+          content: String(index),
+          expectedVersion: "absent",
+          operationId: "op-" + index,
+        });
+      }
+
+      const journal = JSON.parse(
+        await readFile(join(target.base, "journal-" + name + ".json"), "utf8"),
+      );
+      assert.ok(Object.keys(journal.ops).length <= 2, JSON.stringify(Object.keys(journal.ops)));
+      assert.equal((await workspace.read("f-4.txt")).content, "4");
+      await workspace.close();
+    });
+  });
+
+  // Catches: openAgent could accept a cwd outside the root, where relative tool paths mean nothing.
+  test(kind + ": contains tells what is inside the root", async () => {
+    await withTarget(kind, async (target) => {
+      const workspace = await openWorkspace(target, "contains");
+      const root = rootOf(target, "contains");
+
+      assert.equal(await workspace.contains(root), true);
+      assert.equal(await workspace.contains(join(root, "nested", "file.txt")), true);
+      assert.equal(await workspace.contains(join(target.base, "outside.txt")), false);
+      assert.equal(await workspace.contains(target.base), false);
+      await workspace.close();
+    });
+  });
+}
 
 for (const kind of KINDS) {
   // Catches: operationId was spliced into the temp path, so "../" wrote outside the root.

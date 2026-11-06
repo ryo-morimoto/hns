@@ -1,4 +1,4 @@
-export { Crash, Denied, FileFailure } from "./errors.ts";
+export { Crash, Denied, FileFailure, Unavailable } from "./errors.ts";
 export type { CrashPoint } from "./errors.ts";
 export { FILE_EVENT_KINDS } from "./types.ts";
 export type {

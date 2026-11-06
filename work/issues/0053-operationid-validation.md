@@ -32,3 +32,7 @@ workspace の入口でも弾くかどうかを決め、決めた方針を実装�
 ## Log
 
 - 2026-11-07: 作成（0045 の見直しで「HTTP だけ」と分かったため）。
+
+- 2026-11-07: レビュー指摘への対応で、workspace は「同じ operationId を別の内容で使う」ことを `Denied` にし、
+  agent の `write_file` はモデルから `operationId` を受け取らず `tool:<callId>` を内部生成するようにした。
+  形式の検証（`OperationIdSchema` の parse）は本 issue のまま残す。

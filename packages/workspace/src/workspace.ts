@@ -9,7 +9,7 @@ import type {
   Result,
 } from "@earendil-works/pi-durable/env";
 import type { FileRead, MutationResult } from "@hns/core";
-import { Crash, Denied, FileFailure } from "./errors.ts";
+import { Crash, Denied, FileFailure, Unavailable } from "./errors.ts";
 import type { CrashPoint } from "./errors.ts";
 import { emptyJournal, parseJournal } from "./journal.ts";
 import { parseMarker } from "./protocol.ts";
@@ -27,6 +27,8 @@ import type {
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+/** Settled operations kept for replay; older ones are forgotten so the journal stays bounded. */
+const DEFAULT_MAX_SETTLED_OPS = 500;
 const sha = (bytes: Uint8Array): Version =>
   "sha256:" + createHash("sha256").update(bytes).digest("hex");
 
@@ -71,8 +73,10 @@ export interface WorkspaceOptions {
   readonly beforeRename?:
     | ((input: { readonly abs: string; readonly rel: string }) => Promise<void> | void)
     | undefined;
-  /** false turns the rooted helper off, as an unsupported environment would. */
-  readonly rooted?: boolean | undefined;
+  /** false turns the rooted helper off; "required" refuses to open where it cannot run. */
+  readonly rooted?: boolean | "required" | undefined;
+  /** Settled operations kept for replay; older ones are forgotten. Default 500. */
+  readonly maxSettledOps?: number | undefined;
 }
 
 /** What a recover() call settled. "pending" means the write may still be retried. */
@@ -99,6 +103,8 @@ export class Workspace {
   readonly #crashAt: CrashPoint | undefined;
   readonly #beforeRename: WorkspaceOptions["beforeRename"];
   readonly #rootedAllowed: boolean;
+  readonly #rootedRequired: boolean;
+  readonly #maxSettledOps: number;
   readonly #listeners = new Set<(event: FileEvent) => void>();
   readonly #known = new Map<string, Version>();
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -118,6 +124,8 @@ export class Workspace {
     this.#crashAt = options.crashAt;
     this.#beforeRename = options.beforeRename;
     this.#rootedAllowed = options.rooted !== false;
+    this.#rootedRequired = options.rooted === "required";
+    this.#maxSettledOps = options.maxSettledOps ?? DEFAULT_MAX_SETTLED_OPS;
   }
 
   /** Pin the root, load the journal, and decide whether the helper can hold it. */
@@ -132,6 +140,7 @@ export class Workspace {
     const read = await this.#env.readTextFile(this.#journalPath, this.#context);
     // An absent journal is a new workspace; a corrupt one must throw, not read as empty.
     this.#journal = read.ok ? parseJournal(JSON.parse(read.value)) : emptyJournal();
+    this.#trimOps();
     for (const event of this.#journal.events) {
       if (event.kind === "changed" || event.kind === "created")
         this.#known.set(event.path, event.version);
@@ -146,6 +155,9 @@ export class Workspace {
           context: this.#context,
         })
       : undefined;
+    if (this.#rooted === undefined && this.#rootedRequired) {
+      throw new Unavailable("the rooted helper is required but cannot run on this host");
+    }
   }
 
   /** "dirfd" when opens and renames are anchored to a directory fd, "checks" on the fallback. */
@@ -236,6 +248,7 @@ export class Workspace {
     this.#journal.events.push(event);
     if (this.#journal.events.length > 500)
       this.#journal.events.splice(0, this.#journal.events.length - 500);
+    this.#trimOps();
     await this.#save();
     for (const listener of this.#listeners) {
       try {
@@ -386,6 +399,17 @@ export class Workspace {
     }
   }
 
+  /** Whether a path, resolved the way a write resolves it, is the root or below it. */
+  async contains(path: string): Promise<boolean> {
+    try {
+      const abs = await this.#canonicalForWrite(path);
+      return abs === this.#canonicalRoot || abs.startsWith(this.#canonicalRoot + "/");
+    } catch (error) {
+      if (error instanceof Denied) return false;
+      throw error;
+    }
+  }
+
   async #reconcile(opId: string): Promise<MutationResult | undefined> {
     const rec = this.#journal.ops[opId];
     if (rec === undefined) throw new Denied("unknown operation");
@@ -401,8 +425,21 @@ export class Workspace {
     const rec = this.#journal.ops[opId];
     if (rec === undefined) throw new Denied("unknown operation");
     rec.outcome = outcome;
+    this.#trimOps();
     await this.#save();
     return outcome;
+  }
+
+  /**
+   * Keep the journal bounded: forget the oldest settled operations. A pending
+   * one is never dropped, because recovery still needs it.
+   */
+  #trimOps(): void {
+    const settled = Object.keys(this.#journal.ops).filter(
+      (opId) => this.#journal.ops[opId]?.outcome !== undefined,
+    );
+    const excess = settled.length - this.#maxSettledOps;
+    for (const opId of settled.slice(0, Math.max(0, excess))) delete this.#journal.ops[opId];
   }
 
   /** Replace one file if it is still at expectedVersion. */
@@ -432,6 +469,10 @@ export class Workspace {
 
     let rec = this.#journal.ops[operationId];
     if (rec !== undefined) {
+      // An operationId names one attempt: reusing it for another write is a bug, not a replay.
+      if (rec.contentHash !== contentHash || rec.expectedVersion !== expectedVersion) {
+        throw new Denied("operationId reused with different content");
+      }
       if (rec.outcome !== undefined) return rec.outcome;
       const settled = await this.#reconcile(operationId);
       if (settled !== undefined) return settled;
@@ -458,6 +499,7 @@ export class Workspace {
           temp: "",
           outcome: conflict,
         };
+        this.#trimOps();
         await this.#save();
         return conflict;
       }
