@@ -13,6 +13,25 @@
 5. 判断権限を明確にする。承認者は「全部に同意する人」ではなく「許容するリスクと次の投資を決める人」。
 6. 進捗より**学習**を優先する。不明点は小さな調査・試作で減らし、結果で計画を更新する。
 
+## 何を使うか（早見）
+
+| 状況 | 使うもの |
+| --- | --- |
+| 作るか作らないか迷う | [design/abstraction.md](design/abstraction.md) |
+| 境界・責務・公開面を決める | [design/boundary.md](design/boundary.md) |
+| 公開 API・型・エラーを決める | [design/contract.md](design/contract.md) |
+| 保存・再送・並行・上限を決める | [design/data.md](design/data.md) |
+| HTTP のルート・一覧・エラーを決める | [design/http.md](design/http.md) |
+| 認可・秘密・sandbox を決める | [design/security.md](design/security.md) |
+| 画面・操作・状態を決める | [design/interface.md](design/interface.md) |
+| 次に進んでよいか判断する | ゲート判定票（このファイル） |
+| 決めていないことがある | issue の `## 未確定`（台帳） |
+| 技術を選ぶ | 比較表（代表1件）→ decisions に決定 |
+| 決めたことを残す | [decisions.md](decisions.md)（D番号） |
+| 実装が終わった | [review.md](review.md) の索引 → 触る領域 |
+| 画面を変えた | [review/ux.md](review/ux.md) |
+| 観点を足す・削る | [review/eval.md](review/eval.md) |
+
 ## 段階と出口
 
 入口・出口は「全対象が完成」ではなく、**次の着手範囲を判断できる状態**を指す。

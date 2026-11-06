@@ -19,21 +19,21 @@
 
 ## 誤った抽象化は戻す
 
-- **条件**: 共通化した後に、条件分岐や例外が増えている。1つの抽象が2つの意味を持ち始めている
+- **条件**: 共通化した後に、条件分岐や例外が増えているとき。1つの抽象が2つの意味を持ち始めたとき
 - **命令**: 分岐を足す前に、独立した実装に戻す。戻すコストを理由に残さない
 - **補足**: 重複は悪ではない。同じ知識の重複だけが悪い（DRY）。戻すのは失敗ではなく設計
 - **Ref**: [Wrong Abstraction](https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction) / [DRY](https://pragprog.com/titles/tpp20/the-pragmatic-programmer-20th-anniversary-edition/)
 
 ## 抽象化と共通化を混ぜない
 
-- **条件**: 2箇所目を見て「共通化しよう」と思っている
+- **条件**: 2箇所目を見て「共通化しよう」と思ったとき
 - **命令**: 抽象化（型・境界・モジュール）は2つの利用箇所でよい。共通化（同じ処理を1つにする）は3箇所目まで待つ
 - **補足**: 抽象化は境界を引く判断、共通化は知識をまとめる判断。前者は早め、後者は遅め
 - **Ref**: [Yagni](https://martinfowler.com/bliki/Yagni.html) / [Rule of Three](https://martinfowler.com/books/refactoring.html) / [DRY](https://pragprog.com/titles/tpp20/the-pragmatic-programmer-20th-anniversary-edition/) / hns（2と3の使い分け）
 
 ## 理解に必要な複雑さだけ残す
 
-- **条件**: 説明に3文以上かかる。汎用層が1箇所でしか使われない。設定項目が誰にも使われていない
+- **条件**: 説明に3文以上かかるとき。汎用層が1箇所でしか使われていないとき。設定項目が誰にも使われていないとき
 - **命令**: 消す。必要になったときに、その形で足す
 - **補足**: KISS は「短く書く」ではなく「理解に必要な複雑さを増やさない」
 - **Ref**: [Simple Design](https://martinfowler.com/bliki/BeckDesignRules.html) / [Evolutionary Design](https://learn.microsoft.com/en-us/archive/msdn-magazine/2009/brownfield/incremental-delivery-through-continuous-design) / [KISS](https://en.wikipedia.org/wiki/KISS_principle)
