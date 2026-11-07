@@ -5,12 +5,20 @@ import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
 import { formatHash, type Route } from "../routes/route.ts";
+import { formatRelative } from "./relativeTime.ts";
+import { breakdownOf, totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
 
 export interface SidebarProps {
   readonly projects: readonly Project[];
   readonly conversations: readonly Conversation[];
   readonly tasks: readonly Task[];
   readonly runs: readonly WorkflowRun[];
+  readonly summaries: readonly WorkspaceSummary[];
+  readonly summariesPending: boolean;
+  readonly projectsPending: boolean;
+  readonly projectsFailed: boolean;
+  readonly runsPending: boolean;
+  readonly runsFailed: boolean;
   readonly route: Route;
   readonly loading: boolean;
   readonly failed: boolean;
@@ -47,11 +55,85 @@ function runTone(status: WorkflowRun["status"]): Tone {
   }
 }
 
+function statusOf(summary: WorkspaceSummary): string {
+  const parts: string[] = [];
+  if (summary.needsYou > 0) parts.push(String(summary.needsYou) + " needs");
+  if (summary.failed > 0) parts.push(String(summary.failed) + " failed");
+  if (summary.running > 0) parts.push(String(summary.running) + " running");
+  if (parts.length === 0) parts.push("all clear");
+  return parts.join(" · ") + " · " + formatRelative(summary.lastActivityAt);
+}
+
+function lastTime(summary: WorkspaceSummary | undefined): number {
+  if (summary === undefined || summary.lastActivityAt === null) return 0;
+  const time = Date.parse(summary.lastActivityAt);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function sortProjects(
+  projects: readonly Project[],
+  activeId: string | null,
+  summaries: ReadonlyMap<string, WorkspaceSummary>,
+): readonly Project[] {
+  return [...projects].sort((a, b) => {
+    if ((a.id === activeId) !== (b.id === activeId)) return a.id === activeId ? -1 : 1;
+    const left = summaries.get(a.id);
+    const right = summaries.get(b.id);
+    const needs = (right?.needsYou ?? 0) - (left?.needsYou ?? 0);
+    if (needs !== 0) return needs;
+    const failed = (right?.failed ?? 0) - (left?.failed ?? 0);
+    if (failed !== 0) return failed;
+    const running = (right?.running ?? 0) - (left?.running ?? 0);
+    if (running !== 0) return running;
+    const activity = lastTime(right) - lastTime(left);
+    if (activity !== 0) return activity;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+interface SummaryRowProps {
+  readonly label: string;
+  readonly count: number;
+  readonly breakdown: string;
+  readonly critical?: boolean | undefined;
+}
+
+function SummaryRow({ label, count, breakdown, critical = false }: SummaryRowProps): ReactElement {
+  return (
+    <div
+      className="hns-summary__row"
+      role="group"
+      data-tone={critical && count > 0 ? "critical" : "normal"}
+      aria-label={
+        breakdown === ""
+          ? label + ": " + String(count)
+          : label + ": " + String(count) + " (" + breakdown + ")"
+      }
+    >
+      <span className="hns-summary__label" aria-hidden="true">
+        {label}
+      </span>
+      <span className="hns-summary__count" aria-hidden="true">
+        {count > 99 ? "99+" : String(count)}
+      </span>
+      <span className="hns-summary__breakdown" aria-hidden="true">
+        {breakdown}
+      </span>
+    </div>
+  );
+}
+
 export function Sidebar({
   projects,
   conversations,
   tasks,
   runs,
+  summaries,
+  summariesPending,
+  projectsPending,
+  projectsFailed,
+  runsPending,
+  runsFailed,
   route,
   loading,
   failed,
@@ -59,6 +141,11 @@ export function Sidebar({
 }: SidebarProps): ReactElement {
   const projectId = route.projectId;
   const currentConversation = route.kind === "conversation" ? route.conversationId : null;
+  const summaryById = new Map<string, WorkspaceSummary>(
+    summaries.map((summary) => [summary.projectId, summary]),
+  );
+  const totals = totalsOf(summaries);
+  const ordered = sortProjects(projects, projectId, summaryById);
 
   return (
     <nav aria-label="サイドバー" className="hns-sidebar">
@@ -71,65 +158,127 @@ export function Sidebar({
         )}
       </div>
 
-      <section className="hns-sidebar__section">
-        <h2 className="hns-sidebar__title">ワークスペース</h2>
-        <ul className="hns-sidebar__list">
-          {projects.map((project) => (
-            <li key={project.id}>
-              <a
-                className="hns-sidebar__link"
-                href={formatHash({ kind: "workspace", projectId: project.id })}
-                aria-current={
-                  projectId === project.id && route.kind === "workspace" ? "page" : undefined
-                }
-              >
-                {project.name}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </section>
+      {summaries.length === 0 && !summariesPending ? null : (
+        <section className="hns-sidebar__section" aria-label="全体の状態">
+          <h2 className="hns-sidebar__title">All workspaces</h2>
+          {summariesPending ? (
+            <Skeleton width="80%" height={10} />
+          ) : (
+            <div className="hns-summary">
+              <SummaryRow
+                label="Needs you"
+                count={totals.needsYou}
+                breakdown={breakdownOf(summaries, "needsYou")}
+                critical
+              />
+              <SummaryRow
+                label="Failed"
+                count={totals.failed}
+                breakdown={breakdownOf(summaries, "failed")}
+                critical
+              />
+              <SummaryRow
+                label="Running"
+                count={totals.running}
+                breakdown={breakdownOf(summaries, "running")}
+              />
+              <SummaryRow
+                label="Done today"
+                count={totals.doneToday}
+                breakdown={breakdownOf(summaries, "doneToday")}
+              />
+            </div>
+          )}
+        </section>
+      )}
 
-      <section className="hns-sidebar__section">
-        <h2 className="hns-sidebar__title">会話</h2>
-        {loading ? <Skeleton width="80%" height={10} /> : null}
-        {failed ? <p className="hns-sidebar__empty">読み込めません</p> : null}
-        {!loading && !failed && conversations.length === 0 ? (
-          <p className="hns-sidebar__empty">会話はありません</p>
+      <section className="hns-sidebar__section" aria-label="ワークスペース">
+        <h2 className="hns-sidebar__title">ワークスペース</h2>
+        {projectsPending ? <Skeleton width="80%" height={10} /> : null}
+        {projectsFailed ? <p className="hns-sidebar__empty">読み込めません</p> : null}
+        {!projectsPending && !projectsFailed && ordered.length === 0 ? (
+          <p className="hns-sidebar__empty">ワークスペースがありません</p>
         ) : null}
         <ul className="hns-sidebar__list">
-          {conversations.map((conversation) => (
-            <li key={conversation.id}>
-              <a
-                className="hns-sidebar__link"
-                href={formatHash({
-                  kind: "conversation",
-                  projectId: conversation.project_id,
-                  conversationId: conversation.id,
-                })}
-                aria-current={currentConversation === conversation.id ? "page" : undefined}
+          {ordered.map((project) => {
+            const summary = summaryById.get(project.id);
+            const active = project.id === projectId;
+            return (
+              <li
+                className="hns-workspace"
+                data-active={active ? "true" : "false"}
+                key={project.id}
               >
-                {conversation.title}
-              </a>
-            </li>
-          ))}
+                <a
+                  className="hns-workspace__link"
+                  href={formatHash({ kind: "workspace", projectId: project.id })}
+                  aria-current={active && route.kind === "workspace" ? "page" : undefined}
+                  aria-label={
+                    summary === undefined ? project.name : project.name + ": " + statusOf(summary)
+                  }
+                >
+                  <span className="hns-workspace__name">{project.name}</span>
+                  {summary === undefined ? null : (
+                    <span className="hns-workspace__status" aria-hidden="true">
+                      {statusOf(summary)}
+                    </span>
+                  )}
+                </a>
+                {active ? (
+                  <div
+                    className="hns-workspace__body"
+                    role="group"
+                    aria-label={project.name + " の作業"}
+                  >
+                    <h3 className="hns-sidebar__subtitle">会話</h3>
+                    {loading ? <Skeleton width="80%" height={10} /> : null}
+                    {failed ? <p className="hns-sidebar__empty">読み込めません</p> : null}
+                    {!loading && !failed && conversations.length === 0 ? (
+                      <p className="hns-sidebar__empty">会話はありません</p>
+                    ) : null}
+                    <ul className="hns-sidebar__list">
+                      {conversations.map((conversation) => (
+                        <li key={conversation.id}>
+                          <a
+                            className="hns-sidebar__link"
+                            href={formatHash({
+                              kind: "conversation",
+                              projectId: conversation.project_id,
+                              conversationId: conversation.id,
+                            })}
+                            aria-current={
+                              currentConversation === conversation.id ? "page" : undefined
+                            }
+                          >
+                            {conversation.title}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                    <h3 className="hns-sidebar__subtitle">タスク</h3>
+                    <ul className="hns-sidebar__list">
+                      {tasks.map((task) => (
+                        <li className="hns-sidebar__row" key={task.id}>
+                          <Badge tone={taskTone(task.status)}>{task.status}</Badge>
+                          <span>{task.title}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       </section>
 
-      <section className="hns-sidebar__section">
-        <h2 className="hns-sidebar__title">タスク</h2>
-        <ul className="hns-sidebar__list">
-          {tasks.map((task) => (
-            <li className="hns-sidebar__row" key={task.id}>
-              <Badge tone={taskTone(task.status)}>{task.status}</Badge>
-              <span>{task.title}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="hns-sidebar__section">
+      <section className="hns-sidebar__section" aria-label="実行">
         <h2 className="hns-sidebar__title">実行</h2>
+        {runsPending ? <Skeleton width="80%" height={10} /> : null}
+        {runsFailed ? <p className="hns-sidebar__empty">読み込めません</p> : null}
+        {!runsPending && !runsFailed && runs.length === 0 ? (
+          <p className="hns-sidebar__empty">実行はありません</p>
+        ) : null}
         <ul className="hns-sidebar__list">
           {runs.map((run) => (
             <li className="hns-sidebar__row" key={run.id}>

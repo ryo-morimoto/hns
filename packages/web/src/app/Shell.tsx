@@ -13,6 +13,7 @@ import { Sidebar } from "./Sidebar.tsx";
 import { THEME_LABELS, THEMES, useTheme } from "./theme.ts";
 import { TopBar } from "./TopBar.tsx";
 import { useMediaQuery } from "./useMediaQuery.ts";
+import { totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
 import "./shell.css";
 
 export interface ShellProps {
@@ -21,9 +22,11 @@ export interface ShellProps {
   readonly onOpenCommand?: (() => void) | undefined;
   /** 0106 reserves the right panel; the shell only provides the slot. */
   readonly panel?: ReactNode;
+  /** Fixture-only until 0115 returns cross-workspace counts. */
+  readonly summarySource?: (() => Promise<readonly WorkspaceSummary[]>) | undefined;
 }
 
-export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElement {
+export function Shell({ client, onOpenCommand, panel, summarySource }: ShellProps): ReactElement {
   const route = useRoute();
   const mobile = useMediaQuery("(max-width: 768px)");
   const [theme, chooseTheme] = useTheme();
@@ -35,6 +38,12 @@ export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElemen
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: () => client.request("GET /api/projects"),
+  });
+
+  const summaries = useQuery({
+    queryKey: ["workspace-summaries"],
+    enabled: summarySource !== undefined,
+    queryFn: () => (summarySource === undefined ? Promise.resolve([]) : summarySource()),
   });
 
   const conversations = useQuery({
@@ -55,9 +64,9 @@ export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElemen
       }),
   });
 
+  // Runs have no project in the API yet, so they stay a global section (not per workspace).
   const runs = useQuery({
     queryKey: ["runs"],
-    enabled: projectKey !== null,
     queryFn: () => client.request("GET /api/runs"),
   });
 
@@ -82,6 +91,7 @@ export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElemen
   const title =
     route.kind === "conversation" ? (conversationTitle ?? "会話") : (project?.name ?? "Workspace");
 
+  const totals = totalsOf(summaries.data ?? []);
   const connection = projects.isPending ? "connecting" : projects.isError ? "offline" : "online";
   const loading =
     projects.isPending ||
@@ -96,6 +106,12 @@ export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElemen
       conversations={conversations.data ?? []}
       tasks={tasks.data ?? []}
       runs={runs.data ?? []}
+      summaries={summaries.data ?? []}
+      summariesPending={summarySource !== undefined && summaries.isPending}
+      projectsPending={projects.isPending}
+      projectsFailed={projects.isError}
+      runsPending={runs.isPending}
+      runsFailed={runs.isError}
       route={route}
       loading={loading}
       failed={failed}
@@ -115,6 +131,7 @@ export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElemen
         mobile={mobile}
         onSelectProject={(selected) => navigate({ kind: "workspace", projectId: selected.id })}
         onTheme={chooseTheme}
+        menuBadge={totals.needsYou}
         onOpenDrawer={() => setDrawerOpen(true)}
         onBack={
           route.kind === "conversation"

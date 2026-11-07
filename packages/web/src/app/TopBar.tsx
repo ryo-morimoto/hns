@@ -14,6 +14,7 @@ export interface TopBarProps {
   readonly connection: Connection;
   readonly theme: Theme;
   readonly mobile: boolean;
+  readonly menuBadge: number;
   readonly onSelectProject: (project: Project) => void;
   readonly onTheme: (theme: Theme) => void;
   readonly onOpenDrawer: () => void;
@@ -29,6 +30,7 @@ export function TopBar({
   connection,
   theme,
   mobile,
+  menuBadge,
   onSelectProject,
   onTheme,
   onOpenDrawer,
@@ -41,8 +43,21 @@ export function TopBar({
     return (
       <header className="hns-topbar hns-topbar--mobile">
         {onBack === undefined ? (
-          <Button variant="icon" aria-label="メニューを開く" onClick={onOpenDrawer}>
-            <Icon name="menu" />
+          <Button
+            variant="icon"
+            aria-label={
+              menuBadge > 0 ? "メニュー（Needs you " + String(menuBadge) + "）" : "メニューを開く"
+            }
+            onClick={onOpenDrawer}
+          >
+            <span className="hns-menu-badge-wrap">
+              <Icon name="menu" />
+              {menuBadge > 0 ? (
+                <span className="hns-menu-badge" aria-hidden="true">
+                  {menuBadge > 99 ? "99+" : String(menuBadge)}
+                </span>
+              ) : null}
+            </span>
           </Button>
         ) : (
           <Button variant="icon" aria-label="ワークスペースへ戻る" onClick={onBack}>

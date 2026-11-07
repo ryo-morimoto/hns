@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, test } from "vitest";
 import { createWebClient } from "../../src/api/client.ts";
 import { createFixtureFetch } from "../../src/api/fixtures.ts";
 import { Shell } from "../../src/app/Shell.tsx";
+import { fixtureSummarySource } from "../../src/app/fixtureSummaries.ts";
+import type { WorkspaceSummary } from "../../src/app/workspaceSummary.ts";
 
 const originalMatchMedia = window.matchMedia;
 
@@ -23,12 +25,21 @@ function setMobile(mobile: boolean): void {
   });
 }
 
-function renderShell(onOpenCommand?: () => void, panel?: ReactNode) {
+function renderShell(
+  onOpenCommand?: () => void,
+  panel?: ReactNode,
+  summarySource?: () => Promise<readonly WorkspaceSummary[]>,
+) {
   const client = createWebClient({ baseUrl: "", fetch: createFixtureFetch() });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <Shell client={client} onOpenCommand={onOpenCommand} panel={panel} />
+      <Shell
+        client={client}
+        onOpenCommand={onOpenCommand}
+        panel={panel}
+        summarySource={summarySource}
+      />
     </QueryClientProvider>,
   );
 }
@@ -142,6 +153,63 @@ test("mobile conversation shows a back arrow to the workspace", async () => {
 
   await screen.findByRole("heading", { name: "Workspace" });
   assert.equal(window.location.hash, "#/p/project-hns");
+});
+
+// Catches: the sidebar hiding other workspaces' progress until the user switches.
+test("the sidebar shows every workspace's status before switching", async () => {
+  renderShell(undefined, undefined, fixtureSummarySource);
+  await screen.findByRole("heading", { level: 1, name: "Workspace" });
+
+  assert.ok(await screen.findByRole("link", { name: /^hns: 1 needs · 2 running · 12m/u }));
+  assert.ok(screen.getByRole("link", { name: /^docs: 1 running/u }));
+  assert.ok(screen.getByRole("link", { name: /^scratch: all clear/u }));
+
+  const labels = screen
+    .getAllByRole("link")
+    .map((link) => link.getAttribute("aria-label"))
+    .filter((label): label is string => label !== null);
+  assert.match(labels[0] ?? "", /^hns:/u);
+  assert.match(labels[1] ?? "", /^docs:/u);
+  assert.match(labels[2] ?? "", /^scratch:/u);
+
+  assert.match(screen.getByText(/^hns 1$/u).textContent ?? "", /hns 1/u);
+  assert.match(screen.getByText(/^hns 2 · docs 1$/u).textContent ?? "", /docs 1/u);
+  assert.ok(screen.getByRole("group", { name: "Needs you: 1 (hns 1)" }));
+  assert.ok(screen.getByRole("group", { name: "Failed: 0" }));
+  assert.ok(screen.getByRole("group", { name: "Running: 3 (hns 2 · docs 1)" }));
+  assert.ok(screen.getByRole("group", { name: "Done today: 3 (hns 3)" }));
+});
+
+test("the active workspace stays first even without needs", async () => {
+  window.location.hash = "#/p/project-scratch";
+  renderShell(undefined, undefined, fixtureSummarySource);
+  await screen.findByRole("heading", { level: 1, name: "Workspace" });
+
+  const labels = screen
+    .getAllByRole("link")
+    .map((link) => link.getAttribute("aria-label"))
+    .filter((label): label is string => label !== null);
+  assert.match(labels[0] ?? "", /^scratch:/u);
+  assert.match(labels[1] ?? "", /^hns:/u);
+});
+
+test("runs stay global when another workspace is active", async () => {
+  window.location.hash = "#/p/project-docs";
+  renderShell(undefined, undefined, fixtureSummarySource);
+  await screen.findByRole("heading", { level: 1, name: "Workspace" });
+
+  const runs = await screen.findByRole("region", { name: "実行" });
+  assert.match(runs.textContent ?? "", /workflow-release/u);
+  assert.equal(screen.getAllByText("workflow-release").length, 1);
+  const body = screen.getByRole("group", { name: "docs の作業" });
+  assert.equal(within(body).queryByText("workflow-release"), null);
+});
+
+test("the mobile menu carries the needs-you count", async () => {
+  setMobile(true);
+  renderShell(undefined, undefined, fixtureSummarySource);
+
+  assert.ok(await screen.findByRole("button", { name: "メニュー（Needs you 1）" }));
 });
 
 // Catches: a mobile shell that hides the sidebar without a way to reach it, or a drawer that

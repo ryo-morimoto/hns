@@ -20,6 +20,7 @@ type FixtureResponses = { [K in RouteKey]: RouteResponse<K> };
 
 const projectId = v.parse(ProjectIdSchema, "project-hns");
 const scratchProjectId = v.parse(ProjectIdSchema, "project-scratch");
+const docsProjectId = v.parse(ProjectIdSchema, "project-docs");
 const conversationId = v.parse(ConversationIdSchema, "conversation-intent");
 
 const state: State = {
@@ -37,12 +38,13 @@ const state: State = {
   scheduling: "running",
   provider: "faux",
   model: "faux-1",
-  counts: { conversations: 2, projects: 2 },
+  counts: { conversations: 2, projects: 3 },
 };
 
 const projects: Project[] = [
   { id: projectId, name: "hns", created_at: "2026-11-01T00:00:00.000Z" },
   { id: scratchProjectId, name: "scratch", created_at: "2026-11-06T00:00:00.000Z" },
+  { id: docsProjectId, name: "docs", created_at: "2026-11-05T00:00:00.000Z" },
 ];
 
 const conversations: Conversation[] = [
