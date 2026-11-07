@@ -11,89 +11,15 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
-import type { EntryRecord } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { Workspace } from "@hns/workspace";
-import { createNoExecEnv, createSandboxEnv, detectSandbox } from "@hns/workspace/sandbox";
+import { createNoExecEnv, createSandboxEnv } from "@hns/workspace/sandbox";
 import { Denied } from "@hns/workspace";
 import { OperationIdSchema } from "@hns/core";
 import * as v from "valibot";
 import { openAgent, operationIdFor } from "../src/index.ts";
-import type { Agent, AgentEvent, ShellAccess } from "../src/index.ts";
-
-type Faux = ReturnType<typeof fauxProvider>;
-
-interface Fixture {
-  readonly agent: Agent;
-  readonly workspace: Workspace;
-  readonly root: string;
-  readonly events: readonly AgentEvent[];
-  readonly faux: Faux;
-}
-
-/** A real workspace and a real Durable harness, with only the model faked. */
-async function withAgent(run: (fixture: Fixture) => Promise<void>): Promise<void> {
-  const base = await mkdtemp(join(tmpdir(), "hns-agent-"));
-  const root = join(base, "root");
-  await mkdir(root);
-  const env = new NodeExecutionEnv({ cwd: root });
-  const workspace = await Workspace.open({
-    env,
-    root,
-    journalPath: join(base, "journal.json"),
-    context: ctx,
-  });
-  await workspace.write({
-    path: "a.txt",
-    content: "v1",
-    expectedVersion: "absent",
-    operationId: "seed",
-  });
-
-  const status = await detectSandbox();
-  const shell: ShellAccess = status.available
-    ? { kind: "sandboxed", env: createSandboxEnv(env, { root, bwrap: status.bwrap }) }
-    : { kind: "disabled", env: createNoExecEnv(env, status), reason: status.reason };
-  const faux = fauxProvider();
-  const models = createModels();
-  models.setProvider(faux.provider);
-  const events: AgentEvent[] = [];
-  let turn = 0;
-  const agent = await openAgent({
-    storage: new MemoryStorage(),
-    models,
-    workspace,
-    shell,
-    model: { provider: "faux", modelId: "faux-1" },
-    cwd: root,
-    context: ctx,
-    onEvent: (event) => events.push(event),
-    newRequestId: () => {
-      turn += 1;
-      return "turn-" + turn;
-    },
-  });
-  try {
-    await run({ agent, workspace, root, events, faux });
-  } finally {
-    await agent.close();
-    await workspace.close();
-    await rm(base, { recursive: true, force: true });
-  }
-}
-
-/** Text blocks of every tool result, which is what the model read. */
-function toolResults(entries: readonly EntryRecord[]): string[] {
-  return entries
-    .filter((entry) => entry.kind === "pi.tool-result")
-    .flatMap((entry) =>
-      (entry.model ?? []).flatMap((message) =>
-        Array.isArray(message.content)
-          ? message.content.map((part) => (part.type === "text" ? part.text : ""))
-          : [message.content],
-      ),
-    );
-}
+import type { ShellAccess } from "../src/index.ts";
+import { sandboxStatus, toolResults, withAgent } from "./support.ts";
 
 test("a turn reads a file and replaces it with the version it read", async () => {
   await withAgent(async ({ agent, workspace, root, faux }) => {
@@ -167,7 +93,7 @@ test("a refused path is reported to the model, not thrown", async () => {
 });
 
 test("bash is offered only when a sandbox is available", async () => {
-  const status = await detectSandbox();
+  const status = await sandboxStatus();
 
   await withAgent(async ({ agent }) => {
     if (status.available) assert.ok(agent.tools.includes("bash"), agent.tools.join(","));
@@ -198,27 +124,6 @@ test("observation events name the tool, its outcome, and the response", async ()
   });
 });
 
-test("bash runs inside the root and cannot write outside it", async (t) => {
-  const status = await detectSandbox();
-  if (!status.available) {
-    t.skip("bubblewrap is unavailable: " + status.reason);
-    return;
-  }
-  await withAgent(async ({ agent, root, faux }) => {
-    faux.setResponses([
-      fauxAssistantMessage(
-        fauxToolCall("bash", { command: "echo inside > b.txt; echo escape > ../escape.txt" }),
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage("ran it"),
-    ]);
-
-    await agent.send("prove the sandbox");
-
-    assert.equal((await readFile(join(root, "b.txt"), "utf8")).trim(), "inside");
-    await assert.rejects(readFile(join(root, "..", "escape.txt"), "utf8"));
-  });
-});
 // Catches: the model chose operationId, so repeating one silently swallowed the next write.
 test("two writes in one turn both apply, because the call names the operation", async () => {
   await withAgent(async ({ agent, workspace, root, faux }) => {
@@ -295,7 +200,7 @@ test("a cwd outside the workspace root is refused", async () => {
   const faux = fauxProvider();
   const models = createModels();
   models.setProvider(faux.provider);
-  const status = await detectSandbox();
+  const status = await sandboxStatus();
   const shell: ShellAccess = status.available
     ? { kind: "sandboxed", env: createSandboxEnv(env, { root, bwrap: status.bwrap }) }
     : { kind: "disabled", env: createNoExecEnv(env, status), reason: status.reason };

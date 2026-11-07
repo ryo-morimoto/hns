@@ -3,6 +3,7 @@
 追記専用の決定ログ。新しいものが下。変更は新しいエントリで置き換え、置き換えたことを書く。
 
 ## D001: Pi Durable 1.5.0 を固定し、ExecutionEnv を境界にする
+
 date: 2026-11-06 · by: coordinator · issue: -
 
 `pi-durable` / `pi-env` / `pi-ai` を **1.5.0 exact pin**。Agent の実行と永続化は借り、
@@ -15,175 +16,231 @@ ExecutionEnv に条件付き書き込みが無く、組み込みツールの直�
 再実装コストの面で不利。上流が CAS を提供したら、この層を薄くする。
 
 ## D002: リポジトリ構成（README / ARCH / docs / work）
+
 date: 2026-11-06 · by: coordinator · issue: -
 
 README は「やりたいこと」、ARCH はアーキテクチャ、docs はコンポーネント・レイヤー別の仕様、
 work は作業（BOARD・issues）と調査・PoC（research・poc）。docs はネストさせずフラットに置く。
 提供資料の原文は work/research に置き、書き換えない。
+
 ## D003: MVP は 1マシンで「会話→編集→差分→再開」
+
 date: 2026-11-06 · by: user · issue: -
 
 最初の実用範囲は 1 マシン。セルフホスト起動、会話、権限つきファイル編集、差分、再開までを通し、
 2マシン接続は M3 に送る。要件#2 の配置（A/B）は [topology.md](topology.md) で比較中。
+
 ## D004: マシン側は A（中央 + pi-env/SSH）で開始する
+
 date: 2026-11-06 · by: user · issue: -
 
 責務を10に分けた結果、MVP で効くのは接続・認証・セットアップ・資格情報の4つだけで、どれも exec で足りる。
 常駐サービスとポートは A では無理だが MVP の対象外（[分解](topology.md)）。
 前提: 対象マシンへ到達できる / git・gh・tooling は既に設定済み / sudo と対話は人手。
 A'（常駐 Agent）に上げる条件は、マシン初期化・資格情報管理・常駐サービスを製品機能にするとき。
+
 ## D005: Agent の Tool は Workspace と sandbox を経由する
+
 date: 2026-11-06 · by: user · issue: 0007
 
 組み込みの `read`/`write` は使わず、`read_file`/`write_file` を自前で登録して Workspace の版チェックを通す。
 `bash` は `createBashTool` を sandbox（`createSandboxEnv`）越しに動かす。
 組み込み Tool は `api.env` を直接触るため、条件付き保存も root 封じ込めも通らない。
+
 ## D006: 次は Editor、Provider は鍵が来てから
+
 date: 2026-11-06 · by: user · issue: 0008
 
 MVP の受入は「会話→編集→差分→再開」。会話は faux で通ったので、次は人間側の編集を成立させる。
 実 Provider（U-05）は API 鍵がこの環境に無く、検証できないため後回しにする。
 Editor は Workspace の競合契約を人間の操作で確かめる場でもある。
+
 ## D007: 最初の実 Provider は Ollama Cloud
+
 date: 2026-11-06 · by: user · issue: 0012
 
 `https://ollama.com/v1`（OpenAI 互換）を `openai-completions` API で使う。既定モデルは `gpt-oss:120b`。
 鍵は `~/.config/hns/ollama.key` か `OLLAMA_API_KEY`（リポジトリには置かない）。
 `qwen3-coder:480b` は退役していたため使わない。正式な OpenAI / Anthropic / Google は鍵が来たら足す。
+
 ## D008: 2つ目の Provider は OpenCode Go
+
 date: 2026-11-06 · by: user · issue: 0013
 
 pi-ai の `opencode-go` プロバイダをそのまま使う。鍵は `~/.config/hns/opencode-go.key`。
 `openai-completions` と `anthropic-messages` でツール呼び出しを確認。Google 系（`gemini-4-argon`）は設定で無効化中のため未確認。
 Provider ごとに「API 方式が通る」と「モデルが使える」は別なので、モデル追加時は両方確かめる。
+
 ## D009: 統合 MVP は単一プロセス + SQLite + ポーリング UI
+
 date: 2026-11-06 · by: user · issue: 0014
 
 会話（Durable）・ファイル（Workspace）・UI を1プロセスに載せる。保存は Durable の SQLite。
 進捗はまず1秒ポーリングで足りる。ストリーミングは必要になってから足す。
 これで MVP の「会話→編集→差分→再開」が1マシンで成立した。
+
 ## D010: 進捗は SSE、未完了タスクは inspect から
+
 date: 2026-11-06 · by: user · issue: 0015
 
 D009 のポーリングを `GET /api/stream`（SSE）に置き換える。送信の起点は Durable の `conversation.watch`。
 未完了タスクは `harness.inspect` から取り、transcript と同じスナップショットに載せる。
 `/api/state` は残す（テストと初期表示の保険）。
+
 ## D011: UI は最後。最終段で UX に集中する
+
 date: 2026-11-06 · by: user · issue: -
 
 いまの UI は機能確認のための最小（会話・ファイル・diff・タスク）。作り込みは最終段に回す。
 そのときは、見た目より「迷わない・戻れる・待ちが分かる」を基準に、まとめて詰める。
 それまでは API と型を先に固め、UI の都合で境界を曲げない。
+
 ## D012: Workflow は当面サーバ内で逐次実行する
+
 date: 2026-11-06 · by: user · issue: 0017
 
 グラフの検証と版管理は先に固め、実行はサーバ内でトポロジカル順に1ノードずつ回す。1ノード = 1会話。
 Durable のタスクに載せた再開可能な実行は、ノード種別と副作用の扱いが決まってからにする。
 落ちた run は起動時に `interrupted` とし、勝手に再実行しない。
+
 ## D013: Automation は Firing だけ持ち、実行は Workflow に委譲する
+
 date: 2026-11-06 · by: user · issue: 0018
 
 trigger は webhook（token 付き URL）と schedule（5 フィールド cron、ローカル時刻）。
 action は workflow / chat / task。実行状態は Automation に持たせず、Workflow Run と Firing に残す。
 同時実行は Automation ごとに 1 つ、重なった分は `skipped`。落ちた実行は再試行しない。
+
 ## D014: アプリの入口は token、既定は loopback
+
 date: 2026-11-06 · by: user · issue: 0019
 
 `HNS_TOKEN` か state の `token`（0600）を使う。API は Bearer / query / cookie を受け、無ければ 401。
 Webhook は Automation ごとの token で動き、アプリ token を要求しない。既定の bind は 127.0.0.1。
 UI は `?token=` で受け取って `sessionStorage` に置く。複数ユーザーと RBAC はまだ無い。
+
 ## D015: バックアップは VACUUM INTO、復元は停止中に
+
 date: 2026-11-06 · by: user · issue: 0020
 
 動いている間に取れる一貫したスナップショットとして `VACUUM INTO` を使う。`journal.json` と `token` はコピー。
 復元はアプリを止めて行い、`-wal` / `-shm` を消してから置き換える。
 `control.sqlite` は `user_version` でスキーマ版を持ち、変更はそこに足す。
+
 ## D016: tailnet の ID を認証に使う
+
 date: 2026-11-06 · by: user · issue: 0021
 
 `auth: "tailscale"` のとき、接続元 IP を `tailscale whois` で引いて LoginName を取る。
 許可リストで絞り、whois が失敗したら拒否。ループバックは既定で拒否（`HNS_ALLOW_LOCAL=1` で許可）。
 `tailscale serve` のヘッダは信じない。passkey は設計だけ残し、ブラウザ認証器が要るので後回し。
+
 ## D017: passkey は WebAuthn + セッション cookie
+
 date: 2026-11-06 · by: user · issue: 0022
 
 登録・ログインは WebAuthn（`@simplewebauthn/server`）。credential は Control Plane に保存し、ログイン後はサーバ発行の `hns_session`（HttpOnly、30日）で通す。`auth: "passkey"` で切り替え。ブラウザの認証器は Playwright の仮想オーセンティケータでテストする。
 
 ## D018: 秘密は user / service のスコープに分ける
+
 date: 2026-11-06 · by: user · issue: 0024
 
 `user` は人の秘密、`service` は Automation とバックグラウンド実行の資格情報。AES-256-GCM で保存し、Automation 側は `getService` だけを使う。`user` は将来 PRF で包む。
+
 ## D019: PRF で包み、ログイン中だけ復号する
+
 date: 2026-11-06 · by: user · issue: 0023
 
 登録時にブラウザで DEK を生成し、PRF 出力から HKDF で作った KEK で包んで保存する。
 ログイン時に開いてセッションに渡し、平文の DEK はメモリだけに置く。再起動・ログアウトで消える。
 `user` の秘密はロック中 `423`。`service` はサーバ鍵なので Automation は動き続ける。
+
 ## D020: 1つの DEK をパスキーと復旧コードで包む
+
 date: 2026-11-06 · by: user · issue: 0025
 
 `user_keys` に包みを複数持つ。登録時に PRF（HKDF）と復旧コード（PBKDF2 600k）の2つで包む。
 ログイン時は PRF で開ける包みを順に試し、開けたらセッションに渡す。復旧コードはサーバ側で開いて
 セッションを作る（コード自体が資格情報）。誤りは 401。
+
 ## D021: 2台目のパスキーは unlocked セッションで追加する
+
 date: 2026-11-06 · by: user · issue: 0026
 
 `/api/passkey/add/options` と `add/verify` は unlocked のセッションだけを受け付ける。
 ブラウザは `/api/passkey/dek` で DEK を受け取り、新しい認証器の PRF で包み直して追加する。
 既存の包みは消さない。DEK を返すのは unlocked の間だけなので、XSS は境界を破れる点に注意。
+
 ## D022: 制限はアプリ層でかけ、中断は conversation.abort
+
 date: 2026-11-06 · by: user · issue: 0027
 
 レート・予算・タイムアウトは Durable の設定ではなくアプリ層で判定する。
 利用量はターン終了時に `usage` の差分を `usage_log` に残す。
 中断は `abortSubmission` では実行中のターンが止まらなかったため、`conversation.abort` を使う。
 予算超過は実行中のターンを止めず、次のターンから 429。
+
 ## D023: 観測は events テーブルに集約する
+
 date: 2026-11-06 · by: user · issue: 0028
 
 HTTP・会話・中断・例外を `events` に残す。クエリ・ヘッダ・本文は記録しない（token を落とさない）。
 `x-request-id` で相関し、`/api/events` と `/api/metrics` で読む。30日で削除。
 時系列の保存や外部送出（OTLP/Prometheus）は必要になってから。
+
 ## D024: 会話は論理削除、root は消さない
+
 date: 2026-11-07 · by: user · issue: 0029
 
 会話は `deleted_at` で隠す。Durable の transcript は `session.sqlite` に残し、アプリからは見せない（物理削除の API が無い）。
 root 会話は削除できない（アプリの起点）。検索はタイトルのみ（本文検索は必要になってから）。
 一覧は `updated_at` の新しい順で、送信・完了のたびに更新する。
+
 ## D025: sandbox は検出して fail closed
+
 date: 2026-11-07 · by: user · issue: 0030
 
 起動時に bubblewrap を `--version` と user namespace の実行使で検出し、使えなければ bash ツールを登録しない。
 `/api/health` に理由を出す。`.git` は読み取りのみ。rename の前後でパスを再確認し、外れたら `unknown`。
 復旧コードは同一 login で 5 回失敗したら 15 分止める。SSH は pi-env のフラグを検査済み（実接続は未）。
+
 ## D026: 技術スタックを固定する
+
 date: 2026-11-07 · by: user · issue: 0031
 
 TypeScript strict / Node 24 / Fastify / SQLite / React + Vite + CodeMirror 6 / Vitest + Playwright / **oxlint + oxfmt** + vendored anti-slop / **npm workspaces**（pi の packages 構成に倣う）。理由と棄却した選択肢は [engineering.md](../docs/engineering.md) §1。
 
 ## D027: 型が正本（type first）
+
 date: 2026-11-07 · by: user · issue: 0031
 
 `packages/core/src/types.ts` が唯一の正本。実行時の検証層と API 定義書は持たない。
 UI とサーバは types.ts の型だけを使う。スキーマを先に書かない（型を二重に定義しない）。
 
 ## D028: AI slop はゲートで止める
+
 date: 2026-11-07 · by: user · issue: 0031
 
 noUncheckedIndexedAccess、vendored anti-slop（18 ルール。require-readable-spacing は oxfmt と衝突するため無効）、tsc --noEmit、oxfmt --check、knip、依存追加の ADR 必須、生成コードの明示、PR 1目的、TODO の issue 必須。エージェントの成果物も同じゲートを通す。詳細は [engineering.md](../docs/engineering.md) §4。
+
 ## D029: パッケージは 6 つで始める
+
 date: 2026-11-07 · by: user · issue: 0032
 
 core / workspace / agent / store / server / web。apps は作らず packages に置く（pi の coding-agent に倣う）。
 providers は agent の中、identity は store の ./identity、Workflow と Automation は server の中。
 状態の所有者と依存方向は [packages.md](../docs/packages.md)。育ったら orchestrator 等に切る。
+
 ## D030: 型は不変条件を持つパッケージに置く
+
 date: 2026-11-07 · by: user · issue: 0032
 
 `core` は公開モデル（2つ以上のパッケージが使い、ワイヤーで約束するもの）だけ。Row 型は `store`、
 実行中の内部状態は `agent`、ファイル操作の内部型は `workspace` に置く。1パッケージしか使わない型は core に置かない。
 `@hns/store` の Row 型と変換から実装を始めた（`packages/store`）。brand は `ProjectId` と `ConversationId` のみ。
+
 ## D031: 境界は valibot、エラーはコード、遷移は1箇所
+
 date: 2026-11-07 · by: user · issue: 0032
 
 - HTTP の入口と DB の読み出しは valibot で parse する（`packages/core/src/schemas.ts`・`packages/store/src/schemas.ts`）。
@@ -192,6 +249,7 @@ date: 2026-11-07 · by: user · issue: 0032
 - SQLite はコンテナ不要。実 SQLite（インメモリ/ファイル）でテストする。外部サービスが増えたら testcontainers。
 
 ## D032: Node 24 を flake で固定する
+
 date: 2026-11-07 · by: coordinator · issue: 0004
 
 Node は 24.x（nixpkgs `nixos-25.11` の `nodejs_24`、いまは 24.18.0）に固定し、`flake.nix` と
@@ -201,6 +259,7 @@ Node は 24.x（nixpkgs `nixos-25.11` の `nodejs_24`、いまは 24.18.0）に�
 flake を使えない環境では Node 24.18 以降を PATH に置く。CI での利用は 0041。
 
 ## D033: exec は Linux の bubblewrap だけで提供し、他は出さない
+
 date: 2026-11-07 · by: coordinator · issue: 0006
 
 起動時に bwrap の所在（`BWRAP` / PATH）・バージョン・user namespace を、wrapper と同じ引数の実実行で確かめる。
@@ -210,6 +269,7 @@ macOS の sandbox-exec と Windows の AppContainer は実機で検証できる�
 （[調査](../work/research/sandbox-platforms.md)）。bwrap は 0.12.0 で検証し、下限は設けず毎回の probe で実効性を見る。
 
 ## D034: TOCTOU は openat2 ではなく exec する helper で閉じる
+
 date: 2026-11-07 · by: agent · issue: 0005
 
 pi-env 1.5.0 の daemon はパスしか受けない（protocol に fd 相対の操作が無い）。足すのは pin した外部パッケージの
@@ -220,6 +280,7 @@ Linux 以外・exec 無し・helper が届かないホストでは従来の再�
 Node の `fs` だけで解決（daemon 越しに fd を渡せない）。上流が fd 相対の操作を出したら helper を捨てる。
 
 ## D035: Node 26（最新系列）へ上げる
+
 date: 2026-11-07 · by: coordinator · issue: 0004
 
 D032 の Node 24 を 26.x に置き換える。nixpkgs の入力を `nixos-25.11` から `nixpkgs-unstable` に変え、
@@ -228,8 +289,8 @@ D032 の Node 24 を 26.x に置き換える。nixpkgs の入力を `nixos-25.11
 型ストリップは 26 でも同じで、ゲートと PoC は通った。最新へ上げ直すときは `nix flake update nixpkgs`
 → `scripts/with-node.sh npm run check`（lock を更新するまで再現性は保たれる）。
 
-
 ## D036: workspace は core のファイル DTO を借り、helper はパッケージ同梱のプログラムとして exec する
+
 date: 2026-11-07 · by: agent · issue: 0033
 
 `@hns/workspace` の `read` / `write` は `/api/file` の DTO（`FileRead` / `MutationResult`）をそのまま返す。
@@ -241,6 +302,7 @@ dirfd の helper（0005 / D034）は、ビルドすると `dist/rooted-helper.js
 exec できない環境・Linux 以外では helper を諦めて `mode: "checks"` の経路に落ちる（保証の差は `Workspace.mode` で見える）。
 
 ## D037: agent の失敗は値で返し、できる操作は型で分ける
+
 date: 2026-11-07 · by: agent · issue: 0034
 
 ツールの拒否（`denied` / `conflict` / `unknown`）は例外ではなく JSON の値でモデルに返す。1 つの拒否で run を落とさず、
@@ -250,6 +312,7 @@ date: 2026-11-07 · by: agent · issue: 0034
 import 時に接続しない。永続 storage（再起動をまたぐ resume）は store 側の実装（0035）で差し替える。
 
 ## D038: テストは Vitest 1本と node:assert、層は5つ
+
 date: 2026-11-07 · by: coordinator · issue: 0046
 
 D026 の Vitest を維持し、node:test から移行した（124 tests）。Vitest 5.1.0 を exact pin し、
@@ -258,8 +321,8 @@ D026 の Vitest を維持し、node:test から移行した（124 tests）。Vit
 アサーションは `node:assert/strict` に統一し、`expect` は使わない。flaky はリトライしない。
 Trigger.dev / Medusa / Twenty / Payload / Effect の層分けを参考にした（[testing.md](testing.md)）。
 
-
 ## D039: 会話ランタイムは pi-durable 一択とし、pi-agent-core は採用しない
+
 date: 2026-11-07 · by: user · issue: 0034
 
 pi-agent-core 1.5.0 は版が揃っていて（pi-ai / pi-schema は同一の exact pin）、実測では Workspace のツールと sandbox を
@@ -276,6 +339,7 @@ usage 台帳・subagent 会話の所有権・commit 単位の watch）は要件�
 agent-core in durable（同 C）は採らない。
 
 ## D040: 実装後は独立レビューを1回通し、直した diff も再レビューする
+
 date: 2026-11-07 · by: agent · issue: -
 
 `npm run check` は型・整形・テストの整合しか見ない。2026-11-07 のレビュー3回で、ゲート緑のまま
@@ -301,6 +365,7 @@ review が重くて作業を止めるなら、blocking の下限を上げる（�
 「契約・安全・永続化に触る変更」に狭める。
 
 ## D041: レビューを 原則・手順・不変条件の3層に分け、不変条件は条件で読む
+
 date: 2026-11-07 · by: agent · issue: -
 
 D040 の観点表は1ファイル 113 行・約 9KB になり、reviewer は変更と無関係な観点（認可・永続化・互換）まで
@@ -323,6 +388,7 @@ reviewer の最小の読み込みは約 7KB（review.md + common + 1領域、実
 分割をやめて戻す。
 
 ## D042: 設計判断とレビュー観点には原典リンクを付ける
+
 date: 2026-11-07 · by: agent · issue: -
 
 設計の原則は文献に由来する。しかしどれが原典でどれが hns の統合判断かを区別しないと、根拠のない規則が増える。
@@ -335,6 +401,7 @@ date: 2026-11-07 · by: agent · issue: -
 design.md と各項目の補足に書く。
 
 ## D043: Web UI を画面単位で前倒しする（contract-first / fixture 併用）
+
 date: 2026-11-07 · by: user · issue: 0036
 
 D011 の「UI は最後」を、ユーザー判断で前倒しする。PoC で Agentic Workspace の Intent と Golden flow を検証でき、画面単位で本実装へ移せる見通しが付いた。型・検証・サーバを固める順序は変えないが、Web は core の HTTP 契約（0037）に接続し、0035 の完成前は fixture client で画面とテストを進める。
@@ -354,6 +421,7 @@ D011 の「UI は最後」を、ユーザー判断で前倒しする。PoC で A
 - 0100 の web 依存のうち typescript / @types/node / valibot は既存 workspace と同じレンジ（^ 始まり）、受入条件に列挙した 10 依存は exact pin。
 
 ## D044: 型検査は tsrs（Rust 版 tsc）で行う
+
 date: 2026-11-07 · by: user · issue: 0100
 
 X の記事（2026-11-04）に倣い、`npm run check` の型検査を [tsrs](https://github.com/oxc-project/tsrs) 0.22.0-ts7.1.0-beta（TS 7.1 の Rust 実装）に置き換える。速さとメモリが目的で、検査の意味は変えない。
@@ -364,6 +432,7 @@ X の記事（2026-11-04）に倣い、`npm run check` の型検査を [tsrs](ht
 - 既存 4 パッケージと web の型検査が tsrs で通ることを確認して切り替えた。
 
 ## D045: 調査・要件・技術選定の進め方を docs/process.md に置く
+
 date: 2026-11-07 · by: agent · issue: -
 
 工程の判断（何を作るか、どこまで決めて進むか、何を買うか）が会話と issue に散っていて、後から前提を辿れなかった。
@@ -377,6 +446,7 @@ hns: ゲートは会議ではなく、issue と decisions に残る判定とし�
 前提が変わる条件: 工程が CI やチケットの状態機械で自動化され、ゲート判定が人の判断でなくなったら、この文書は判定基準だけに縮める。
 
 ## D046: UI/UX と Agentic Workspace の Golden Example を作業前後の参照に置く
+
 date: 2026-11-07 · by: agent · issue: -
 
 画面の判断が会話と好みで決まり、作業後に見る観点も無かった。[design/interface.md](design/interface.md) に、5つの実例から
@@ -390,6 +460,7 @@ hns: 参考は見た目の模倣ではなく「どの問題をどう解いてい
 ここは実例の索引に縮める。
 
 ## D047: 正本を Cloudflare に置き、実行は手元に残す
+
 date: 2026-11-07 · by: user · issue: 0140
 
 [work/poc/cf-harness](../work/poc/cf-harness/README.md) で pi-durable 1.5.0 の Harness を Durable Object に載せ、
@@ -409,9 +480,10 @@ SSH 経路は失われる（DO は生の TCP を張れない）。要件1の意�
 残る未知は DO の CPU / 128MB と長時間 bash と provider ストリーミングの3つで、0163 と 0152 で測る。
 
 前提が変わる条件: 実運用で p95 が 150ms を超える、DO のメモリ上限に当たる、またはコストが月 $50 を超える。
-そのときは ExecutionEnv と Storage の境界でローカルへ戻す（[0166](issues/0166-migration-rollback.md)）。
+そのときは ExecutionEnv と Storage の境界でローカルへ戻す（[0166](../work/issues/0166-migration-rollback.md)）。
 
 ## D048: 正本の単位は (C, J) とし、ack は単一システムで閉じる
+
 date: 2026-11-07 · by: user · issue: 0141
 
 D047 の「正本を Cloudflare に置く」を、同一性の単位まで下ろした。正本は **`(C, J)`**（最後の checkpoint
@@ -435,6 +507,7 @@ hns: 費用は容量ではなく行数と往復で決まる。月1万保存・8K
 前提が変わる条件: 1 保存あたりの本文が常に 256KB を超える、または DO の行数が月 5,000万を超える。
 
 ## D049: Durable Object は調整の単位にだけ使う
+
 date: 2026-11-07 · by: user · issue: 0146
 
 Cloudflare の指針（[cloudflare/skills](https://github.com/cloudflare/skills)）に照らすと、D047 の設計は DO を
@@ -444,10 +517,10 @@ Cloudflare の指針（[cloudflare/skills](https://github.com/cloudflare/skills)
 **PiHarness（pi-durable 1.5.0 を DO で動かす）は維持する。** ただし 1 会話 = 1 DO をやめ、**1 ワークスペース = 1 Session** にする
 （pi-durable の Session は複数の会話を持つ。ベンダー例も 1 DO に全会話を載せている）。残す DO は次の2種類だけ。
 
-| 種別 | 単位 | 役割 |
-| --- | --- | --- |
+| 種別                    | 単位             | 役割                         |
+| ----------------------- | ---------------- | ---------------------------- |
 | Session DO（PiHarness） | 1 ワークスペース | harness・transcript・run・WS |
-| Workspace DO | 1 ワークスペース | Journal・版・lease・直列化 |
+| Workspace DO            | 1 ワークスペース | Journal・版・lease・直列化   |
 
 **D1 に移すもの**: Project / Task / Workflow 定義 / Machine レコード。machine は cloudflared で常時接続を持たないので
 DO は要らない（D1 のレコード + fetch）。provider の予算カウンタは D1 の 1 文（`UPDATE ... WHERE spent < limit`）。
@@ -461,6 +534,7 @@ Workspace DO は残す。高頻度の小さい書き込みと epoch の整合は
 run の記録に追いつかなくなる。そのときは Session を時間やプロジェクトで分割する。
 
 ## D050: コミット時チェックはステージ済みのパッケージに限定する
+
 date: 2026-11-07 · by: agent · issue: -
 
 実測（グリーンなツリー、Node 26）で `npm run check` は約 20.3 秒。内訳は test 12.9s（63%）と build 5.5s（27%）で、
@@ -479,3 +553,49 @@ lint / fmt / typecheck / knip は合計 1.5 秒だった。直近 133 コミッ�
 
 見直す条件: CI（0041）を入れるとき、パッケージが 8 つを超えるとき、または部分ステージの取り違えが実際に起きたとき。
 
+## D051: コミットは速い層、push は全部。層は「プロセス」で分ける
+
+date: 2026-11-07 · by: agent · issue: 0170, 0171, 0172
+
+D050 の続き。hook を pre-commit と pre-push に分け、テストを unit と integration に分けた。
+分ける基準は**時間ではなく「1プロセスで終わるか」**にした。遅い unit テストは層の問題ではなくテストの書き方の問題で、
+遅いからという理由で integration に逃がすと、直すべきものが見えなくなる（実測: unit 化した workspace は 771ms、
+rooted を切ると open 2.7ms / write 2.5ms。遅さの正体は rooted ヘルパーの**操作ごとのプロセス起動**だった。0172）。
+
+実測（Node 26、5パッケージ）:
+
+|                         | 変更前 | 変更後                                    |
+| ----------------------- | ------ | ----------------------------------------- |
+| pre-commit（docs のみ） | 20.5s  | 0.12s                                     |
+| pre-commit（core 変更） | 20.5s  | 2.6s                                      |
+| pre-push                | なし   | 20.8s（integration・build・knip 込み）    |
+| テスト（unit のみ）     | 12.9s  | 1.66s                                     |
+| テスト（全部）          | 12.9s  | 13.3s（integration を足したため件数は増） |
+
+- 層: `packages/<pkg>/test` = unit（対象の操作は in-process、rooted:false。bwrap の有無などの検出は1ファイル1回まで）、`test/integration` = 別プロセス。
+  同じシナリオを両方で回すファイルは `*.tiers.test.ts` とし、vitest の project が `inject("tier")` で層を渡す。
+- hook: 段階表に `hooks` 列を持たせ、build と knip を pre-push に移した。pre-push は全パッケージ・全段階。
+- runner は引き続き自作。prek 0.3.11 を実際に動かして比較したが、**依存閉包を表現できない**（workspace の変更で
+  core のフックが "no files to check" になる）。gate を1フックとして包むと、置き換わるのは4行のシェル2本だけだった。
+  prek を採るのは「per-file の lint/format と stash が要る」「複数リポジトリで hook 導入を揃える」が出たとき。
+
+見直す条件: integration が 30 秒を超える、または push 前が重すぎて迂回されるようになったとき（そのときは `git diff @{push}` で push 範囲に絞る）。
+
+## D052: 接続・計算・ライブ更新の言い方を訂正する
+
+date: 2026-11-07 · by: agent · issue: 0140
+
+D047〜D049 に、実装者が誤読する言い方があった。本文は残し、ここで上書きする。
+
+- **SSH が使えない理由**は「DO が生の TCP を張れない」ではない。Workers ランタイムは outbound の TCP を持ち、DO も同じ。
+  正しい制約は**マシンが NAT / tailnet の内側にあり inbound を受けない**ことで、外向き接続（cloudflared）が要る。
+- **「Cloudflare は計算を持たない」**は「ユーザーのワークロード（git / npm / build / test）を実行しない」の意味。
+  Harness は DO の上で動く。
+- **cloudflared は外向きの接続を維持する**（D049 の「常時接続を持たない」は誤り）。machine の状態を D1 で足りるのは、
+  接続の有無ではなく記録の性質による。
+- **D010 の「進捗は SSE」は 0159 の WS に置き換える。** 0050 / 0118 と同じ扱い。
+- 一覧のために D1 に置くのは**会話と run の索引だけ**。イベントは D1 に複製しない。
+
+hns: 決定は追記で直す。D047〜D049 の本文は履歴として残す。
+
+前提が変わる条件: WS 以外の輸送に変える、または Cloudflare 上でワークロードを動かす決定をしたとき。

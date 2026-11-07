@@ -17,6 +17,34 @@ const alias = [
   { find: /^@hns\/agent$/, replacement: source("./packages/agent/src/index.ts") },
 ];
 
+// Two projects per package: the in-process tests a commit runs, and the
+// integration tests that spawn a helper, a daemon, or bubblewrap. Files named
+// *.tiers.test.ts run in both and read the tier from the project.
+const packageProjects = (name: string, extra: Record<string, unknown> = {}) => [
+  {
+    extends: true,
+    test: {
+      name,
+      include: [`packages/${name}/test/**/*.test.ts`, `packages/${name}/test/**/*.test.tsx`],
+      exclude: ["**/integration/**"],
+      provide: { tier: "unit" },
+      ...extra,
+    },
+  },
+  {
+    extends: true,
+    test: {
+      name: `${name}-integration`,
+      include: [
+        `packages/${name}/test/**/*.tiers.test.ts`,
+        `packages/${name}/test/integration/**/*.test.{ts,tsx}`,
+      ],
+      provide: { tier: "integration" },
+      ...extra,
+    },
+  },
+];
+
 export default defineConfig({
   resolve: {
     // Packages export their source under this condition; Vite must read the same files tsc does.
@@ -28,23 +56,14 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     projects: [
-      { extends: true, test: { name: "core", include: ["packages/core/test/**/*.test.ts"] } },
-      { extends: true, test: { name: "store", include: ["packages/store/test/**/*.test.ts"] } },
-      {
-        extends: true,
-        test: { name: "workspace", include: ["packages/workspace/test/**/*.test.ts"] },
-      },
-      { extends: true, test: { name: "agent", include: ["packages/agent/test/**/*.test.ts"] } },
-      { extends: true, test: { name: "server", include: ["packages/server/test/**/*.test.ts"] } },
-      {
-        extends: true,
-        test: {
-          name: "web",
-          environment: "jsdom",
-          include: ["packages/web/test/**/*.test.{ts,tsx}"],
-          setupFiles: ["packages/web/test/setup.ts"],
-        },
-      },
+      ...packageProjects("core"),
+      ...packageProjects("store"),
+      ...packageProjects("workspace"),
+      ...packageProjects("agent"),
+      ...packageProjects("web", {
+        environment: "jsdom",
+        setupFiles: ["packages/web/test/setup.ts"],
+      }),
       { extends: true, test: { name: "tools", include: ["tools/gate/test/**/*.test.ts"] } },
     ],
   },

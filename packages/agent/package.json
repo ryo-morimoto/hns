@@ -21,7 +21,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run --root ../.. --project agent",
+    "test": "vitest run --root ../.. --project 'agent*'",
     "typecheck": "tsrs --noEmit"
   },
   "dependencies": {

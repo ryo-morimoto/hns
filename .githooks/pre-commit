@@ -4,4 +4,4 @@ cd "$(git rev-parse --show-toplevel)"
 command -v node >/dev/null || { echo "pre-commit: run inside nix develop (node not found)" >&2; exit 1; }
 node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 18) ? 0 : 1)' \
   || { echo "pre-commit: node >= 22.18 is required (nix develop pins 26)" >&2; exit 1; }
-exec node tools/gate/main.ts
+exec node tools/gate/main.ts pre-commit

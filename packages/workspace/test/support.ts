@@ -9,22 +9,51 @@ import { Workspace } from "../src/index.ts";
 import type { WorkspaceOptions } from "../src/index.ts";
 
 export const KINDS = ["node", "local"] as const;
-export type Kind = (typeof KINDS)[number];
+type Kind = (typeof KINDS)[number];
+
+/**
+ * How one tier runs a scenario. "checks" stays in this process; the others
+ * spawn the rooted helper or the pi-env daemon for every operation.
+ */
+export interface TestTarget {
+  readonly kind: Kind;
+  readonly rooted: boolean;
+  readonly label: string;
+}
+
+export type Tier = "unit" | "integration";
+
+declare module "vitest" {
+  export interface ProvidedContext {
+    tier: Tier;
+  }
+}
+
+const UNIT_TARGETS: readonly TestTarget[] = [{ kind: "node", rooted: false, label: "node/checks" }];
+const INTEGRATION_TARGETS: readonly TestTarget[] = [
+  { kind: "node", rooted: true, label: "node/dirfd" },
+  { kind: "local", rooted: true, label: "local/dirfd" },
+];
+
+/** The vitest project decides the tier; the same scenario file runs in both. */
+export const targetsForTier = (tier: Tier): readonly TestTarget[] =>
+  tier === "integration" ? INTEGRATION_TARGETS : UNIT_TARGETS;
 
 export interface Target {
   readonly base: string;
   readonly env: ExecutionEnv;
+  readonly rooted: boolean;
 }
 
-/** Run against both environments: the in-process one and the pi-env daemon. */
+/** Run against one target: in-process, the rooted helper, or the pi-env daemon. */
 export async function withTarget(
-  kind: Kind,
+  testTarget: TestTarget,
   run: (target: Target) => Promise<void>,
 ): Promise<void> {
   const base = await mkdtemp(join(tmpdir(), "hns-workspace-"));
   let close = async (): Promise<void> => {};
   let env: ExecutionEnv;
-  if (kind === "node") {
+  if (testTarget.kind === "node") {
     env = new NodeExecutionEnv({ cwd: base });
   } else {
     const connection = new Connection({ command: [localDaemon()] });
@@ -34,7 +63,7 @@ export async function withTarget(
     };
   }
   try {
-    await run({ base, env });
+    await run({ base, env, rooted: testTarget.rooted });
   } finally {
     await close();
     await rm(base, { recursive: true, force: true });
@@ -58,11 +87,12 @@ export async function openWorkspace(
     root,
     journalPath: join(target.base, "journal-" + name + ".json"),
     context: ctx,
+    rooted: target.rooted,
     ...options,
   });
 }
 
-/** Move a directory aside and put a link to \`outside\` in its place. */
+/** Move a directory aside and put a link to `outside` in its place. */
 export async function swapParent(root: string, name: string, outside: string): Promise<void> {
   await rename(join(root, name), join(root, name + "-old"));
   await symlink(outside, join(root, name));

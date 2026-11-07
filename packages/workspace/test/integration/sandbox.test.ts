@@ -14,8 +14,8 @@ import {
   detectSandbox,
   parseVersion,
   resolveShell,
-} from "../src/sandbox.ts";
-import type { SandboxReport } from "../src/sandbox.ts";
+} from "../../src/sandbox.ts";
+import type { SandboxReport } from "../../src/sandbox.ts";
 
 const base = await mkdtemp(join(tmpdir(), "hns-sandbox-"));
 

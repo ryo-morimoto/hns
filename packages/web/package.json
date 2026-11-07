@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
-    "test": "vitest run --root ../.. --project web",
+    "test": "vitest run --root ../.. --project 'web*'",
     "typecheck": "tsrs --noEmit"
   },
   "dependencies": {

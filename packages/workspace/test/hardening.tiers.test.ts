@@ -1,17 +1,19 @@
-import { test } from "vitest";
+import { inject, test } from "vitest";
 import assert from "node:assert/strict";
 import * as v from "valibot";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Denied, FileFailure } from "../src/index.ts";
-import { KINDS, openWorkspace, rootOf, withTarget } from "./support.ts";
+import { openWorkspace, rootOf, targetsForTier, withTarget } from "./support.ts";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-for (const kind of KINDS) {
+const targets = targetsForTier(inject("tier"));
+
+for (const testTarget of targets) {
   // Catches: reusing an operationId for different content silently returned the old outcome.
-  test(kind + ": an operationId cannot carry two different writes", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": an operationId cannot carry two different writes", async () => {
+    await withTarget(testTarget, async (target) => {
       const workspace = await openWorkspace(target, "op-reuse");
       await workspace.write({
         path: "a.txt",
@@ -36,8 +38,8 @@ for (const kind of KINDS) {
   });
 
   // Catches: the journal kept every settled operation, so each write rewrote a growing file.
-  test(kind + ": settled operations are trimmed from the journal", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": settled operations are trimmed from the journal", async () => {
+    await withTarget(testTarget, async (target) => {
       const name = "op-trim";
       const workspace = await openWorkspace(target, name, { maxSettledOps: 2 });
       for (let index = 0; index < 5; index += 1) {
@@ -59,8 +61,8 @@ for (const kind of KINDS) {
   });
 
   // Catches: openAgent could accept a cwd outside the root, where relative tool paths mean nothing.
-  test(kind + ": contains tells what is inside the root", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": contains tells what is inside the root", async () => {
+    await withTarget(testTarget, async (target) => {
       const workspace = await openWorkspace(target, "contains");
       const root = rootOf(target, "contains");
 
@@ -73,11 +75,11 @@ for (const kind of KINDS) {
   });
 }
 
-for (const kind of KINDS) {
+for (const testTarget of targets) {
   // Catches: operationId was spliced into the temp path. Invalid ids are refused; valid
   // ids never reach the internal temp name.
-  test(kind + ": operationId never reaches a path", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": operationId never reaches a path", async () => {
+    await withTarget(testTarget, async (target) => {
       const name = "op-id";
       const workspace = await openWorkspace(target, name);
       const applied = await workspace.write({
@@ -100,14 +102,14 @@ for (const kind of KINDS) {
   });
 
   // Catches: a new directory in the root produced an unhandled rejection (EISDIR) and could crash.
-  test(kind + ": watching survives a directory appearing in the root", async (t) => {
+  test(testTarget.label + ": watching survives a directory appearing in the root", async (t) => {
     const rejections: unknown[] = [];
     const onRejection = (reason: Error): void => {
       rejections.push(reason);
     };
     process.on("unhandledRejection", onRejection);
     try {
-      await withTarget(kind, async (target) => {
+      await withTarget(testTarget, async (target) => {
         const workspace = await openWorkspace(target, "watch-dir");
         const watcher = await workspace.startWatching().catch(() => undefined);
         if (watcher === undefined) {
@@ -126,8 +128,8 @@ for (const kind of KINDS) {
   });
 
   // Catches: a directory read surfaced as a raw FileError instead of a typed failure.
-  test(kind + ": reading a directory is a FileFailure, not a defect", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": reading a directory is a FileFailure, not a defect", async () => {
+    await withTarget(testTarget, async (target) => {
       const workspace = await openWorkspace(target, "dir-read");
       await mkdir(join(rootOf(target, "dir-read"), "dir"), { recursive: true });
       const failure = await workspace.read("dir").then(
@@ -142,8 +144,8 @@ for (const kind of KINDS) {
   });
 
   // Catches: two writes in flight overwrote each other's journal entry (lost update).
-  test(kind + ": concurrent writes both survive a reopen", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": concurrent writes both survive a reopen", async () => {
+    await withTarget(testTarget, async (target) => {
       const workspace = await openWorkspace(target, "concurrent");
       const [first, second] = await Promise.all([
         workspace.write({
@@ -173,8 +175,8 @@ for (const kind of KINDS) {
   });
 
   // Catches: a retried conflict applied later once the version came back.
-  test(kind + ": a conflict is recorded and stays a conflict on retry", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": a conflict is recorded and stays a conflict on retry", async () => {
+    await withTarget(testTarget, async (target) => {
       const name = "conflict-retry";
       const workspace = await openWorkspace(target, name);
       await workspace.write({
@@ -214,8 +216,8 @@ for (const kind of KINDS) {
 
   // Catches: a direct workspace.write caller could bypass the HTTP operationId rule, and a
   // path-shaped id left a journal entry or a temp file, or the refusal left no audit line.
-  test(kind + ": an invalid operationId is refused before writing", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": an invalid operationId is refused before writing", async () => {
+    await withTarget(testTarget, async (target) => {
       const name = "op-invalid";
       const workspace = await openWorkspace(target, name);
       const root = rootOf(target, name);

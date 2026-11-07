@@ -35,20 +35,21 @@ npm run check
 
 Node 26 is pinned by `flake.nix`. Run anything that needs `node`/`npm` inside `nix develop` (or prefix it with `nix develop --command`).
 
-`npm run gate` is the commit gate: it reads the staged paths, selects the packages they can break (dependency closure), and runs lint → fmt → typecheck → test → build → knip on just those. The pre-commit hook calls it after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`). `npm run check` runs the same gate with `--all`.
+`npm run gate` is the commit gate: it reads the staged paths, selects the packages they can break (dependency closure), and runs lint → fmt → typecheck → unit tests on just those. `npm run gate pre-push` runs every stage over every package, including the integration tests, `build`, and `knip`. The hooks call it after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`). `npm run check` runs the same gate with `--all`.
 Building is not proof of correctness; types and tests are.
 
 ## Build Commands
 
-| Command | What it does |
-| --- | --- |
-| `npm run gate` | the commit gate for what is staged |
-| `npm run check` | the gate over every package |
-| `npm run gate <stage>` | one stage: `lint`, `fmt`, `typecheck`, `test`, `build`, `knip` |
-| `npm test -w @hns/store` | tests for one package |
-| `npm run build -w @hns/store` | `dist/` for one package |
-| `npm run lint` | the gate's lint stage over every package |
-| `npm run fmt` | oxfmt, in place |
+| Command                       | What it does                                                     |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `npm run gate`                | the commit gate for what is staged                               |
+| `npm run check`               | the gate over every package, every stage                         |
+| `npm run gate pre-push`       | the push gate: everything, including integration tests and build |
+| `npm run gate <stage>`        | one stage: `lint`, `fmt`, `typecheck`, `test`, `build`, `knip`   |
+| `npm test -w @hns/store`      | tests for one package                                            |
+| `npm run build -w @hns/store` | `dist/` for one package                                          |
+| `npm run lint`                | the gate's lint stage over every package                         |
+| `npm run fmt`                 | oxfmt, in place                                                  |
 
 Run these inside `nix develop`.
 
@@ -139,23 +140,23 @@ The PoC is for manual checks only. New product work goes into `packages/`.
 ### How to run tests
 
 ```bash
-npm test -w @hns/core
-npm test -w @hns/store
-npm run check          # everything
+npm test -w @hns/store   # that package's unit + integration tests
+npm run gate test        # unit tests of the staged packages
+npm run check            # everything
 ```
 
 Inside `nix develop`. Tests use Vitest; the layers and rules are in [docs/testing.md](docs/testing.md).
 
 ### Test Structure
 
-Tests live in `packages/<pkg>/test/*.test.ts`. There is no shared fixture package yet: each file creates its own in-memory or temporary SQLite database and closes it.
+Tests live in `packages/<pkg>/test/*.test.ts`. A test that does not finish in one process (rooted helper, pi-env daemon, bubblewrap, a child process) lives in `packages/<pkg>/test/integration/`; a file that runs in both tiers is `*.tiers.test.ts`. There is no shared fixture package yet: each file creates its own in-memory or temporary SQLite database and closes it.
 
 Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS_CHROME` to override the binary.
 
 ## Review
 
 - **The goal is a change that safely fulfills its contract, not a perfect diff.** Judge behavior over appearance, evidence over suspicion, this change's regressions over pre-existing problems, and signal over volume
-- **Independent review after implementation, before commit.** Your own reading is not review. A change in scope is done when `npm run check` passes *and* an agent that wrote none of the code returns `PASS`. The procedure is [docs/review.md](docs/review.md); read only the invariant files the change touches
+- **Independent review after implementation, before commit.** Your own reading is not review. A change in scope is done when `npm run check` passes _and_ an agent that wrote none of the code returns `PASS`. The procedure is [docs/review.md](docs/review.md); read only the invariant files the change touches
 - **Only regressions block.** What this change made worse is blocking; what pre-dates it becomes an issue, not a blocker (definition: [docs/review.md](docs/review.md)). Ask for the smallest correction that restores the contract
 - **A fix is re-reviewed.** The fix diff is where new defects enter (hns shipped two in one round). The reviewer checks the fix against the boundary schemas and docs it touched
 - **Record it.** Verdict, reviewer, HEAD, and blocking findings go in the issue's `## Result`. No record, no `done`
@@ -177,16 +178,16 @@ Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS
 
 Read on demand — not every session:
 
-| When | What |
-| --- | --- |
-| Requirements and scope | `README.md`, `ARCH.md` |
-| Research, requirements, tech selection, gates | `docs/process.md` |
-| UI/UX and agentic workspace examples | `docs/design/interface.md` (before) / `docs/review/ux.md` (review) |
-| Package boundaries and where types live | `docs/packages.md` |
-| Why a decision was made | `docs/decisions.md` (append-only) |
-| Stack, tooling, AI-slop gates | `docs/engineering.md` |
-| How to review a type | `docs/type-review.md` |
-| How to review a finished slice | `docs/review.md` (checks; sources linked per item) |
-| Design rules, conditions and sources | `docs/design.md` (read before designing) |
-| Comparison with the golden examples | `docs/typescript.md` |
-| Current backlog | `work/BOARD.md`, `work/issues/` |
+| When                                          | What                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------ |
+| Requirements and scope                        | `README.md`, `ARCH.md`                                             |
+| Research, requirements, tech selection, gates | `docs/process.md`                                                  |
+| UI/UX and agentic workspace examples          | `docs/design/interface.md` (before) / `docs/review/ux.md` (review) |
+| Package boundaries and where types live       | `docs/packages.md`                                                 |
+| Why a decision was made                       | `docs/decisions.md` (append-only)                                  |
+| Stack, tooling, AI-slop gates                 | `docs/engineering.md`                                              |
+| How to review a type                          | `docs/type-review.md`                                              |
+| How to review a finished slice                | `docs/review.md` (checks; sources linked per item)                 |
+| Design rules, conditions and sources          | `docs/design.md` (read before designing)                           |
+| Comparison with the golden examples           | `docs/typescript.md`                                               |
+| Current backlog                               | `work/BOARD.md`, `work/issues/`                                    |

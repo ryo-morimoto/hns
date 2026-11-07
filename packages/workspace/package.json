@@ -26,7 +26,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run --root ../.. --project workspace",
+    "test": "vitest run --root ../.. --project 'workspace*'",
     "typecheck": "tsrs --noEmit"
   },
   "dependencies": {

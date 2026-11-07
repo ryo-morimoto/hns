@@ -12,10 +12,10 @@ import type {
   Result,
   ShellExecResult,
 } from "@earendil-works/pi-durable/env";
-import { ForwardingEnv } from "../src/env.ts";
-import { Unavailable, Workspace } from "../src/index.ts";
-import { KINDS, openWorkspace, rootOf, swapParent, withTarget } from "./support.ts";
-import type { Target } from "./support.ts";
+import { ForwardingEnv } from "../../src/env.ts";
+import { Unavailable, Workspace } from "../../src/index.ts";
+import { KINDS, openWorkspace, rootOf, swapParent, withTarget } from "../support.ts";
+import type { Target, TestTarget } from "../support.ts";
 
 /** An environment that runs the attack once, right after it resolved a path. */
 class AttackEnv extends ForwardingEnv {
@@ -101,9 +101,11 @@ async function seeded(target: Target, name: string, rooted: boolean) {
   return { root, outside, version };
 }
 
-for (const kind of KINDS) {
-  test(kind + ": opens in dirfd mode", async () => {
-    await withTarget(kind, async (target) => {
+const targets = KINDS.map((kind): TestTarget => ({ kind, rooted: true, label: kind }));
+
+for (const testTarget of targets) {
+  test(testTarget.label + ": opens in dirfd mode", async () => {
+    await withTarget(testTarget, async (target) => {
       const workspace = await openWorkspace(target, "mode");
 
       assert.equal(workspace.mode, "dirfd");
@@ -113,36 +115,41 @@ for (const kind of KINDS) {
 
   // Catches: the window between the parent re-check and rename(2). The path-based
   // fallback still loses it; the dirfd path is what closes it.
-  test(kind + ": a write swapped after the last check escapes on the fallback", async () => {
-    await withTarget(kind, async (target) => {
-      const { root, outside, version } = await seeded(target, "fallback", false);
-      const trap = new AttackEnv(target.env, join(root, "d"), () => swapParent(root, "d", outside));
-      const trapped = await Workspace.open({
-        env: trap,
-        root,
-        journalPath: join(target.base, "journal-fallback-2.json"),
-        context: ctx,
-        rooted: false,
-      });
+  test(
+    testTarget.label + ": a write swapped after the last check escapes on the fallback",
+    async () => {
+      await withTarget(testTarget, async (target) => {
+        const { root, outside, version } = await seeded(target, "fallback", false);
+        const trap = new AttackEnv(target.env, join(root, "d"), () =>
+          swapParent(root, "d", outside),
+        );
+        const trapped = await Workspace.open({
+          env: trap,
+          root,
+          journalPath: join(target.base, "journal-fallback-2.json"),
+          context: ctx,
+          rooted: false,
+        });
 
-      const result = await trapped.write({
-        path: "d/f.txt",
-        content: "x",
-        expectedVersion: version,
-        operationId: "w1",
-      });
+        const result = await trapped.write({
+          path: "d/f.txt",
+          content: "x",
+          expectedVersion: version,
+          operationId: "w1",
+        });
 
-      assert.ok(trap.fired);
-      assert.deepEqual(await readdir(outside), ["f.txt"]);
-      assert.equal(result.status, "unknown");
-      assert.ok(trapped.auditLog.some((entry) => entry.reason === "escaped after rename"));
-      await trapped.close();
-    });
-  });
+        assert.ok(trap.fired);
+        assert.deepEqual(await readdir(outside), ["f.txt"]);
+        assert.equal(result.status, "unknown");
+        assert.ok(trapped.auditLog.some((entry) => entry.reason === "escaped after rename"));
+        await trapped.close();
+      });
+    },
+  );
 
   // Catches: a parent swapped after the last check must not take the write with it.
-  test(kind + ": the same swap is refused in dirfd mode", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": the same swap is refused in dirfd mode", async () => {
+    await withTarget(testTarget, async (target) => {
       const { root, outside, version } = await seeded(target, "dirfd", true);
       const trapped = await Workspace.open({
         env: target.env,
@@ -168,8 +175,8 @@ for (const kind of KINDS) {
   });
 
   // Catches: repeated writes while the parent is swapped must never leak.
-  test(kind + ": repeated writes while the parent is swapped stay inside", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": repeated writes while the parent is swapped stay inside", async () => {
+    await withTarget(testTarget, async (target) => {
       const outside = join(target.base, "outside-churn");
       const workspace = await openWorkspace(target, "churn");
       const root = rootOf(target, "churn");
@@ -214,8 +221,8 @@ for (const kind of KINDS) {
   });
 
   // Catches: a parent swapped after the resolve must not be followed by a read.
-  test(kind + ": a read never follows a swapped parent", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": a read never follows a swapped parent", async () => {
+    await withTarget(testTarget, async (target) => {
       const read = async (name: string, rooted: boolean) => {
         const outside = join(target.base, "outside-" + name);
         const workspace = await openWorkspace(target, name, { rooted });
@@ -251,8 +258,8 @@ for (const kind of KINDS) {
   });
 
   // Catches: a final component replaced by a symbolic link is never read through.
-  test(kind + ": a final link is refused in both modes", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": a final link is refused in both modes", async () => {
+    await withTarget(testTarget, async (target) => {
       for (const rooted of [false, true]) {
         const name = "final-" + (rooted ? "dirfd" : "checks");
         const outside = join(target.base, "outside-" + name);
@@ -283,8 +290,8 @@ for (const kind of KINDS) {
     });
   });
 
-  test(kind + ": an environment without exec falls back and still works", async () => {
-    await withTarget(kind, async (target) => {
+  test(testTarget.label + ": an environment without exec falls back and still works", async () => {
+    await withTarget(testTarget, async (target) => {
       const workspace = await openWorkspace(target, "no-exec", {
         env: new NoExecEnv(target.env),
         rooted: true,
@@ -305,8 +312,8 @@ for (const kind of KINDS) {
   });
 }
 test("a required rooted helper refuses to open without exec", async () => {
-  for (const kind of KINDS) {
-    await withTarget(kind, async (target) => {
+  for (const testTarget of targets) {
+    await withTarget(testTarget, async (target) => {
       await assert.rejects(
         openWorkspace(target, "required", { env: new NoExecEnv(target.env), rooted: "required" }),
         Unavailable,
