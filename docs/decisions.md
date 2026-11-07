@@ -599,3 +599,32 @@ D047〜D049 に、実装者が誤読する言い方があった。本文は残�
 hns: 決定は追記で直す。D047〜D049 の本文は履歴として残す。
 
 前提が変わる条件: WS 以外の輸送に変える、または Cloudflare 上でワークロードを動かす決定をしたとき。
+
+## D052: フックは prek に通し、ステージ内容と merge をゲートで覆う
+date: 2026-11-07 · by: agent · issue: 0174
+
+D051 で残した「部分ステージの内容一致」と「merge の素通り」を埋める。worktree の退避・復元を自作するのは
+事故りやすいので、prek **0.5.10**（npm、exact pin）に任せる。
+
+実測（prek 0.5.10）:
+
+| 確認 | 結果 |
+| --- | --- |
+| staged=B / worktree=C の pre-commit | フックは **B** を見て、終了後に worktree を C に戻す |
+| `prek run --stage pre-commit` を .githooks から | 同じ（shim のインストールは不要） |
+| pre-merge-commit ステージ | 非 fast-forward の merge でフックが走る |
+| 出力 | 既定では成功時に隠れるので `verbose: true` を付けた（段階ごとの時間が消えない） |
+
+構成: `.pre-commit-config.yaml` に3フック（commit / merge / push）。`.githooks/*` は
+`prek run --stage <stage>` を呼ぶだけで、`core.hooksPath=.githooks` は変えない。
+merge は commit と同じ段階（unit まで）を回し、全量は push が担う。
+
+代償: フックの間だけ worktree が退避される（commit で約2.5秒、pre-push は全量なので約20秒）。
+同時に別プロセスがファイルを書くと復元が衝突し得る。pre-commit を短く保つ理由が1つ増えた。
+
+注意: `.pre-commit-config.yaml` を編集して stage しないままだと、prek は「設定が stage されていない」として
+**すべてのコミットを止める**（フックはコミットされる設定で走るべき、という安全策）。
+フック設定を変えたら、その変更も同じコミットに含める。
+
+見直す条件: prek の更新が止まる、または退避・復元で事故が起きたとき（そのときは lefthook を同じ形で試す）。
+

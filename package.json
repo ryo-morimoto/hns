@@ -19,16 +19,36 @@
   },
   "knip": {
     "workspaces": {
-      "packages/*": { "entry": ["test/**/*.test.ts"] },
-      "packages/workspace": { "entry": ["test/**/*.test.ts", "src/rooted-helper.ts"] },
+      "packages/*": {
+        "entry": [
+          "test/**/*.test.ts"
+        ]
+      },
+      "packages/workspace": {
+        "entry": [
+          "test/**/*.test.ts",
+          "src/rooted-helper.ts"
+        ]
+      },
       "packages/web": {
-        "entry": ["test/**/*.test.{ts,tsx}"],
-        "ignoreDependencies": ["jsdom"]
+        "entry": [
+          "test/**/*.test.{ts,tsx}"
+        ],
+        "ignoreDependencies": [
+          "jsdom"
+        ]
       }
     },
-    "ignore": ["work/**", "tools/**"]
+    "ignore": [
+      "work/**",
+      "tools/**"
+    ],
+    "ignoreDependencies": [
+      "@j178/prek"
+    ]
   },
   "devDependencies": {
+    "@j178/prek": "0.5.10",
     "@oxlint/plugins": "1.78.0",
     "knip": "6.44.1",
     "oxfmt": "0.77.0",

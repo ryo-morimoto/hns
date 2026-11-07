@@ -1,0 +1,31 @@
+# The commit gate runs through prek, which hides unstaged changes while the hooks
+# run: the tools then see exactly what will be committed, not the working tree.
+# Entry points are .githooks/* (core.hooksPath); prek does not install shims here.
+default_install_hook_types: [pre-commit, pre-push, pre-merge-commit]
+repos:
+  - repo: local
+    hooks:
+      - id: gate-commit
+        name: gate (staged content, unit tests)
+        language: system
+        entry: node tools/gate/main.ts pre-commit
+        pass_filenames: false
+        always_run: true
+        verbose: true
+        stages: [pre-commit]
+      - id: gate-merge
+        name: gate (merge result, unit tests)
+        language: system
+        entry: node tools/gate/main.ts pre-commit
+        pass_filenames: false
+        always_run: true
+        verbose: true
+        stages: [pre-merge-commit]
+      - id: gate-push
+        name: gate (every package, every stage)
+        language: system
+        entry: node tools/gate/main.ts pre-push
+        pass_filenames: false
+        always_run: true
+        verbose: true
+        stages: [pre-push]

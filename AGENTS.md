@@ -14,7 +14,7 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
   - `work/poc/` — the integrated PoC app (plain JS). **Not product code.** Do not add features here
   - `work/BOARD.md`, `work/issues/` — the backlog and per-issue notes
 - `docs/` — flat specs: architecture decisions, auth, safety, observability, packages, type review
-- `.githooks/` — `pre-commit` runs the commit gate (`tools/gate/`) on the staged packages
+- `.githooks/` — `pre-commit`, `pre-push` and `pre-merge-commit` run the gate (`tools/gate/`) through prek, so the hooks see the staged content, not the working tree
 
 ### Architecture Notes
 
@@ -35,7 +35,7 @@ npm run check
 
 Node 26 is pinned by `flake.nix`. Run anything that needs `node`/`npm` inside `nix develop` (or prefix it with `nix develop --command`).
 
-`npm run gate` is the commit gate: it reads the staged paths, selects the packages they can break (dependency closure), and runs lint → fmt → typecheck → unit tests on just those. `npm run gate pre-push` runs every stage over every package, including the integration tests, `build`, and `knip`. The hooks call it after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`). `npm run check` runs the same gate with `--all`.
+`npm run gate` is the commit gate: it reads the staged paths, selects the packages they can break (dependency closure), and runs lint → fmt → typecheck → unit tests on just those. `npm run gate pre-push` runs every stage over every package, including the integration tests, `build`, and `knip`. The hooks call it through `prek`, which hides unstaged changes while they run, after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`). `npm run check` runs the same gate with `--all`.
 Building is not proof of correctness; types and tests are.
 
 ## Build Commands

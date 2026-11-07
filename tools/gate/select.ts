@@ -45,6 +45,7 @@ const ROOT_TRIGGERS: readonly string[] = [
   "vitest.config.ts",
   "oxlint.config.ts",
   ".oxfmtrc.json",
+  ".pre-commit-config.yaml",
 ];
 
 /** Directories whose contents can affect every package (the gate itself, tooling). */

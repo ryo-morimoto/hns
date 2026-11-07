@@ -55,6 +55,12 @@ test("a change under tools forces every package", () => {
   assert.equal(selection.forcedAll, true);
 });
 
+// Catches: editing the hook wiring without running the gate on that commit.
+test("a change to the hook config forces every package", () => {
+  const selection = select([staged(".pre-commit-config.yaml")], packages);
+  assert.equal(selection.forcedAll, true);
+});
+
 // Catches: a deletion being dropped from the check set by --diff-filter=ACMR.
 test("deleted files still select their package", () => {
   const selection = select([staged("packages/store/src/rows.ts", "D")], packages);

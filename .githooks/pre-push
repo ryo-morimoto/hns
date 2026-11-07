@@ -4,4 +4,5 @@ cd "$(git rev-parse --show-toplevel)"
 command -v node >/dev/null || { echo "pre-push: run inside nix develop (node not found)" >&2; exit 1; }
 node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 18) ? 0 : 1)' \
   || { echo "pre-push: node >= 22.18 is required (nix develop pins 26)" >&2; exit 1; }
-exec node tools/gate/main.ts pre-push
+[ -x ./node_modules/.bin/prek ] || { echo "pre-push: prek is missing; run npm install" >&2; exit 1; }
+exec ./node_modules/.bin/prek run --stage pre-push
