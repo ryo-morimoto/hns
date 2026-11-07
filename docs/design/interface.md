@@ -202,6 +202,13 @@ hns の画面は「AI と会話する場所」ではなく、**人間が仕事�
 - **補足**: hns: 2026-11-07 のユーザーレビュー。参考は ChatGPT モバイル（ホームは挨拶 + 最近の成果物 + 下端 composer、会話は戻る + タイトル + 共有 + composer だけ）。シェルの下部バーは不要と判断され 0102 から削除。composer と頻繁操作の共存 UI はアイデアが出るまで低優先度。スワイプは補助で、代替操作を必ず持つ（原則17・WCAG 2.5.1/2.5.7）
 - **Ref**: ChatGPT モバイル（2026-11-07 にユーザー提供のスクリーンショットで確認） / [Material 3 — Navigation bar](https://m3.material.io/components/navigation-bar/overview)（一般論。hns は採らない）
 
+## 19. 切り替えずに、他のワークスペースの状態を見せる
+
+- **条件**: サイドバー・ワークスペース切替・一覧を作るとき
+- **命令**: 選択中のワークスペースだけでなく、全ワークスペースの「Needs you / Running / 最近の完了」を 1 画面に出す。切替器の行に件数と鮮度を付け、件数からその仕事へ 1 操作で入れる。件数は一覧の実数と一致させ、done は件数ではなくドット / 鮮度にする
+- **補足**: hns: 2026-11-07 のユーザーレビュー（切り替えないと他ワークスペースの進捗が見えない）。参考は Slack の workspace badge、Linear の横断優先リスト、Sentry の Projects 一覧、Cursor の Agents Window。集計は 0115、更新は 0118。件数だけ先に、項目は 0116/0117 の後
+- **Ref**: [Slack — Activity badges](https://slack.com/help/articles/45573197224467-Triage-notifications-from-the-Activity-tab--legacy-) / [Linear — Inbox](https://linear.app/docs/inbox) / [Sentry — Projects](https://docs.sentry.io/product/projects/) / [Cursor — Agents Window](https://cursor.com/docs/agent/agents-window)
+
 ## 参考: Agentic Workspace の5例
 
 | 例 | 取るもの | リンク |
