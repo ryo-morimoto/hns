@@ -388,3 +388,94 @@ date: 2026-11-07 · by: agent · issue: -
 hns: 参考は見た目の模倣ではなく「どの問題をどう解いているか」を1文で残す。好みは blocking にしない。
 前提が変わる条件: hns の UI が実装され、画面ごとの独自規範（レイアウト・トークン）ができたら、原則はそちらへ移し、
 ここは実例の索引に縮める。
+
+## D047: 正本を Cloudflare に置き、実行は手元に残す
+date: 2026-11-07 · by: user · issue: 0140
+
+[work/poc/cf-harness](../work/poc/cf-harness/README.md) で pi-durable 1.5.0 の Harness を Durable Object に載せ、
+ツールだけを手元のマシンで実行する構成を通した。実デプロイで 1 op 28ms（p95 61ms）、1 ターン 4 op で 181ms。
+75 秒のアイドル後も会話と状態は DO SQLite から戻り、[RESULTS.md](../work/poc/cf-harness/RESULTS.md) に実測を残した。
+許容範囲と判断し、**正本を Cloudflare に置く**。
+
+正本の範囲は、Control Plane（Run / Task / Workflow / 版 / 認可）を Durable Objects、ワークスペースの確定内容を R2、
+会話を DO 上の pi-durable とする。実行はマシン上のエージェント（cloudflared + 署名付きリクエスト）で、Cloudflare は計算を持たない
+（Containers / Computer は採らない）。durable の単位は commit 済み ref（`refs/hns/checkpoints/<runId>`）。
+RPO は ack 済み保存 0、agent の shell 変更は Run 終了時まで。版チェックは lease でマシンに委譲し、期限切れは fail closed。
+provider 鍵は harness の isolate に置かず gateway Worker が持ち、git の資格情報はマシンに残す。
+一覧・検索は D1 の投影、ライブ更新は WebSocket。
+
+hns: 「セルフホスト」は UI とサーバのコードを自分で動かせることを指し、Cloudflare アカウント無しでは会話が動かないことを明記する。
+SSH 経路は失われる（DO は生の TCP を張れない）。要件1の意味、D004（A 前提）、D016（tailnet 認証）を置き換える。D039（pi-durable 一択）は維持する。
+残る未知は DO の CPU / 128MB と長時間 bash と provider ストリーミングの3つで、0163 と 0152 で測る。
+
+前提が変わる条件: 実運用で p95 が 150ms を超える、DO のメモリ上限に当たる、またはコストが月 $50 を超える。
+そのときは ExecutionEnv と Storage の境界でローカルへ戻す（[0166](issues/0166-migration-rollback.md)）。
+
+## D048: 正本の単位は (C, J) とし、ack は単一システムで閉じる
+date: 2026-11-07 · by: user · issue: 0141
+
+D047 の「正本を Cloudflare に置く」を、同一性の単位まで下ろした。正本は **`(C, J)`**（最後の checkpoint
+commit と、その後の確定済み Journal）。作業ツリーは `C ⊕ J ⊕ U` の写像で、U（未確定変更）は durable でない。
+契約は [durability.md](durability.md)。
+
+**Journal は Workspace DO に分ける**（1 ワークスペースに 1 つ）。会話は Session DO が持ち、Workspace DO を
+RPC で呼ぶ。寿命と粒度が違い、会話を消しても版を残す必要があるため。
+
+**本文は 256KB まで DO の行に持ち、それ以上は R2 に置いて hash だけ残す。** ack は DO の 1 トランザクションで閉じる。
+大きい場合のみ R2 → DO → ack の順。逆にすると「ack したのに R2 に無い」が作れる。
+
+**checkpoint は Run の終了時だけ**（中断・lease 解放・正常終了を含む）。定期的には打たない。この帰結として、
+Run の途中でプロセスが死ぬとその Run の未確定変更は丸ごと失われる。
+
+hns: 費用は容量ではなく行数と往復で決まる。月1万保存・8KB なら、DO に本文を置いても R2 に置いても $0 で、
+小さいファイルでは DO のほうが安い（行課金 $1/100万 < Class A $4.5/100万、往復も無い）。R2 を使う理由は
+金額ではなく 128MB のメモリ上限と復帰時間。本当の罠は token 単位の commit、J を切り詰めないこと、
+イベントごとの D1 同期更新、小さな DO の乱造。
+
+前提が変わる条件: 1 保存あたりの本文が常に 256KB を超える、または DO の行数が月 5,000万を超える。
+
+## D049: Durable Object は調整の単位にだけ使う
+date: 2026-11-07 · by: user · issue: 0146
+
+Cloudflare の指針（[cloudflare/skills](https://github.com/cloudflare/skills)）に照らすと、D047 の設計は DO を
+制御レコードと接続管理にまで広げていて過剰だった。DO は「エンティティ単位の調整が中心」のときに使い、
+レコードを SQL で引く用途は D1 にする。
+
+**PiHarness（pi-durable 1.5.0 を DO で動かす）は維持する。** ただし 1 会話 = 1 DO をやめ、**1 ワークスペース = 1 Session** にする
+（pi-durable の Session は複数の会話を持つ。ベンダー例も 1 DO に全会話を載せている）。残す DO は次の2種類だけ。
+
+| 種別 | 単位 | 役割 |
+| --- | --- | --- |
+| Session DO（PiHarness） | 1 ワークスペース | harness・transcript・run・WS |
+| Workspace DO | 1 ワークスペース | Journal・版・lease・直列化 |
+
+**D1 に移すもの**: Project / Task / Workflow 定義 / Machine レコード。machine は cloudflared で常時接続を持たないので
+DO は要らない（D1 のレコード + fetch）。provider の予算カウンタは D1 の 1 文（`UPDATE ... WHERE spent < limit`）。
+automations の起動は Cron Triggers。一覧は D1（会話と run の索引だけを Session DO からミラーする）。
+
+hns: 「実行中の状態は DO、確定したレコードは D1」。D1 に実行中の状態を書かない（正本を2つにしない）。
+Workspace DO は残す。高頻度の小さい書き込みと epoch の整合は、単一プライマリの SQL では詰まる。
+クラス数が 2 つになることで、migration とデプロイの面も半分になる。
+
+前提が変わる条件: 1 ワークスペースの履歴が DO の 10GB / 128MB に近づく、または D1 の書き込みが
+run の記録に追いつかなくなる。そのときは Session を時間やプロジェクトで分割する。
+
+## D050: コミット時チェックはステージ済みのパッケージに限定する
+date: 2026-11-07 · by: agent · issue: -
+
+実測（グリーンなツリー、Node 26）で `npm run check` は約 20.3 秒。内訳は test 12.9s（63%）と build 5.5s（27%）で、
+lint / fmt / typecheck / knip は合計 1.5 秒だった。直近 133 コミットのうち 94（71%）は `packages/` に触れていない。
+つまり待ち時間の大半は、変更と関係のない検査に払われていた。
+
+段階の定義を `tools/gate/stages.ts`、対象の選別を `tools/gate/select.ts` に置き、pre-commit は
+`git diff --cached` のパスから影響パッケージ（依存の閉包）を計算して、その範囲だけを回す。
+段階は個別に実行でき（`npm run gate <stage>`）、`npm run check` は同じ定義の `--all` にした。
+実際に web だけのコミットは 3.95 秒、docs だけなら 0.1 秒で終わる（実測）。
+
+却下: lint-staged / lefthook / prek をこの時点で入れる。どれも npm workspaces の影響範囲を計算せず、
+段階分割と選別だけで 7 割のコミットが 0.1 秒になるため、まず効果の大きい部分を依存ゼロで入れる（買う→借りる→作る の順）。
+部分ステージの内容（index と作業ツリーの差）はまだ見ていない。ツールは作業ツリーを読むので、
+ステージ後に編集したファイルは「検査した内容 ≠ コミット内容」になり得る。必要になったら runner を入れて埋める。
+
+見直す条件: CI（0041）を入れるとき、パッケージが 8 つを超えるとき、または部分ステージの取り違えが実際に起きたとき。
+

@@ -40,7 +40,8 @@
 
 ## ゲート
 
-- `npm run check` = oxlint → oxfmt → tsrs → `vitest run` → build。
+- `npm run check` = 全パッケージに oxlint → oxfmt → tsrs → `vitest run` → build。
+- コミット時は `npm run gate` が、ステージ済みのパスから選んだパッケージにだけ同じ段階を回す（定義は `tools/gate/stages.ts`、選別は `tools/gate/select.ts`）。
 - CI も同じコマンド。テストのためだけの別ランナー・別設定を作らない。
 - テストを足さない変更は「何を証明したか」を説明する。
 

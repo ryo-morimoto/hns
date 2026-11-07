@@ -14,7 +14,7 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
   - `work/poc/` — the integrated PoC app (plain JS). **Not product code.** Do not add features here
   - `work/BOARD.md`, `work/issues/` — the backlog and per-issue notes
 - `docs/` — flat specs: architecture decisions, auth, safety, observability, packages, type review
-- `.githooks/` — `pre-commit` runs the full check
+- `.githooks/` — `pre-commit` runs the commit gate (`tools/gate/`) on the staged packages
 
 ### Architecture Notes
 
@@ -35,17 +35,19 @@ npm run check
 
 Node 26 is pinned by `flake.nix`. Run anything that needs `node`/`npm` inside `nix develop` (or prefix it with `nix develop --command`).
 
-`npm run check` is the gate: oxlint → oxfmt --check → tsrs → test → build. It also runs from the pre-commit hook after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`).
+`npm run gate` is the commit gate: it reads the staged paths, selects the packages they can break (dependency closure), and runs lint → fmt → typecheck → test → build → knip on just those. The pre-commit hook calls it after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`). `npm run check` runs the same gate with `--all`.
 Building is not proof of correctness; types and tests are.
 
 ## Build Commands
 
 | Command | What it does |
 | --- | --- |
-| `npm run check` | everything below, in order |
+| `npm run gate` | the commit gate for what is staged |
+| `npm run check` | the gate over every package |
+| `npm run gate <stage>` | one stage: `lint`, `fmt`, `typecheck`, `test`, `build`, `knip` |
 | `npm test -w @hns/store` | tests for one package |
 | `npm run build -w @hns/store` | `dist/` for one package |
-| `npm run lint` | oxlint only |
+| `npm run lint` | the gate's lint stage over every package |
 | `npm run fmt` | oxfmt, in place |
 
 Run these inside `nix develop`.
@@ -162,7 +164,7 @@ Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS
 
 - **oxlint** with the vendored [anti-slop](https://github.com/dmmulroy/anti-slop) rules (`tools/oxlint/anti-slop/`). Read a rule before disabling it; do not edit the vendored copy without recording it in `UPSTREAM.md`
 - **oxfmt** owns whitespace. `require-readable-spacing` is disabled because the two disagree
-- `npm run lint` / `npm run fmt`; the pre-commit hook runs both through `npm run check`
+- `npm run lint` / `npm run fmt`; the pre-commit hook runs the gate (`tools/gate/`), scoped to the staged packages
 - Type checks run per workspace (`tsrs --noEmit`, D044); declaration emit stays on `tsc`
 
 ## Commit Guidelines

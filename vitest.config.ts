@@ -45,6 +45,7 @@ export default defineConfig({
           setupFiles: ["packages/web/test/setup.ts"],
         },
       },
+      { extends: true, test: { name: "tools", include: ["tools/gate/test/**/*.test.ts"] } },
     ],
   },
 });
