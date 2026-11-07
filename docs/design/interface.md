@@ -188,19 +188,19 @@ hns の画面は「AI と会話する場所」ではなく、**人間が仕事�
 参考: [Linear AIG](https://linear.app/developers/aig) / [AI Design Guide — 39 patterns](https://www.aidesign.guide/agentic-ux-patterns) /
 [Setproduct — 16 patterns](https://www.setproduct.com/blog/ai-agent-ui-design-patterns)
 
-## 13. タッチとスワイプは補助にする
+## 17. タッチとスワイプは補助にする
 
 - **条件**: モバイル・タブレット向けの操作（dismiss・drawer・一覧の行操作・タブ切替）を設計する
 - **命令**: スワイプを主操作にしない。同じ操作をボタン/メニュー/キーボードでも用意する。縦スクロールや画面端の戻るジェスチャと競合させない。閾値・速度・キャンセルを決め、破壊的操作には Undo か確認を付ける
 - **補足**: hns: モバイル/タブレット利用の増加を見込む。タップ領域は 44px を目安にし、hover 前提の操作を作らない
 - **Ref**: [Apple HIG — Gestures](https://developer.apple.com/design/human-interface-guidelines/gestures) / [Material 3 — Gestures](https://m3.material.io/foundations/interaction/gestures) / [WCAG 2.5.1](https://www.w3.org/WAI/WCAG22/Understanding/pointer-gestures.html) / [WCAG 2.5.7](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html)
 
-## 14. フッターは composer を主にする（汎用の下部バーを作らない）
+## 18. モバイルはクロームを削り、composer を主にする
 
-- **条件**: モバイル・タブレットの操作やフッターを設計するとき
-- **命令**: フッターの主役は入力欄（composer）。汎用の下部ナビバーで頻繁操作を並べない。頻繁な操作（コンテキスト/タスク切替、Needs you、コマンド）は、composer と共存できる形（入力欄への併置・近接）で届かせる。共存の設計ができない間は、上部・drawer・キーボードに置く
-- **補足**: hns: 2026-11-07 のユーザーレビューで shell の下部バーは「この操作感なら不要」と判断され、0102 から削除した。composer と頻繁操作を共存させる UI はアイデアが出るまで低優先度。スワイプは補助で、代替操作を必ず持つ（原則13・WCAG 2.5.1/2.5.7）
-- **Ref**: [Material 3 — Navigation bar](https://m3.material.io/components/navigation-bar/overview)（下部バーの一般論。hns は採らない） / [Linear AIG](https://linear.app/developers/aig)
+- **条件**: モバイル・タブレットのクローム（ヘッダー・ナビ・フッター）を設計するとき
+- **命令**: 階層は必須のものだけ残す。上バーは「戻る/メニュー + 現在地 + 主要アクション1つ」に絞り、プロジェクト切替・テーマ・接続は drawer / 設定へ置く。常設タブや二重のナビを置かない。本文は全幅を使う。フッターの主役は composer で、入力欄と共存できない頻繁操作は drawer / キーボードに置く
+- **補足**: hns: 2026-11-07 のユーザーレビュー。参考は ChatGPT モバイル（ホームは挨拶 + 最近の成果物 + 下端 composer、会話は戻る + タイトル + 共有 + composer だけ）。シェルの下部バーは不要と判断され 0102 から削除。composer と頻繁操作の共存 UI はアイデアが出るまで低優先度。スワイプは補助で、代替操作を必ず持つ（原則17・WCAG 2.5.1/2.5.7）
+- **Ref**: ChatGPT モバイル（2026-11-07 にユーザー提供のスクリーンショットで確認） / [Material 3 — Navigation bar](https://m3.material.io/components/navigation-bar/overview)（一般論。hns は採らない）
 
 ## 参考: Agentic Workspace の5例
 

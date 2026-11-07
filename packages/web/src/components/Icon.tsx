@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { classNames } from "../design/classNames.ts";
 
-const ICON_NAMES = ["close", "chevron-down", "check", "alert", "menu"] as const;
+const ICON_NAMES = ["close", "chevron-down", "check", "alert", "menu", "search", "back"] as const;
 type IconName = (typeof ICON_NAMES)[number];
 
 /** The only sizes the design system allows. */
@@ -15,6 +15,8 @@ const PATHS: Record<IconName, string> = {
   check: "M3.5 8.5L6.5 11.5L12.5 5",
   alert: "M8 3.5v5.5M8 12v.5",
   menu: "M3 5h10M3 8h10M3 11h10",
+  search: "M7 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM9.8 9.8 13 13",
+  back: "M10 3.5 5.5 8l4.5 4.5",
 };
 
 export interface IconProps {

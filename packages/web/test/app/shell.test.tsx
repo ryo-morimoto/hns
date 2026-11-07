@@ -130,6 +130,20 @@ test("the shell provides the right panel slot", async () => {
   assert.match(panel.textContent ?? "", /パネル/u);
 });
 
+test("mobile conversation shows a back arrow to the workspace", async () => {
+  setMobile(true);
+  window.location.hash = "#/p/project-hns/c/conversation-intent";
+  renderShell();
+
+  await screen.findByRole("heading", { name: "Web の土台" });
+  assert.equal(screen.queryByRole("button", { name: "メニューを開く" }), null);
+  assert.ok(screen.getByText("Web の土台", { selector: ".hns-topbar__title" }));
+  await userEvent.click(screen.getByRole("button", { name: "ワークスペースへ戻る" }));
+
+  await screen.findByRole("heading", { name: "Workspace" });
+  assert.equal(window.location.hash, "#/p/project-hns");
+});
+
 // Catches: a mobile shell that hides the sidebar without a way to reach it, or a drawer that
 // traps users. The footer stays composer-first; there is no generic bottom bar (0102, user).
 test("mobile opens the drawer from the top bar", async () => {
@@ -138,9 +152,18 @@ test("mobile opens the drawer from the top bar", async () => {
   await screen.findByRole("heading", { name: "Workspace" });
 
   assert.equal(screen.queryByRole("navigation", { name: "下部バー" }), null);
+  assert.equal(screen.queryByRole("button", { name: "hns" }), null);
+  assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Workspace");
+  assert.ok(screen.getByText("hns", { selector: ".hns-topbar__title" }));
 
   await userEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
   assert.ok(await screen.findByRole("dialog", { name: "メニュー" }));
+  assert.equal(screen.getByRole("status").textContent, "接続済み");
+  const themeGroup = screen.getByRole("group", { name: "テーマ" });
+  assert.ok(themeGroup);
+  await userEvent.click(screen.getByRole("button", { name: "ダーク" }));
+  assert.equal(document.documentElement.dataset["theme"], "dark");
+  assert.equal(window.localStorage.getItem("hns.theme"), "dark");
 
   await userEvent.click(screen.getByRole("button", { name: "メニューを閉じる" }));
   await waitFor(() => {

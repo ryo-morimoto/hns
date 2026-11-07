@@ -3,12 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import type { Conversation, Project, Task } from "@hns/core";
 import type { WebClient } from "../api/client.ts";
+import { Button } from "../components/Button.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
 import { projectIdFrom } from "../routes/ids.ts";
 import { formatHash } from "../routes/route.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
+import { ConnectionStatus } from "./ConnectionStatus.tsx";
 import { Sidebar } from "./Sidebar.tsx";
-import { useTheme } from "./theme.ts";
+import { THEME_LABELS, THEMES, useTheme } from "./theme.ts";
 import { TopBar } from "./TopBar.tsx";
 import { useMediaQuery } from "./useMediaQuery.ts";
 import "./shell.css";
@@ -77,6 +79,8 @@ export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElemen
       ? conversations.data?.find((item) => item.id === route.conversationId)?.title
       : undefined;
   const location = route.kind === "conversation" ? (conversationTitle ?? "会話") : "Workspace";
+  const title =
+    route.kind === "conversation" ? (conversationTitle ?? "会話") : (project?.name ?? "Workspace");
 
   const connection = projects.isPending ? "connecting" : projects.isError ? "offline" : "online";
   const loading =
@@ -105,12 +109,18 @@ export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElemen
         projectName={project?.name ?? (projects.isPending ? "読み込み中" : "プロジェクト")}
         projects={projects.data ?? []}
         location={location}
+        title={title}
         connection={connection}
         theme={theme}
         mobile={mobile}
         onSelectProject={(selected) => navigate({ kind: "workspace", projectId: selected.id })}
         onTheme={chooseTheme}
         onOpenDrawer={() => setDrawerOpen(true)}
+        onBack={
+          route.kind === "conversation"
+            ? () => navigate({ kind: "workspace", projectId: route.projectId })
+            : undefined
+        }
         onOpenCommand={onOpenCommand}
       />
 
@@ -155,7 +165,24 @@ export function Shell({ client, onOpenCommand, panel }: ShellProps): ReactElemen
             <Drawer.Viewport className="hns-drawer-viewport">
               <Drawer.Popup className="hns-drawer-popup">
                 <Drawer.Title className="hns-sr-only">メニュー</Drawer.Title>
-                <Drawer.Content className="hns-drawer-content">{sidebar}</Drawer.Content>
+                <Drawer.Content className="hns-drawer-content">
+                  {sidebar}
+                  <div className="hns-drawer-footer">
+                    <ConnectionStatus connection={connection} />
+                    <div className="hns-theme-row" role="group" aria-label="テーマ">
+                      {THEMES.map((choice) => (
+                        <Button
+                          key={choice}
+                          variant={theme === choice ? "primary" : "ghost"}
+                          aria-pressed={theme === choice}
+                          onClick={() => chooseTheme(choice)}
+                        >
+                          {THEME_LABELS[choice]}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </Drawer.Content>
               </Drawer.Popup>
             </Drawer.Viewport>
           </Drawer.Portal>

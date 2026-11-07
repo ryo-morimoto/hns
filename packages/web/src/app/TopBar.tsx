@@ -3,32 +3,21 @@ import type { ReactElement } from "react";
 import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Menu } from "../components/Menu.tsx";
-import { THEMES, type Theme } from "./theme.ts";
-
-type Connection = "connecting" | "online" | "offline";
-
-const THEME_LABELS: Record<Theme, string> = {
-  system: "システム",
-  light: "ライト",
-  dark: "ダーク",
-};
-
-const CONNECTION_LABELS: Record<Connection, string> = {
-  connecting: "接続中",
-  online: "接続済み",
-  offline: "未接続",
-};
+import { ConnectionStatus, type Connection } from "./ConnectionStatus.tsx";
+import { THEME_LABELS, THEMES, type Theme } from "./theme.ts";
 
 export interface TopBarProps {
   readonly projectName: string;
   readonly projects: readonly Project[];
   readonly location: string;
+  readonly title: string;
   readonly connection: Connection;
   readonly theme: Theme;
   readonly mobile: boolean;
   readonly onSelectProject: (project: Project) => void;
   readonly onTheme: (theme: Theme) => void;
   readonly onOpenDrawer: () => void;
+  readonly onBack: (() => void) | undefined;
   readonly onOpenCommand: (() => void) | undefined;
 }
 
@@ -36,22 +25,42 @@ export function TopBar({
   projectName,
   projects,
   location,
+  title,
   connection,
   theme,
   mobile,
   onSelectProject,
   onTheme,
   onOpenDrawer,
+  onBack,
   onOpenCommand,
 }: TopBarProps): ReactElement {
+  if (mobile) {
+    // Low chrome: menu, the page title, one action. Project, theme, and connection live in
+    // the drawer so the content keeps the width (interface.md 14).
+    return (
+      <header className="hns-topbar hns-topbar--mobile">
+        {onBack === undefined ? (
+          <Button variant="icon" aria-label="メニューを開く" onClick={onOpenDrawer}>
+            <Icon name="menu" />
+          </Button>
+        ) : (
+          <Button variant="icon" aria-label="ワークスペースへ戻る" onClick={onBack}>
+            <Icon name="back" />
+          </Button>
+        )}
+        <span className="hns-topbar__title">{title}</span>
+        {onOpenCommand === undefined ? null : (
+          <Button variant="icon" aria-label="コマンド" onClick={onOpenCommand}>
+            <Icon name="search" />
+          </Button>
+        )}
+      </header>
+    );
+  }
+
   return (
     <header className="hns-topbar">
-      {mobile ? (
-        <Button variant="icon" aria-label="メニューを開く" onClick={onOpenDrawer}>
-          <Icon name="menu" />
-        </Button>
-      ) : null}
-
       {projects.length === 0 ? (
         <Button variant="ghost" disabled>
           {projectName}
@@ -75,10 +84,7 @@ export function TopBar({
       <span className="hns-topbar__location">{location}</span>
       <span className="hns-topbar__spacer" />
 
-      <span className="hns-connection" data-state={connection} role="status">
-        <span className="hns-connection__dot" aria-hidden="true" />
-        {CONNECTION_LABELS[connection]}
-      </span>
+      <ConnectionStatus connection={connection} />
 
       <Menu
         label="テーマ"
@@ -90,16 +96,14 @@ export function TopBar({
         }))}
       />
 
-      {mobile ? null : (
-        <Button
-          variant="ghost"
-          onClick={onOpenCommand}
-          disabled={onOpenCommand === undefined}
-          title={onOpenCommand === undefined ? "0103 で実装" : undefined}
-        >
-          コマンド
-        </Button>
-      )}
+      <Button
+        variant="ghost"
+        onClick={onOpenCommand}
+        disabled={onOpenCommand === undefined}
+        title={onOpenCommand === undefined ? "0103 で実装" : undefined}
+      >
+        コマンド
+      </Button>
     </header>
   );
 }
