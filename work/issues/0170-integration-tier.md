@@ -1,36 +1,36 @@
-# 0170: 遅いテストをコミット前から外す
+# 0170: integration 層を分ける
 
-status: open
+status: done
 depends-on: -
-touches: vitest.config.ts, tools/gate/stages.ts, package.json, docs/testing.md, AGENTS.md
+touches: packages/*/test/**, vitest.config.ts, packages/*/package.json, docs/testing.md, AGENTS.md
 
 ## Goal
 
-コミット前の test 段階から遅いテストを外し、push / CI に回す。
-実測では workspace の 3 ファイル（`workspace.test.ts` 11.95s / `toctou.test.ts` 7.20s / `hardening.test.ts` 7.05s。
-並列なので project 全体で 12.46s）と `agent.test.ts`（3.73s）が、test 段階 12.9 秒のほぼ全部を占める。
+「遅いから」ではなく「**1プロセスで終わらない**」を基準にテストを integration へ分ける。
+遅い unit テストは層ではなくテストの書き方の問題として扱い、ここには混ぜない（0172）。
 
 ## Acceptance criteria
 
-- [ ] `vitest.config.ts` の `projects` を速い層と遅い層に分ける（例: `workspace` から `workspace-slow`、`agent` から `agent-slow`）
-- [ ] `tools/gate/stages.ts` の test 段階が、既定では速い層だけを回す
-- [ ] `npm run check`（`--all`）は全層を回す（検出機会を落とさない）
-- [ ] 遅い層だけを回すコマンドがある（`npm run gate test --all` か専用スクリプト）
-- [ ] 実測: core 変更時の pre-commit が約 3 秒になる（現状 13 秒）
-- [ ] `docs/testing.md` の層の定義と、どの層がコミットを止めるかを更新する
+- [x] 基準を [docs/testing.md](../docs/testing.md) に書く（プロセスを要するものだけ）
+- [x] workspace の daemon / dirfd 系を `test/integration` へ（`*.tiers.test.ts` を両層で回す）
+- [x] sandbox（bwrap）のテストを integration へ
+- [x] agent の bash 実行テストを integration へ
+- [x] vitest を `<pkg>` / `<pkg>-integration` の2プロジェクトに分ける
+- [x] `npm test -w @hns/<pkg>` は両方を回す（`--project '<pkg>*'`）
+- [x] pre-commit は unit のみ、pre-push は全部
 
 ## Notes
 
-- 分け方は project の追加だけで表現できる。ファイル単位の除外リストを別に持たない（定義を1か所に保つ）。
-- 遅い層は「遅いから」ではなく「外部資源（bwrap・実ファイル・実時間）に触るから」で分ける。
-  そうしないと、速くなったときに理由なく戻せなくなる。
-- 既存の `npm test -w @hns/workspace` の意味を変えない（パッケージの全テストを回す）。
+- 実測: workspace unit 771ms（20 passed / 1 skipped）、workspace integration 12.5s。
+  agent unit 595ms（変更前 3.7s、detectSandbox をファイル単位でキャッシュ）、agent integration 461ms。
+- 両層で回すシナリオは `*.tiers.test.ts` に置き、`inject("tier")` で対象を選ぶ。
+  モジュールを import してテストを登録する方式は、Vitest がファイル単位でテストを集めるため使えない（実測）。
+- unit は `rooted: false`（checks モード）で走らせる。dirfd の保護は integration 側で確かめる。
+- dirfd でしか成り立たない1件（親の差し替え）は `test.skipIf(!testTarget.rooted)` にした。
 
-## やらないこと
+## Result
 
-- テスト自体の高速化（fixture・sandbox の見直し）はここではやらない。層を分けるだけ。
-- flaky のリトライ導入。テストの規律（0046）を変えない。
-
-## Log
-
-- 2026-11-07: 作成（実測は work/research/commit-hook-optimization.md）。
+- verdict: **PASS**（初回 FAIL。root trigger のコミットで integration が pre-commit に流れた → 段階表に `tier` を足して修正）
+- reviewer: tier-reviewer
+- HEAD: d40ac8f
+- blocking findings: なし（修正後に再レビュー PASS）

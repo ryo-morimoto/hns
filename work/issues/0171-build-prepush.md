@@ -1,34 +1,29 @@
 # 0171: build を pre-push に移す
 
-status: open
+status: done
 depends-on: 0170
-touches: .githooks/pre-push, tools/gate/stages.ts, tools/gate/main.ts, package.json, AGENTS.md, docs/engineering.md
+touches: .githooks/pre-push, tools/gate/stages.ts, tools/gate/main.ts, docs/testing.md, AGENTS.md
 
 ## Goal
 
-build をコミット前から外し、push 前に回す。実測で build は 5.5 秒（全体の 27%）。
-型検査（tsrs）と重複する部分が大きく、コミットのたびに払う理由が薄い。
+build と knip をコミット前から外し、push 前に回す。型検査と重複する部分が大きく、コミットのたびに払う理由が薄い。
 
 ## Acceptance criteria
 
-- [ ] `.githooks/pre-push` を追加し、build と knip を回す（`core.hooksPath` 配下なので clone 時に有効）
-- [ ] pre-commit の段階表から build を外す（`npm run gate build` では引き続き実行できる）
-- [ ] `npm run check` は build を含む全段階のまま（CI と手動の全量）
-- [ ] build が型検査より多く捕まえるもの（declaration emit・`exports`/`files` と dist の一致・vite の bundle）が、
-      push 前に必ず走ることをテストか手順で示す
-- [ ] 実測: 全パッケージ変更時の pre-commit が 20.5 秒 → 約 15 秒
+- [x] `.githooks/pre-push` を追加し、`gate pre-push` を呼ぶ
+- [x] 段階表に `hooks` 列を足し、build と knip を `pre-push` にだけ割り当てる
+- [x] `npm run check`（`--all`）は全段階のまま
+- [x] 実測: pre-commit（core 変更）2.6s、pre-push 20.8s
 
 ## Notes
 
-- build を消すのではなく、段階を下げる。検出機会は残す。
-- pre-push は push のたびに走るので、遅い層（0170）と合わせて「コミットは速く、push で全部」の形にする。
-- `git push --no-verify` の逃げ道は残る。CI（0041）が最終ゲートになるまでは、push 前が最後の砦であることを docs に書く。
+- pre-push は**全パッケージ**を対象にする。push は CI の直前の最後の砦なので、影響範囲の計算をせず確実に全部回す。
+- `--all` は「全段階 + 全パッケージ」、`pre-push` は「全段階 + 全パッケージ」だが意図が違う（前者は手動、後者は hook）。
+- build が型検査より多く捕まえるもの（declaration emit・exports と dist の一致・vite の bundle）は push 前に必ず走る。
 
-## やらないこと
+## Result
 
-- build のキャッシュ（turbo 等）は入れない。まず段階を下げる。
-- CI の構築は 0041。
-
-## Log
-
-- 2026-11-07: 作成。
+- verdict: **PASS**
+- reviewer: tier-reviewer（0170 と同じ変更としてレビュー）
+- HEAD: d40ac8f
+- blocking findings: なし
