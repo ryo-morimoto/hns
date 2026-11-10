@@ -6,7 +6,7 @@ afterEach(() => {
   cleanup();
 });
 
-// jsdom has no layout engine; Base UI's popups consult these two (0101).
+// jsdom has no layout engine; Base UI's popups consult these two.
 if (!("ResizeObserver" in globalThis)) {
   class ResizeObserverStub {
     observe(): void {}

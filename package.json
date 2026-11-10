@@ -21,18 +21,17 @@
     "workspaces": {
       "packages/*": {
         "entry": [
-          "test/**/*.test.ts"
+          "src/**/*.test.ts"
         ]
       },
       "packages/workspace": {
         "entry": [
-          "test/**/*.test.ts",
           "src/rooted-helper.ts"
         ]
       },
       "packages/web": {
         "entry": [
-          "test/**/*.test.{ts,tsx}"
+          "src/**/*.test.{ts,tsx}"
         ],
         "ignoreDependencies": [
           "jsdom"

@@ -18,11 +18,11 @@ import "./shell.css";
 
 export interface ShellProps {
   readonly source: WorkspaceSource;
-  /** 0103 mounts the palette; until then the entries render disabled. */
+  /** The command palette mounts later; until then the entries render disabled. */
   readonly onOpenCommand?: (() => void) | undefined;
-  /** 0106 reserves the right panel; the shell only provides the slot. */
+  /** The right panel mounts later; the shell only provides the slot. */
   readonly panel?: ReactNode;
-  /** Fixture-only until 0115 returns cross-workspace counts. */
+  /** Fixture-only until the overview API returns cross-workspace counts. */
   readonly summarySource?: (() => Promise<readonly WorkspaceSummary[]>) | undefined;
 }
 
@@ -231,7 +231,7 @@ function WorkspaceView({ project, conversations, tasks }: WorkspaceViewProps): R
       <p className="hns-view__meta">
         {project.name} · 会話 {conversations.length} · タスク {tasks.length}
       </p>
-      <p className="hns-view__note">Workspace の中身は 0104 で作る。ここは shell の確認用。</p>
+      <p className="hns-view__note">Workspace の中身はこれから作る。ここは shell の確認用。</p>
     </section>
   );
 }
@@ -252,7 +252,7 @@ function ConversationView({ project, conversationId, title }: ConversationViewPr
       <a className="hns-view__link" href={formatHash({ kind: "workspace", projectId: project.id })}>
         ワークスペースへ戻る
       </a>
-      <p className="hns-view__note">Conversation の中身は 0105 で作る。</p>
+      <p className="hns-view__note">Conversation の中身はこれから作る。</p>
     </section>
   );
 }

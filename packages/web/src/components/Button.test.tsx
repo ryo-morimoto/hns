@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import assert from "node:assert/strict";
 import { expect, test } from "vitest";
-import { Button } from "../../src/components/Button.tsx";
+import { Button } from "./Button.tsx";
 
 test("Button runs its action on click", async () => {
   let clicks = 0;

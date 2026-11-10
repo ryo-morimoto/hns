@@ -71,7 +71,7 @@ const runs: readonly WorkflowRun[] = [
     workflow_id: "workflow-review",
     version: 3,
     status: "running",
-    input: "0101 のレビュー",
+    input: "デザインシステムのレビュー",
     output: null,
     created_at: "2026-11-07T00:30:00.000Z",
     finished_at: null,

@@ -20,8 +20,8 @@ export interface ToastProps {
 }
 
 /**
- * A presentational toast: status for information, alert for errors (0101). The queue that
- * places it lives with the app shell (0102); Base UI's Toast is a dialog-roled manager.
+ * A presentational toast: status for information, alert for errors. The queue that
+ * places it lives with the app shell; Base UI's Toast is a dialog-roled manager.
  */
 export function Toast({
   tone = "info",

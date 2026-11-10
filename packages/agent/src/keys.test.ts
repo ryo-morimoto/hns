@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 import { Denied, FileFailure } from "@hns/workspace";
-import { failureOf, fixedKeySource, opencodeGo, ollamaCloud, readKey } from "../src/index.ts";
-import { OLLAMA_DEFAULT_MODEL, OLLAMA_PROVIDER } from "../src/index.ts";
-import { OPENCODE_DEFAULT_MODEL, OPENCODE_PROVIDER } from "../src/index.ts";
+import { failureOf, fixedKeySource, opencodeGo, ollamaCloud, readKey } from "./index.ts";
+import { OLLAMA_DEFAULT_MODEL, OLLAMA_PROVIDER } from "./index.ts";
+import { OPENCODE_DEFAULT_MODEL, OPENCODE_PROVIDER } from "./index.ts";
 
 test("a key comes from the environment before any file", () => {
   const key = readKey(

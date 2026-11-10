@@ -16,7 +16,7 @@ export function readTheme(storage: Storage): Theme {
   return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
-/** system removes the override so light-dark() follows the OS (0101). */
+/** system removes the override so light-dark() follows the OS. */
 export function applyTheme(theme: Theme, root: HTMLElement = document.documentElement): void {
   if (theme === "system") delete root.dataset["theme"];
   else root.dataset["theme"] = theme;

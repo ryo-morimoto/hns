@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { applyTheme, readTheme, saveTheme } from "../../src/app/theme.ts";
+import { applyTheme, readTheme, saveTheme } from "./theme.ts";
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();

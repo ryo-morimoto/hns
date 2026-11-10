@@ -1,10 +1,6 @@
 import { expect, test } from "vitest";
 import * as v from "valibot";
-import {
-  AutomationActionSchema,
-  AutomationTriggerSchema,
-  WorkflowGraphSchema,
-} from "../src/schemas.ts";
+import { AutomationActionSchema, AutomationTriggerSchema, WorkflowGraphSchema } from "./schemas.ts";
 
 // Catches: moving the workflow and automation JSON schemas from core to store dropped the
 // non-empty id checks, so an empty node id, cron, or workflow id parsed successfully.

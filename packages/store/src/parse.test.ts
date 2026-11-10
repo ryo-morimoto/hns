@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import type { JsonValue } from "@hns/core";
-import { parseConversation, parseEvent, parseProject, parseTask } from "../src/parse.ts";
+import { parseConversation, parseEvent, parseProject, parseTask } from "./parse.ts";
 
 const projectRow = { id: "p1", name: "hns", created_at: "2026-11-07T00:00:00.000Z" };
 const conversationRow = {

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { validateWorkflowGraph } from "../src/workflow.ts";
+import { validateWorkflowGraph } from "./workflow.ts";
 
 const node = (id: string) => ({ id, type: "agent" as const, prompt: "go" });
 const edge = (from: string, to: string) => ({ from, to });

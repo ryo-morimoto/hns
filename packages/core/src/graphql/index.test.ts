@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { GraphQLBoolean, GraphQLEnumType, GraphQLObjectType, validateSchema } from "graphql";
-import { buildSchema, buildSdl, defineEntity, EXCLUDED } from "../src/graphql/index.ts";
-import { TASK_STATUSES } from "../src/types.ts";
+import { buildSchema, buildSdl, defineEntity, EXCLUDED } from "./index.ts";
+import { TASK_STATUSES } from "../types.ts";
 
-const golden = readFileSync(new URL("./fixtures/schema.graphql", import.meta.url), "utf8");
+const golden = readFileSync(new URL("../../test/fixtures/schema.graphql", import.meta.url), "utf8");
 
 /** A stand-in for the server's Query root; the model contributes no Query of its own. */
 function dummyQuery(): GraphQLObjectType {

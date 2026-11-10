@@ -27,7 +27,7 @@ const TOKENS = [
 ] as const;
 
 /**
- * A dev-only page for reviewing the design system by hand (0101). It is not part of the
+ * A dev-only page for reviewing the design system by hand. It is not part of the
  * product: open /#/design while the dev server runs and use light/dark plus the keyboard.
  */
 function initialTheme(): ThemeChoice {
@@ -151,7 +151,7 @@ export function Gallery() {
               </label>
               <input
                 id="gallery-goal"
-                placeholder="例: 0102 の App shell を作る"
+                placeholder="例: App shell を作る"
                 style={{
                   height: 30,
                   padding: "0 8px",

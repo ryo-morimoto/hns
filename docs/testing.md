@@ -101,7 +101,7 @@ e2e/                                      # Playwright。pages / fixtures / jour
 ```
 
 - 共有 fixture パッケージは作らない。2パッケージ以上で重複が証明できたときだけ検討する。
-- unit テストのコロケーションは 0186 で移行する。それまでは既存の `packages/<pkg>/test/` に置いてよい。
+- unit テストは `src/**/*.test.ts(x)` に置く。integration は `test/integration/`、共有 fixture は `test/support/`。
 
 ### アサーション
 
@@ -160,10 +160,10 @@ e2e/                                      # Playwright。pages / fixtures / jour
 | 0183 | 方針・tsdown / doctest のスパイク | done |
 | 0185 | tiers の二重実行を廃止 | done |
 | 0184 | アサーションを `expect` に統一 | done |
-| 0186 | コロケーションと issue 参照の削除 | 未着手 |
+| 0186 | コロケーションと issue 参照の削除 | done |
 | 0187 | TSDoc 契約と doctest の全パッケージ展開 | 未着手 |
 
-現時点では、既存テストは `packages/<pkg>/test/` にあり、doctest は core の1関数だけで動いている。
+unit テストは各パッケージの `src` にコロケートされ、doctest は core の1関数で動いている。
 
 ## 参考
 

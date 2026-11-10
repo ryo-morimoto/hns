@@ -159,7 +159,7 @@ Tests live next to the code they prove. Unit tests are `packages/<pkg>/src/<modu
 
 Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS_CHROME` to override the binary.
 
-Existing tests are being migrated: colocation (0186), TSDoc / doctest rollout (0187).
+Existing tests are being migrated: TSDoc / doctest rollout (0187).
 
 ## Review
 

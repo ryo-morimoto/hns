@@ -26,7 +26,10 @@ const packageProjects = (name: string, extra: Record<string, unknown> = {}) => [
     extends: true,
     test: {
       name,
-      include: [`packages/${name}/test/**/*.test.ts`, `packages/${name}/test/**/*.test.tsx`],
+      include: [
+        `packages/${name}/src/**/*.test.ts`,
+        `packages/${name}/src/**/*.test.tsx`,
+      ],
       includeSource: [`packages/${name}/src/**/*.{ts,tsx}`],
       exclude: ["**/integration/**"],
       ...extra,

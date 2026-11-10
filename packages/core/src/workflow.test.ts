@@ -6,7 +6,7 @@ import {
   canFiringTransition,
   canNodeTransition,
   canRunTransition,
-} from "../src/workflow.ts";
+} from "./workflow.ts";
 
 // Catches: the transition table drifting open without a failing test.
 test("run transitions only move forward", () => {

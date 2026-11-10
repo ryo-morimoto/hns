@@ -115,7 +115,7 @@ export function TopBar({
         variant="ghost"
         onClick={onOpenCommand}
         disabled={onOpenCommand === undefined}
-        title={onOpenCommand === undefined ? "0103 で実装" : undefined}
+        title={onOpenCommand === undefined ? "未実装" : undefined}
       >
         コマンド
       </Button>

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatRelative } from "../../src/app/relativeTime.ts";
+import { formatRelative } from "./relativeTime.ts";
 
 const now = new Date("2026-11-07T12:00:00.000Z");
 

@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test } from "vitest";
-import { Button } from "../../src/components/Button.tsx";
-import { Menu } from "../../src/components/Menu.tsx";
+import { Button } from "./Button.tsx";
+import { Menu } from "./Menu.tsx";
 
 test("Menu opens from the keyboard and selects the highlighted item with Enter", async () => {
   let selected = "";

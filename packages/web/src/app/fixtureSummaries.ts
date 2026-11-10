@@ -9,7 +9,7 @@ function ago(minutes: number): string {
   return new Date(now - minutes * 60_000).toISOString();
 }
 
-/** Fixture-only until 0115 returns these counts. The second workspace has no needs/running. */
+/** Fixture-only until the overview API returns these counts. The second workspace has no needs/running. */
 const FIXTURE_WORKSPACE_SUMMARIES: readonly WorkspaceSummary[] = [
   {
     projectId: projectId("project-hns"),

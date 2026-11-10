@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { isoTimestamp, operationId, operationIdFrom } from "../src/index.ts";
+import { isoTimestamp, operationId, operationIdFrom } from "./codecs.ts";
 
 test("ISO timestamps are built only through the codec", () => {
   const value = isoTimestamp("2026-01-01T00:00:00.000Z");
@@ -36,6 +36,7 @@ test("no package source calls v.isoTimestamp or repeats the operationId alphabet
   for (const entry of sourceFiles) {
     if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
     const path = join(entry.parentPath ?? "", entry.name);
+    if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) continue;
     if (!path.includes("/src/") || path.endsWith("/packages/core/src/codecs.ts")) continue;
     const text = await readFile(path, "utf8");
     const code = text.replaceAll(/\/\*[\s\S]*?\*\//g, "").replaceAll(/\/\/.*$/gm, "");

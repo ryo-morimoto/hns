@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test } from "vitest";
-import { Button } from "../../src/components/Button.tsx";
-import { Dialog } from "../../src/components/Dialog.tsx";
+import { Button } from "./Button.tsx";
+import { Dialog } from "./Dialog.tsx";
 
 test("Dialog opens from its trigger and closes with Escape", async () => {
   render(

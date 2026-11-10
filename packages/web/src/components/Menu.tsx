@@ -19,7 +19,7 @@ export interface MenuProps {
   readonly items: readonly MenuItemSpec[];
 }
 
-/** A menu on Base UI: arrow-key navigation, Esc, and typeahead are the library's (0101). */
+/** A menu on Base UI: arrow-key navigation, Esc, and typeahead are the library's. */
 export function Menu({ trigger, label, items }: MenuProps): ReactElement {
   return (
     <BaseMenu.Root>

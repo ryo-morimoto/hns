@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test } from "vitest";
-import { Toast } from "../../src/components/Toast.tsx";
+import { Toast } from "./Toast.tsx";
 
 test("an information Toast is a status with an Undo action", async () => {
   let undone = 0;

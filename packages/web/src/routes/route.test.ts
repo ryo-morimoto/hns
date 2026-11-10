@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatHash, parseHash } from "../../src/routes/route.ts";
+import { formatHash, parseHash } from "./route.ts";
 
 test("workspace and conversation hashes parse", () => {
   expect(parseHash("#/p/p1")).toStrictEqual({ kind: "workspace", projectId: "p1" });

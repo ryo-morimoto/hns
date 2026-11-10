@@ -3,10 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, afterEach, beforeEach, test } from "vitest";
-import { createFixtureSource } from "../../src/app/fixtureSource.ts";
-import { Shell } from "../../src/app/Shell.tsx";
-import { fixtureSummarySource } from "../../src/app/fixtureSummaries.ts";
-import type { WorkspaceSummary } from "../../src/app/workspaceSummary.ts";
+import { createFixtureSource } from "./fixtureSource.ts";
+import { Shell } from "./Shell.tsx";
+import { fixtureSummarySource } from "./fixtureSummaries.ts";
+import type { WorkspaceSummary } from "./workspaceSummary.ts";
 
 const originalMatchMedia = window.matchMedia;
 
@@ -130,7 +130,7 @@ test("back returns to the previous route", async () => {
   expect(await screen.findByRole("heading", { name: "Workspace" })).toBeTruthy();
 });
 
-// Catches: the editor panel having no slot, so 0106 has to restructure the shell.
+// Catches: the editor panel having no slot, so the editor would have to restructure the shell.
 test("the shell provides the right panel slot", async () => {
   renderShell(undefined, <p>パネル</p>);
   await screen.findByRole("heading", { name: "Workspace" });
@@ -213,7 +213,7 @@ test("the mobile menu carries the needs-you count", async () => {
 });
 
 // Catches: a mobile shell that hides the sidebar without a way to reach it, or a drawer that
-// traps users. The footer stays composer-first; there is no generic bottom bar (0102, user).
+// traps users. The footer stays composer-first; there is no generic bottom bar.
 test("mobile opens the drawer from the top bar", async () => {
   setMobile(true);
   renderShell();

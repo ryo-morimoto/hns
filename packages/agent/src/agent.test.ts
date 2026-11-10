@@ -17,9 +17,9 @@ import { createNoExecEnv, createSandboxEnv } from "@hns/workspace/sandbox";
 import { Denied } from "@hns/workspace";
 import { OperationIdSchema } from "@hns/core";
 import * as v from "valibot";
-import { openAgent, operationIdFor } from "../src/index.ts";
-import type { ShellAccess } from "../src/index.ts";
-import { sandboxStatus, toolResults, withAgent } from "./support.ts";
+import { openAgent, operationIdFor } from "./index.ts";
+import type { ShellAccess } from "./index.ts";
+import { sandboxStatus, toolResults, withAgent } from "../test/support.ts";
 
 test("a turn reads a file and replaces it with the version it read", async () => {
   await withAgent(async ({ agent, workspace, root, faux }) => {

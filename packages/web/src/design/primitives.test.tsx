@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
-import { Badge } from "../../src/components/Badge.tsx";
-import { Icon } from "../../src/components/Icon.tsx";
-import { Skeleton } from "../../src/components/Skeleton.tsx";
+import { Badge } from "../components/Badge.tsx";
+import { Icon } from "../components/Icon.tsx";
+import { Skeleton } from "../components/Skeleton.tsx";
 
 test("Badge renders its tone and text", () => {
   render(<Badge tone="ok">done</Badge>);

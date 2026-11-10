@@ -12,7 +12,7 @@ export interface DialogProps {
 
 /**
  * A modal dialog on Base UI: focus trap, Esc, and focus restore are the library's, not ours
- * (0101). Styling is the hns primitives' class contract.
+ * Styling is the hns primitives' class contract.
  */
 export function Dialog({
   trigger,

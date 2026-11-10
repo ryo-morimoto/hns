@@ -7,9 +7,9 @@ import type { IsoTimestamp } from "@hns/core";
 import type { WorkflowGraph } from "@hns/core";
 import assert from "node:assert/strict";
 import { expect, test } from "vitest";
-import { openDatabase, readUserVersion } from "../src/db.ts";
-import { migrate } from "../src/migrate.ts";
-import { openStore, type Store } from "../src/store.ts";
+import { openDatabase, readUserVersion } from "./db.ts";
+import { migrate } from "./migrate.ts";
+import { openStore, type Store } from "./store.ts";
 
 function clock(start = "2026-01-01T00:00:00.000Z") {
   let at = Date.parse(start);

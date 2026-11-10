@@ -1,6 +1,6 @@
 import type { ProjectId } from "@hns/core";
 
-/** The sidebar's cross-workspace summary. Fixture-only until 0115 owns the API. */
+/** The sidebar's cross-workspace summary. Fixture-only until the overview API exists. */
 export interface WorkspaceSummary {
   readonly projectId: ProjectId;
   readonly name: string;
