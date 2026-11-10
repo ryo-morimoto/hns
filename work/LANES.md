@@ -8,11 +8,11 @@
 | レーン | issue | 所有するパス | owner | reviewer | 状態 | 次の統合 |
 | --- | --- | --- | --- | --- | --- | --- |
 | E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/core/README.md`, `packages/store/src/schemas.ts`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | reviewer-0188 | done（66fc2ea） | 4 |
-| E2 | [0144](issues/0144-cf-deploy-env.md) 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | `cloudflare.config.ts`, `cloudflare.worker.ts`, `tsconfig.deploy.json`, `tools/deploy/`, `tools/gate/stages.ts`, `package.json` | lead | — | 実装中 | 2 |
+| E2 | [0144](issues/0144-cf-deploy-env.md) 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | `tools/deploy/`, `tools/gate/stages.ts`, `tools/gate/test/stages.test.ts`, `vitest.config.ts`, `package.json`, `docs/engineering.md`, `docs/decisions.md` | lead | reviewer-0144 | review FAIL（blocking 3）→修正済み・再 review 待ち | 2 |
 | E3 | 統合レーン（このセッション） | `docs/process.md`, `docs/parallel-change.md`, `work/README.md`, `work/LANES.md` | lead | — | 統合済み（5cb0ae5） | 1 |
 
 - E3 は製品コードを書かない。3レーンの運用を文書化し、統合・レビュー・計測だけを行う。E1 / E2 のファイルを書かない。
-- E2（0144）は実装中。deploy.sh と config.test.ts は `tools/deploy/`、config は root。
+- E2（0144）は実装中。config も deploy.sh / config.test.ts も `tools/deploy/`。
 - E1（0188）は done（66fc2ea）。0143 は done（4073bc0）。
 - E2 は `package.json` / `package-lock.json` を触るので、統合は root lock owner として1本で行う。
 - 0141 / 0031 / 0037 は `in-progress` のまま更新が止まっている。レーンとして数える前に status を整理する

@@ -35,4 +35,5 @@ touches: packages/server/src/edge/, packages/server/test/
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
 - 2026-11-10: D059 により、入口を GraphQL / WS / 静的の3面にした。REST は面ごとの issue が持つ。
-- 2026-11-11: 0144 の cloudflare.worker.ts スタブと cloudflare.config.ts の entrypoint を置き換える。
+- 2026-11-11: 0144 の tools/deploy/worker.ts を packages/server/src/edge/worker.ts の re-export にする
+  （cloudflare.config.ts の entrypoint は worker.ts のまま）。

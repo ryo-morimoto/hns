@@ -56,4 +56,7 @@ touches: tools/deploy/, tools/gate/stages.ts, tools/gate/test/stages.test.ts, vi
   postinstall で tools/deploy を install する。
 - 2026-11-11: tools/deploy で cf deploy --dry-run --mode development 成功（約0.9s、認証不要）。
   staging も成功（hns-stg）。npm run check 成功（182 tests / build / knip）。
-- 2026-11-11: 独立レビュー待ち。
+- 2026-11-11: reviewer-0144 が **FAIL**（blocking 3）。--mode 未指定が production に落ちる、rollback の引数、
+  0145 / LANES のパスが実ファイルと違う。修正: --mode を必須にし docs を更新、rollback を
+  --worker-id / --message 無しに、handoff / ledger を tools/deploy に。secret のキー whitelist も追加。
+- 2026-11-11: 再レビュー待ち。
