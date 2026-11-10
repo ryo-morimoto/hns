@@ -1,0 +1,391 @@
+{
+  "generatedAt": "2026-11-10T07:02:35.034Z",
+  "config": {
+    "iters": 60,
+    "warmup": 20,
+    "mirrorMs": 5000,
+    "workspaces": 12,
+    "conversations": 40,
+    "node": "v24.11.1"
+  },
+  "results": [
+    {
+      "label": "REST  /api/state per conversation (N+1)",
+      "clientRequests": 40,
+      "rpcPerRequest": 40,
+      "latencyMs": {
+        "p50": 11.16112,
+        "p95": 16.220354,
+        "min": 9.573257,
+        "max": 21.348767
+      },
+      "bytesPerScreen": 30679,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/live per conversation (N+1, lean)",
+      "clientRequests": 40,
+      "rpcPerRequest": 40,
+      "latencyMs": {
+        "p50": 8.228979,
+        "p95": 14.234044,
+        "min": 6.932541,
+        "max": 15.392283
+      },
+      "bytesPerScreen": 3753,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/overview  (RPC batched per workspace)",
+      "clientRequests": 1,
+      "rpcPerRequest": 12,
+      "latencyMs": {
+        "p50": 1.263596,
+        "p95": 1.423726,
+        "min": 1.217449,
+        "max": 5.987492
+      },
+      "bytesPerScreen": 3620,
+      "items": 8,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/overview  (RPC per conversation, parallel)",
+      "clientRequests": 1,
+      "rpcPerRequest": 40,
+      "latencyMs": {
+        "p50": 3.109714,
+        "p95": 7.490386,
+        "min": 2.931669,
+        "max": 9.779894
+      },
+      "bytesPerScreen": 3620,
+      "items": 8,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/overview  (RPC per conversation, serial)",
+      "clientRequests": 1,
+      "rpcPerRequest": 40,
+      "latencyMs": {
+        "p50": 6.311829,
+        "p95": 11.033682,
+        "min": 6.051181,
+        "max": 11.742809
+      },
+      "bytesPerScreen": 3620,
+      "items": 8,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/overview  (D1 mirror only)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.3257,
+        "p95": 0.370113,
+        "min": 0.313227,
+        "max": 0.376405
+      },
+      "bytesPerScreen": 3620,
+      "items": 8,
+      "note": ""
+    },
+    {
+      "label": "GQL   overview (fan-out: RPC per conversation)",
+      "clientRequests": 1,
+      "rpcPerRequest": 40,
+      "latencyMs": {
+        "p50": 3.557161,
+        "p95": 8.228338,
+        "min": 3.292125,
+        "max": 9.177054
+      },
+      "bytesPerScreen": 3642,
+      "items": 8,
+      "note": ""
+    },
+    {
+      "label": "GQL   overview (batch: RPC per workspace)",
+      "clientRequests": 1,
+      "rpcPerRequest": 12,
+      "latencyMs": {
+        "p50": 1.638598,
+        "p95": 1.918002,
+        "min": 1.55934,
+        "max": 4.875189
+      },
+      "bytesPerScreen": 3642,
+      "items": 8,
+      "note": ""
+    },
+    {
+      "label": "GQL   overview (D1 mirror only)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.628697,
+        "p95": 0.697015,
+        "min": 0.606255,
+        "max": 0.728113
+      },
+      "bytesPerScreen": 3642,
+      "items": 8,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/overview  (records only, no live)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.279253,
+        "p95": 0.412742,
+        "min": 0.268553,
+        "max": 0.723925
+      },
+      "bytesPerScreen": 2340,
+      "items": 2,
+      "note": ""
+    },
+    {
+      "label": "GQL   overview (records only, no live)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.551442,
+        "p95": 0.614671,
+        "min": 0.53386,
+        "max": 2.360841
+      },
+      "bytesPerScreen": 2362,
+      "items": 2,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/conversations?includeLive=1 (batched)",
+      "clientRequests": 1,
+      "rpcPerRequest": 12,
+      "latencyMs": {
+        "p50": 1.246825,
+        "p95": 1.510869,
+        "min": 1.210546,
+        "max": 4.726892
+      },
+      "bytesPerScreen": 10928,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/conversations?fields=summary&includeLive=1",
+      "clientRequests": 1,
+      "rpcPerRequest": 12,
+      "latencyMs": {
+        "p50": 1.226606,
+        "p95": 1.924785,
+        "min": 1.192533,
+        "max": 6.177267
+      },
+      "bytesPerScreen": 7808,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "GQL   conversations + live (4 fields, batch)",
+      "clientRequests": 1,
+      "rpcPerRequest": 12,
+      "latencyMs": {
+        "p50": 1.720802,
+        "p95": 2.081497,
+        "min": 1.602471,
+        "max": 6.347135
+      },
+      "bytesPerScreen": 7795,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "GQL   conversations + live (7 fields, batch)",
+      "clientRequests": 1,
+      "rpcPerRequest": 12,
+      "latencyMs": {
+        "p50": 1.716865,
+        "p95": 2.316828,
+        "min": 1.668835,
+        "max": 4.953856
+      },
+      "bytesPerScreen": 10795,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "GQL   conversations + live (fan-out)",
+      "clientRequests": 1,
+      "rpcPerRequest": 40,
+      "latencyMs": {
+        "p50": 3.498341,
+        "p95": 8.638647,
+        "min": 3.298767,
+        "max": 10.273688
+      },
+      "bytesPerScreen": 7119,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "GQL   conversations + live (batch)",
+      "clientRequests": 1,
+      "rpcPerRequest": 12,
+      "latencyMs": {
+        "p50": 1.597612,
+        "p95": 1.883968,
+        "min": 1.53806,
+        "max": 6.253811
+      },
+      "bytesPerScreen": 7119,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "GQL   conversations + live (D1 mirror only)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.623427,
+        "p95": 0.740507,
+        "min": 0.609191,
+        "max": 3.093663
+      },
+      "bytesPerScreen": 7119,
+      "items": 40,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/conversations (7 fields)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.145603,
+        "p95": 0.163886,
+        "min": 0.141796,
+        "max": 0.169888
+      },
+      "bytesPerScreen": 751,
+      "items": 4,
+      "note": ""
+    },
+    {
+      "label": "GQL   sidebar (4 fields, no live)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.311713,
+        "p95": 0.36859,
+        "min": 0.301374,
+        "max": 0.391393
+      },
+      "bytesPerScreen": 462,
+      "items": 4,
+      "note": ""
+    },
+    {
+      "label": "REST  /api/conversations?fields=summary (4)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.144531,
+        "p95": 0.161302,
+        "min": 0.141224,
+        "max": 0.180147
+      },
+      "bytesPerScreen": 439,
+      "items": 4,
+      "note": ""
+    },
+    {
+      "label": "GQL   sidebar (7 fields, no live)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.319779,
+        "p95": 0.392414,
+        "min": 0.309369,
+        "max": 0.415929
+      },
+      "bytesPerScreen": 762,
+      "items": 4,
+      "note": ""
+    }
+  ],
+  "sidebar": {
+    "rest": {
+      "label": "REST  /api/conversations (7 fields)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.145603,
+        "p95": 0.163886,
+        "min": 0.141796,
+        "max": 0.169888
+      },
+      "bytesPerScreen": 751,
+      "items": 4,
+      "note": ""
+    },
+    "gql": {
+      "label": "GQL   sidebar (4 fields, no live)",
+      "clientRequests": 1,
+      "rpcPerRequest": 0,
+      "latencyMs": {
+        "p50": 0.311713,
+        "p95": 0.36859,
+        "min": 0.301374,
+        "max": 0.391393
+      },
+      "bytesPerScreen": 462,
+      "items": 4,
+      "note": ""
+    }
+  },
+  "needs": {
+    "authoritative": 8,
+    "needsFromLiveOnly": 6,
+    "d1Representable": 8,
+    "d1NeedsFromLiveOnly": 6,
+    "recordsOnly": 2
+  },
+  "mirror": {
+    "intervalMs": 5000,
+    "ticks": 3,
+    "rowsPerTick": 40,
+    "rowsPerSecond": 8,
+    "rowsPerDay": 691200
+  },
+  "mirrorLagMs": [
+    3795,
+    3757,
+    857,
+    450,
+    1088,
+    1143
+  ],
+  "graphqlFixedCostMs": {
+    "p50": 0.214722,
+    "p95": 0.531726,
+    "min": 0.179476,
+    "max": 1.367481
+  },
+  "graphqlValidateMs": {
+    "p50": 0.103444,
+    "p95": 0.222907,
+    "min": 0.095659,
+    "max": 0.580978
+  },
+  "loc": {
+    "rest.mjs": 141,
+    "gql.mjs": 105,
+    "compose.mjs (business rules, shared)": 47,
+    "SDL lines": 12
+  }
+}

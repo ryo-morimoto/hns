@@ -1,0 +1,11 @@
+{
+  "name": "hns-relay-probe",
+  "private": true,
+  "type": "module",
+  "description": "work/poc: Relay の変更面・生成物・実行時挙動を測る",
+  "dependencies": {
+    "graphql": "16.11.0",
+    "relay-compiler": "20.1.1",
+    "relay-runtime": "20.1.1"
+  }
+}

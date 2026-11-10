@@ -1,0 +1,41 @@
+type Query {
+  overview: Overview!
+  conversations(projectId: ID): [Conversation!]!
+}
+
+type Overview {
+  counts: Counts!
+  needs: [Item!]!
+  running: [Item!]!
+  completed: [Item!]!
+}
+
+type Counts {
+  needsYou: Int!
+  running: Int!
+  doneToday: Int!
+}
+
+type Item {
+  kind: String!
+  id: ID!
+  title: String!
+  reason: String
+  updatedAt: String!
+}
+
+type Conversation {
+  id: ID!
+  projectId: ID!
+  title: String!
+  createdAt: String!
+  updatedAt: String
+  archived: Boolean!
+  live: Live!
+}
+
+type Live {
+  status: String!
+  needsReason: String
+  lastActivityAt: String!
+}

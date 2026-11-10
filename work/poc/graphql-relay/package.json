@@ -1,0 +1,13 @@
+{
+  "name": "hns-api-shape-bench",
+  "private": true,
+  "type": "module",
+  "description": "work/poc: REST vs GraphQL の read 経路を、hns の正本配置（DO/D1）で測る",
+  "scripts": {
+    "bench": "node src/bench.mjs"
+  },
+  "dependencies": {
+    "graphql": "16.11.0",
+    "dataloader": "2.2.3"
+  }
+}
