@@ -38,7 +38,7 @@
 | [0180](issues/0180-codegen-gate.md) | relay-compiler をゲートに組み込む | 0175, 0178 |
 
 
-### plan（65）
+### plan（64）
 
 - **L2 会話**: 0146, 0159
 - **L3 マシン**: 0147, 0148, 0165
@@ -49,7 +49,7 @@
 - **L8 運用**: 0161, 0162, 0163, 0164, 0166
 - **L9 ゲートウェイ**: 0151, 0152
 - **L10 GraphQL**: 0181, 0182
-- **テスト基盤**: 0184, 0186, 0187
+- **テスト基盤**: 0186, 0187
 - **基盤・移植**: 0032, 0036, 0038, 0039, 0040, 0043, 0048, 0049, 0058, 0059, 0069, 0070, 0071
 - **UI 画面**: 0103, 0104, 0105, 0106, 0107, 0108, 0109, 0110, 0111, 0112, 0113, 0114
 - **API / data**: 0116, 0117, 0122, 0123, 0124, 0125, 0126, 0127, 0128, 0129, 0130, 0131
@@ -234,7 +234,7 @@
 | [0181](issues/0181-store-freshness.md) | store の鮮度方針 | open | plan | 0159, 0179 |
 | [0182](issues/0182-surface-inventory.md) | GraphQL 以外に残す面の棚卸し | open | plan | 0179 |
 | [0183](issues/0183-test-management.md) | テスト管理の再設計（TSDoc・コロケート・doctest） | **done** | — | — |
-| [0184](issues/0184-vitest-assertions.md) | テストのアサーションを Vitest の expect に統一する | open | plan | 0185 |
+| [0184](issues/0184-vitest-assertions.md) | テストのアサーションを Vitest の expect に統一する | **done** | — | 0185 |
 | [0185](issues/0185-tiers-removal.md) | tiers の二重実行を廃止する | **done** | — | 0183 |
 | [0186](issues/0186-test-colocation.md) | テストをコロケートし、issue 参照を削除する | open | plan | 0184, 0185 |
 | [0187](issues/0187-tsdoc-doctest.md) | TSDoc 契約と doctest を展開する | open | plan | 0186 |
