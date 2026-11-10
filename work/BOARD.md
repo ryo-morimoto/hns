@@ -6,7 +6,7 @@
 
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 15 |
+| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 13 |
 | Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 65 |
 | Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 9 |
 | Q4 | — | — | `hold` | いまはやらない | 9 |
@@ -19,20 +19,18 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（15）
+### now（13）
 
 | # | 作業 | 依存の状態 |
 | --- | --- | --- |
 | [0188](issues/0188-graphql-only-contract.md) | GraphQL を唯一の契約にする（REST 契約の撤去） | — |
 | [0031](issues/0031-foundation.md) | 製品の土台（core・ゲート） | 0014 |
-| [0037](issues/0037-http-contracts.md) | HTTP 契約と型付きクライアント | 0031 |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
 | [0143](issues/0143-secret-placement.md) | 秘密の配置（gateway・git はマシン・DEK） | 0140 |
 | [0144](issues/0144-cf-deploy-env.md) | 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | 0140 |
 | [0145](issues/0145-worker-edge.md) | Worker の入口（認証境界・ルーティング・相関 ID） | 0144 |
 | [0150](issues/0150-store-d1-do-backend.md) | store の D1 バックエンド（node:sqlite との二重化） | 0144 |
-| [0175](issues/0175-graphql-relay-foundation.md) | core で SDL を起こす（D055） | 0037 |
 | [0176](issues/0176-graphql-endpoint.md) | Worker に /graphql を載せる | 0145, 0175 |
 | [0177](issues/0177-global-id.md) | global id（Relay の store 要件） | 0176 |
 | [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | 0177 |
