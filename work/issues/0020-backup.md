@@ -1,5 +1,7 @@
 # 0020: バックアップと復元（要件16）
 
+> 前提変更: Cloudflare 上の正本に合わせて 0164 で作り直す。D015 はローカル DB の話として残す。
+
 status: done
 depends-on: 0014
 touches: work/poc/app

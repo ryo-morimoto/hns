@@ -1,7 +1,7 @@
 # 0022: passkey の登録・ログイン（要件13）
 
 status: done
-depends-on: 0021
+depends-on: 0158
 touches: work/poc/app, docs/auth.md
 
 ## Goal

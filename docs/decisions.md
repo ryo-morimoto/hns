@@ -581,25 +581,6 @@ rooted を切ると open 2.7ms / write 2.5ms。遅さの正体は rooted ヘル�
 
 見直す条件: integration が 30 秒を超える、または push 前が重すぎて迂回されるようになったとき（そのときは `git diff @{push}` で push 範囲に絞る）。
 
-## D052: 接続・計算・ライブ更新の言い方を訂正する
-
-date: 2026-11-07 · by: agent · issue: 0140
-
-D047〜D049 に、実装者が誤読する言い方があった。本文は残し、ここで上書きする。
-
-- **SSH が使えない理由**は「DO が生の TCP を張れない」ではない。Workers ランタイムは outbound の TCP を持ち、DO も同じ。
-  正しい制約は**マシンが NAT / tailnet の内側にあり inbound を受けない**ことで、外向き接続（cloudflared）が要る。
-- **「Cloudflare は計算を持たない」**は「ユーザーのワークロード（git / npm / build / test）を実行しない」の意味。
-  Harness は DO の上で動く。
-- **cloudflared は外向きの接続を維持する**（D049 の「常時接続を持たない」は誤り）。machine の状態を D1 で足りるのは、
-  接続の有無ではなく記録の性質による。
-- **D010 の「進捗は SSE」は 0159 の WS に置き換える。** 0050 / 0118 と同じ扱い。
-- 一覧のために D1 に置くのは**会話と run の索引だけ**。イベントは D1 に複製しない。
-
-hns: 決定は追記で直す。D047〜D049 の本文は履歴として残す。
-
-前提が変わる条件: WS 以外の輸送に変える、または Cloudflare 上でワークロードを動かす決定をしたとき。
-
 ## D052: フックは prek に通し、ステージ内容と merge をゲートで覆う
 date: 2026-11-07 · by: agent · issue: 0174
 
@@ -628,3 +609,172 @@ merge は commit と同じ段階（unit まで）を回し、全量は push が�
 
 見直す条件: prek の更新が止まる、または退避・復元で事故が起きたとき（そのときは lefthook を同じ形で試す）。
 
+## D053: 接続・計算・ライブ更新の言い方を訂正する
+
+（当初 D052 として追記したが、並行作業の D052（フックを prek に通す）と衝突したため D053 に振り直した。）
+
+date: 2026-11-07 · by: agent · issue: 0140
+
+D047〜D049 に、実装者が誤読する言い方があった。本文は残し、ここで上書きする。
+
+- **SSH が使えない理由**は「DO が生の TCP を張れない」ではない。Workers ランタイムは outbound の TCP を持ち、DO も同じ。
+  正しい制約は**マシンが NAT / tailnet の内側にあり inbound を受けない**ことで、外向き接続（cloudflared）が要る。
+- **「Cloudflare は計算を持たない」**は「ユーザーのワークロード（git / npm / build / test）を実行しない」の意味。
+  Harness は DO の上で動く。
+- **cloudflared は外向きの接続を維持する**（D049 の「常時接続を持たない」は誤り）。machine の状態を D1 で足りるのは、
+  接続の有無ではなく記録の性質による。
+- **D010 の「進捗は SSE」は 0159 の WS に置き換える。** 0050 / 0118 と同じ扱い。
+- 一覧のために D1 に置くのは**会話と run の索引だけ**。イベントは D1 に複製しない。
+
+hns: 決定は追記で直す。D047〜D049 の本文は履歴として残す。
+
+前提が変わる条件: WS 以外の輸送に変える、または Cloudflare 上でワークロードを動かす決定をしたとき。
+
+
+## D054: 優先度は now / plan / batch / hold の4つで表し、agent は now だけを着手する
+date: 2026-11-07 · by: user · issue: -
+
+open の issue が 87 件フラットに並び、どれを拾うかが agent の判断に委ねられていた。重要でないもの・
+すでに新しい設計に吸収されたものも同じ列にいるため、着手の選択がぶれた。
+
+重要度 × 緊急度で4つに分ける。issue の front matter に `priority:`、[BOARD](../work/BOARD.md) の先頭にマトリクスを置く。
+
+| priority | 重要度 | 緊急度 | 意味 |
+| --- | --- | --- | --- |
+| `now` | 高 | 高 | いまの波。依存が満たされていて、すぐ着手してよい |
+| `plan` | 高 | 低 | 重要だが、いまの波の後。レーン順に上げる |
+| `batch` | 低 | 中 | 安い・隣接するときだけ。単独では着手しない |
+| `hold` | — | — | いまはやらない（Want・保留・新しい設計に吸収） |
+
+**agent が着手してよいのは `now` だけ。** `now` が空なら止まって人に聞く。`plan` を `now` に上げるのは人の判断で、
+agent は自分で昇格しない。`batch` は同じファイル・同じレーンを触るついでだけ。`hold` はユーザーが明示したときだけ。
+
+hns: 分類は「重要度＝Must 要件・クリティカルパス・安全」「緊急度＝いまの波を止めているか」で決める。
+now は波が進むたびに入れ替わる（いまは L0 / L1 と進行中の 9 件）。
+
+前提が変わる条件: 波が変わり、now が空になったとき（人が plan から上げる）。
+
+## D055: Web の契約を GraphQL、クライアントを Relay にする
+
+date: 2026-11-10 · by: user · issue: 0175–0182
+
+D043 の「Relay + GraphQL と SSR / streaming は採らない」を置き換える。判断材料は
+[work/poc/graphql-relay](../work/poc/graphql-relay/RESULTS.md) の実測で、REST と GraphQL を同じデータ層
+（DO の live 状態、D1 の確定レコード）に載せて比べた。
+
+- 読みの DO RPC 数はまとめ方で決まり、プロトコルでは決まらない（WS ごと 12、会話ごと 40/120、索引 0）。
+- 同一 field set の payload は ±5% 以内。選択を絞ったときだけ差が出る（37〜41%）。
+- graphql-js の実行時コストは 0.17ms（DO RPC 28ms の 0.6%）。
+- Relay は store が満たせる要求を 0 回にする（実測: 再訪 0、別 operation でも field が揃えば 0）。
+- 索引（[0149](../work/issues/0149-d1-projection.md)）を置かない構成でも画面は成立する（mirror 書き込み 0、needs 8/8）。
+
+決めたこと:
+
+- **web のアプリ契約は GraphQL**（`/graphql` 1 endpoint）。SDL は `@hns/core` のモデルから起こし、
+  schema-first にしない（型が正本。AGENTS.md）。
+- **クライアントは Relay**（`relay-compiler` / `react-relay` / `relay-runtime`）。exact pin は 0178 で決める。
+- **REST は残す**。passkey / hooks / health・metrics・usage / machine agent / ファイルのバイト列は GraphQL に載せない
+  （プロトコルに縛られた面、または graph の形をしていない面。既存 49 ルートのうち 22）。
+- **id は型をまたいで一意にする**。Relay の正規化 store は同じ id を 2 つの型に割り当てられない。
+  PoC で `Conversation` と `Item` が同じ id を持ち、Relay が衝突を警告した。
+- **codegen をゲートの前段に入れる**（型検査・テストの前に生成）。生成物は手で編集しない。
+- **store の鮮度方針を画面ごとに決める**。`store-or-network` は再取得 0 なので、購読か明示的な再取得を
+  決めないと古いまま表示される。
+- **索引は 0149 の push 型**（DO が commit 後に自分の行を書く）。全件を間隔ごとに pull して書き直す形は採らない
+  （実測: 40 会話・1s で $53.68/月、D047 の閾値超え）。
+
+hns: D043 の残り（Vite / React / TanStack Query / Base UI / CSS 変数）は維持する。TanStack Query は
+Relay が持たない画面状態と、GraphQL 以外の面（passkey 等）に残す。
+
+前提が変わる条件: Relay の store と DO の正本の整合を説明できなくなったとき、codegen と生成物の同期が
+ゲートの支配的要因になったとき、または購読（0159）をスキーマに載せるとメッセージの union が二重化するとき。
+
+0175 の実装で決めたこと（SDL の管理）:
+
+- `graphql` 16.11.0 を core の依存に exact pin。SDL は `@hns/core/graphql` のサブパスから取り、
+  ルートの entry からは出さない（web の bundle に graphql-js を入れない）。
+- SDL の field 名は明示する。`project_id` → `projectId`、boolean は `is`/`has`（`archived` → `isArchived`）。
+  `is`/`has` を付けられない boolean が要るときは、そのとき例外の仕組みを足す（今は無い。`defineEntity` が拒否する）。
+- enum の公開名は SCREAMING_SNAKE_CASE、内部値はモデルの literal のまま（`TODO` = `"todo"`）。
+- 並びは生成側で決める（型と field は名前順、enum の値は宣言順）。`lexicographicSortSchema` は使わない。
+  schema と SDL の成果物が食い違わないようにするため。
+- SDL は `buildSdl()` の出力を**コミットする成果物**として web に置く（`packages/web/schema.graphql`、0178）。
+  再生成して差分が出たら落とす検査は 0180。手で編集しない。
+- 契約の進化: 加算のみ安全。削除は `@deprecated` を1回置き、利用箇所を列挙してから消す。
+  enum への値追加は、receiver の `switch` を先に更新する。
+
+## D056: テストのアサーションは Vitest の expect に統一する
+
+date: 2026-11-10 · by: user · issue: 0183, 0184
+
+D038 の「アサーションは node:assert/strict に統一。expect は使わない」を置き換える。
+in-source / doctest / 別ファイルを同じ API で書け、ブラウザでも動く。node:assert は本番 import と
+TS2775（assertion 関数の分割代入）の制約があり、in-source と相性が悪い。
+
+- テストは `expect` を使う。`node:assert` はテストから外す。
+- 型の絞り込みは `defined()` か明示チェックで行い、`as` を増やさない。
+- D038 のランナー（Vitest 5.1.0）と unit / integration の分離は維持する。層の呼び名は D057 で整理する。履歴は残す。
+
+前提が変わる条件: `expect` で型の絞り込みが実用にならない、または Vitest 以外の runner に移るとき。
+
+## D057: テスト管理は TSDoc 契約 + コロケート/インソーステスト + doctest にする
+
+date: 2026-11-10 · by: user · issue: 0183–0187
+
+中央カタログと docs の検証表は作らない。テスト要件は issue の `## テスト条件` / `## テスト設計` に書き、
+永続する仕様は TSDoc の契約とテストに置く。
+
+- テスト分析: Example Mapping（Story / Rules / Examples / Questions）で受入条件を条件に分解する。
+- テスト設計: 条件ごとに技法（同値分割・境界値・デシジョンテーブル・状態遷移・シナリオ・故障注入）と
+  最も低い層を選ぶ。同じシナリオを複数層で回さない。
+- コード: unit はソースの隣（`src/*.test.ts`）、in-source は小さな純粋関数、公開 API の例は TSDoc の
+  `@example` を doctest として実行する。integration / E2E は別ディレクトリ。
+- TSDoc の範囲は export する API + 内部の重要な関数。`@remarks` / `@throws` / `@example` を使う。
+- テスト/コードから issue を参照しない。コード/テストの TODO にも issue 番号を書かない。
+- アサーションは Vitest の `expect`（D056）。
+- パッケージのビルドは **tsdown 0.23.7**（Rolldown。dts / treeshake / define）で、`import.meta.vitest` を落とす。
+- 公開 API の doctest は **vite-plugin-doctest 3.0.0**（TSDoc の `@example` を Vitest で実行）で行う。
+
+採用しなかったもの: 中央カタログ（二重管理・更新漏れ）、docs の検証表（実行されない・レビューが弱い）、
+Gherkin / Cucumber（unit には重く、E2E は Playwright のテスト名で足りる）。
+
+前提が変わる条件: TypeDoc と doctest で要求の抜けを説明できなくなったとき、または
+複数チームで監査用の対応表が必要になったとき。
+
+## D058: tiers の二重実行を廃止し、シナリオは1層1回にする
+
+date: 2026-11-10 · by: user · issue: 0185
+
+同じシナリオを unit / integration の両方で回す `*.tiers.test.ts` を廃止する。シナリオは一度だけ、
+最も低い層で実行する。workspace は dirfd 経路を integration で1回、local daemon は別のスモークにする。
+
+- `*.tiers.test.ts` / `inject("tier")` / `targetsForTier` を削除する。
+- `vitest.config.ts` の `<pkg>` / `<pkg>-integration` は残すが、tiers の include / provide は持たない。
+- workspace の共通シナリオは `test/integration` で `node/dirfd` の1ターゲットに固定する。
+- local daemon は `test/integration/local-daemon.test.ts` のスモーク1本にする。
+- checks モード（rooted: false）の重複は落とす。dirfd の保護は integration で確認する。
+
+前提が変わる条件: ローカル daemon と node で dirfd の挙動が分かれ、片方だけでは回帰を説明できなくなったとき。
+
+
+## D059: core は「系が合意する語彙」とし、REST は面ごとに実装する
+
+date: 2026-11-10 · by: user · issue: 0188
+
+前案（`@hns/contract` を切り、REST 22 本を残置する）を置き換える。0145 の入口は GraphQL / WS / 静的の3面。
+
+- **`@hns/contract` は作らない。** `@hns/core` の意味を「系が合意する語彙（モデルと、その射影）」にする。
+  SDL は `@hns/core/graphql` のサブパス（D055 / 0175 の形）を維持する。SDL はモデルからの射影で独立した
+  真実を持たない。独立しているのは公開方針だけで、それは約 250 行の projection であり、パッケージではなく
+  サブパスと oxlint で隔離できる。小チームでは、モデル変更のたびに 2 パッケージと「model か wire か」の
+  型分類が増える方が高くつく。
+- **REST は事前に宣言しない。** 49 本の `ROUTES` と schema、web の typed client / fixture を削除した。
+  REST 面は、それを実装する issue が schema・認証・handler を同じ変更で足す。**D055 の「22 本は REST に
+  残す」はここで取り消す。** 宣言だけの面は「実装済み・正常」と誤認させ、agent を「残す・増やす」方向に
+  推論させる。
+- 要求・応答の封筒と運用 view は、その面を実装するパッケージが持つ。永続するモデルと、DO・agent・machine を
+  跨ぐ型だけを core に置く。
+- 削除した契約のテストは復活させない。面ごとの issue が schema と一緒に足す。
+
+前提が変わる条件: REST 面が増えて parse とエラー封筒の重複が痛くなったとき（共通部分を core に戻す）、
+または公開面を独立に版管理する必要が出たとき。

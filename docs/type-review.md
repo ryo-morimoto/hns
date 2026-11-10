@@ -28,31 +28,32 @@
 
 ## このファイルへの適用（見つけたもの）
 
-| 重大度 | 箇所 | 問題 | 直し方 |
-| --- | --- | --- | --- |
-| 高 | `Message` | `role` と optional の組合せで不正状態が作れる（user に toolName、tool に text 無し） | 判別可能ユニオン（user / assistant / tool）に分ける |
-| 高 | `Conversation.archived` | DB の 0/1 が API に漏れている | `boolean` にし、境界で変換 |
-| 高 | `Health.auth` | `string`。`AuthMode` があるのに使っていない | `AuthMode` にする |
-| 高 | `ChatResponse.submissionId` | DB の連番。外に出す ID ではない | 不透明な `SubmissionId`（brand）に |
-| 中 | 全体 | ID が `string`。`project_id` と `conversationId` を取り違えても通る | brand（`ProjectId` など）と生成関数 |
-| 中 | 日時 | `created_at` 等が `string`。形式・TZ が不明 | `IsoDateTime` brand。`updated_at` は「未設定」の意味を決める |
-| 中 | `Event.event` / `TaskView.kind·state` / `State.scheduling` | 閉じた集合なのに `string` | 既知の union（必要なら `(string & {})` で拡張可） |
-| 中 | `FileWriteRequest.expectedVersion` | `"absent"` の特別扱いが型に出ていない | `FileVersion \| "absent"` |
-| 中 | `MutationResult.unknown.reason` | `string`。実際は `"io"` だけ | `"io" \| "crash" \| "timeout"` |
-| 中 | `SandboxStatus` | `available` と optional の組合せが不正 | true の形と false の形のユニオン |
-| 中 | `Health.version` | 定数 `1`。意味が無い | サーバの版（semver）にするか削除 |
-| 中 | `State` | 会話・プロジェクトの全件を状態に同梱 | 要約（件数）か別 API。件数上限を型で示す |
-| 中 | `FileRead.content` / `FileWriteRequest.content` | 文字列の意味（UTF-8 か base64 か）が不明 | テキストに限定するか `Uint8Array` の表現を決める |
-| 低 | `Metrics` / `Usage.today` | `{ turns; tokens; cost }` の重複 | `TokenTotals` に切り出す。`chats` のキーも union に |
-| 低 | 命名 | `created_at` と `conversationId` が混在 | JSON は snake_case に統一（または camelCase に全て寄せる） |
-| 低 | 不変性 | 配列・オブジェクトが可変 | 返す側は `readonly` を検討 |
-| 低 | 完全性 | Workflow / Automation / Firing / Run の型が無い | 実装に合わせて追加 |
+| 重大度 | 箇所                                                       | 問題                                                                                 | 直し方                                                       |
+| ------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| 高     | `Message`                                                  | `role` と optional の組合せで不正状態が作れる（user に toolName、tool に text 無し） | 判別可能ユニオン（user / assistant / tool）に分ける          |
+| 高     | `Conversation.archived`                                    | DB の 0/1 が API に漏れている                                                        | `boolean` にし、境界で変換                                   |
+| 高     | `Health.auth`                                              | `string`。`AuthMode` があるのに使っていない                                          | `AuthMode` にする                                            |
+| 高     | `ChatResponse.submissionId`                                | DB の連番。外に出す ID ではない                                                      | 不透明な `SubmissionId`（brand）に                           |
+| 中     | 全体                                                       | ID が `string`。`project_id` と `conversationId` を取り違えても通る                  | brand（`ProjectId` など）と生成関数                          |
+| 中     | 日時                                                       | `created_at` 等が `string`。形式・TZ が不明                                          | `IsoDateTime` brand。`updated_at` は「未設定」の意味を決める |
+| 中     | `Event.event` / `TaskView.kind·state` / `State.scheduling` | 閉じた集合なのに `string`                                                            | 既知の union（必要なら `(string & {})` で拡張可）            |
+| 中     | `FileWriteRequest.expectedVersion`                         | `"absent"` の特別扱いが型に出ていない                                                | `FileVersion \| "absent"`                                    |
+| 中     | `MutationResult.unknown.reason`                            | `string`。実際は `"io"` だけ                                                         | `"io" \| "crash" \| "timeout"`                               |
+| 中     | `SandboxStatus`                                            | `available` と optional の組合せが不正                                               | true の形と false の形のユニオン                             |
+| 中     | `Health.version`                                           | 定数 `1`。意味が無い                                                                 | サーバの版（semver）にするか削除                             |
+| 中     | `State`                                                    | 会話・プロジェクトの全件を状態に同梱                                                 | 要約（件数）か別 API。件数上限を型で示す                     |
+| 中     | `FileRead.content` / `FileWriteRequest.content`            | 文字列の意味（UTF-8 か base64 か）が不明                                             | テキストに限定するか `Uint8Array` の表現を決める             |
+| 低     | `Metrics` / `Usage.today`                                  | `{ turns; tokens; cost }` の重複                                                     | `TokenTotals` に切り出す。`chats` のキーも union に          |
+| 低     | 命名                                                       | `created_at` と `conversationId` が混在                                              | JSON は snake_case に統一（または camelCase に全て寄せる）   |
+| 低     | 不変性                                                     | 配列・オブジェクトが可変                                                             | 返す側は `readonly` を検討                                   |
+| 低     | 完全性                                                     | Workflow / Automation / Firing / Run の型が無い                                      | 実装に合わせて追加                                           |
 
 ## 型をテストする
 
 - `expectTypeOf`（vitest）や `tsd` で「代入できてはいけない」を固定する。
 - `@ts-expect-error` を「不正な状態の見本」として置く（消えたら気づける）。
 - 実データのフィクスチャを `satisfies` で受ける（型と実物のズレを一度は目で見る）。
+
 ## 反映（2026-11-07）
 
 高・中を `types.ts` に反映した。

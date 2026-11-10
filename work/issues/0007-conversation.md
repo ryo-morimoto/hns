@@ -1,7 +1,7 @@
 # 0007: 会話の実結線
 
 status: done
-depends-on: -
+depends-on: —
 touches: work/poc/conversation, docs/decisions.md
 
 ## Goal

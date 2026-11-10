@@ -125,24 +125,24 @@ hns の画面は「AI と会話する場所」ではなく、**人間が仕事�
 委任された仕事は **意図 → 計画 → 実行 → チェックポイント → 結果 → 監査** の6段階を通る。
 多くの製品は意図と実行だけを作り、チェックポイント・結果・監査が弱い。hns はそこを最初から設計する。
 
-| 段階 | パターン | 何をするか |
-| --- | --- | --- |
-| 意図 | 1. 目的の確認質問 | 1〜3個だけ、既定値つきで聞く。曖昧なときだけ |
-| 意図 | 2. スコープのチップ | 触ってよい範囲（パス・環境）を入力の上に明示する |
-| 計画 | 3. 編集できる計画 | 実行前に手順を見せ、その場で直せる |
-| 計画 | 4. 工数・費用の見積り | 時間・トークン・費用の目安を出す |
-| 計画 | 5. ドライラン | 変更を適用せずに結果を予測する |
-| 実行 | 6. 実行台帳 | 何をしたかを1行ずつ積む。開けば詳細 |
-| 実行 | 7. ツール呼び出しカード | 引数と結果を1枚に。失敗は既定で開く |
-| 実行 | 8. 推論の開示 | 「N秒考えた」程度。詳細は要求時だけ |
-| 実行 | 9. バックグラウンドと進捗面 | タブを閉じても進む。戻ると状態と結果がある |
-| 確認 | 10. 段階的な権限ゲート | 危険度に比例して止まる。すべて同じ強さで止めない |
-| 確認 | 11. まとめて承認 | 同種の承認を束ねる（1件ずつ聞かない） |
-| 確認 | 12. 中断と方向修正 | 実行中に止めて指示を変えられる |
-| 結果 | 13. 差分優先の要約 | 物語ではなく変更の footprint を先に |
-| 結果 | 14. 確信度と未解決 | できたこと・怪しいこと・決めていないことを分ける |
-| 監査 | 15. 操作履歴と Undo | 各操作が見つかり、戻せる |
-| 監査 | 16. 人間への引き継ぎ | 担当者・承認者・次の人へ渡せる |
+| 段階 | パターン                    | 何をするか                                       |
+| ---- | --------------------------- | ------------------------------------------------ |
+| 意図 | 1. 目的の確認質問           | 1〜3個だけ、既定値つきで聞く。曖昧なときだけ     |
+| 意図 | 2. スコープのチップ         | 触ってよい範囲（パス・環境）を入力の上に明示する |
+| 計画 | 3. 編集できる計画           | 実行前に手順を見せ、その場で直せる               |
+| 計画 | 4. 工数・費用の見積り       | 時間・トークン・費用の目安を出す                 |
+| 計画 | 5. ドライラン               | 変更を適用せずに結果を予測する                   |
+| 実行 | 6. 実行台帳                 | 何をしたかを1行ずつ積む。開けば詳細              |
+| 実行 | 7. ツール呼び出しカード     | 引数と結果を1枚に。失敗は既定で開く              |
+| 実行 | 8. 推論の開示               | 「N秒考えた」程度。詳細は要求時だけ              |
+| 実行 | 9. バックグラウンドと進捗面 | タブを閉じても進む。戻ると状態と結果がある       |
+| 確認 | 10. 段階的な権限ゲート      | 危険度に比例して止まる。すべて同じ強さで止めない |
+| 確認 | 11. まとめて承認            | 同種の承認を束ねる（1件ずつ聞かない）            |
+| 確認 | 12. 中断と方向修正          | 実行中に止めて指示を変えられる                   |
+| 結果 | 13. 差分優先の要約          | 物語ではなく変更の footprint を先に              |
+| 結果 | 14. 確信度と未解決          | できたこと・怪しいこと・決めていないことを分ける |
+| 監査 | 15. 操作履歴と Undo         | 各操作が見つかり、戻せる                         |
+| 監査 | 16. 人間への引き継ぎ        | 担当者・承認者・次の人へ渡せる                   |
 
 ## その他の頻出パターン（最初に覚える12）
 
@@ -161,19 +161,19 @@ hns の画面は「AI と会話する場所」ではなく、**人間が仕事�
 
 ## 入口と周辺のパターン（採否は画面ごと）
 
-| パターン | hns の扱い |
-| --- | --- |
-| Sparkle（AI の入口） | 入力欄とコマンドで足りるなら専用ボタンを増やさない。置くなら文脈（選択範囲・ファイル）を持つ |
-| プロンプト例・続きの提案 | 空のときだけ出す。常時出すと注意を奪う |
-| @-mention と文脈チップ | 採用。何を文脈に入れたかを常に表示する |
-| ツール・コネクタのメニュー | 採用。選べるツールは権限と一致させる |
-| モデル選択・effort・Agent の階層 | 採用。費用と能力の差を表示し、既定は安全側 |
-| 文脈長・費用のメーター | 採用。limits と接続し、上限に近づいたら知らせる |
-| 音声モード | 今は対象外（後で要件になったら考える） |
-| 引用と出典パネル | 調査・要約の実行で採用。主張と出典を対応させる |
-| 深掘り調査のフィード | 実行台帳で代替できるなら専用画面を作らない |
-| 状態を表す動詞と割り込みのヒント | 文言は短く。「止められる」ことを示す |
-| Agent の computer pane・実行トレース・再生 | 実在感のために採用。既定は要約、開いたら詳細 |
+| パターン                                   | hns の扱い                                                                                   |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Sparkle（AI の入口）                       | 入力欄とコマンドで足りるなら専用ボタンを増やさない。置くなら文脈（選択範囲・ファイル）を持つ |
+| プロンプト例・続きの提案                   | 空のときだけ出す。常時出すと注意を奪う                                                       |
+| @-mention と文脈チップ                     | 採用。何を文脈に入れたかを常に表示する                                                       |
+| ツール・コネクタのメニュー                 | 採用。選べるツールは権限と一致させる                                                         |
+| モデル選択・effort・Agent の階層           | 採用。費用と能力の差を表示し、既定は安全側                                                   |
+| 文脈長・費用のメーター                     | 採用。limits と接続し、上限に近づいたら知らせる                                              |
+| 音声モード                                 | 今は対象外（後で要件になったら考える）                                                       |
+| 引用と出典パネル                           | 調査・要約の実行で採用。主張と出典を対応させる                                               |
+| 深掘り調査のフィード                       | 実行台帳で代替できるなら専用画面を作らない                                                   |
+| 状態を表す動詞と割り込みのヒント           | 文言は短く。「止められる」ことを示す                                                         |
+| Agent の computer pane・実行トレース・再生 | 実在感のために採用。既定は要約、開いたら詳細                                                 |
 
 ## 避ける形（アンチパターン）
 
@@ -211,25 +211,25 @@ hns の画面は「AI と会話する場所」ではなく、**人間が仕事�
 
 ## 参考: Agentic Workspace の5例
 
-| 例 | 取るもの | リンク |
-| --- | --- | --- |
-| Linear | 仕事・Activity・Inbox に Agent を統合。Delegation / Human Ownership / Agent Activity。組織に紐づくセッション | [AIG](https://linear.app/developers/aig) / [実装](https://linear.app/blog/how-we-built-linear-agent) |
-| Cursor | Agent Sessions / Changes / Demo / Take Control。並行実行と証拠のレビュー | [cursor.com](https://cursor.com) |
-| Manus | 実行の実在感（computer view・進捗・再生）。透明性の見せ方 | [manus.im](https://manus.im) |
-| Claude Cowork | Task Delegation / Artifacts / Projects / Steering。目的から委任し、途中で方向修正 | [claude.com](https://claude.com/product/cowork) |
-| Replit Agent | Design Canvas / Live Preview / Direct Manipulation。成果物をその場で編集 | [replit.com](https://replit.com) |
+| 例            | 取るもの                                                                                                     | リンク                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| Linear        | 仕事・Activity・Inbox に Agent を統合。Delegation / Human Ownership / Agent Activity。組織に紐づくセッション | [AIG](https://linear.app/developers/aig) / [実装](https://linear.app/blog/how-we-built-linear-agent) |
+| Cursor        | Agent Sessions / Changes / Demo / Take Control。並行実行と証拠のレビュー                                     | [cursor.com](https://cursor.com)                                                                     |
+| Manus         | 実行の実在感（computer view・進捗・再生）。透明性の見せ方                                                    | [manus.im](https://manus.im)                                                                         |
+| Claude Cowork | Task Delegation / Artifacts / Projects / Steering。目的から委任し、途中で方向修正                            | [claude.com](https://claude.com/product/cowork)                                                      |
+| Replit Agent  | Design Canvas / Live Preview / Direct Manipulation。成果物をその場で編集                                     | [replit.com](https://replit.com)                                                                     |
 
 ## 参考: Web UI の15例（テーマ別に2つずつ見る）
 
-| テーマ | 見る組 |
-| --- | --- |
+| テーマ                        | 見る組                                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
 | Hover・Tooltip・Button の質感 | [Rauno — Craft](https://rauno.me/craft) + [Aceternity Labs](https://ui.aceternity.com) |
-| Drag・Selection・Canvas | [tldraw flash](https://flash.tldraw.com) + [Excalidraw](https://excalidraw.com) |
-| Motion と状態遷移 | [Rive](https://rive.app) + [Spline](https://spline.design) |
-| 非同期とリアルタイム | [Krea](https://www.krea.ai) + [Observable](https://observablehq.com) |
-| 情報の密度と階層 | [Are.na](https://www.are.na) + [Cosmos](https://www.cosmos.so) |
-| ブランドと操作性 | [Stripe Press](https://press.stripe.com) + [Readymag](https://readymag.com) |
-| 共同作業の快適さ | [FigJam](https://www.figma.com/figjam/) + [Milanote](https://milanote.com) |
-| 3D と段階的な設定 | [Qudrix](https://qudrix.com) |
+| Drag・Selection・Canvas       | [tldraw flash](https://flash.tldraw.com) + [Excalidraw](https://excalidraw.com)        |
+| Motion と状態遷移             | [Rive](https://rive.app) + [Spline](https://spline.design)                             |
+| 非同期とリアルタイム          | [Krea](https://www.krea.ai) + [Observable](https://observablehq.com)                   |
+| 情報の密度と階層              | [Are.na](https://www.are.na) + [Cosmos](https://www.cosmos.so)                         |
+| ブランドと操作性              | [Stripe Press](https://press.stripe.com) + [Readymag](https://readymag.com)            |
+| 共同作業の快適さ              | [FigJam](https://www.figma.com/figjam/) + [Milanote](https://milanote.com)             |
+| 3D と段階的な設定             | [Qudrix](https://qudrix.com)                                                           |
 
 見た目が似ていても、対象・頻度・情報量・権限が違えばそのまま使えない。「どの問題を、どう解いているから参考か」を一文で残す。

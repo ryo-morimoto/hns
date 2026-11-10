@@ -11,13 +11,13 @@
 
 ## 数値
 
-| | pi-ai | hns core |
-| --- | --- | --- |
-| 行数 | 925 | 274 |
-| export | 86 | 48 |
-| JSDoc 行 | 174 | 19（Produced by / Consumed by） |
-| readonly | 4 | 1（Brand） |
-| brand | 0 | 2 |
+|                  | pi-ai                     | hns core                                 |
+| ---------------- | ------------------------- | ---------------------------------------- |
+| 行数             | 925                       | 274                                      |
+| export           | 86                        | 48                                       |
+| JSDoc 行         | 174                       | 19（Produced by / Consumed by）          |
+| readonly         | 4                         | 1（Brand）                               |
+| brand            | 0                         | 2                                        |
 | 判別可能ユニオン | Message / StopReason ほか | Message / MutationResult / SandboxStatus |
 
 ## 同じ選択をしているもの

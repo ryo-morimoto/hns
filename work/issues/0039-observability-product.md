@@ -1,7 +1,8 @@
 # 0039: 観測の製品化
 
 status: open
-depends-on: 0035
+priority: plan
+depends-on: 0145, 0146
 touches: packages/store, packages/server
 
 ## Goal

@@ -1,7 +1,7 @@
 # 0046: テストの規律とランナーを固定する
 
 status: done
-depends-on: -
+depends-on: —
 touches: docs/testing.md, docs/engineering.md, docs/decisions.md, AGENTS.md, vitest.config.ts, packages/*/test, packages/*/package.json, package.json, package-lock.json
 
 ## Goal
@@ -40,6 +40,7 @@ touches: docs/testing.md, docs/engineering.md, docs/decisions.md, AGENTS.md, vit
 - 2026-11-07: 作成。
 - 2026-11-07: Vitest 5.1.0 を導入。node:test から 10 ファイル / 124 テストを移行し、`docs/testing.md` と D038 を追加。
 - 2026-11-07: TOCTOU の churn テストが「全 write 拒否」で落ちる flaky を修正（churn 後の write で applied を確認）。
+- 2026-11-10: 0183 でテスト管理を再設計。D038 の「node:assert/strict 固定」は D056 で Vitest の expect に置換する。層・ランナーは維持する。
 
 ## Result
 
@@ -47,3 +48,4 @@ touches: docs/testing.md, docs/engineering.md, docs/decisions.md, AGENTS.md, vit
 - 層: unit / contract / repository / integration / API / E2E。実 SQLite、`fastify.inject`、E2E は Playwright。
 - `npm run check` は lint → fmt → tsc → `vitest run` → build。124/124 合格。
 - flaky のリトライは禁止。テストは `node:assert/strict` に統一。
+- 追記（2026-11-10）: アサーションの固定は D056 で置換済み。

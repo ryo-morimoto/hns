@@ -1,7 +1,7 @@
 # 0004: 開発環境の固定
 
 status: done
-depends-on: -
+depends-on: —
 touches: README.md, flake.nix, flake.lock, scripts/with-node.sh, work/poc/install.sh
 
 ## Goal

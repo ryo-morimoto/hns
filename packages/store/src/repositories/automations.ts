@@ -1,17 +1,15 @@
 import * as v from "valibot";
 import {
-  AutomationActionSchema,
-  AutomationTriggerSchema,
   type Automation,
   type AutomationAction,
   type AutomationFiringStatus,
   type AutomationTrigger,
-  type AutomationUpdate,
   type Firing,
   type ProjectId,
 } from "@hns/core";
 import type { IsoTimestamp } from "@hns/core";
 import { IsoTimestampSchema } from "@hns/core";
+import { AutomationActionSchema, AutomationTriggerSchema } from "../schemas.ts";
 import type { StoreContext } from "../db.ts";
 import { parseAutomation, parseFiring } from "../parse.ts";
 
@@ -23,12 +21,20 @@ export interface AutomationCreateInput {
   readonly enabled?: boolean | undefined;
 }
 
+/** A partial change to one automation. The surface that serves edits parses its own input. */
+interface AutomationPatch {
+  readonly name?: string | undefined;
+  readonly trigger?: AutomationTrigger | undefined;
+  readonly action?: AutomationAction | undefined;
+  readonly enabled?: boolean | undefined;
+}
+
 export interface AutomationRepository {
   list(projectId?: ProjectId | undefined): Automation[];
   get(id: string): Automation | undefined;
   getByToken(token: string): Automation | undefined;
   create(input: AutomationCreateInput): Automation;
-  update(id: string, patch: AutomationUpdate): Automation | undefined;
+  update(id: string, patch: AutomationPatch): Automation | undefined;
   delete(id: string): boolean;
   setLastFiredAt(id: string, at: IsoTimestamp): void;
   createFiring(input: {

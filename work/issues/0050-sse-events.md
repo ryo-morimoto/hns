@@ -1,6 +1,8 @@
 # 0050: SSE の token / tool イベント
 
-status: open
+> 0159（ライブ更新の WS 化）に置き換え（D047）。着手しない。
+
+status: superseded
 depends-on: 0037, 0046
 touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test
 

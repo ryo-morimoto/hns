@@ -1,6 +1,7 @@
 # 0172: rooted ヘルパーの起動を操作ごとにしない
 
 status: open
+priority: batch
 depends-on: -
 touches: packages/workspace/src/rooted.ts, packages/workspace/src/workspace.ts, packages/workspace/src/protocol.ts
 

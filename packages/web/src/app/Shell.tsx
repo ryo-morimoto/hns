@@ -2,7 +2,7 @@ import { Drawer } from "@base-ui/react/drawer";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import type { Conversation, Project, Task } from "@hns/core";
-import type { WebClient } from "../api/client.ts";
+import type { WorkspaceSource } from "./workspaceSource.ts";
 import { Button } from "../components/Button.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
 import { projectIdFrom } from "../routes/ids.ts";
@@ -17,7 +17,7 @@ import { totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
 import "./shell.css";
 
 export interface ShellProps {
-  readonly client: WebClient;
+  readonly source: WorkspaceSource;
   /** 0103 mounts the palette; until then the entries render disabled. */
   readonly onOpenCommand?: (() => void) | undefined;
   /** 0106 reserves the right panel; the shell only provides the slot. */
@@ -26,7 +26,7 @@ export interface ShellProps {
   readonly summarySource?: (() => Promise<readonly WorkspaceSummary[]>) | undefined;
 }
 
-export function Shell({ client, onOpenCommand, panel, summarySource }: ShellProps): ReactElement {
+export function Shell({ source, onOpenCommand, panel, summarySource }: ShellProps): ReactElement {
   const route = useRoute();
   const mobile = useMediaQuery("(max-width: 768px)");
   const [theme, chooseTheme] = useTheme();
@@ -37,7 +37,7 @@ export function Shell({ client, onOpenCommand, panel, summarySource }: ShellProp
 
   const projects = useQuery({
     queryKey: ["projects"],
-    queryFn: () => client.request("GET /api/projects"),
+    queryFn: () => source.listProjects(),
   });
 
   const summaries = useQuery({
@@ -50,24 +50,19 @@ export function Shell({ client, onOpenCommand, panel, summarySource }: ShellProp
     queryKey: ["conversations", rawProjectId, projectKey],
     enabled: projectKey !== null,
     queryFn: () =>
-      client.request("GET /api/conversations", {
-        input: projectKey === null ? {} : { projectId: projectKey },
-      }),
+      projectKey === null ? Promise.resolve([]) : source.listConversations(projectKey),
   });
 
   const tasks = useQuery({
     queryKey: ["tasks", projectKey],
     enabled: projectKey !== null,
-    queryFn: () =>
-      client.request("GET /api/tasks", {
-        input: projectKey === null ? {} : { projectId: projectKey },
-      }),
+    queryFn: () => (projectKey === null ? Promise.resolve([]) : source.listTasks(projectKey)),
   });
 
   // Runs have no project in the API yet, so they stay a global section (not per workspace).
   const runs = useQuery({
     queryKey: ["runs"],
-    queryFn: () => client.request("GET /api/runs"),
+    queryFn: () => source.listRuns(),
   });
 
   // The first project is the workspace default; replace so Back does not land on "#/".

@@ -6,14 +6,14 @@ Editor と Agent が同じファイルに触るとき、黙って壊さない。
 
 ## 保証
 
-| 層 | 保証 | 手段 | 破れる条件 |
-| --- | --- | --- | --- |
-| 観測 | 内容と版が対応 | 読取時に sha256 | 読取中の外部変更 |
-| 検出 | 古い版からの置換を拒否 | ヘルパー内で再ハッシュしてから rename | ヘルパーを実行できない環境 / 同名差し替えの競合（両方が hash を通ると両方 applied になり得る） |
-| 封じ込め | 差し替えられた親を辿らない | root の dirfd から `O_NOFOLLOW` で開き、rename も dirfd 相対 | ヘルパーを実行できない環境 |
-| 原子性 | 途中状態を見せない | 同一ディレクトリの temp + rename | 別ファイルシステムへの移動 |
-| 冪等 | 再送で二重適用しない | Journal の intent / outcome | Journal の喪失 |
-| 調停 | 不明を UNKNOWN として照合 | 内容ハッシュと intent の比較 | — |
+| 層       | 保証                       | 手段                                                         | 破れる条件                                                                                     |
+| -------- | -------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| 観測     | 内容と版が対応             | 読取時に sha256                                              | 読取中の外部変更                                                                               |
+| 検出     | 古い版からの置換を拒否     | ヘルパー内で再ハッシュしてから rename                        | ヘルパーを実行できない環境 / 同名差し替えの競合（両方が hash を通ると両方 applied になり得る） |
+| 封じ込め | 差し替えられた親を辿らない | root の dirfd から `O_NOFOLLOW` で開き、rename も dirfd 相対 | ヘルパーを実行できない環境                                                                     |
+| 原子性   | 途中状態を見せない         | 同一ディレクトリの temp + rename                             | 別ファイルシステムへの移動                                                                     |
+| 冪等     | 再送で二重適用しない       | Journal の intent / outcome                                  | Journal の喪失                                                                                 |
+| 調停     | 不明を UNKNOWN として照合  | 内容ハッシュと intent の比較                                 | —                                                                                              |
 
 「検出」であって「防止」ではないが、検査と使用は同一の解決にする（下記「TOCTOU」）。
 そこができない環境では窓が残るので、冪等と調停を重ねる。
@@ -22,7 +22,11 @@ Editor と Agent が同じファイルに触るとき、黙って壊さない。
 
 ```ts
 type Version = string; // "sha256:<hex>"
-interface FileRef { workspaceId: string; rootId: string; relativePath: string }
+interface FileRef {
+  workspaceId: string;
+  rootId: string;
+  relativePath: string;
+}
 
 interface WorkspaceFileApi {
   readFile(ref: FileRef): Promise<{ content: Uint8Array; version: Version }>;
@@ -56,11 +60,11 @@ type MutationResult =
 `operationId` は 1 回の試行に 1 つ。同じ id で別の内容（`contentHash` か `expectedVersion` が違う）を送ると `denied`。
 古い決着済み operation は既定 500 件で切り捨てる（`maxSettledOps`）ので、それより前の再送は新しい書き込みになる。
 
-| 観測 | 判定 |
-| --- | --- |
-| 版 == contentHash | applied（outcome を補記） |
-| 版 == expected | 未適用。同じ `operationId` で再実行可 |
-| 一致しない・消えた | conflict または unknown |
+| 観測               | 判定                                  |
+| ------------------ | ------------------------------------- |
+| 版 == contentHash  | applied（outcome を補記）             |
+| 版 == expected     | 未適用。同じ `operationId` で再実行可 |
+| 一致しない・消えた | conflict または unknown               |
 
 `unknown` を applied / conflict に丸めない。
 
@@ -103,11 +107,11 @@ type MutationResult =
 
 起動時に `detectSandbox()` が次を順に確かめ、どれかで落ちれば `exec: "disabled"` を返す。アプリは bash ツールを登録せず、ワークフローの tool ノードも `createNoExecEnv` が拒否する。生の exec に落とさない。
 
-| 確認 | 落ちたときの `code` | `userNamespaces` |
-| --- | --- | --- |
-| Linux か | `unsupported-platform` | `unknown` |
-| `BWRAP` か PATH に実行可能な bwrap がある | `not-found` / `not-executable` | `unknown` |
-| `bwrap --version` が読める | `version-failed` | `unknown` |
+| 確認                                                          | 落ちたときの `code`                                          | `userNamespaces`      |
+| ------------------------------------------------------------- | ------------------------------------------------------------ | --------------------- |
+| Linux か                                                      | `unsupported-platform`                                       | `unknown`             |
+| `BWRAP` か PATH に実行可能な bwrap がある                     | `not-found` / `not-executable`                               | `unknown`             |
+| `bwrap --version` が読める                                    | `version-failed`                                             | `unknown`             |
 | wrapper と同じ引数で 1 回動く（user namespace・mount・shell） | `userns-unavailable` / `shell-missing` / `smoke-test-failed` | `blocked` / `unknown` |
 
 `/api/health` の `sandbox` は `available` で分かれる union。`true` は `exec: "enabled"`・`userNamespaces: "ok"`・`version`・`sysctls` を持ち、`false` は `exec: "disabled"` と失敗した `code` / `reason` を持つ（`backend` / `platform` / `shell` / `bwrap` / `checkedAt` は共通）。バージョンは報告するが下限は設けない（0.12.0 で検証。実効性は毎回の probe で見る）。
@@ -139,15 +143,15 @@ recover（applied / pending / unknown）を実装。**40/40 合格**（Node env 
 `work/poc/sandbox` が bwrap の検出（欠落・非実行・偽物・user namespace）と封じ込めを検証。**18/18 合格**（bwrap 0.12.0 / NixOS）。
 `work/poc/app/run-safety.mjs` は検出の状態と、sandbox が無いときに tool ノードが動かないことを検証（**15/15**）。bwrap が無い環境では封じ込めだけを SKIP する。
 
-| 試験 | 内容 |
-| --- | --- |
+| 試験 | 内容                                                                                                                        |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- |
 | T-03 | 同じ版から2クライアント → 通常は片方 applied、片方 conflict。両方が hash を通過すると両方 applied になり得る（lost update） |
-| T-04 | intent 後 / temp 後 / rename 後の停止 → pending / pending / applied。再送で二重適用なし |
-| - | rename 後に第三者が変更 → unknown（applied にも conflict にも丸めない） |
-| - | 同じ §operationId§ の再送は記録済みの結果を返し、後からの外部変更を上書きしない |
-| T-05 | 親を差し替えながら書き込みを繰り返す → dirfd では root の外に 0 件、`checks` では 1 件出る（対照） |
-| - | 親を差し替えた直後の読取 → dirfd は辿らない。最終コンポーネントの symlink は両経路で拒否 |
-| - | exec が無い環境 → `checks` に落ちて従来どおり読み書きできる |
+| T-04 | intent 後 / temp 後 / rename 後の停止 → pending / pending / applied。再送で二重適用なし                                     |
+| -    | rename 後に第三者が変更 → unknown（applied にも conflict にも丸めない）                                                     |
+| -    | 同じ §operationId§ の再送は記録済みの結果を返し、後からの外部変更を上書きしない                                             |
+| T-05 | 親を差し替えながら書き込みを繰り返す → dirfd では root の外に 0 件、`checks` では 1 件出る（対照）                          |
+| -    | 親を差し替えた直後の読取 → dirfd は辿らない。最終コンポーネントの symlink は両経路で拒否                                    |
+| -    | exec が無い環境 → `checks` に落ちて従来どおり読み書きできる                                                                 |
 
 ## 限界（実装で確認したもの）
 

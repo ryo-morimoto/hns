@@ -1,7 +1,7 @@
 # 0008: Editor の最小
 
 status: done
-depends-on: -
+depends-on: —
 touches: work/poc/editor, work/poc/walking-skeleton/server.mjs
 
 ## Goal

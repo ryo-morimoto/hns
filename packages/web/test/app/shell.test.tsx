@@ -4,8 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, test } from "vitest";
-import { createWebClient } from "../../src/api/client.ts";
-import { createFixtureFetch } from "../../src/api/fixtures.ts";
+import { createFixtureSource } from "../../src/app/fixtureSource.ts";
 import { Shell } from "../../src/app/Shell.tsx";
 import { fixtureSummarySource } from "../../src/app/fixtureSummaries.ts";
 import type { WorkspaceSummary } from "../../src/app/workspaceSummary.ts";
@@ -30,12 +29,12 @@ function renderShell(
   panel?: ReactNode,
   summarySource?: () => Promise<readonly WorkspaceSummary[]>,
 ) {
-  const client = createWebClient({ baseUrl: "", fetch: createFixtureFetch() });
+  const source = createFixtureSource();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <Shell
-        client={client}
+        source={source}
         onOpenCommand={onOpenCommand}
         panel={panel}
         summarySource={summarySource}

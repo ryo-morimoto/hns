@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { doctest } from "vite-plugin-doctest";
 
 // One runner for every layer (docs/testing.md). A project per package keeps
 // `npm test -w @hns/store` scoped to that package instead of the whole repo.
@@ -18,16 +19,16 @@ const alias = [
 ];
 
 // Two projects per package: the in-process tests a commit runs, and the
-// integration tests that spawn a helper, a daemon, or bubblewrap. Files named
-// *.tiers.test.ts run in both and read the tier from the project.
+// integration tests that spawn a helper, a daemon, or bubblewrap. A scenario
+// runs in exactly one project.
 const packageProjects = (name: string, extra: Record<string, unknown> = {}) => [
   {
     extends: true,
     test: {
       name,
       include: [`packages/${name}/test/**/*.test.ts`, `packages/${name}/test/**/*.test.tsx`],
+      includeSource: [`packages/${name}/src/**/*.{ts,tsx}`],
       exclude: ["**/integration/**"],
-      provide: { tier: "unit" },
       ...extra,
     },
   },
@@ -35,17 +36,14 @@ const packageProjects = (name: string, extra: Record<string, unknown> = {}) => [
     extends: true,
     test: {
       name: `${name}-integration`,
-      include: [
-        `packages/${name}/test/**/*.tiers.test.ts`,
-        `packages/${name}/test/integration/**/*.test.{ts,tsx}`,
-      ],
-      provide: { tier: "integration" },
+      include: [`packages/${name}/test/integration/**/*.test.{ts,tsx}`],
       ...extra,
     },
   },
 ];
 
 export default defineConfig({
+  plugins: [doctest()],
   resolve: {
     // Packages export their source under this condition; Vite must read the same files tsc does.
     conditions: ["source"],

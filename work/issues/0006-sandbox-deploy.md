@@ -1,7 +1,7 @@
 # 0006: sandbox の前提を固める
 
 status: done
-depends-on: -
+depends-on: —
 touches: work/poc/sandbox, work/poc/workspace-core, work/poc/app, work/research/sandbox-platforms.md, docs/workspace.md
 
 ## Goal

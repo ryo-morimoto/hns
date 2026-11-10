@@ -1,6 +1,7 @@
 # 0049: agent の複数会話 API
 
 status: open
+priority: plan
 depends-on: 0034, 0046
 touches: packages/agent/src, packages/agent/test
 

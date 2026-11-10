@@ -1,6 +1,7 @@
 # 0044: マルチマシン（保留）
 
 status: **保留**
+priority: hold
 depends-on: 0040
 touches: packages/worker, packages/server
 

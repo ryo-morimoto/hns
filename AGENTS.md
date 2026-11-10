@@ -7,9 +7,9 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
 ### Key Directories
 
 - `packages/` — product code, one package per capability
-  - `packages/core` — the model (`src/types.ts`), valibot boundary schemas (`src/schemas.ts`), workflow state transitions (`src/workflow.ts`)
+  - `packages/core` — the model (`src/types.ts`, `src/codecs.ts`), its GraphQL projection (`src/graphql/`), workflow state transitions (`src/workflow.ts`)
   - `packages/store` — SQLite row schemas and `parse*` functions that produce the public model
-  - planned: `workspace`, `agent`, `server`, `web` (see [docs/packages.md](docs/packages.md))
+  - existing: `workspace`, `agent`, `web`; planned: `server`, `machine` (see [docs/packages.md](docs/packages.md))
 - `work/` — remaining work and history
   - `work/poc/` — the integrated PoC app (plain JS). **Not product code.** Do not add features here
   - `work/BOARD.md`, `work/issues/` — the backlog and per-issue notes
@@ -19,6 +19,7 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
 ### Architecture Notes
 
 - Target package graph: `server → agent / store / workspace → core`; `web → core`. Never the other way
+- GraphQL is the one app contract (`@hns/core/graphql` generates the SDL from the model). REST is not declared in advance: the issue that implements a REST face adds its schema, auth, and handler together (D059)
 - Conversation runtime is pi-durable 1.5.0 (external, pinned). We compose it, not fork it
 - Persistence is SQLite through `node:sqlite`; there is no ORM
 - Types are the source of truth; valibot schemas are typed against them (`v.GenericSchema<unknown, T>`)
@@ -76,9 +77,9 @@ Each rule's condition and source links are in [docs/design.md](docs/design.md).
 
 **Errors**
 
-- **Expected failures are typed.** API failures use the `ErrorCode` union (`invalid_request`, `unauthorized`, `not_found`, `conflict`, `rate_limited`, …). Do not add new string `error` fields; make it something the caller can branch on
+- **Expected failures are typed.** GraphQL returns errors as unions (0176); a REST face parses and returns its own closed failure union. Do not add new string `error` fields; make it something the caller can branch on
 - **Throw `Error`, not values.** A thrown string or object loses the stack and every `instanceof` check downstream. Unexpected failures are `Error` subclasses
-- **Do not swallow failures.** No empty `catch`. Await the promise, or write `void` with a reason. Catch only the kind you expect and let the rest through
+- **Await every promise.** Write `void` with a reason when you intentionally ignore one. Catch only the kind you expect and let the rest through
 
 **Safety**
 
@@ -89,11 +90,11 @@ Each rule's condition and source links are in [docs/design.md](docs/design.md).
 
 **Code**
 
-- **Comments explain why, not what.** Two or three lines, hard ceiling five. Longer reasoning goes to a docstring, README, or decision, and the comment points there. Do not restate the same fact in several places
+- **Inline comments explain why, not what.** TSDoc on exported APIs and important internal functions is the contract (see Testing). Inline comments stay two or three lines, hard ceiling five; longer reasoning goes to a docstring, README, or decision. Do not restate the same fact in several places
 - **Reuse existing guards and helpers.** Reimplementation is the most common AI-authored defect. Look in `packages/core` and the package you are editing first
 - **New abstractions need two call sites.** Build for what exists, not for a guessed future
 - **Match the surrounding code.** Naming, structure, and comment density come from the adjacent file. The type, validation, and safety rules above win over local style
-- **Generated files are not hand-edited.** Keep headers and regeneration commands intact
+- **Edit generated files by regenerating them.** Keep headers and regeneration commands intact
 
 ### Package Structure
 
@@ -131,11 +132,16 @@ The PoC is for manual checks only. New product work goes into `packages/`.
 
 ### Writing Tests - Required Practices
 
-- **Do not mock persistence.** Use real SQLite (`:memory:` or a temp file); the schema and constraints are part of what you test
-- **A test names the regression it catches.** If it cannot be said in one line, do not add it. Write `// Catches: <bug>` above the case
+- **Start from test analysis.** Derive test conditions from the issue's goal, acceptance criteria, docs, and contracts. Record `## テスト条件` and `## テスト設計` in the issue (Example Mapping + Given/When/Then). Test design is a separate step from writing code
+- **Choose the lowest layer that can prove the behavior.** One scenario runs in exactly one layer
+- **Tests live next to the code.** Unit tests are `packages/<pkg>/src/<module>.test.ts`; integration is `packages/<pkg>/test/integration/`; E2E is `e2e/`. In-source (`if (import.meta.vitest)`) and TSDoc `@example` doctests are for small, pure functions and public contracts
+- **Assertions use Vitest `expect`.** For type narrowing, use an explicit check or the `defined()` helper
+- **A test names the regression it catches.** Write `// Catches: <bug>` for regression tests. Do not put issue numbers in tests, code, or TODO comments
 - Cover failure paths: invalid input, illegal transitions, conflicts, unknown enum values
 - Test behavior, not implementation: no assertions on internal helper names, log wording, or CSS. One behavior per test; a test that passes when the logic is broken is not a test
-- **Make sure the test runs.** Vitest 5 (`vitest run`); assertions use `node:assert/strict`. The full discipline is in [docs/testing.md](docs/testing.md)
+- **TSDoc declares the contract.** Exported APIs and important internal functions document preconditions, invariants, errors, and examples. Tests prove them
+- **The issue and TSDoc are the only test-management artifacts; tests are the proof**
+- **Make sure the test runs.** Vitest 5 (`vitest run`); the full discipline is in [docs/testing.md](docs/testing.md)
 
 ### How to run tests
 
@@ -149,9 +155,11 @@ Inside `nix develop`. Tests use Vitest; the layers and rules are in [docs/testin
 
 ### Test Structure
 
-Tests live in `packages/<pkg>/test/*.test.ts`. A test that does not finish in one process (rooted helper, pi-env daemon, bubblewrap, a child process) lives in `packages/<pkg>/test/integration/`; a file that runs in both tiers is `*.tiers.test.ts`. There is no shared fixture package yet: each file creates its own in-memory or temporary SQLite database and closes it.
+Tests live next to the code they prove. Unit tests are `packages/<pkg>/src/<module>.test.ts`; a test that needs another process (rooted helper, pi-env daemon, bubblewrap, a child process) lives in `packages/<pkg>/test/integration/`. E2E is `e2e/` and is not part of `npm run check`. There is no shared fixture package: each package keeps its builders in `test/support/`, and each test creates its own temporary database or directory.
 
 Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS_CHROME` to override the binary.
+
+Existing tests are being migrated: `node:assert` → `expect` (0184), colocation (0186), TSDoc / doctest rollout (0187).
 
 ## Review
 
@@ -159,14 +167,14 @@ Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS
 - **Independent review after implementation, before commit.** Your own reading is not review. A change in scope is done when `npm run check` passes _and_ an agent that wrote none of the code returns `PASS`. The procedure is [docs/review.md](docs/review.md); read only the invariant files the change touches
 - **Only regressions block.** What this change made worse is blocking; what pre-dates it becomes an issue, not a blocker (definition: [docs/review.md](docs/review.md)). Ask for the smallest correction that restores the contract
 - **A fix is re-reviewed.** The fix diff is where new defects enter (hns shipped two in one round). The reviewer checks the fix against the boundary schemas and docs it touched
-- **Record it.** Verdict, reviewer, HEAD, and blocking findings go in the issue's `## Result`. No record, no `done`
+- **Record it.** Verdict, reviewer, HEAD, and blocking findings go in the issue's `## Result` before it is marked `done`
 
 ## Linting & Formatting
 
-- **oxlint** with the vendored [anti-slop](https://github.com/dmmulroy/anti-slop) rules (`tools/oxlint/anti-slop/`). Read a rule before disabling it; do not edit the vendored copy without recording it in `UPSTREAM.md`
+- **oxlint** with the vendored [anti-slop](https://github.com/dmmulroy/anti-slop) rules (`tools/oxlint/anti-slop/`). Read a rule before disabling it; record every edit to the vendored copy in `UPSTREAM.md`
 - **oxfmt** owns whitespace. `require-readable-spacing` is disabled because the two disagree
 - `npm run lint` / `npm run fmt`; the pre-commit hook runs the gate (`tools/gate/`), scoped to the staged packages
-- Type checks run per workspace (`tsrs --noEmit`, D044); declaration emit stays on `tsc`
+- Type checks run per workspace (`tsrs --noEmit`, D044); declaration emit is `tsdown` (core; other packages migrate in 0187)
 
 ## Commit Guidelines
 
@@ -190,4 +198,4 @@ Read on demand — not every session:
 | How to review a finished slice                | `docs/review.md` (checks; sources linked per item)                 |
 | Design rules, conditions and sources          | `docs/design.md` (read before designing)                           |
 | Comparison with the golden examples           | `docs/typescript.md`                                               |
-| Current backlog                               | `work/BOARD.md`, `work/issues/`                                    |
+| Current backlog                               | `work/BOARD.md`, `work/issues/`。着手は `priority: now` だけ       |

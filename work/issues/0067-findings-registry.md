@@ -1,7 +1,7 @@
 # 0067: レビュー findings の記録場所
 
 status: done
-depends-on: -
+depends-on: —
 touches: work/findings
 
 ## Goal

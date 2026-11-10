@@ -1,6 +1,7 @@
 # 0056: workspace の temp を後片付けする
 
 status: open
+priority: batch
 depends-on: 0045
 touches: packages/workspace
 

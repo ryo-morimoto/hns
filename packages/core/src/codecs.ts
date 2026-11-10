@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import type { Brand } from "./types.ts";
+import type { Brand, ConversationId, ProjectId } from "./types.ts";
 
 /** An ISO 8601 timestamp. Only isoTimestamp() / IsoTimestampSchema build the brand. */
 export type IsoTimestamp = Brand<string, "IsoTimestamp">;
@@ -42,7 +42,35 @@ export function operationId(value: string): OperationId {
   return v.parse(OperationIdSchema, value);
 }
 
-/** Derive an OperationId from arbitrary text: outside characters become "-", then the length is capped. */
+/**
+ * Derive an OperationId from arbitrary text: outside characters become "-", then the length is capped.
+ *
+ * @remarks
+ * The returned value always satisfies OperationIdSchema.
+ *
+ * @example
+ * ```ts @import.meta.vitest
+ * expect(operationIdFrom("a b")).toBe("a-b");
+ * expect(operationIdFrom("x".repeat(80)).length).toBe(64);
+ * ```
+ */
 export function operationIdFrom(text: string): OperationId {
   return operationId(text.replaceAll(NOT_OPERATION_ID, "-").slice(0, OPERATION_ID_MAX_LENGTH));
 }
+/** A project id, built at the boundary where an untrusted string becomes a ProjectId. */
+export const ProjectIdSchema: v.GenericSchema<unknown, ProjectId> = v.pipe(
+  v.string(),
+  v.transform((value): ProjectId => {
+    // SAFETY: the value is a validated string; the brand exists only in the type.
+    return value as ProjectId;
+  }),
+);
+
+/** A conversation id, built at the boundary where an untrusted string becomes a ConversationId. */
+export const ConversationIdSchema: v.GenericSchema<unknown, ConversationId> = v.pipe(
+  v.string(),
+  v.transform((value): ConversationId => {
+    // SAFETY: the value is a validated string; the brand exists only in the type.
+    return value as ConversationId;
+  }),
+);

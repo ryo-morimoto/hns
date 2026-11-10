@@ -1,12 +1,12 @@
-import { inject, test } from "vitest";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, readdir, rename, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import { Crash, Denied, FileFailure, Workspace } from "../src/index.ts";
-import { openWorkspace, rootOf, targetsForTier, withTarget } from "./support.ts";
+import { Crash, Denied, FileFailure, Workspace } from "../../src/index.ts";
+import { DIRFD_TARGET, openWorkspace, rootOf, withTarget } from "../support.ts";
 
-const targets = targetsForTier(inject("tier"));
+const targets = [DIRFD_TARGET] as const;
 
 for (const testTarget of targets) {
   test(testTarget.label + ": a write applies and a read sees it", async () => {
@@ -260,7 +260,7 @@ for (const testTarget of targets) {
   });
 
   // The dirfd helper is what makes this "unknown" instead of "conflict".
-  test.skipIf(!testTarget.rooted)(
+  test(
     testTarget.label +
       ": a parent swapped for a link before the rename is unknown and nothing escapes",
     async () => {

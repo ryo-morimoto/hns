@@ -6,17 +6,17 @@
 
 不変条件は条件で分ける。変更が触るものだけ読み、触っていない領域は読まない（common は常に）。
 
-| 条件 | 不変条件 |
-| --- | --- |
-| 常に | [common.md](review/common.md) — 失敗の形・型、schema、docs の主張、テスト、抽象、修正そのもの |
-| パス・コマンド・秘密・sandbox・認可・既定値・降格 | [security.md](review/security.md) |
-| 永続化・書込・再送・並行・上限 | [persistence.md](review/persistence.md) |
-| wire / schema / signature / イベント名 / 互換 | [contracts.md](review/contracts.md) |
-| 画面・操作・状態・文言（UI/UX） | [ux.md](review/ux.md) |
-| 観点を足す・削るときだけ | [eval.md](review/eval.md) |
+| 条件                                              | 不変条件                                                                                      |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 常に                                              | [common.md](review/common.md) — 失敗の形・型、schema、docs の主張、テスト、抽象、修正そのもの |
+| パス・コマンド・秘密・sandbox・認可・既定値・降格 | [security.md](review/security.md)                                                             |
+| 永続化・書込・再送・並行・上限                    | [persistence.md](review/persistence.md)                                                       |
+| wire / schema / signature / イベント名 / 互換     | [contracts.md](review/contracts.md)                                                           |
+| 画面・操作・状態・文言（UI/UX）                   | [ux.md](review/ux.md)                                                                         |
+| 観点を足す・削るときだけ                          | [eval.md](review/eval.md)                                                                     |
 
 観点の根拠は [design.md](design.md) の各項目（原典リンク付き。設計時の命令もそこにある）。迷ったら diff のファイル名で決める（`sandbox` → security、`journal` / `store` / `migrate` → persistence、
-`http-schemas` / `core/types` → contracts）。
+`graphql` / `core/types` → contracts）。
 
 ## 手順
 
@@ -30,10 +30,10 @@
 
 ## 判定
 
-| 判定 | 意味 |
-| --- | --- |
-| PASS | blocking 無し。未確認事項と残件を列挙 |
-| FAIL | blocking あり（再現手順と観測、または成立する経路） |
+| 判定    | 意味                                                                   |
+| ------- | ---------------------------------------------------------------------- |
+| PASS    | blocking 無し。未確認事項と残件を列挙                                  |
+| FAIL    | blocking あり（再現手順と観測、または成立する経路）                    |
 | BLOCKED | HEAD・受入条件・環境・依存が揃わず確認できない。自己確認で置き換えない |
 
 **blocking** = この変更で生まれた 重大・高・中。前からある問題は diff がその経路を悪化させた場合だけ（他は issue）。

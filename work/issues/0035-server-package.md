@@ -1,6 +1,8 @@
 # 0035: server パッケージ（移植）
 
-status: open
+> 0145（Worker の入口）と 0146（Session DO）に置き換え（D047）。着手しない。
+
+status: superseded
 depends-on: 0037, 0046, 0047, 0048, 0049, 0050
 touches: packages/server, package.json, package-lock.json
 

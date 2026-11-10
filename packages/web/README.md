@@ -1,7 +1,7 @@
 # @hns/web
 
-hns の React UI。契約は @hns/core の ROUTES / parseResponse で、response 型をここで手書きしない。
+hns の React UI。読み取りは `WorkspaceSource`（モデルを返す口）を通し、response 型をここで手書きしない。
+今は fixture 実装だけで、0178 が Relay に置き換える。
 
-- `npm run dev -w @hns/web`: Vite。`/api` は `HNS_API`（既定 http://127.0.0.1:8787）へ proxy
-- `VITE_HNS_FIXTURES=1`: fixture client で描く（server 0035 は不要）
+- `npm run dev -w @hns/web`: Vite。server はまだ無い（0145 が `/graphql` の口を作る）
 - `npm run typecheck / build / test -w @hns/web`

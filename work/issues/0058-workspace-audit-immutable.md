@@ -1,6 +1,7 @@
 # 0058: auditLog を不変にする
 
 status: open
+priority: plan
 depends-on: 0045
 touches: packages/workspace
 

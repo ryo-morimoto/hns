@@ -1,7 +1,10 @@
 # 0040: セルフホストの配布
 
+> 前提変更: 「セルフホスト」の意味は 0140 で限定された（UI は自前、脳は Cloudflare）。
+
 status: open
-depends-on: 0035, 0036
+priority: plan
+depends-on: 0036, 0145, 0146
 touches: packages/server, docs
 
 ## Goal

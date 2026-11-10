@@ -1,7 +1,7 @@
 # 0051: 並列ブランチのルールと前提の整理
 
 status: done
-depends-on: -
+depends-on: —
 touches: work/README.md, work/BOARD.md, work/issues/*（新規の雛形）
 
 ## Goal

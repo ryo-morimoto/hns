@@ -1,6 +1,7 @@
 # 0063: ContractError に path を残す
 
 status: open
+priority: batch
 depends-on: 0037
 touches: packages/core
 

@@ -1,6 +1,7 @@
 # 0032: 6パッケージへの移植
 
 status: open
+priority: plan
 depends-on: 0031
 touches: packages/, work/poc/
 

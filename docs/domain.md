@@ -4,17 +4,17 @@
 
 ## エンティティ
 
-| もの | 主な属性 | 関係 |
-| --- | --- | --- |
-| Project | id, name, createdAt | Workspace・Conversation・Task・Workflow を持つ |
-| Workspace | id, machineId, rootPath | Project に属する |
-| Conversation | Durable の id, projectId, title, archived, deletedAt | 一覧は更新順。削除は論理削除（0029） |
-| Task | id, projectId, title, status, createdAt, updatedAt | Project に属し、Run を持つ |
-| Run | id, taskId?, conversationId?, workspaceId, status | 実行の記録 |
-| Workflow | id, projectId, version, graph | Project に属する |
-| WorkflowRun | id, workflowId, version, status, startedAt | 版を固定して実行する |
-| Automation | id, projectId, trigger, action, enabled | Webhook / スケジュールの起点（[automation.md](automation.md)） |
-| Firing | id, automationId, status, runId | 起動の記録。実行は Workflow Run に委譲 |
+| もの         | 主な属性                                             | 関係                                                           |
+| ------------ | ---------------------------------------------------- | -------------------------------------------------------------- |
+| Project      | id, name, createdAt                                  | Workspace・Conversation・Task・Workflow を持つ                 |
+| Workspace    | id, machineId, rootPath                              | Project に属する                                               |
+| Conversation | Durable の id, projectId, title, archived, deletedAt | 一覧は更新順。削除は論理削除（0029）                           |
+| Task         | id, projectId, title, status, createdAt, updatedAt   | Project に属し、Run を持つ                                     |
+| Run          | id, taskId?, conversationId?, workspaceId, status    | 実行の記録                                                     |
+| Workflow     | id, projectId, version, graph                        | Project に属する                                               |
+| WorkflowRun  | id, workflowId, version, status, startedAt           | 版を固定して実行する                                           |
+| Automation   | id, projectId, trigger, action, enabled              | Webhook / スケジュールの起点（[automation.md](automation.md)） |
+| Firing       | id, automationId, status, runId                      | 起動の記録。実行は Workflow Run に委譲                         |
 
 ## 状態
 
@@ -34,8 +34,8 @@
 
 ## 未決
 
-| ID | 論点 | 案 | 決める時 |
-| --- | --- | --- | --- |
+| ID   | 論点       | 案              | 決める時    |
+| ---- | ---------- | --------------- | ----------- |
 | D-04 | 削除と履歴 | 論理削除 + 監査 | Task 実装時 |
 
 ## 実装順

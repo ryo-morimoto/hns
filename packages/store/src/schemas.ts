@@ -1,8 +1,6 @@
 import * as v from "valibot";
 import {
   AUTOMATION_FIRING_STATUSES,
-  AutomationActionSchema,
-  AutomationTriggerSchema,
   ConversationIdSchema,
   EVENT_LEVELS,
   EVENT_NAMES,
@@ -11,10 +9,11 @@ import {
   TASK_STATUSES,
   WORKFLOW_NODE_STATUSES,
   WORKFLOW_RUN_STATUSES,
-  WorkflowGraphSchema,
 } from "@hns/core";
 import type {
   Automation,
+  AutomationAction,
+  AutomationTrigger,
   Conversation,
   Event,
   Firing,
@@ -23,6 +22,9 @@ import type {
   Task,
   Usage,
   Workflow,
+  WorkflowEdge,
+  WorkflowGraph,
+  WorkflowNode,
   WorkflowRun,
   WorkflowRunNode,
 } from "@hns/core";
@@ -84,6 +86,50 @@ function parseJsonText<TValue>(schema: v.GenericSchema<unknown, TValue>, text: s
   const parsed: unknown = JSON.parse(text);
   return v.parse(schema, parsed);
 }
+
+// The graph, trigger, and action are model shapes stored as JSON text. Store validates them
+// on the way in and on the way out; no other package owns this parsing.
+
+export const WorkflowNodeSchema: v.GenericSchema<unknown, WorkflowNode> = v.variant("type", [
+  v.object({ id: v.string(), type: v.literal("agent"), prompt: v.string() }),
+  v.object({ id: v.string(), type: v.literal("human"), prompt: v.string() }),
+  v.object({ id: v.string(), type: v.literal("tool"), command: v.string() }),
+]);
+
+export const WorkflowEdgeSchema: v.GenericSchema<unknown, WorkflowEdge> = v.object({
+  from: v.string(),
+  to: v.string(),
+});
+
+export const WorkflowGraphSchema: v.GenericSchema<unknown, WorkflowGraph> = v.object({
+  nodes: v.pipe(v.array(WorkflowNodeSchema), v.minLength(1)),
+  edges: v.array(WorkflowEdgeSchema),
+});
+
+export const AutomationTriggerSchema: v.GenericSchema<unknown, AutomationTrigger> = v.variant(
+  "type",
+  [
+    v.object({ type: v.literal("schedule"), cron: v.string(), timeZone: v.optional(v.string()) }),
+    v.object({ type: v.literal("webhook"), token: v.optional(v.string()) }),
+  ],
+);
+
+export const AutomationActionSchema: v.GenericSchema<unknown, AutomationAction> = v.variant(
+  "type",
+  [
+    v.object({
+      type: v.literal("workflow"),
+      workflowId: v.string(),
+      input: v.optional(v.string()),
+    }),
+    v.object({
+      type: v.literal("chat"),
+      conversationId: v.optional(ConversationIdSchema),
+      prompt: v.string(),
+    }),
+    v.object({ type: v.literal("task"), title: v.optional(v.string()) }),
+  ],
+);
 
 /** The DB keeps the graph as JSON text; the public model keeps it as an object. */
 const workflowRowSchema = v.object({

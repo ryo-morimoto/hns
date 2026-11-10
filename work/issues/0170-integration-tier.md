@@ -34,3 +34,4 @@ touches: packages/*/test/**, vitest.config.ts, packages/*/package.json, docs/tes
 - reviewer: tier-reviewer
 - HEAD: d40ac8f
 - blocking findings: なし（修正後に再レビュー PASS）
+- 追記（2026-11-10）: `*.tiers.test.ts` の二重実行は 0185 で廃止した。層の基準（1プロセスで終わるか）と unit / integration の分離は維持する。

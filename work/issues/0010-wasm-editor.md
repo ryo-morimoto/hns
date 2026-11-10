@@ -1,7 +1,8 @@
 # 0010: WASM エディタ（Want）
 
 status: open
-depends-on: -
+priority: hold
+depends-on: —
 touches: work/poc/wasm-editor, work/research/wasm-editor.md
 
 ## Goal

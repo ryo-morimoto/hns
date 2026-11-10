@@ -14,8 +14,8 @@ import type {
 } from "@earendil-works/pi-durable/env";
 import { ForwardingEnv } from "../../src/env.ts";
 import { Unavailable, Workspace } from "../../src/index.ts";
-import { KINDS, openWorkspace, rootOf, swapParent, withTarget } from "../support.ts";
-import type { Target, TestTarget } from "../support.ts";
+import { DIRFD_TARGET, openWorkspace, rootOf, swapParent, withTarget } from "../support.ts";
+import type { Target } from "../support.ts";
 
 /** An environment that runs the attack once, right after it resolved a path. */
 class AttackEnv extends ForwardingEnv {
@@ -101,7 +101,7 @@ async function seeded(target: Target, name: string, rooted: boolean) {
   return { root, outside, version };
 }
 
-const targets = KINDS.map((kind): TestTarget => ({ kind, rooted: true, label: kind }));
+const targets = [DIRFD_TARGET] as const;
 
 for (const testTarget of targets) {
   test(testTarget.label + ": opens in dirfd mode", async () => {

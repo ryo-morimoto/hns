@@ -10,12 +10,12 @@
 
 ## エンティティ
 
-| もの | 属性 |
-| --- | --- |
-| Automation | id, projectId, name, trigger, action, enabled, createdAt |
-| Trigger | schedule（cron / timeZone）または webhook（token） |
-| Action | workflow（workflowId / input）・chat（conversationId / prompt）・task（title） |
-| Firing | id, automationId, at, status（queued/running/done/failed）, detail, runId |
+| もの       | 属性                                                                           |
+| ---------- | ------------------------------------------------------------------------------ |
+| Automation | id, projectId, name, trigger, action, enabled, createdAt                       |
+| Trigger    | schedule（cron / timeZone）または webhook（token）                             |
+| Action     | workflow（workflowId / input）・chat（conversationId / prompt）・task（title） |
+| Firing     | id, automationId, at, status（queued/running/done/failed）, detail, runId      |
 
 ## 決めたこと
 
@@ -26,16 +26,16 @@
 - 停止は `enabled = false`。実行中のものは止めない（次の機会から止まる）。
 - cron は 5 フィールド、**サーバのローカル時刻**。DOM と DOW を両方指定したときは OR（標準 cron）。
 - 同じ分に二度は発火しない（`last_fired_at`）。Webhook は 202 を返し、実行は非同期。
-- テスト用に `POST /api/debug/tick`（`allowDebug` のときだけ）で任意の時刻を流せる。
+- テストは時計を注入する（製品にデバッグ用の口は置かない）。
 
 ## 未決
 
-| ID | 論点 | 案 | 決める時 |
-| --- | --- | --- | --- |
-| A-01 | cron の実装 | 自前の 5 フィールド + TZ、またはライブラリ | 実装時 |
-| A-02 | 認証 | localhost 前提。token は URL に含める | 外部公開前 |
-| A-03 | Webhook の入力検証 | JSON サイズ上限と schema | 実装時 |
-| A-04 | 失敗の通知 | まず Firing に残すだけ | 必要になったら |
+| ID   | 論点               | 案                                         | 決める時       |
+| ---- | ------------------ | ------------------------------------------ | -------------- |
+| A-01 | cron の実装        | 自前の 5 フィールド + TZ、またはライブラリ | 実装時         |
+| A-02 | 認証               | localhost 前提。token は URL に含める      | 外部公開前     |
+| A-03 | Webhook の入力検証 | JSON サイズ上限と schema                   | 実装時         |
+| A-04 | 失敗の通知         | まず Firing に残すだけ                     | 必要になったら |
 
 ## 実装順
 

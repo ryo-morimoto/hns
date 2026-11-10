@@ -19,7 +19,7 @@
 ## 想定内の失敗は型で返す
 
 - **条件**: 拒否・競合・不在・上限など、利用者が直せる失敗があるとき
-- **命令**: `Result` か `ErrorCode` で返す。例外は defect（バグ）だけにする
+- **命令**: `Result` か、その面の閉じた失敗 union で返す。例外は defect（バグ）だけにする
 - **補足**: 1つの拒否で run を落とさない。呼び出し側が分岐できる形にする
 - **Ref**: [Design by Contract](https://www.informit.com/store/object-oriented-software-construction-9780136291558) / [Fail Fast](https://martinfowler.com/ieeeSoftware/failFast.pdf) / [Command-Query Separation](https://martinfowler.com/bliki/CommandQuerySeparation.html)
 

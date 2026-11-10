@@ -1,7 +1,7 @@
 # 0005: TOCTOU の窓を閉じる
 
 status: done
-depends-on: -
+depends-on: —
 touches: work/poc/workspace-core, docs/workspace.md
 
 ## Goal

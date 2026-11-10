@@ -1,6 +1,7 @@
 # 0059: agent の bash も観測する
 
 status: open
+priority: plan
 depends-on: 0034
 touches: packages/agent
 

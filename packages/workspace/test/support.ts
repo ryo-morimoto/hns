@@ -8,36 +8,20 @@ import { Connection, LocalExecutionEnv, localDaemon } from "@earendil-works/pi-e
 import { Workspace } from "../src/index.ts";
 import type { WorkspaceOptions } from "../src/index.ts";
 
-export const KINDS = ["node", "local"] as const;
-type Kind = (typeof KINDS)[number];
+type Kind = "node" | "local";
 
-/**
- * How one tier runs a scenario. "checks" stays in this process; the others
- * spawn the rooted helper or the pi-env daemon for every operation.
- */
+/** How one scenario runs: in-process, or through the pi-env daemon, with rooted dirfd operations. */
 export interface TestTarget {
   readonly kind: Kind;
   readonly rooted: boolean;
   readonly label: string;
 }
 
-export type Tier = "unit" | "integration";
+/** The production path: the rooted helper with dirfd operations, run once. */
+export const DIRFD_TARGET: TestTarget = { kind: "node", rooted: true, label: "node/dirfd" };
 
-declare module "vitest" {
-  export interface ProvidedContext {
-    tier: Tier;
-  }
-}
-
-const UNIT_TARGETS: readonly TestTarget[] = [{ kind: "node", rooted: false, label: "node/checks" }];
-const INTEGRATION_TARGETS: readonly TestTarget[] = [
-  { kind: "node", rooted: true, label: "node/dirfd" },
-  { kind: "local", rooted: true, label: "local/dirfd" },
-];
-
-/** The vitest project decides the tier; the same scenario file runs in both. */
-export const targetsForTier = (tier: Tier): readonly TestTarget[] =>
-  tier === "integration" ? INTEGRATION_TARGETS : UNIT_TARGETS;
+/** A smoke target for the local daemon; the full scenario set does not run here. */
+export const LOCAL_TARGET: TestTarget = { kind: "local", rooted: true, label: "local/daemon" };
 
 export interface Target {
   readonly base: string;

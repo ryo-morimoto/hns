@@ -1,6 +1,7 @@
 # 0041: CI と開発環境の固定
 
 status: open
+priority: batch
 depends-on: 0046
 touches: work/issues/0004, .github
 

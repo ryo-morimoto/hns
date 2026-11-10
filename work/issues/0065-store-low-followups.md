@@ -1,6 +1,7 @@
 # 0065: store の low 残件（clock・ISO・comment）
 
 status: open
+priority: hold
 depends-on: 0047
 touches: packages/store, packages/core/src/http.ts, docs
 

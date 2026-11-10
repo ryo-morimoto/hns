@@ -4,13 +4,13 @@
 
 ## 参照元
 
-| リポジトリ | 見るファイル | 学ぶこと |
-| --- | --- | --- |
-| Trigger.dev | [`internal-packages/run-engine/AGENTS.md`](https://github.com/triggerdotdev/trigger.dev/blob/main/internal-packages/run-engine/AGENTS.md)（実在。`apps/webapp/AGENTS.md` は無い） | 失敗前提の実行管理。状態・ロック・リトライ・checkpoint・testcontainers |
-| Medusa | [`workflows-sdk/src/utils/composer/create-step.ts`](https://github.com/medusajs/medusa/blob/develop/packages/core/workflows-sdk/src/utils/composer/create-step.ts) / [`create-workflow.ts`](https://github.com/medusajs/medusa/blob/develop/packages/core/workflows-sdk/src/utils/composer/create-workflow.ts) | step の invoke / compensate、workflow の合成、モジュール分離 |
-| Twenty | [`CLAUDE.md`](https://github.com/twentyhq/twenty/blob/main/CLAUDE.md)（リポジトリ直下。`packages/twenty-server/CLAUDE.md` は無い） | 日常の規約。type 優先・literal union・named generic・guard の再利用 |
-| Payload CMS | [`AGENTS.md`](https://github.com/payloadcms/payload/blob/main/AGENTS.md) / [`fields/validations.ts`](https://github.com/payloadcms/payload/blob/main/packages/payload/src/fields/validations.ts) | 境界での検証。`test/<feature>/{config,int.spec,e2e.spec}.ts` の3層テスト |
-| Effect | [`Schema.ts`](https://github.com/Effect-TS/effect/blob/main/packages/effect/src/Schema.ts) / [`Layer.ts`](https://github.com/Effect-TS/effect/blob/main/packages/effect/src/Layer.ts) | `decodeUnknown` による境界検証、型付きエラー、依存の合成 |
+| リポジトリ  | 見るファイル                                                                                                                                                                                                                                                                                                   | 学ぶこと                                                                 |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Trigger.dev | [`internal-packages/run-engine/AGENTS.md`](https://github.com/triggerdotdev/trigger.dev/blob/main/internal-packages/run-engine/AGENTS.md)（実在。`apps/webapp/AGENTS.md` は無い）                                                                                                                              | 失敗前提の実行管理。状態・ロック・リトライ・checkpoint・testcontainers   |
+| Medusa      | [`workflows-sdk/src/utils/composer/create-step.ts`](https://github.com/medusajs/medusa/blob/develop/packages/core/workflows-sdk/src/utils/composer/create-step.ts) / [`create-workflow.ts`](https://github.com/medusajs/medusa/blob/develop/packages/core/workflows-sdk/src/utils/composer/create-workflow.ts) | step の invoke / compensate、workflow の合成、モジュール分離             |
+| Twenty      | [`CLAUDE.md`](https://github.com/twentyhq/twenty/blob/main/CLAUDE.md)（リポジトリ直下。`packages/twenty-server/CLAUDE.md` は無い）                                                                                                                                                                             | 日常の規約。type 優先・literal union・named generic・guard の再利用      |
+| Payload CMS | [`AGENTS.md`](https://github.com/payloadcms/payload/blob/main/AGENTS.md) / [`fields/validations.ts`](https://github.com/payloadcms/payload/blob/main/packages/payload/src/fields/validations.ts)                                                                                                               | 境界での検証。`test/<feature>/{config,int.spec,e2e.spec}.ts` の3層テスト |
+| Effect      | [`Schema.ts`](https://github.com/Effect-TS/effect/blob/main/packages/effect/src/Schema.ts) / [`Layer.ts`](https://github.com/Effect-TS/effect/blob/main/packages/effect/src/Layer.ts)                                                                                                                          | `decodeUnknown` による境界検証、型付きエラー、依存の合成                 |
 
 ## 1. 境界で parse する（全5プロジェクトがやっている）
 
@@ -35,7 +35,7 @@ const project = parseProject(JSON.parse(body)); // 失敗したら throw か Res
 Medusa の step は **invoke と compensate を対**で持つ。失敗したら補償を実行する、という業務の性質が型に出ている。
 
 ```ts
-type CompensateFn<T> = (input: T | undefined, context: StepExecutionContext) => unknown
+type CompensateFn<T> = (input: T | undefined, context: StepExecutionContext) => unknown;
 ```
 
 Trigger.dev は run を `RunAttempt`・`Checkpoint`・`Waitpoint` のような**状態と遷移**に分ける。
@@ -111,17 +111,17 @@ Trigger.dev は **testcontainers** で PostgreSQL と Redis を立て、engine �
 
 ## 8. よくある誤解
 
-| 誤解 | 実際 |
-| --- | --- |
-| `as` で型を付けられる | 実行時は何も起きない。検証ではない |
-| `satisfies` で安全になる | コンパイル時だけ。入力の検証にはならない |
-| `any` は便利 | 型検査が伝播して消える。`unknown` + 検証が正しい |
-| interface の方が速い | 性能差はない |
-| enum が安全 | 実行時オブジェクトを持つ。literal union で足りる |
-| optional と null は同じ | 「無い」「null」「空」は別。`exactOptionalPropertyTypes` で区別できる |
-| 構造的部分型は安全 | 余計なプロパティは literal のときしか検査されない |
-| 配列は共変で安全 | `string[]` を `(string | number)[]` に入れると実行時に壊れる |
-| 型レベル計算はすごい | アプリコードでは可読性を落とす。ライブラリの仕事 |
+| 誤解                     | 実際                                                                  |
+| ------------------------ | --------------------------------------------------------------------- |
+| `as` で型を付けられる    | 実行時は何も起きない。検証ではない                                    |
+| `satisfies` で安全になる | コンパイル時だけ。入力の検証にはならない                              |
+| `any` は便利             | 型検査が伝播して消える。`unknown` + 検証が正しい                      |
+| interface の方が速い     | 性能差はない                                                          |
+| enum が安全              | 実行時オブジェクトを持つ。literal union で足りる                      |
+| optional と null は同じ  | 「無い」「null」「空」は別。`exactOptionalPropertyTypes` で区別できる |
+| 構造的部分型は安全       | 余計なプロパティは literal のときしか検査されない                     |
+| 配列は共変で安全         | `string[]` を `(string                                                | number)[]` に入れると実行時に壊れる |
+| 型レベル計算はすごい     | アプリコードでは可読性を落とす。ライブラリの仕事                      |
 
 ## 9. レビューのチェックリスト
 
@@ -145,17 +145,18 @@ Trigger.dev は **testcontainers** で PostgreSQL と Redis を立て、engine �
 - 型を先に書くこと（type first）と、境界で parse することは両立する。型はモデル、parse は入口。
 
 推奨: HTTP の入口と DB の読み出しに parse を置く。zod を使わないなら手書きの guard でもよいが、**検証を省かない**。
+
 ## 11. hns での適用（2026-11-07 追記）
 
 参照元を実際に取得して確かめたパスは上の表のとおり。ここまでの実装に落としたもの:
 
-| 原則 | hns の実装 |
-| --- | --- |
-| 境界で parse（Payload / Effect） | `packages/core/src/contract.ts` の `parseRequest` / `parseResponse`。`ROUTES` の schema で parse し、失敗は `Result` で返す。DB は `packages/store/src/parse.ts` |
-| 失敗を型で（Effect / Trigger） | `packages/core/src/result.ts` の `Result<T, E>` と `ContractError`。HTTP の失敗は `ErrorCode` の union |
-| 状態を型で・遷移は1箇所（Medusa / Trigger） | `packages/core/src/workflow.ts` の遷移表。`WORKFLOW_RUN_STATUSES` 等は const array 由来 |
-| 3層テスト（Payload） | unit は各パッケージの `test/`。store は実 SQLite。統合 / E2E は server（0035）と 0043 で足す |
-| 依存は端で組み立てる（Effect Layer） | まだ server が無いので未適用。0035 の composition root で行う |
+| 原則                                        | hns の実装                                                                                                                                                       |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 境界で parse（Payload / Effect）            | `Result` は `packages/core/src/result.ts`、DB は `packages/store/src/parse.ts`。GraphQL の入力は resolver で parse し、REST の面は実装するパッケージが schema を持つ（D059） |
+| 失敗を型で（Effect / Trigger）              | `packages/core/src/result.ts` の `Result<T, E>`。面ごとの失敗は、その面の union で返す                                                             |
+| 状態を型で・遷移は1箇所（Medusa / Trigger） | `packages/core/src/workflow.ts` の遷移表。`WORKFLOW_RUN_STATUSES` 等は const array 由来                                                                          |
+| 3層テスト（Payload）                        | unit は各パッケージの `test/`。store は実 SQLite。統合 / E2E は server（0035）と 0043 で足す                                                                     |
+| 依存は端で組み立てる（Effect Layer）        | まだ server が無いので未適用。0035 の composition root で行う                                                                                                    |
 
 意図的に合わせないもの:
 

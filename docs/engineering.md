@@ -4,20 +4,21 @@
 
 ## 1. 技術スタック
 
-| 層 | 選定 | 理由 | 捨てたもの |
-| --- | --- | --- | --- |
-| 言語 | TypeScript strict（`noUncheckedIndexedAccess`） | 境界が多い。型で守る | JS（PoC のまま） |
-| 実行 | Node.js 26（`flake.nix` + nixpkgs-unstable で固定、D035） | 既存の pi-durable と同一。`node:sqlite` が使える | Bun（DB と sandbox の相性が未検証） |
-| HTTP | Fastify 5 | SSE・テストが素直 | Express（検証が弱い）、Hono（未検証） |
-| DB | SQLite（`node:sqlite`） | Durable と同じ。バックアップが簡単 | Postgres（今は不要） |
-| UI | React 19 + Vite 8（Rolldown）+ TanStack Query 5 + Base UI | 最終段の UX を詰めやすい。状態の取り回しが明確。X の新 x.com（2026-11-04）と同じ土台 | 素の DOM（UI が育たない） |
-| 型検査 | tsrs 0.22（D044） | tsc 互換の Rust 実装。型検査を速く保つ。emit は tsc のまま | tsc だけ（遅い） |
-| エディタ | CodeMirror 6 | 軽い。diff は自前で持っている | Monaco（重い） |
-| テスト | Vitest 5（unit / contract / repository / API）+ E2E（0043 で決める） | 1 runner で backend と将来の React を同じ規律に。型ストリップに依存しない | Jest（重い）、node:test（UI で二重化） |
-| Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored） | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
-| パッケージ | **npm workspaces**（`packages/*` + `apps/*`） | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直 | pnpm（今のところ利点より設定が増える） |
+| 層            | 選定                                                                                        | 理由                                                                                 | 捨てたもの                                         |
+| ------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| 言語          | TypeScript strict（`noUncheckedIndexedAccess`）                                             | 境界が多い。型で守る                                                                 | JS（PoC のまま）                                   |
+| 実行          | Worker は workerd / DO。マシンとテストは Node.js 26（`flake.nix` + nixpkgs-unstable、D035） | 既存の pi-durable と同一。マシンにツールチェーンがある                               | Bun（DB と sandbox の相性が未検証）                |
+| HTTP          | Workers（`cf`）                                                                             | DO・WS・D1 に揃う。実行はマシンに置く                                                | Fastify / Hono は使わない（D047）                  |
+| DB            | 制御データは D1、実行中の状態は DO SQLite、ローカルは `node:sqlite`                         | 引く用途は SQL、調整は DO に向く（D049）                                             | Postgres（今は不要）                               |
+| UI            | React 19 + Vite 8（Rolldown）+ Relay（GraphQL）+ TanStack Query 5 + Base UI（D055）          | 最終段の UX を詰めやすい。Relay の colocated fragment と正規化 store で画面単位の要求を 0 にできる | 素の DOM（UI が育たない）                          |
+| 型検査        | tsrs 0.22（D044）                                                                           | tsc 互換の Rust 実装。型検査を速く保つ。emit は tsdown                               | tsc だけ（遅い）                                   |
+| ビルド        | **tsdown 0.23.7**（Rolldown。core で採用、他は移行中）                                        | ESM + d.ts。`import.meta.vitest` を define で落とせる                                 | tsc だけ（DCE なし）                               |
+| エディタ      | CodeMirror 6                                                                                | 軽い。diff は自前で持っている                                                        | Monaco（重い）                                     |
+| テスト        | Vitest 5（unit / contract / integration / component）+ Playwright E2E（0043）               | 1 runner で backend と React を同じ規律に。アサーションは `expect`。層はプロセスで分ける | Jest（重い）、node:test（UI で二重化）             |
+| Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored）         | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる                         | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
+| パッケージ    | **npm workspaces**（`packages/*` + `apps/*`）                                               | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直          | pnpm（今のところ利点より設定が増える）             |
 
-テストの層・禁じ手・flaky の扱いは [testing.md](testing.md)。設計・型・API の規律は [design.md](design.md)。
+テストの分析・設計・配置・TSDoc / doctest は [testing.md](testing.md)。設計・型・API の規律は [design.md](design.md)。
 
 ## 2. コード構造
 
@@ -28,8 +29,9 @@ packages/
   core/       types.ts（モデル）
   workspace/  版・Journal・認可・イベント。./sandbox で exec 隔離
   agent/      Durable の組み立て、ツール、hooks、Model アダプタ
-  store/      SQLite・migration・リポジトリ。./identity で認証と秘密
-  server/     app。HTTP・SSE・Workflow・Automation、bin「hns」
+  store/      SQLite / D1・migration・リポジトリ。./identity で認証と秘密
+  server/     Worker（edge）と DO。HTTP・WS・Workflow・Automation
+  machine/    マシン側の常駐エージェント。ExecutionEnv・署名・sandbox（0147）
   web/        React UI（最後）
 
 各パッケージは [pi の packages](https://github.com/earendil-works/pi/tree/main/packages) に倣う。
@@ -54,7 +56,7 @@ packages/
 4. 型を変えたら、コンパイルが落ちる場所で追従する。
 
 - スキーマは型の写しではなく、境界の検証。型と schema の不一致はコンパイルエラー。
-- SSE のイベントも型で表す。
+- WS のイベントも型で表す（0159）。
 
 ## 4. AI slop を防ぐ
 
@@ -71,21 +73,21 @@ npm 依存ではなく**コピー**として持つ。読んで、必要なら自
 
 **slop の定義**: 動くように見えるが、型と合わない・誰も使わない・根拠のない抽象化・重複した実装。
 
-| 仕組み | 何を止めるか |
-| --- | --- |
-| `noUncheckedIndexedAccess` | 未検証の JSON、`any` の伝播 |
-| anti-slop: `no-unknown-parameters`・`no-unsafe-dictionary-type`・`no-widen-then-assert`・`require-safety-comment-for-type-assertion` | 型を捨てる近道、根拠のない `as` |
-| anti-slop: `no-object-parameters`・`no-array-filter-map`・`no-reduce-accumulator-copy`・`no-module-mocking` | 低信号な実装パターン |
-| `knip` | 未使用の export・依存・ファイル |
-| 依存の追加ルール | 「便利そう」で増える依存。追加は ADR 1枚と exact pin を要求 |
-| 生成コードの明示 | 手で直される生成物（ヘッダに `generated` と再生成コマンド） |
-| 小さな PR・1目的 | ついでのリファクタと機能追加の混在 |
-| 変更ごとの「何を証明したか」 | テストが増えない変更、根拠のない最適化 |
-| 未使用の抽象化の禁止 | 使う予定のない汎用層（YAGNI。増やすなら利用箇所を先に示す） |
-| ドキュメントの同期 | 型・ADR・README の更新漏れ（リンク検査と更新日） |
+| 仕組み                                                                                                                               | 何を止めるか                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `noUncheckedIndexedAccess`                                                                                                           | 未検証の JSON、`any` の伝播                                 |
+| anti-slop: `no-unknown-parameters`・`no-unsafe-dictionary-type`・`no-widen-then-assert`・`require-safety-comment-for-type-assertion` | 型を捨てる近道、根拠のない `as`                             |
+| anti-slop: `no-object-parameters`・`no-array-filter-map`・`no-reduce-accumulator-copy`・`no-module-mocking`                          | 低信号な実装パターン                                        |
+| `knip`                                                                                                                               | 未使用の export・依存・ファイル                             |
+| 依存の追加ルール                                                                                                                     | 「便利そう」で増える依存。追加は ADR 1枚と exact pin を要求 |
+| 生成コードの明示                                                                                                                     | 手で直される生成物（ヘッダに `generated` と再生成コマンド） |
+| 小さな PR・1目的                                                                                                                     | ついでのリファクタと機能追加の混在                          |
+| 変更ごとの「何を証明したか」                                                                                                         | テストが増えない変更、根拠のない最適化                      |
+| 未使用の抽象化の禁止                                                                                                                 | 使う予定のない汎用層（YAGNI。増やすなら利用箇所を先に示す） |
+| ドキュメントの同期                                                                                                                   | 型・ADR・README の更新漏れ（リンク検査と更新日）            |
 
-- `TODO` は issue 番号を必須にする（`TODO(#1234): ...`）。
-- `@ts-expect-error` は理由と issue を同じ行に書く。
+- `TODO` は内容を書く（issue 番号はコードに書かない。issue 側からパスを参照する）。
+- `@ts-expect-error` は理由を同じ行に書く（issue 番号は書かない）。
 - 例外・握りつぶしは「なぜ無視してよいか」をコメントで残す。
 - エージェントが書いたコードも同じゲートを通す。レビューは [review.md](review.md) の手順（契約 → 振る舞い → 証拠）で行う。
 

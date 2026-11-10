@@ -1,5 +1,7 @@
 # 0100: Web の土台（React / Vite / typed client / fixtures）
 
+> 前提変更: 配信は Workers Assets（0160）。typed client と WS の口が増える。
+
 status: done
 depends-on: 0037, 0046
 touches: packages/web, package.json（tsrs / knip 設定）, package-lock.json, vitest.config.ts, oxlint.config.ts, packages/core/package.json, packages/store/package.json, packages/workspace/package.json, packages/agent/package.json, docs/decisions.md, docs/packages.md, docs/engineering.md, docs/testing.md, README.md, AGENTS.md, work/issues/0101-web-design-system.md
@@ -29,7 +31,7 @@ response 型を web で手書きしない。
 - 依存追加は D043 に exact pin と理由を書く
 - src/api は transport と client を分け、client のテストは fetch を差し替える
 - 技術選定の参考: X の記事（2026-11-04）。Vite 8 は Rolldown。named export / barrel なし、境界は parse、UI テストは jsdom + Testing Library（D043）。
-- Relay + GraphQL と SSR / streaming は採らない。hns の契約は typed REST で、読者は自己ホストの認証済み利用者だけ（D043）。
+- ~~Relay + GraphQL と SSR / streaming は採らない。~~ **D055（2026-11-10）で Relay + GraphQL を採用。** typed client は REST 面（passkey / hooks / 運用 / マシン）に残し、アプリの読み書きは 0175–0182 で GraphQL にする。SSR / streaming の不採用は維持。
 - 型検査は tsrs 0.22.0-ts7.1.0-beta（D044）。宣言の emit は tsc のまま。
 - Base UI（`@base-ui/react` 1.9.0）は 0101 で追加する。0100 では未使用の依存を作らない。
 
@@ -42,7 +44,9 @@ response 型を web で手書きしない。
 ## Log
 
 - 2026-11-07: 作成（user）。
+- 2026-11-10: D055 により Relay + GraphQL を採用。0100 の typed client / fixtures は REST 面と画面状態に残る。
 - 2026-11-07: X の記事（2026-11-04）を技術選定の根拠にして D043 を補い、D044（tsrs）を追加。typed client（ROUTES の path 組み立て / parseResponse / ApiError）、fixture client、Workspace harness、jsdom + Testing Library の12テストを実装。Base UI は 0101 で追加する。
+- 2026-11-10: 0188 で typed client・fixture client・REST 契約を削除。shell は `WorkspaceSource`（fixture 実装）で読む。D055 / D059。
 
 ## Result
 

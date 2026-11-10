@@ -1,4 +1,4 @@
-import type { WorkflowEdge, WorkflowGraph } from "./http.ts";
+import type { WorkflowEdge, WorkflowGraph } from "./types.ts";
 import { err, ok } from "./result.ts";
 import type { Result } from "./result.ts";
 import type { AutomationFiringStatus, WorkflowNodeStatus, WorkflowRunStatus } from "./types.ts";

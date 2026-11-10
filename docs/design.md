@@ -20,15 +20,15 @@
 
 ## 対象別の入口
 
-| 作るもの | 先に読む |
-| --- | --- |
-| 新しい機能・抽象化 | abstraction.md（今必要か → 取り返せるか → 誤抽象） |
-| パッケージ・モジュールの分割 | boundary.md（何を隠すか → 深さ → 依存） |
-| 公開 API・型・エラー | contract.md（境界 → 不正状態 → 契約） |
-| 保存形式・journal・再送 | data.md（冪等 → 原子性 → 互換） |
-| HTTP のルート・一覧・エラー | http.md（ページネーション → safe/idempotent → problem details） |
-| 認可・秘密・sandbox | security.md（OWASP → PAGNI → fail closed） |
-| 画面・操作・状態 | interface.md（仕事が主役 → 注意の順序 → 直接編集） |
+| 作るもの                     | 先に読む                                                        |
+| ---------------------------- | --------------------------------------------------------------- |
+| 新しい機能・抽象化           | abstraction.md（今必要か → 取り返せるか → 誤抽象）              |
+| パッケージ・モジュールの分割 | boundary.md（何を隠すか → 深さ → 依存）                         |
+| 公開 API・型・エラー         | contract.md（境界 → 不正状態 → 契約）                           |
+| 保存形式・journal・再送      | data.md（冪等 → 原子性 → 互換）                                 |
+| HTTP のルート・一覧・エラー  | http.md（ページネーション → safe/idempotent → problem details） |
+| 認可・秘密・sandbox          | security.md（OWASP → PAGNI → fail closed）                      |
+| 画面・操作・状態             | interface.md（仕事が主役 → 注意の順序 → 直接編集）              |
 
 ## 進め方
 

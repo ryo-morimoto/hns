@@ -1,6 +1,7 @@
 # 0057: journal の一時ファイル名を一意にする
 
 status: open
+priority: batch
 depends-on: 0045
 touches: packages/workspace
 

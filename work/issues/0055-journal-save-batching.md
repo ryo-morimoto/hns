@@ -1,6 +1,7 @@
 # 0055: Journal の保存を write 単位でまとめる
 
 status: open
+priority: hold
 depends-on: 0045
 touches: packages/workspace
 

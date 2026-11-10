@@ -1,6 +1,8 @@
 # 0021: tailnet の ID で認証する（要件13）
 
-status: done
+> 0158（認証の再編）でデバイス鍵に置き換え（D047）。入口の認証として再利用しない。
+
+status: superseded
 depends-on: 0019
 touches: work/poc/app, docs/auth.md
 

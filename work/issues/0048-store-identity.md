@@ -1,6 +1,7 @@
 # 0048: store/identity（認証・秘密）
 
 status: open
+priority: plan
 depends-on: 0047
 touches: packages/store/src/identity, packages/store/package.json, packages/store/test, package-lock.json
 

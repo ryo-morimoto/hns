@@ -9,11 +9,11 @@
 
 ## 制限（設定は `startApp` の `limits` か環境変数）
 
-| 制限 | 設定 | 超えたとき |
-| --- | --- | --- |
-| レート | `turnsPerMinute` / `HNS_TURNS_PER_MINUTE` | 429（`retryAfterMs` 付き） |
-| 1日のトークン | `dailyTokenBudget` / `HNS_DAILY_TOKEN_BUDGET` | 429（次のターンを開始しない） |
-| 1ターンの時間 | `turnTimeoutMs` / `HNS_TURN_TIMEOUT_MS` | 会話を中断（`conversation.abort`） |
+| 制限          | 設定                                          | 超えたとき                         |
+| ------------- | --------------------------------------------- | ---------------------------------- |
+| レート        | `turnsPerMinute` / `HNS_TURNS_PER_MINUTE`     | 429（`retryAfterMs` 付き）         |
+| 1日のトークン | `dailyTokenBudget` / `HNS_DAILY_TOKEN_BUDGET` | 429（次のターンを開始しない）      |
+| 1ターンの時間 | `turnTimeoutMs` / `HNS_TURN_TIMEOUT_MS`       | 会話を中断（`conversation.abort`） |
 
 - レートは会話ごと、直近60秒の受け付けたターン数で数える。
 - 予算は `usage_log` の当日合計で判定する。実行中のターンは止めない（次から止まる）。

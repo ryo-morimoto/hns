@@ -1,6 +1,8 @@
 # 0052: sandbox の hide を起動時に配線する
 
-status: open
+> 0147（マシンエージェント）の受入条件に統合（D047）。単独では着手しない。
+
+status: superseded
 depends-on: 0035
 touches: packages/server, docs/safety.md, docs/workspace.md
 

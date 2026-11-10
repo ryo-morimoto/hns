@@ -1,6 +1,7 @@
 # 0031: 製品の土台（core・ゲート）
 
 status: in-progress
+priority: now
 depends-on: 0014
 touches: packages/protocol, apps, docs/engineering.md
 

@@ -1,4 +1,5 @@
-// The model. Types are the source of truth. Each type names who produces and who consumes it.
+// The model. Types are the source of truth. Wire projections are generated from these
+// (`@hns/core/graphql`); request and response envelopes belong to the surface that serves them.
 
 declare const brand: unique symbol;
 /** Nominal wrapper: two ids of different kinds cannot be swapped. Built at the DB boundary. */
@@ -19,24 +20,9 @@ export type WorkflowNodeStatus = (typeof WORKFLOW_NODE_STATUSES)[number];
 
 export const AUTOMATION_FIRING_STATUSES = ["running", "done", "failed", "skipped"] as const;
 export type AutomationFiringStatus = (typeof AUTOMATION_FIRING_STATUSES)[number];
-export type RunStatus = "queued" | "running" | "waiting" | "done" | "failed";
-export const AUTH_MODES = ["token", "tailscale", "passkey", "none"] as const;
-export type AuthMode = (typeof AUTH_MODES)[number];
+
 export const EVENT_LEVELS = ["info", "warn", "error"] as const;
 export type EventLevel = (typeof EVENT_LEVELS)[number];
-export type MessageRole = "user" | "assistant" | "tool";
-export const SCHEDULING_STATES = ["paused", "running", "closing"] as const;
-export type Scheduling = (typeof SCHEDULING_STATES)[number];
-export const TASK_STATES = [
-  "running",
-  "pending",
-  "waiting",
-  "sleeping",
-  "completing",
-  "blocked",
-] as const;
-export type TaskState = (typeof TASK_STATES)[number];
-export type TaskKind = string;
 
 export const EVENT_NAMES = [
   "server.start",
@@ -84,45 +70,6 @@ export type JsonValue =
   | readonly JsonValue[]
   | { [key: string]: JsonValue };
 
-interface MessageBase {
-  /** ISO 8601 (UTC). Ordering key for the transcript. */
-  timestamp: string;
-}
-
-export interface UserMessage extends MessageBase {
-  role: "user";
-  text: string;
-}
-
-export interface AssistantMessage extends MessageBase {
-  role: "assistant";
-  text?: string | undefined;
-  /** Names of the tools this turn asked for. */
-  toolCalls?: string[] | undefined;
-  /** The model that produced the turn (provider/model). */
-  model: string;
-  /** Usage of this turn, when the provider reported it. */
-  usage?: UsageBucket | undefined;
-}
-
-export interface ToolMessage extends MessageBase {
-  role: "tool";
-  toolName: string;
-  text: string;
-  isError?: boolean | undefined;
-}
-
-/** One turn. Produced by /api/state; consumed by the transcript. */
-export type Message = UserMessage | AssistantMessage | ToolMessage;
-
-/** A live Durable task. Produced by /api/state; consumed by the progress panel. */
-export interface TaskView {
-  id: string;
-  kind: TaskKind;
-  state: TaskState;
-}
-
-/** Produced by GET/POST /api/projects; consumed by the project list. */
 export interface Project {
   id: ProjectId;
   name: string;
@@ -130,7 +77,6 @@ export interface Project {
   created_at: string;
 }
 
-/** Produced by /api/conversations; consumed by the conversation list and the header. */
 export interface Conversation {
   id: ConversationId;
   project_id: ProjectId;
@@ -142,143 +88,6 @@ export interface Conversation {
   deleted_at: string | null;
 }
 
-/** Any non-2xx response. Produced by every endpoint; consumed by the client error path. */
-export const ERROR_CODES = [
-  "invalid_request",
-  "unauthorized",
-  "forbidden",
-  "not_found",
-  "conflict",
-  "rate_limited",
-  "budget_exceeded",
-  "unsupported",
-  "internal",
-] as const;
-export type ErrorCode = (typeof ERROR_CODES)[number];
-
-/** Any non-2xx response. Produced by every endpoint; consumed by the client error path. */
-export interface ErrorResponse {
-  code: ErrorCode;
-  message: string;
-  retryAfterMs?: number | undefined;
-}
-
-export const SANDBOX_EXEC = ["enabled", "disabled"] as const;
-export type SandboxExec = (typeof SANDBOX_EXEC)[number];
-export const SANDBOX_USER_NAMESPACES = ["ok", "blocked", "unknown"] as const;
-export type SandboxUserNamespaces = (typeof SANDBOX_USER_NAMESPACES)[number];
-
-/** The sysctls the probe reads; null when the host does not expose one. */
-export interface SandboxSysctls {
-  maxUserNamespaces: number | null;
-  unprivilegedUsernsClone: number | null;
-  apparmorRestrictUnprivilegedUserns: number | null;
-}
-
-interface SandboxBase {
-  backend: "bubblewrap";
-  platform: string;
-  shell: string;
-  /** ISO 8601. */
-  checkedAt: string;
-  bwrap: string;
-}
-
-/** The probe passed: exec may be offered, and the version and sysctls are known. */
-export interface SandboxReady extends SandboxBase {
-  available: true;
-  exec: "enabled";
-  version: string;
-  userNamespaces: "ok";
-  sysctls: SandboxSysctls;
-}
-
-/** The probe failed: exec is off, and the first check that failed is named. */
-export interface SandboxUnavailable extends SandboxBase {
-  available: false;
-  exec: "disabled";
-  version?: string | undefined;
-  userNamespaces: SandboxUserNamespaces;
-  sysctls?: SandboxSysctls | undefined;
-  code: string;
-  reason: string;
-}
-
-/** Produced by /api/health; consumed by the login and settings views (docs/workspace.md, 0006). */
-export type SandboxStatus = SandboxReady | SandboxUnavailable;
-
-export interface Limits {
-  /** 0 means unlimited. Never negative. */
-  turnsPerMinute: number;
-  dailyTokenBudget: number;
-  turnTimeoutMs: number;
-}
-
-/** Produced by /api/health; consumed by the login and settings views. */
-export interface Health {
-  ok: boolean;
-  /** Server semver. */
-  version: string;
-  provider: string;
-  model: string;
-  auth: AuthMode;
-  sandbox: SandboxStatus;
-  limits: Limits;
-}
-
-/** The chat view. Produced by /api/state; consumed by the chat view and the progress panel. */
-export interface State {
-  messages: Message[];
-  tasks: TaskView[];
-  queued: number;
-  scheduling: Scheduling;
-  provider: string;
-  model: string;
-  /** Counts only; lists come from their own endpoints. */
-  counts: { conversations: number; projects: number };
-}
-
-/** Produced by the client, consumed by POST /api/chat. */
-export interface ChatRequest {
-  message: string;
-  conversationId?: ConversationId | undefined;
-}
-
-/** Produced by POST /api/chat; consumed by the client to follow the run. */
-export interface ChatResponse {
-  requestId: string;
-  /** Opaque submission id. */
-  submissionId: number;
-  conversationId: ConversationId;
-}
-
-/** Produced by the client, consumed by POST /api/conversations. */
-export interface ConversationCreate {
-  projectId?: ProjectId | undefined;
-  title?: string | undefined;
-}
-
-/** Produced by the client, consumed by PATCH /api/conversations/:id. */
-export interface ConversationUpdate {
-  title?: string | undefined;
-  archived?: boolean | undefined;
-}
-
-export interface ProjectCreate {
-  name: string;
-}
-
-export interface TaskCreate {
-  projectId: ProjectId;
-  title: string;
-}
-
-export interface TaskUpdate {
-  title?: string | undefined;
-  status?: TaskStatus | undefined;
-}
-
-/** Produced by /api/tasks; consumed by the task list. */
 export interface Task {
   id: string;
   project_id: ProjectId;
@@ -289,24 +98,108 @@ export interface Task {
   updated_at: string;
 }
 
-/** Produced by the client, consumed by PUT /api/file. */
-export interface FileWriteRequest {
-  path: string;
-  /** UTF-8 text. Binary content is out of scope for now. */
-  content: string;
-  expectedVersion: string | "absent";
-  operationId: string;
+export const WORKFLOW_NODE_TYPES = ["agent", "tool", "human"] as const;
+export type WorkflowNodeType = (typeof WORKFLOW_NODE_TYPES)[number];
+
+/** An agent or human node carries a prompt; a tool node carries a command. */
+export interface WorkflowNode {
+  id: string;
+  type: WorkflowNodeType;
+  prompt?: string | undefined;
+  command?: string | undefined;
+}
+
+export interface WorkflowEdge {
+  from: string;
+  to: string;
+}
+
+/** A DAG. The server rejects cycles before it stores one. */
+export interface WorkflowGraph {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+export interface Workflow {
+  id: string;
+  project_id: ProjectId;
+  name: string;
+  /** Bumped on every edit. A run pins the version it started with. */
+  version: number;
+  graph: WorkflowGraph;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One node of a run. */
+export interface WorkflowRunNode {
+  node_id: string;
+  status: WorkflowNodeStatus;
+  prompt: string | null;
+  output: string | null;
+  conversation_id: ConversationId | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflow_id: string;
+  version: number;
+  status: WorkflowRunStatus;
+  input: string;
+  /** JSON text of the node outputs. */
+  output: string | null;
+  created_at: string;
+  finished_at: string | null;
+  nodes?: WorkflowRunNode[] | undefined;
+}
+
+export const AUTOMATION_TRIGGER_TYPES = ["schedule", "webhook"] as const;
+
+export type AutomationTrigger =
+  | { type: "schedule"; cron: string; timeZone?: string | undefined }
+  | { type: "webhook"; token?: string | undefined };
+
+export const AUTOMATION_ACTION_TYPES = ["workflow", "chat", "task"] as const;
+
+export type AutomationAction =
+  | { type: "workflow"; workflowId: string; input?: string | undefined }
+  | { type: "chat"; conversationId?: ConversationId | undefined; prompt: string }
+  | { type: "task"; title?: string | undefined };
+
+export interface Automation {
+  id: string;
+  project_id: ProjectId;
+  name: string;
+  trigger: AutomationTrigger;
+  action: AutomationAction;
+  enabled: boolean;
+  /** Minute of the last scheduled firing; null before the first one. */
+  last_fired_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Firing {
+  id: string;
+  automation_id: string;
+  at: string;
+  status: AutomationFiringStatus;
+  detail: string | null;
+  run_id: string | null;
+  created_at: string;
 }
 
 export type MutationUnknownReason = "io" | "crash" | "timeout";
 
-/** Produced by PUT /api/file; consumed by the editor. */
+/** A versioned write's outcome. The workspace returns it; the editor consumes it. */
 export type MutationResult =
   | { status: "applied"; operationId: string; version: string }
   | { status: "conflict"; operationId: string; currentVersion: string }
   | { status: "unknown"; operationId: string; reason: MutationUnknownReason };
 
-/** Produced by GET /api/file; consumed by the editor. */
+/** A versioned read of one file. The workspace returns it; the editor consumes it. */
 export interface FileRead {
   path: string;
   /** UTF-8 text. */
@@ -314,7 +207,6 @@ export interface FileRead {
   version: string;
 }
 
-/** Produced by /api/events; consumed by the observability view and tests. */
 export interface Event {
   id: string;
   /** ISO 8601. */
@@ -338,7 +230,7 @@ export interface StatusCount {
   count: number;
 }
 
-/** Produced by /api/metrics; consumed by the dashboard. */
+/** The aggregate store computes from events; the observability view consumes it. */
 export interface Metrics {
   http: {
     total: number;
@@ -366,7 +258,14 @@ export interface UsageBucket {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
 }
 
-/** Produced by /api/usage; consumed by the dashboard and the limits banner. */
+export interface Limits {
+  /** 0 means unlimited. Never negative. */
+  turnsPerMinute: number;
+  dailyTokenBudget: number;
+  turnTimeoutMs: number;
+}
+
+/** Recorded per turn; the usage view and the limits banner consume it. */
 export interface Usage {
   session: { models: Record<string, UsageBucket>; tools: Record<string, UsageBucket> };
   today: { turns: number; tokens: number; cost: number };

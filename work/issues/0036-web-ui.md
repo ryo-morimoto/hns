@@ -1,7 +1,8 @@
 # 0036: Web UI（最終段）
 
 status: open
-depends-on: 0035, 0037
+priority: plan
+depends-on: 0145, 0146, 0178
 touches: packages/web
 
 ## Goal
@@ -17,3 +18,7 @@ touches: packages/web
 - [ ] 設定（provider・秘密・制限・バックアップ・監視）
 - [ ] ログイン（passkey・復旧コード・tailnet）
 - [ ] キーボード操作とエラー表示を含む UX
+
+## Log
+
+- 2026-11-10: 0188 で REST 契約を撤去した。0037 は D055 / 0188 に置換。

@@ -1,6 +1,7 @@
 # パッケージ構成
 
-2026-11-07 決定（D029）。pi の packages を参考にした **6 パッケージ**。
+2026-11-07 決定（D029）。pi の packages を参考にした **7 パッケージ**（D047 で `machine` を足した）。
+2026-11-10、D059 で `core` の意味を「系が合意する語彙（モデルと、その射影）」に確定した。
 
 ## 原則
 
@@ -8,27 +9,30 @@
 - **依存は一方向**。`core` は誰にも依存しない。
 - 機能名ではなく**状態と責務**で切る。
 - 使う予定のない分割をしない。育ったら切る（今は切らない）。
+- **宣言と実装は同じ変更に閉じる**。実装の無い面を先に宣言しない（D059）。
 
 ## 状態の所有者
 
-| 状態 | 所有者 |
-| --- | --- |
-| 会話・実行・ツール呼び出し | pi-durable（外部）。`agent` が組み立てる |
-| ファイルの版・Journal・認可・イベント・exec 隔離 | `workspace` |
-| Project / Task / Conversation / Workflow / Automation / Usage / Event | `store` |
-| 利用者・セッション・秘密（passkey・token・tailnet） | `store/identity` |
-| UI の一時状態 | `web` |
+| 状態                                                                  | 所有者                                   |
+| --------------------------------------------------------------------- | ---------------------------------------- |
+| 会話・実行・ツール呼び出し                                            | pi-durable（外部）。`agent` が組み立てる |
+| ファイルの版・Journal・認可・イベント・exec 隔離                      | `workspace`                              |
+| Project / Task / Conversation / Workflow / Automation / Usage / Event | `store`                                  |
+| 利用者・セッション・秘密（passkey・token）                            | `store/identity`                         |
+| マシン側の実行（fs・exec・署名の検証）                                | `machine`                                |
+| UI の一時状態                                                         | `web`                                    |
 
 ## パッケージ
 
-| パッケージ | 責任（公開するもの） | 依存 |
-| --- | --- | --- |
-| `@hns/core` | モデル（types.ts） | — |
-| `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離 | core, pi-durable/env |
-| `@hns/agent` | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode） | core, workspace, pi-durable, pi-ai |
-| `@hns/store` | SQLite、migration、リポジトリ。`./identity` で token・tailnet・passkey・セッション・秘密 | node:sqlite |
-| `@hns/server` | HTTP / SSE / 認証の組み立て、Workflow・Automation、bin（`hns`） | 全部 |
-| `@hns/web` | React UI（D043 で前倒し） | core（ROUTES / parseResponse を含む） |
+| パッケージ       | 責任（公開するもの）                                                                              | 依存                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `@hns/core`      | モデル（`types.ts`・`codecs.ts`）と、その射影。`./graphql` で SDL を起こす                   | —（id の検証に valibot、`./graphql` に graphql） |
+| `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離                                 | core, pi-durable/env                  |
+| `@hns/agent`     | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode）   | core, workspace, pi-durable, pi-ai    |
+| `@hns/store`     | SQLite / D1、migration、リポジトリ。`./identity` で token・passkey・セッション・秘密              | node:sqlite, D1                       |
+| `@hns/server`    | Worker（edge）・Durable Object（Session / Workspace）・GraphQL の resolver・認証・WS・Workflow / Automation の組み立て | 全部                                  |
+| `@hns/web`       | React UI（D043 で前倒し）。Relay で `/graphql` を読む（D055）                                      | core（モデル・SDL）                    |
+| `@hns/machine`   | マシン側の常駐エージェント。`ExecutionEnv` の実装、署名検証、ROOT 封じ込め、sandbox（0147）       | core, workspace                       |
 
 ## 依存グラフ
 
@@ -38,10 +42,13 @@ server ─┬─► agent ─┬─► workspace ─► core
         │          │            └─► pi-durable/env
         │          └─► core
         └─► store ─► core
+
+machine ─┬─► workspace ─► core
+         └─► core
 ```
 
 - `agent` は pi-ai と pi-durable に依存する。`providers` は分けず、`agent/src/providers/` に置く。
-- `workspace` と `store` は互いに独立。
+- `workspace` と `store` は互いに独立。`machine` は `server` に依存しない（別に配布する）。
 - 逆向き（`store` → `server`、`core` → `workspace`）は禁止。`oxlint.config.ts` の `no-restricted-imports` がこの表と import を照合する（0042）。
 
 ## 境界の検査
@@ -50,42 +57,56 @@ server ─┬─► agent ─┬─► workspace ─► core
 
 未使用の export・依存・ファイルの検出は knip を使う（[0042](../work/issues/0042-boundaries-knip.md) で導入）。
 
-パッケージを足すときは、この表と `oxlint.config.ts` の該当ブロックを同時に更新する。
+パッケージを足すときは、この表と `oxlint.config.ts` の該当ブロックを同時に更新する。`machine` を足すのは 0147 で、そのとき `oxlint.config.ts` も更新する。
 
 ## 型の置き場所
 
 **型は、その不変条件を持つパッケージに置く。** 全部を `core` に集めない。
 
-| どこ | 何を置くか |
-| --- | --- |
-| `@hns/core` | 2つ以上のパッケージが使い、ワイヤーで約束するもの（ID・日時・状態・公開 DTO） |
-| `@hns/store` | Row 型（DB の形）と、Row → 公開型の変換 |
-| `@hns/agent` | 実行中の内部状態（Durable の検査結果など） |
-| `@hns/workspace` | ファイル操作の内部型（公開 DTO は core） |
-| `@hns/server` | リクエスト/レスポンスの組み立て（型は core の公開 DTO を使う） |
+| どこ             | 何を置くか                                                                              |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `@hns/core`      | 永続するモデルと、2つ以上のパッケージが使う型（ID・日時・状態・Workflow / Automation） |
+| `@hns/store`     | Row 型（DB の形）と、Row → 公開型の変換。JSON 列に入るモデル（graph / trigger / action）の検証 |
+| `@hns/agent`     | 実行中の内部状態（Durable の検査結果など）                                              |
+| `@hns/workspace` | ファイル操作の内部型（`FileRead` / `MutationResult` は core）                        |
+| `@hns/server`    | 要求・応答の封筒、GraphQL の resolver が使う入力型、運用 view の型                      |
 
 判断のしかた:
 
 - **1パッケージしか使わない型は `core` に置かない。**
+- **要求・応答の封筒は、その面を実装するパッケージが持つ。** 実装しない面の型を先に置かない。
 - Row（`archived: 0 | 1`、DB の連番）と公開型（`archived: boolean`）を混ぜない。境界で変換する。
 - Workflow / Automation を足すときは、公開 DTO と内部定義（グラフ・設定）を分ける。
 
 いまの `types.ts` は「公開モデル」であり、製品の全モデルではない。育つと Row 型と内部型が各パッケージに増える。
 
+GraphQL の SDL は `core` でモデルから起こす（D055）。型を先に書き、schema をそれに合わせる向きは変えない。
+web は生成された SDL を build 時に読むだけで、schema を手で持たない。
+
+## REST 面
+
+REST は事前に宣言しない（D059）。GraphQL に載せない面（passkey・ファイルのバイト列・hooks・運用・machine）は、
+それを実装する issue が schema・認証・handler を同じ変更で足す。今はどの面も宣言されていない。
+
+- 一覧・検索・書き込みのアプリ契約は GraphQL（`/graphql`）。
+- REST を足すときは、そのパッケージ内に schema と handler を置き、`core` に封筒を戻さない。
+
 ## exports の切り方
 
-- `@hns/core`: `.`（型・検証）。
+- `@hns/core`: `.`（モデルと検証）、`./graphql`（モデルから起こした SDL。web の bundle には入れない）。
 - `@hns/workspace`: `.`（Workspace）、`./sandbox`（ExecutionEnv デコレータ）。
 - `@hns/store`: `.`（リポジトリ）、`./identity`（認証・秘密）。exec を使わないアプリが
   bubblewrap に依存しないようにする。
 - `@hns/agent`: `.`。
-- `@hns/server`: `bin` のみ（`hns`）。ライブラリ利用はしない。
+- `@hns/machine`: `.`（常駐エージェント。単体で起動する）。
+- `@hns/server`: `.`（Worker と DO のクラス。`cf` が束ねる）と `bin`（`hns`）。
 
 ## 今は切らないもの
 
 - `config`（環境変数）: `server` 内で起動時に1回パースする。
 - Workflow / Automation の実行: `server/src/workflows` に置く。スケジューラと人間待ちが育ったら `@hns/orchestrator` に切る。
 - `providers`: `agent` の中。`pi-ai` への依存をここに閉じ込める。
+- `contract` / `api`: 作らない（D059）。wire は `core` の射影と、面を実装するパッケージに置く。
 
 ## 移行順
 
@@ -94,5 +115,6 @@ server ─┬─► agent ─┬─► workspace ─► core
 3. `agent` ← `work/poc/conversation` + ツール + hooks
 4. `server` ← `work/poc/app/server.mjs`
 5. `web` ← `work/poc/app/ui`（D043 で前倒し。画面単位）
+6. `machine` ← `work/poc/cf-harness/agent`（0147）
 
 各段で型検査を通す。

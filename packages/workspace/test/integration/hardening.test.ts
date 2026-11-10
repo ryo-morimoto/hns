@@ -1,14 +1,14 @@
-import { inject, test } from "vitest";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import * as v from "valibot";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Denied, FileFailure } from "../src/index.ts";
-import { openWorkspace, rootOf, targetsForTier, withTarget } from "./support.ts";
+import { Denied, FileFailure } from "../../src/index.ts";
+import { DIRFD_TARGET, openWorkspace, rootOf, withTarget } from "../support.ts";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const targets = targetsForTier(inject("tier"));
+const targets = [DIRFD_TARGET] as const;
 
 for (const testTarget of targets) {
   // Catches: reusing an operationId for different content silently returned the old outcome.

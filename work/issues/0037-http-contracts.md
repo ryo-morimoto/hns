@@ -1,6 +1,9 @@
 # 0037: HTTP 契約と型付きクライアント
 
-status: in-progress
+後継: D055（GraphQL をアプリ契約にする）と 0188（REST 契約の撤去）。REST 面は面ごとの issue が持つ。
+
+status: superseded
+priority: now
 depends-on: 0031
 touches: packages/core, packages/web
 
@@ -29,6 +32,8 @@ touches: packages/core, packages/web
   - `SandboxStatus` を 0006 の検出結果（exec / backend / userNamespaces / code / reason）に更新
   - `TaskState` / `Scheduling` / `AuthMode` を const array 由来の union に（schema と型を一致させるため）
 - Passkey の WebAuthn ペイロードは `@simplewebauthn` の所有なので `JsonValue` のまま。周辺の項目だけ型にする。
+- 2026-11-10: D055 により、web のアプリ契約は GraphQL になった。ROUTES は passkey / hooks / 運用 / マシンの面と、
+  SDL の出所になるモデル型の検証に残る（49 ルートのうち 22 がこちら側）。
 
 ## Log
 

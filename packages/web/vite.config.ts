@@ -1,8 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// The dev server proxies /api to the local server; VITE_HNS_FIXTURES=1 bypasses it entirely.
-const api = process.env["HNS_API"] ?? "http://127.0.0.1:8787";
+// No server exists yet. The GraphQL endpoint (0145 / 0176) adds its proxy when it lands.
 
 export default defineConfig({
   plugins: [react()],
@@ -11,5 +10,4 @@ export default defineConfig({
   resolve: {
     conditions: ["module", "browser", "development|production", "source"],
   },
-  server: { proxy: { "/api": { target: api } } },
 });

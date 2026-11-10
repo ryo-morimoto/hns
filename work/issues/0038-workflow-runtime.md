@@ -1,7 +1,10 @@
 # 0038: Workflow / Automation の実行基盤
 
+> 前提変更: 実行基盤は Session DO（0146）。alarm と wake の上で動かす。
+
 status: open
-depends-on: 0035
+priority: plan
+depends-on: 0145, 0146
 touches: packages/server, packages/core
 
 ## Goal

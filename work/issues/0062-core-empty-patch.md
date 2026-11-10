@@ -1,6 +1,7 @@
 # 0062: 空の PATCH をどう扱うか決める
 
 status: open
+priority: batch
 depends-on: 0037
 touches: packages/core
 

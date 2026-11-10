@@ -1,7 +1,7 @@
 # 0012: 実 Provider（Ollama Cloud）
 
 status: done
-depends-on: -
+depends-on: —
 touches: work/poc/conversation/ollama.mjs, work/poc/conversation/real.mjs
 
 ## Goal

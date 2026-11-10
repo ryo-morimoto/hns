@@ -1,6 +1,7 @@
 # 0064: スキーマの id と名前の命名を分ける
 
 status: open
+priority: hold
 depends-on: 0037
 touches: packages/core
 

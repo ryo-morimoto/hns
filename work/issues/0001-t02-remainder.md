@@ -1,7 +1,7 @@
 # 0001: T-02 の残り
 
 status: done
-depends-on: -
+depends-on: —
 touches: work/poc/root-containment, work/poc/root-swap, docs/workspace.md
 
 ## Goal

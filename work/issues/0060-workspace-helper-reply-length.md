@@ -1,6 +1,7 @@
 # 0060: helper の応答に長さの検証を入れる
 
 status: open
+priority: batch
 depends-on: 0033
 touches: packages/workspace
 
