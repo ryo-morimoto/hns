@@ -6,10 +6,10 @@
 
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 13 |
-| Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 65 |
-| Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 9 |
-| Q4 | — | — | `hold` | いまはやらない | 9 |
+| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 12 |
+| Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 64 |
+| Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 7 |
+| Q4 | — | — | `hold` | いまはやらない | 8 |
 
 ### 着手の規則
 
@@ -19,11 +19,10 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（13）
+### now（12）
 
 | # | 作業 | 依存の状態 |
 | --- | --- | --- |
-| [0188](issues/0188-graphql-only-contract.md) | GraphQL を唯一の契約にする（REST 契約の撤去） | — |
 | [0031](issues/0031-foundation.md) | 製品の土台（core・ゲート） | 0014 |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
@@ -36,6 +35,7 @@
 | [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | 0177 |
 | [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む（最初の画面） | 0178, 0102 |
 | [0180](issues/0180-codegen-gate.md) | relay-compiler をゲートに組み込む | 0175, 0178 |
+
 
 
 ### plan（64）
@@ -54,7 +54,7 @@
 - **UI 画面**: 0103, 0104, 0105, 0106, 0107, 0108, 0109, 0110, 0111, 0112, 0113, 0114
 - **API / data**: 0116, 0117, 0122, 0123, 0124, 0125, 0126, 0127, 0128, 0129, 0130, 0131
 
-### batch（9）
+### batch（7）
 
 | # | 何 | なぜ今でないか |
 | --- | --- | --- |
@@ -62,13 +62,11 @@
 | 0056 | temp の後片付け | 小さい漏れ |
 | 0057 | temp 名の一意性 | 小さい |
 | 0060 | helper の長さ検証 | 小さい |
-| 0062 | 空 PATCH | 決めるだけ |
-| 0063 | ContractError の path | 診断が良くなる |
 | 0120 | Review evidence | 記録の自動化 |
 | 0172 | rooted helper の起動 | 性能。workspace を触るついで |
 | 0173 | docs の残り | 0140 の取りこぼし |
 
-### hold（9）
+### hold（8）
 
 | # | 何 | なぜ今やらないか |
 | --- | --- | --- |
@@ -76,7 +74,6 @@
 | 0044 | マルチマシン | ユーザーが保留 |
 | 0055 | Journal の保存をまとめる | 0169 の redesign で置き換わる |
 | 0061 | JournalIntent.temp の型 | 0156 / 0169 で型ごと作り直す |
-| 0064 | スキーマの命名 | 見た目 |
 | 0065 | store の low 残件 | 見た目 |
 | 0115 | overview API | 0149 の後に形を決める |
 | 0119 | 会話の単体取得 | 0146 が持つ |
@@ -147,9 +144,9 @@
 | [0059](issues/0059-agent-observe-bash.md) | agent の bash も観測する | open | plan | 0034 |
 | [0060](issues/0060-workspace-helper-reply-length.md) | helper の応答に長さの検証を入れる | open | batch | 0033 |
 | [0061](issues/0061-workspace-intent-temp-type.md) | JournalIntent.temp の「無い」を型で表す | open | hold | 0045 |
-| [0062](issues/0062-core-empty-patch.md) | 空の PATCH をどう扱うか決める | open | batch | 0037 |
-| [0063](issues/0063-core-contract-error-path.md) | ContractError に path を残す | open | batch | 0037 |
-| [0064](issues/0064-core-schema-naming.md) | スキーマの id と名前の命名を分ける | open | hold | 0037 |
+| [0062](issues/0062-core-empty-patch.md) | 空の PATCH をどう扱うか決める | **置換**（0188） | — | — |
+| [0063](issues/0063-core-contract-error-path.md) | ContractError に path を残す | **置換**（0188） | — | — |
+| [0064](issues/0064-core-schema-naming.md) | スキーマの id と名前の命名を分ける | **置換**（0188） | — | — |
 | [0065](issues/0065-store-low-followups.md) | store の low 残件（clock・ISO・comment） | open | hold | 0047 |
 | [0066](issues/0066-invariant-codecs.md) | 不変条件を型と codec に寄せる（IsoTimestamp / OperationId） | **done** | — | 0047 |
 | [0067](issues/0067-findings-registry.md) | レビュー findings の記録場所 | **done** | — | — |
@@ -230,7 +227,7 @@
 | [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | open | now | 0177 |
 | [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む | open | now | 0178, 0102 |
 | [0180](issues/0180-codegen-gate.md) | relay-compiler をゲートに組み込む | open | now | 0175, 0178 |
-| [0188](issues/0188-graphql-only-contract.md) | GraphQL を唯一の契約にする（REST 契約の撤去） | in-progress | now | — |
+| [0188](issues/0188-graphql-only-contract.md) | GraphQL を唯一の契約にする（REST 契約の撤去） | **done** | — | — |
 | [0181](issues/0181-store-freshness.md) | store の鮮度方針 | open | plan | 0159, 0179 |
 | [0182](issues/0182-surface-inventory.md) | GraphQL 以外に残す面の棚卸し | open | plan | 0179 |
 | [0183](issues/0183-test-management.md) | テスト管理の再設計（TSDoc・コロケート・doctest） | **done** | — | — |

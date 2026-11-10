@@ -20,6 +20,9 @@
 | brand            | 0                         | 2                                        |
 | 判別可能ユニオン | Message / StopReason ほか | Message / MutationResult / SandboxStatus |
 
+> 2026-11-07 時点の比較。`Message` / `SandboxStatus` は D059（0188）で core から削除し、現在の core は
+> モデルと GraphQL の射影だけを持つ。
+
 ## 同じ選択をしているもの
 
 - **Message は role の判別可能ユニオン**。`Message = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage`。

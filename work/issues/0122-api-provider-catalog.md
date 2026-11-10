@@ -2,8 +2,8 @@
 
 status: open
 priority: plan
-depends-on: 0034, 0037, 0145, 0146
-touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test, packages/agent/src/providers, packages/agent/test, packages/server/src, packages/server/test
+depends-on: 0034, 0145, 0146
+touches: packages/core/src/graphql, packages/agent/src/providers, packages/agent/test, packages/server/src, packages/server/test
 
 ## Goal
 

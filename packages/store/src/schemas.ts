@@ -90,15 +90,17 @@ function parseJsonText<TValue>(schema: v.GenericSchema<unknown, TValue>, text: s
 // The graph, trigger, and action are model shapes stored as JSON text. Store validates them
 // on the way in and on the way out; no other package owns this parsing.
 
+const id = v.pipe(v.string(), v.minLength(1));
+
 export const WorkflowNodeSchema: v.GenericSchema<unknown, WorkflowNode> = v.variant("type", [
-  v.object({ id: v.string(), type: v.literal("agent"), prompt: v.string() }),
-  v.object({ id: v.string(), type: v.literal("human"), prompt: v.string() }),
-  v.object({ id: v.string(), type: v.literal("tool"), command: v.string() }),
+  v.object({ id, type: v.literal("agent"), prompt: id }),
+  v.object({ id, type: v.literal("human"), prompt: id }),
+  v.object({ id, type: v.literal("tool"), command: id }),
 ]);
 
 export const WorkflowEdgeSchema: v.GenericSchema<unknown, WorkflowEdge> = v.object({
-  from: v.string(),
-  to: v.string(),
+  from: id,
+  to: id,
 });
 
 export const WorkflowGraphSchema: v.GenericSchema<unknown, WorkflowGraph> = v.object({
@@ -109,8 +111,8 @@ export const WorkflowGraphSchema: v.GenericSchema<unknown, WorkflowGraph> = v.ob
 export const AutomationTriggerSchema: v.GenericSchema<unknown, AutomationTrigger> = v.variant(
   "type",
   [
-    v.object({ type: v.literal("schedule"), cron: v.string(), timeZone: v.optional(v.string()) }),
-    v.object({ type: v.literal("webhook"), token: v.optional(v.string()) }),
+    v.object({ type: v.literal("schedule"), cron: id, timeZone: v.optional(v.string()) }),
+    v.object({ type: v.literal("webhook"), token: v.optional(id) }),
   ],
 );
 
@@ -119,15 +121,15 @@ export const AutomationActionSchema: v.GenericSchema<unknown, AutomationAction> 
   [
     v.object({
       type: v.literal("workflow"),
-      workflowId: v.string(),
+      workflowId: id,
       input: v.optional(v.string()),
     }),
     v.object({
       type: v.literal("chat"),
       conversationId: v.optional(ConversationIdSchema),
-      prompt: v.string(),
+      prompt: id,
     }),
-    v.object({ type: v.literal("task"), title: v.optional(v.string()) }),
+    v.object({ type: v.literal("task"), title: v.optional(id) }),
   ],
 );
 

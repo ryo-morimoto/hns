@@ -11,7 +11,7 @@ import "./design/system.css";
 // Apply the stored theme before the first paint so the shell does not flash the OS default.
 applyTheme(readTheme(window.localStorage));
 
-// There is no server yet; 0178 replaces the fixture reads with Relay.
+// There is no server yet; Relay replaces the fixture reads once it lands.
 const source = createFixtureSource();
 const gallery = import.meta.env.DEV && window.location.hash === "#/design";
 

@@ -9,7 +9,7 @@ import {
 import * as v from "valibot";
 import type { WorkspaceSource } from "./workspaceSource.ts";
 
-// Model fixtures for the shell. There is no server yet; 0178 replaces this with Relay reads.
+// Model fixtures for the shell. There is no server yet; Relay replaces this once it lands.
 
 const hns = v.parse(ProjectIdSchema, "project-hns");
 const scratch = v.parse(ProjectIdSchema, "project-scratch");

@@ -1,7 +1,8 @@
 # 0062: 空の PATCH をどう扱うか決める
 
-status: open
-priority: batch
+> 後継: なし（0188 で対象が消えた）。
+
+status: superseded
 depends-on: 0037
 touches: packages/core
 
@@ -24,3 +25,4 @@ touches: packages/core
 ## Log
 
 - 2026-11-07: 作成（コードレビューで空 PATCH が通るのを見つけた）。
+- 2026-11-10: 0188（D059）で REST 契約と core の schema / ContractError を撤去し、対象が無くなった。

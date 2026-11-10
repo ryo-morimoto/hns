@@ -7,13 +7,14 @@
 
 | レーン | issue | 所有するパス | owner | reviewer | 状態 | 次の統合 |
 | --- | --- | --- | --- | --- | --- | --- |
-| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/core/README.md`, `packages/store/src/schemas.ts`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | reviewer-0188 | review FAIL（blocking 2, f4ca217） | 4 |
-| E2 | [0185](issues/0185-tiers-removal.md) tiers の二重実行を廃止 | `packages/workspace/test/**`, `vitest.config.ts`, `docs/testing.md`, `docs/decisions.md`, `AGENTS.md` | — | reviewer-0185b | done（統合済み 5cb0ae5） | 3 |
+| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/core/README.md`, `packages/store/src/schemas.ts`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | reviewer-0188 | review PASS（8b45bd7, fix 未 commit）・統合待ち | 4 |
+| E2 | [0143](issues/0143-secret-placement.md) 秘密の配置（gateway・git はマシン・DEK） | `docs/auth.md` | lead | — | 実装済み・review 待ち | 2 |
 | E3 | 統合レーン（このセッション） | `docs/process.md`, `docs/parallel-change.md`, `work/README.md`, `work/LANES.md` | lead | — | 統合済み（5cb0ae5） | 1 |
 
 - E3 は製品コードを書かない。3レーンの運用を文書化し、統合・レビュー・計測だけを行う。E1 / E2 のファイルを書かない。
-- E2 は review PASS、統合済み。E1 は review FAIL。store schema の空文字と core README / CHANGELOG を直して再 review する。新しい変更レーンは E1 の review PASS 後に開く。
-- E1 と E2 は `docs/decisions.md` と `AGENTS.md` が重なる。E2 を先に統合し、E1 を rebase して 5cb0ae5 に含めた。
+- E2（0143）は docs-only、review 待ち。0185 は E2 の前のレーンとして統合済み（5cb0ae5）。
+- E1（0188）は review FAIL（別レーンが修正中）。E2（0143）は `docs/auth.md` だけで E1 と交わらない。
+- E1 の修正は `packages/store` / `docs/decisions.md` / `work/BOARD.md` を触る。E2 は触らない。
 - 0141 / 0031 / 0037 は `in-progress` のまま更新が止まっている。レーンとして数える前に status を整理する
   （0037 は 0188 が superseded にする。0141 は 0188 の統合後に再開する）。
 
@@ -28,7 +29,7 @@
 
 統合は1本ずつ。rebase → `npm run check` → review PASS → merge → main で再確認。5cb0ae5 は `npm run check`（162 tests、build、knip）通過後に作成した。
 0175 / 0183 は統合済みなので、0144 の `package.json` / `package-lock.json` の lock は空いた。
-未コミット: `packages/store/src/schemas.ts` に空文字を拒否する変更が1件（2026-11-10 23:43）。0188 の follow-up として review してから統合する。
+未コミット: 0188 の fix 一式（store schema の空文字拒否、core README / CHANGELOG、遷移テスト、指摘対応）。新規 `packages/core/test/workflow.test.ts` と `packages/store/test/schemas.test.ts` は untracked なので、commit 時に明示的に stage する。
 
 ## 次の変更レーン候補
 
@@ -42,7 +43,7 @@
 | [0176](issues/0176-graphql-endpoint.md) /graphql | 0145 / 0175 未マージ | — | 不可 |
 | [0184](issues/0184-vitest-assertions.md) expect 移行 | 0185 未マージ | テスト全体 | 0185 は統合済み。0188 の review 後に開く。優先度は plan |
 
-0188 は review FAIL（blocking 2）。修正と再 review の後に、E1 を 0144 へ入れ替える。
+0188 は review PASS（reviewer-0188）。fix 一式の commit と main での再確認の後に、E1 を 0144 へ入れ替える。
 3本目は引き続き統合レーンとし、製品コードを書かない。
 
 ## 更新の規則

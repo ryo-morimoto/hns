@@ -3,7 +3,6 @@
 後継: D055（GraphQL をアプリ契約にする）と 0188（REST 契約の撤去）。REST 面は面ごとの issue が持つ。
 
 status: superseded
-priority: now
 depends-on: 0031
 touches: packages/core, packages/web
 

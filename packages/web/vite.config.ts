@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// No server exists yet. The GraphQL endpoint (0145 / 0176) adds its proxy when it lands.
+// No server exists yet. The GraphQL endpoint adds its proxy when it lands.
 
 export default defineConfig({
   plugins: [react()],

@@ -2,7 +2,7 @@
 
 status: open
 priority: plan
-depends-on: 0037, 0159
+depends-on: 0159
 touches: packages/web/, deploy/assets/
 
 ## Goal

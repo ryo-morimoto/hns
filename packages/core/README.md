@@ -1,33 +1,32 @@
 # @hns/core
 
-hns のモデル。`src/types.ts` が唯一の正本。
+hns のモデル。`src/types.ts` が唯一の正本。GraphQL の SDL はここから起こす。
 
 ```bash
 npm run typecheck
-npm run build           # dist/ に型
+npm run build
 ```
 
-- `src/types.ts` — Project / Task / Conversation / Event / Metrics などの型（正本）。
-- `src/schemas.ts` — 境界の valibot schema。`v.GenericSchema<unknown, T>` で型に縛る。
+## 中身
+
+- `src/types.ts` — Project / Conversation / Task / Workflow / Automation / Event / Metrics などのモデルと語彙。
 - `src/codecs.ts` — IsoTimestamp / OperationId の brand・schema・constructor。規則の owner はここ1箇所。
-- `src/workflow.ts` — Workflow / Automation の状態遷移表。
+- `src/workflow.ts` — Workflow / Automation の状態遷移と `validateWorkflowGraph()`。
+- `src/result.ts` — `Result<T, E>`。想定内の失敗を値で返す。
+- `src/graphql/` — `types.ts` から SDL を起こす射影。`@hns/core/graphql` として公開し、ルート entry には出さない。
 
-## 型と持ち主
+要求・応答の封筒は core に置かない。REST の面は、それを実装するパッケージが schema・認証・handler を
+同じ変更で足す（D059）。core にあるのは、永続するモデルと、2つ以上のパッケージが使う型だけ。
 
-| 型                                                 | 作る場所                                   | 使う場所                 |
-| -------------------------------------------------- | ------------------------------------------ | ------------------------ |
-| `Project`                                          | `GET/POST /api/projects`                   | Project 一覧             |
-| `Conversation`                                     | `GET/POST/PATCH/DELETE /api/conversations` | 会話一覧・ヘッダー       |
-| `Message` `TaskView` `State`                       | `GET /api/state`                           | 会話画面・進捗           |
-| `ChatRequest` / `ChatResponse`                     | クライアント / `POST /api/chat`            | 会話画面                 |
-| `Task` / `TaskCreate` / `TaskUpdate`               | `/api/tasks`                               | Task 一覧                |
-| `FileRead` / `FileWriteRequest` / `MutationResult` | `/api/file`                                | エディタ                 |
-| `Event`                                            | `/api/events`                              | 観測・テスト             |
-| `Metrics` / `Usage`                                | `/api/metrics` / `api/usage`               | ダッシュボード           |
-| `Health` / `Limits` / `SandboxStatus`              | `/api/health`                              | ログイン・設定           |
-| `ErrorResponse`                                    | 全エンドポイント                           | クライアントのエラー処理 |
+## 型の置き場所
 
-`types.ts` の各型の JSDoc にも「Produced by / Consumed by」を書いてある。
+- Project / Conversation / Task / Workflow / Automation / Firing / Event / Usage — `store` が作る。
+- WorkflowRun / WorkflowRunNode — `store` / Session DO が作る。
+- FileRead / MutationResult — `workspace` が返す。
+- Limits — 運用の面が読む。
+
+Row 型（`archived: 0 | 1` など）は `store`、実行中の内部状態は `agent`、ファイル操作の内部型は `workspace`。
+詳細は [docs/packages.md](../../docs/packages.md) を見る。
 
 ## codec
 

@@ -73,8 +73,8 @@ export type GraphError =
   | { readonly kind: "cycle"; readonly path: readonly string[] };
 
 /**
- * Check that every edge names a node and that the nodes form a DAG. The server calls this
- * before it stores a workflow (http.ts); the client can call it to disable a save.
+ * Check that every edge names a node and that the nodes form a DAG. A surface that stores a
+ * workflow calls this first; a client can call it to disable a save.
  */
 export function validateWorkflowGraph(graph: WorkflowGraph): Result<WorkflowGraph, GraphError> {
   const ids = new Set<string>();

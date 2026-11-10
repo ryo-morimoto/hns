@@ -6,8 +6,8 @@
 
 status: open
 priority: hold
-depends-on: 0037, 0049, 0145, 0146
-touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test/http.test.ts, packages/server/src, packages/server/test
+depends-on: 0049, 0145, 0146
+touches: packages/core/src/graphql, packages/server/src, packages/server/test
 
 ## Goal
 
