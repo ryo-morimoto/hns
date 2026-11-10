@@ -1,6 +1,6 @@
 # 0143: 秘密の配置（gateway・git はマシン・DEK）
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0140
 touches: docs/auth.md, docs/automation.md, work/issues/0147-machine-agent.md
@@ -51,3 +51,25 @@ touches: docs/auth.md, docs/automation.md, work/issues/0147-machine-agent.md
 - 2026-11-11: reviewer-0143 が再度 **FAIL**（blocking 3）。0143 の受入条件の旧文言、provider 鍵の machine 側テストの
   担当、service 鍵 / cloudflared の rotate・失効の閉包。修正: 受入条件をブラウザ + サーバセッションに、0147 に
   machine の env テストを追加、封じ込めに service 鍵 / cloudflared を追加。再 review する。
+- 2026-11-11: reviewer-0143 が **PASS**（blocking 0）。残る低は Result に記録した。
+
+## Result
+
+- verdict: **PASS**（blocking 0。初回 FAIL 5 → 修正 → FAIL 3 → 修正 → PASS）
+- reviewer: reviewer-0143
+- HEAD: 4073bc0
+- blocking: なし
+- 受入: 6/6。docs-only のため `npm run check` は対象パッケージ無し（文書の突き合わせで確認）。
+- non-blocking（残し。実装・後続 issue で掃除）:
+  - 低 / `docs/auth.md:80`, `0147:19` / `git fetch` は `.git` に書くため、「agent は fetch を使える」と
+    「`.git` 書き込み拒否」が両立しない。fetch を製品側（sandbox 外）にするか、拒否を agent の直接書き込みに限定する。
+  - 低 / `docs/auth.md:52` / service 鍵の「使う主体」に webhook token の暗号化・復号を足す。
+  - 低 / `docs/auth.md:42`, `0143:24-26` / webhook token の実装先 0038 / 0112 / 0131 の AC に項目が無い。
+    どれかの AC に一行足すか、新規 issue にする。
+  - 低 / `docs/auth.md:60`, `0151:16` / harness が provider の URL も持たないことのテストが 0151 に無い。
+    URL 不在テストを足すか、主張を鍵に限定する。
+  - 低 / `0143:14` / 表の対象に service 鍵・cloudflared token を足す（現在は5種の列挙）。
+  - 低 / `docs/auth.md:123-124` / webhook token は TTL ではなく rotate / archive 時。「定期なし」と書く。
+  - 低 / `docs/auth.md:93` / `join` / `homedir` の import 前提を実装時に補足する。
+- 未確認: 0151 / 0147 は未実装。webhook の service 鍵暗号化は実装未着手。identity / user_keys の DO / D1 の
+  置き場は未決。git credential helper の sandbox 到達経路は 0147 で決める。

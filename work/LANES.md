@@ -8,7 +8,7 @@
 | レーン | issue | 所有するパス | owner | reviewer | 状態 | 次の統合 |
 | --- | --- | --- | --- | --- | --- | --- |
 | E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/core/README.md`, `packages/store/src/schemas.ts`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | reviewer-0188 | review PASS（8b45bd7, fix 未 commit）・統合待ち | 4 |
-| E2 | [0143](issues/0143-secret-placement.md) 秘密の配置（gateway・git はマシン・DEK） | `docs/auth.md` | lead | — | 実装済み・review 待ち | 2 |
+| E2 | [0143](issues/0143-secret-placement.md) 秘密の配置（gateway・git はマシン・DEK） | `docs/auth.md`, `docs/automation.md`, `work/issues/0147-machine-agent.md` | lead | reviewer-0143 | done（4073bc0, PASS） | 2 |
 | E3 | 統合レーン（このセッション） | `docs/process.md`, `docs/parallel-change.md`, `work/README.md`, `work/LANES.md` | lead | — | 統合済み（5cb0ae5） | 1 |
 
 - E3 は製品コードを書かない。3レーンの運用を文書化し、統合・レビュー・計測だけを行う。E1 / E2 のファイルを書かない。
