@@ -65,7 +65,7 @@ export default defineConfig({
         environment: "jsdom",
         setupFiles: ["packages/web/test/setup.ts"],
       }),
-      { extends: true, test: { name: "tools", include: ["tools/gate/test/**/*.test.ts"] } },
+      { extends: true, test: { name: "tools", include: ["tools/**/*.test.ts"] } },
     ],
   },
 });

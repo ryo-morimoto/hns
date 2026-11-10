@@ -6,17 +6,40 @@ import { stageNamed, stagesFor } from "../stages.ts";
 // Catches: build or knip sneaking back into the commit hook.
 test("build and knip only run before a push", () => {
   expect(stagesFor("pre-commit").map((stage) => stage.name)).toStrictEqual(["lint", "fmt", "typecheck", "test"]);
-  expect(stagesFor("pre-push").map((stage) => stage.name)).toStrictEqual(["lint", "fmt", "typecheck", "test", "build", "knip"]);
+  expect(stagesFor("pre-push").map((stage) => stage.name)).toStrictEqual([
+    "lint",
+    "fmt",
+    "typecheck",
+    "test",
+    "build",
+    "deploy",
+    "knip",
+  ]);
 });
 
 // Catches: a hook running a stage that no hook owns.
 test("every stage belongs to at least one hook", () => {
-  for (const name of ["lint", "fmt", "typecheck", "test", "build", "knip"]) {
+  for (const name of ["lint", "fmt", "typecheck", "test", "build", "deploy", "knip"]) {
     const stage = stageNamed(name);
     assert.ok(stage !== undefined, name);
     expect(stage.hooks.length, name).toBeGreaterThan(0);
   }
   expect(stageNamed("nope")).toBe(undefined);
+});
+
+// Catches: the dry-run check disappearing from the push gate, or running with credentials.
+test("the deploy stage builds the development config", () => {
+  const stage = stageNamed("deploy");
+  assert.ok(stage !== undefined);
+  expect(stage.hooks).toStrictEqual(["pre-push"]);
+  const runs = stage.run({ root: "/repo", packages: [], all: true, tier: "all" });
+  expect(runs).toStrictEqual([
+    {
+      cwd: "/repo/tools/deploy",
+      argv: ["/repo/node_modules/.bin/cf", "deploy", "--dry-run", "--mode", "development"],
+      env: { WRANGLER_LOG_PATH: "/repo/tools/deploy/.wrangler/logs" },
+    },
+  ]);
 });
 
 // Catches: a root trigger at commit time widening the run to the integration tier.

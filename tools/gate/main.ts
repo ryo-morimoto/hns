@@ -178,6 +178,7 @@ const main = (): void => {
       const result = spawnSync(run.argv[0] ?? "", run.argv.slice(1), {
         cwd: run.cwd,
         stdio: "inherit",
+        env: run.env === undefined ? undefined : { ...process.env, ...run.env },
       });
       if (result.error !== undefined) {
         console.error(`gate: ${stage.name}: ${result.error.message}`);

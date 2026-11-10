@@ -9,6 +9,8 @@ export type Hook = "pre-commit" | "pre-push";
 export interface Run {
   cwd: string;
   argv: string[];
+  /** Extra environment for the child only. */
+  env?: Record<string, string>;
 }
 
 /** Which tier the test stage runs: the commit only sees the in-process tests. */
@@ -40,7 +42,13 @@ export const stages: readonly Stage[] = [
     name: "lint",
     hooks: ["pre-commit", "pre-push"],
     run: ({ root, packages, all }) => [
-      { cwd: root, argv: [binary(root, "oxlint"), ...(all ? ["packages"] : dirs(packages))] },
+      {
+        cwd: root,
+        argv: [
+          binary(root, "oxlint"),
+          ...(all ? ["packages", "tools/deploy"] : dirs(packages)),
+        ],
+      },
     ],
   },
   {
@@ -49,7 +57,11 @@ export const stages: readonly Stage[] = [
     run: ({ root, packages, all }) => [
       {
         cwd: root,
-        argv: [binary(root, "oxfmt"), "--check", ...(all ? ["packages"] : dirs(packages))],
+        argv: [
+          binary(root, "oxfmt"),
+          "--check",
+          ...(all ? ["packages", "tools/deploy"] : dirs(packages)),
+        ],
       },
     ],
   },
@@ -65,6 +77,10 @@ export const stages: readonly Stage[] = [
         runs.push({
           cwd: root,
           argv: [binary(root, "tsrs"), "--noEmit", "-p", "tools/gate/tsconfig.json"],
+        });
+        runs.push({
+          cwd: root,
+          argv: [binary(root, "tsrs"), "--noEmit", "-p", "tools/deploy/tsconfig.json"],
         });
       }
       return runs;
@@ -89,6 +105,17 @@ export const stages: readonly Stage[] = [
     hooks: ["pre-push"],
     run: ({ root, packages }) =>
       packages.map((pkg) => ({ cwd: root, argv: ["npm", "run", "build", "-w", pkg.name] })),
+  },
+  {
+    name: "deploy",
+    hooks: ["pre-push"],
+    run: ({ root }) => [
+      {
+        cwd: join(root, "tools/deploy"),
+        argv: [binary(root, "cf"), "deploy", "--dry-run", "--mode", "development"],
+        env: { WRANGLER_LOG_PATH: join(root, "tools/deploy/.wrangler/logs") },
+      },
+    ],
   },
   {
     name: "knip",
