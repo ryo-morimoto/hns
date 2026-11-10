@@ -3,7 +3,7 @@
 status: in-progress
 priority: now
 depends-on: —
-touches: packages/core/src, packages/core/test, packages/web/src, packages/web/test, docs/decisions.md, docs/packages.md, docs/auth.md, docs/typescript.md, docs/review.md, docs/automation.md, AGENTS.md, work/BOARD.md, work/issues/0037-http-contracts.md, work/issues/0145-worker-edge.md, work/issues/0176-graphql-endpoint.md, work/issues/0177-global-id.md, work/issues/0178-web-relay-environment.md, work/issues/0182-surface-inventory.md, work/issues/0036-web-ui.md, work/issues/0100-web-foundation.md, work/issues/0102-web-app-shell.md
+touches: packages/core/src, packages/core/test, packages/core/README.md, packages/core/CHANGELOG.md, packages/store/src/schemas.ts, packages/store/test, packages/web/src, packages/web/test, docs/decisions.md, docs/packages.md, docs/auth.md, docs/typescript.md, docs/review.md, docs/automation.md, AGENTS.md, work/BOARD.md, work/issues/0037-http-contracts.md, work/issues/0145-worker-edge.md, work/issues/0176-graphql-endpoint.md, work/issues/0177-global-id.md, work/issues/0178-web-relay-environment.md, work/issues/0182-surface-inventory.md, work/issues/0036-web-ui.md, work/issues/0100-web-foundation.md, work/issues/0102-web-app-shell.md
 
 ## Goal
 
@@ -21,7 +21,7 @@ REST 面は、それを実装する issue が schema・認証・handler を同�
 - [x] D059 を decisions に追記し、D029 の意味の補足と D055 の REST の範囲を更新する
 - [x] docs/packages.md・AGENTS.md・auth/typescript/review/automation の参照を更新する
 - [x] 0037 を superseded、0145 を 3 面（GraphQL / WS / 静的）、0182 を「面ごとの再導入」に更新する
-- [ ] `npm run check` が通る（全段の確認中）
+- [x] `npm run check` が通る（f4ca217 の clean worktree で成功）
 
 ## テスト条件（Example Mapping）
 
@@ -64,4 +64,35 @@ REST 面は、それを実装する issue が schema・認証・handler を同�
   shell テストは 14 本そのまま通る。
 - 2026-11-10: D059・docs/packages.md・AGENTS・auth/typescript/review/automation を更新。0037 を superseded、
   0145 / 0176 / 0177 / 0178 / 0182 / 0036 / 0100 / 0102 と BOARD を更新。
-- 2026-11-10: 統合 commit 5cb0ae5 に含めた。独立 review と Result は未実施（status は in-progress のまま）。
+- 2026-11-10: 統合 commit 5cb0ae5 に含めた。
+- 2026-11-10: reviewer-0188 が **FAIL**（blocking 2）。store schema の空文字と、core の README / CHANGELOG の
+  wire 契約の記述。修正後に再 review する。
+
+## Result
+
+- verdict: **FAIL**（blocking 2）
+- reviewer: reviewer-0188
+- HEAD: f4ca217（clean worktree で `npm run check` 成功: lint / fmt / typecheck / test / build / knip）
+- blocking:
+  - **中 / `packages/store/src/schemas.ts:93-130` / 空の workflow id・cron・token が parse を通る。**
+    旧 `packages/core/src/http-schemas.ts` は `const id = v.pipe(v.string(), v.minLength(1));` を
+    `WorkflowNode` / `WorkflowEdge` / `AutomationTrigger` / `AutomationAction` に使っていた。
+    移動後の store schema は `v.string()` で、空文字を受け付ける。再現（f4ca217 の clean worktree）:
+    `v.safeParse(WorkflowGraphSchema, { nodes: [{ id: "", type: "agent", prompt: "p" }], edges: [] })`
+    → `success: true`。`AutomationTriggerSchema` の `cron: ""` も `true`。
+    修正: `id` を store schema に戻して該当 field に使い、空文字を拒否する回帰テストを
+    `packages/store/test` に足す。作業ツリーには同じ修正案（未コミット・テストなし）がある。
+  - **中 / `packages/core/README.md:11-30`, `packages/core/CHANGELOG.md:6` / 削除した wire 契約を今も説明。**
+    README は `src/schemas.ts`・`GET/POST /api/...`・`ErrorResponse`・`Health`・`ChatRequest` を含む表を
+    残し、changelog は "HTTP wire contract" を残す。D059 と実装に反する。修正: core を
+    「モデル + `./graphql` 射影。要求・応答の封筒は面を実装するパッケージが持つ」に書き換える。
+- non-blocking:
+  - 低 / `docs/decisions.md:247,410,419` / D031 の `ErrorCode` と D043 の ROUTES は履歴として残る。
+    D059 に置き換えの1行があると読み手が迷わない。
+  - 低 / `work/issues/0188...:6` / `touches` に store schema / test / core README / CHANGELOG が無かった。
+    この review で追記した。
+- 未確認:
+  - web の見た目・操作は変更なし。shell test 14 本は通過。visual review は対象外。
+  - 空文字の拒否は既存テストで未覆盖（finding 1 の回帰テストで埋める）。
+  - `npm run check` のテスト件数は clean worktree の出力からは取り直していない（gate は ok）。
+- 修正後の再 review: 必要。

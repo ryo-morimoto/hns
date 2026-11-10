@@ -7,12 +7,12 @@
 
 | レーン | issue | 所有するパス | owner | reviewer | 状態 | 次の統合 |
 | --- | --- | --- | --- | --- | --- | --- |
-| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | — | 統合済み（5cb0ae5）・review 待ち | 4 |
+| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/core/README.md`, `packages/store/src/schemas.ts`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | reviewer-0188 | review FAIL（blocking 2, f4ca217） | 4 |
 | E2 | [0185](issues/0185-tiers-removal.md) tiers の二重実行を廃止 | `packages/workspace/test/**`, `vitest.config.ts`, `docs/testing.md`, `docs/decisions.md`, `AGENTS.md` | — | reviewer-0185b | done（統合済み 5cb0ae5） | 3 |
 | E3 | 統合レーン（このセッション） | `docs/process.md`, `docs/parallel-change.md`, `work/README.md`, `work/LANES.md` | lead | — | 統合済み（5cb0ae5） | 1 |
 
 - E3 は製品コードを書かない。3レーンの運用を文書化し、統合・レビュー・計測だけを行う。E1 / E2 のファイルを書かない。
-- E2 は review PASS、統合済み。E1 は統合済みだが review 待ち。新しい変更レーンは E1 の review 後に開く。
+- E2 は review PASS、統合済み。E1 は review FAIL。store schema の空文字と core README / CHANGELOG を直して再 review する。新しい変更レーンは E1 の review PASS 後に開く。
 - E1 と E2 は `docs/decisions.md` と `AGENTS.md` が重なる。E2 を先に統合し、E1 を rebase して 5cb0ae5 に含めた。
 - 0141 / 0031 / 0037 は `in-progress` のまま更新が止まっている。レーンとして数える前に status を整理する
   （0037 は 0188 が superseded にする。0141 は 0188 の統合後に再開する）。
@@ -42,7 +42,7 @@
 | [0176](issues/0176-graphql-endpoint.md) /graphql | 0145 / 0175 未マージ | — | 不可 |
 | [0184](issues/0184-vitest-assertions.md) expect 移行 | 0185 未マージ | テスト全体 | 0185 は統合済み。0188 の review 後に開く。優先度は plan |
 
-0188 は統合済み（5cb0ae5）だが review 待ち。review PASS 後に、E1 を 0144 へ入れ替える。
+0188 は review FAIL（blocking 2）。修正と再 review の後に、E1 を 0144 へ入れ替える。
 3本目は引き続き統合レーンとし、製品コードを書かない。
 
 ## 更新の規則
