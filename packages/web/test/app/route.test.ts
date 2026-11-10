@@ -1,10 +1,9 @@
-import assert from "node:assert/strict";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { formatHash, parseHash } from "../../src/routes/route.ts";
 
 test("workspace and conversation hashes parse", () => {
-  assert.deepEqual(parseHash("#/p/p1"), { kind: "workspace", projectId: "p1" });
-  assert.deepEqual(parseHash("#/p/p1/c/c1"), {
+  expect(parseHash("#/p/p1")).toStrictEqual({ kind: "workspace", projectId: "p1" });
+  expect(parseHash("#/p/p1/c/c1")).toStrictEqual({
     kind: "conversation",
     projectId: "p1",
     conversationId: "c1",
@@ -13,15 +12,15 @@ test("workspace and conversation hashes parse", () => {
 
 // Catches: a typo'd or stale URL rendering a conversation that does not exist.
 test("unknown hashes fall back to the bare workspace", () => {
-  assert.deepEqual(parseHash("#/nope"), { kind: "workspace", projectId: null });
-  assert.deepEqual(parseHash(""), { kind: "workspace", projectId: null });
-  assert.deepEqual(parseHash("#/p/p1/x/c1"), { kind: "workspace", projectId: "p1" });
-  assert.deepEqual(parseHash("#/p/p1/c/%"), { kind: "workspace", projectId: "p1" });
+  expect(parseHash("#/nope")).toStrictEqual({ kind: "workspace", projectId: null });
+  expect(parseHash("")).toStrictEqual({ kind: "workspace", projectId: null });
+  expect(parseHash("#/p/p1/x/c1")).toStrictEqual({ kind: "workspace", projectId: "p1" });
+  expect(parseHash("#/p/p1/c/%")).toStrictEqual({ kind: "workspace", projectId: "p1" });
 });
 
 test("formatHash round-trips ids that need encoding", () => {
   const route = { kind: "conversation" as const, projectId: "a/b", conversationId: "c d" };
 
-  assert.equal(formatHash(route), "#/p/a%2Fb/c/c%20d");
-  assert.deepEqual(parseHash(formatHash(route)), route);
+  expect(formatHash(route)).toBe("#/p/a%2Fb/c/c%20d");
+  expect(parseHash(formatHash(route))).toStrictEqual(route);
 });

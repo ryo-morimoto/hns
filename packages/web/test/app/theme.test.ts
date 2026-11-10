@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { applyTheme, readTheme, saveTheme } from "../../src/app/theme.ts";
 
 function memoryStorage(): Storage {
@@ -22,13 +21,13 @@ function memoryStorage(): Storage {
 
 test("the stored theme round-trips and rejects unknown values", () => {
   const storage = memoryStorage();
-  assert.equal(readTheme(storage), "system");
+  expect(readTheme(storage)).toBe("system");
 
   saveTheme(storage, "dark");
-  assert.equal(readTheme(storage), "dark");
+  expect(readTheme(storage)).toBe("dark");
 
   storage.setItem("hns.theme", "blue");
-  assert.equal(readTheme(storage), "system");
+  expect(readTheme(storage)).toBe("system");
 });
 
 // Catches: system keeping a stale data-theme, so the OS preference stops applying.
@@ -36,8 +35,8 @@ test("applying system removes the override", () => {
   const root = document.createElement("html");
 
   applyTheme("dark", root);
-  assert.equal(root.dataset["theme"], "dark");
+  expect(root.dataset["theme"]).toBe("dark");
 
   applyTheme("system", root);
-  assert.equal(root.dataset["theme"], undefined);
+  expect(root.dataset["theme"]).toBe(undefined);
 });

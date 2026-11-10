@@ -1,7 +1,6 @@
-import assert from "node:assert/strict";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { Button } from "../../src/components/Button.tsx";
 import { Menu } from "../../src/components/Menu.tsx";
 
@@ -27,13 +26,13 @@ test("Menu opens from the keyboard and selects the highlighted item with Enter",
   trigger.focus();
 
   await userEvent.keyboard("{Enter}");
-  assert.ok(await screen.findByRole("menu", { name: "操作" }));
+  expect(await screen.findByRole("menu", { name: "操作" })).toBeTruthy();
 
   await userEvent.keyboard("{ArrowDown}");
   await userEvent.keyboard("{Enter}");
 
   await waitFor(() => {
-    assert.equal(selected, "削除");
+    expect(selected).toBe("削除");
   });
 });
 
@@ -52,8 +51,8 @@ test("Escape closes the Menu and returns focus to the trigger", async () => {
   await userEvent.keyboard("{Escape}");
 
   await waitFor(() => {
-    assert.equal(screen.queryByRole("menu"), null);
-    assert.equal(document.activeElement, trigger);
+    expect(screen.queryByRole("menu")).toBe(null);
+    expect(document.activeElement).toBe(trigger);
   });
 });
 
@@ -71,5 +70,5 @@ test("a disabled Menu item is not selectable", async () => {
   const item = await screen.findByRole("menuitem", { name: "削除" });
   await userEvent.click(item);
 
-  assert.equal(selected, false);
+  expect(selected).toBe(false);
 });

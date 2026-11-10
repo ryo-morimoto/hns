@@ -1,7 +1,6 @@
-import assert from "node:assert/strict";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { Toast } from "../../src/components/Toast.tsx";
 
 test("an information Toast is a status with an Undo action", async () => {
@@ -19,18 +18,18 @@ test("an information Toast is a status with an Undo action", async () => {
   );
 
   const status = screen.getByRole("status");
-  assert.match(status.textContent ?? "", /削除しました/u);
+  expect(status.textContent ?? "").toMatch(/削除しました/u);
 
   await userEvent.click(screen.getByRole("button", { name: "元に戻す" }));
 
-  assert.equal(undone, 1);
+  expect(undone).toBe(1);
 });
 
 // Catches: an error toast announced politely (assertive is the point of role=alert).
 test("an error Toast is an alert", () => {
   render(<Toast tone="error" message="保存に失敗しました" />);
 
-  assert.ok(screen.getByRole("alert"));
+  expect(screen.getByRole("alert")).toBeTruthy();
 });
 
 test("Toast dismiss runs its handler", async () => {
@@ -46,5 +45,5 @@ test("Toast dismiss runs its handler", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "閉じる" }));
 
-  assert.equal(dismissals, 1);
+  expect(dismissals).toBe(1);
 });

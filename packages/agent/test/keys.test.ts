@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import { Denied, FileFailure } from "@hns/workspace";
 import { failureOf, fixedKeySource, opencodeGo, ollamaCloud, readKey } from "../src/index.ts";
 import { OLLAMA_DEFAULT_MODEL, OLLAMA_PROVIDER } from "../src/index.ts";
@@ -11,7 +10,7 @@ test("a key comes from the environment before any file", () => {
     fixedKeySource({ HNS_KEY: " from-env " }, { "/a": "from-file" }),
   );
 
-  assert.equal(key, "from-env");
+  expect(key).toBe("from-env");
 });
 
 test("files are tried in order and blank values are skipped", () => {
@@ -20,42 +19,42 @@ test("files are tried in order and blank values are skipped", () => {
     fixedKeySource({ HNS_KEY: "  " }, { "/a": "  ", "/b": "second" }),
   );
 
-  assert.equal(key, "second");
+  expect(key).toBe("second");
 });
 
 test("no key anywhere is undefined, not an empty string", () => {
-  assert.equal(readKey({ env: "HNS_KEY", files: ["/a"] }, fixedKeySource({}, {})), undefined);
+  expect(readKey({ env: "HNS_KEY", files: ["/a"] }, fixedKeySource({}, {}))).toBe(undefined);
 });
 
 test("a workspace refusal maps to a value and a bug does not", () => {
-  assert.deepEqual(failureOf(new Denied("escapes root")), {
+  expect(failureOf(new Denied("escapes root"))).toStrictEqual({
     ok: false,
     status: "denied",
     message: "escapes root",
   });
-  assert.deepEqual(failureOf(new FileFailure("not_found", "missing")), {
+  expect(failureOf(new FileFailure("not_found", "missing"))).toStrictEqual({
     ok: false,
     status: "failed",
     code: "not_found",
     message: "missing",
   });
-  assert.throws(() => failureOf(new RangeError("bug")), RangeError);
+  expect(() => failureOf(new RangeError("bug"))).toThrow(RangeError);
 });
 
 test("the ollama adapter names its provider and model", () => {
   const built = ollamaCloud({ apiKey: "key" });
 
-  assert.equal(built.model, OLLAMA_DEFAULT_MODEL);
-  assert.deepEqual(built.ref, { provider: OLLAMA_PROVIDER, modelId: OLLAMA_DEFAULT_MODEL });
+  expect(built.model).toBe(OLLAMA_DEFAULT_MODEL);
+  expect(built.ref).toStrictEqual({ provider: OLLAMA_PROVIDER, modelId: OLLAMA_DEFAULT_MODEL });
 });
 
 test("the opencode adapter hands the key to pi-ai through the environment", () => {
   const previous = process.env.OPENCODE_API_KEY;
   const built = opencodeGo({ apiKey: "secret-key", model: "model-x" });
 
-  assert.equal(process.env.OPENCODE_API_KEY, "secret-key");
-  assert.deepEqual(built.ref, { provider: OPENCODE_PROVIDER, modelId: "model-x" });
-  assert.equal(OPENCODE_DEFAULT_MODEL, "deepseek-v4.1-flash");
+  expect(process.env.OPENCODE_API_KEY).toBe("secret-key");
+  expect(built.ref).toStrictEqual({ provider: OPENCODE_PROVIDER, modelId: "model-x" });
+  expect(OPENCODE_DEFAULT_MODEL).toBe("deepseek-v4.1-flash");
   if (previous === undefined) delete process.env.OPENCODE_API_KEY;
   else process.env.OPENCODE_API_KEY = previous;
 });

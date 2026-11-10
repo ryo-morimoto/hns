@@ -1,9 +1,8 @@
-import assert from "node:assert/strict";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, test } from "vitest";
+import { expect, afterEach, beforeEach, test } from "vitest";
 import { createFixtureSource } from "../../src/app/fixtureSource.ts";
 import { Shell } from "../../src/app/Shell.tsx";
 import { fixtureSummarySource } from "../../src/app/fixtureSummaries.ts";
@@ -56,10 +55,10 @@ afterEach(() => {
 test("the shell renders fixtures and defaults to the first project", async () => {
   renderShell();
 
-  assert.ok(await screen.findByRole("heading", { name: "Workspace" }));
-  assert.ok(await screen.findByRole("link", { name: "デザインシステムのレビュー" }));
-  assert.ok((await screen.findAllByText("Web の土台")).length > 0);
-  assert.equal(window.location.hash, "#/p/project-hns");
+  expect(await screen.findByRole("heading", { name: "Workspace" })).toBeTruthy();
+  expect(await screen.findByRole("link", { name: "デザインシステムのレビュー" })).toBeTruthy();
+  expect((await screen.findAllByText("Web の土台")).length).toBeGreaterThan(0);
+  expect(window.location.hash).toBe("#/p/project-hns");
 });
 
 // Catches: a stale #/... bookmark leaving the shell on a blank workspace.
@@ -67,9 +66,9 @@ test("an unknown hash normalizes to the first project", async () => {
   window.location.hash = "#/nope";
   renderShell();
 
-  assert.ok(await screen.findByRole("heading", { name: "Workspace" }));
+  expect(await screen.findByRole("heading", { name: "Workspace" })).toBeTruthy();
   await waitFor(() => {
-    assert.equal(window.location.hash, "#/p/project-hns");
+    expect(window.location.hash).toBe("#/p/project-hns");
   });
 });
 
@@ -77,8 +76,8 @@ test("a conversation route renders the conversation", async () => {
   window.location.hash = "#/p/project-hns/c/conversation-intent";
   renderShell();
 
-  assert.ok(await screen.findByRole("heading", { name: "Web の土台" }));
-  assert.match(document.body.textContent ?? "", /conversation-intent/u);
+  expect(await screen.findByRole("heading", { name: "Web の土台" })).toBeTruthy();
+  expect(document.body.textContent ?? "").toMatch(/conversation-intent/u);
 });
 
 test("the project menu switches the URL", async () => {
@@ -89,8 +88,8 @@ test("the project menu switches the URL", async () => {
   await userEvent.click(await screen.findByRole("menuitem", { name: "scratch" }));
 
   await waitFor(() => {
-    assert.equal(window.location.hash, "#/p/project-scratch");
-    assert.match(document.body.textContent ?? "", /scratch · 会話 0 · タスク 0/u);
+    expect(window.location.hash).toBe("#/p/project-scratch");
+    expect(document.body.textContent ?? "").toMatch(/scratch · 会話 0 · タスク 0/u);
   });
 });
 
@@ -103,7 +102,7 @@ test("the command entry calls its handler", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "コマンド" }));
 
-  assert.equal(openings, 1);
+  expect(openings).toBe(1);
 });
 
 test("the theme menu applies and stores a theme", async () => {
@@ -112,11 +111,11 @@ test("the theme menu applies and stores a theme", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "テーマ" }));
   const system = await screen.findByRole("menuitemradio", { name: "システム" });
-  assert.equal(system.getAttribute("aria-checked"), "true");
+  expect(system.getAttribute("aria-checked")).toBe("true");
   await userEvent.click(screen.getByRole("menuitemradio", { name: "ダーク" }));
 
-  assert.equal(document.documentElement.dataset["theme"], "dark");
-  assert.equal(window.localStorage.getItem("hns.theme"), "dark");
+  expect(document.documentElement.dataset["theme"]).toBe("dark");
+  expect(window.localStorage.getItem("hns.theme")).toBe("dark");
 });
 
 test("back returns to the previous route", async () => {
@@ -128,7 +127,7 @@ test("back returns to the previous route", async () => {
 
   window.history.back();
 
-  assert.ok(await screen.findByRole("heading", { name: "Workspace" }));
+  expect(await screen.findByRole("heading", { name: "Workspace" })).toBeTruthy();
 });
 
 // Catches: the editor panel having no slot, so 0106 has to restructure the shell.
@@ -137,7 +136,7 @@ test("the shell provides the right panel slot", async () => {
   await screen.findByRole("heading", { name: "Workspace" });
 
   const panel = screen.getByRole("complementary", { name: "エディタパネル" });
-  assert.match(panel.textContent ?? "", /パネル/u);
+  expect(panel.textContent ?? "").toMatch(/パネル/u);
 });
 
 test("mobile conversation shows a back arrow to the workspace", async () => {
@@ -146,12 +145,12 @@ test("mobile conversation shows a back arrow to the workspace", async () => {
   renderShell();
 
   await screen.findByRole("heading", { name: "Web の土台" });
-  assert.equal(screen.queryByRole("button", { name: "メニューを開く" }), null);
-  assert.ok(screen.getByText("Web の土台", { selector: ".hns-topbar__title" }));
+  expect(screen.queryByRole("button", { name: "メニューを開く" })).toBe(null);
+  expect(screen.getByText("Web の土台", { selector: ".hns-topbar__title" })).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "ワークスペースへ戻る" }));
 
   await screen.findByRole("heading", { name: "Workspace" });
-  assert.equal(window.location.hash, "#/p/project-hns");
+  expect(window.location.hash).toBe("#/p/project-hns");
 });
 
 // Catches: the sidebar hiding other workspaces' progress until the user switches.
@@ -159,24 +158,26 @@ test("the sidebar shows every workspace's status before switching", async () => 
   renderShell(undefined, undefined, fixtureSummarySource);
   await screen.findByRole("heading", { level: 1, name: "Workspace" });
 
-  assert.ok(await screen.findByRole("link", { name: /^hns: 1 needs · 2 running · 12m/u }));
-  assert.ok(screen.getByRole("link", { name: /^docs: 1 running/u }));
-  assert.ok(screen.getByRole("link", { name: /^scratch: all clear/u }));
+  expect(
+    await screen.findByRole("link", { name: /^hns: 1 needs · 2 running · 12m/u }),
+  ).toBeTruthy();
+  expect(screen.getByRole("link", { name: /^docs: 1 running/u })).toBeTruthy();
+  expect(screen.getByRole("link", { name: /^scratch: all clear/u })).toBeTruthy();
 
   const labels = screen
     .getAllByRole("link")
     .map((link) => link.getAttribute("aria-label"))
     .filter((label): label is string => label !== null);
-  assert.match(labels[0] ?? "", /^hns:/u);
-  assert.match(labels[1] ?? "", /^docs:/u);
-  assert.match(labels[2] ?? "", /^scratch:/u);
+  expect(labels[0] ?? "").toMatch(/^hns:/u);
+  expect(labels[1] ?? "").toMatch(/^docs:/u);
+  expect(labels[2] ?? "").toMatch(/^scratch:/u);
 
-  assert.match(screen.getByText(/^hns 1$/u).textContent ?? "", /hns 1/u);
-  assert.match(screen.getByText(/^hns 2 · docs 1$/u).textContent ?? "", /docs 1/u);
-  assert.ok(screen.getByRole("group", { name: "Needs you: 1 (hns 1)" }));
-  assert.ok(screen.getByRole("group", { name: "Failed: 0" }));
-  assert.ok(screen.getByRole("group", { name: "Running: 3 (hns 2 · docs 1)" }));
-  assert.ok(screen.getByRole("group", { name: "Done today: 3 (hns 3)" }));
+  expect(screen.getByText(/^hns 1$/u).textContent ?? "").toMatch(/hns 1/u);
+  expect(screen.getByText(/^hns 2 · docs 1$/u).textContent ?? "").toMatch(/docs 1/u);
+  expect(screen.getByRole("group", { name: "Needs you: 1 (hns 1)" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Failed: 0" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Running: 3 (hns 2 · docs 1)" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Done today: 3 (hns 3)" })).toBeTruthy();
 });
 
 test("the active workspace stays first even without needs", async () => {
@@ -188,8 +189,8 @@ test("the active workspace stays first even without needs", async () => {
     .getAllByRole("link")
     .map((link) => link.getAttribute("aria-label"))
     .filter((label): label is string => label !== null);
-  assert.match(labels[0] ?? "", /^scratch:/u);
-  assert.match(labels[1] ?? "", /^hns:/u);
+  expect(labels[0] ?? "").toMatch(/^scratch:/u);
+  expect(labels[1] ?? "").toMatch(/^hns:/u);
 });
 
 test("runs stay global when another workspace is active", async () => {
@@ -198,17 +199,17 @@ test("runs stay global when another workspace is active", async () => {
   await screen.findByRole("heading", { level: 1, name: "Workspace" });
 
   const runs = await screen.findByRole("region", { name: "実行" });
-  assert.match(runs.textContent ?? "", /workflow-release/u);
-  assert.equal(screen.getAllByText("workflow-release").length, 1);
+  expect(runs.textContent ?? "").toMatch(/workflow-release/u);
+  expect(screen.getAllByText("workflow-release").length).toBe(1);
   const body = screen.getByRole("group", { name: "docs の作業" });
-  assert.equal(within(body).queryByText("workflow-release"), null);
+  expect(within(body).queryByText("workflow-release")).toBe(null);
 });
 
 test("the mobile menu carries the needs-you count", async () => {
   setMobile(true);
   renderShell(undefined, undefined, fixtureSummarySource);
 
-  assert.ok(await screen.findByRole("button", { name: "メニュー（Needs you 1）" }));
+  expect(await screen.findByRole("button", { name: "メニュー（Needs you 1）" })).toBeTruthy();
 });
 
 // Catches: a mobile shell that hides the sidebar without a way to reach it, or a drawer that
@@ -218,22 +219,22 @@ test("mobile opens the drawer from the top bar", async () => {
   renderShell();
   await screen.findByRole("heading", { name: "Workspace" });
 
-  assert.equal(screen.queryByRole("navigation", { name: "下部バー" }), null);
-  assert.equal(screen.queryByRole("button", { name: "hns" }), null);
-  assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Workspace");
-  assert.ok(screen.getByText("hns", { selector: ".hns-topbar__title" }));
+  expect(screen.queryByRole("navigation", { name: "下部バー" })).toBe(null);
+  expect(screen.queryByRole("button", { name: "hns" })).toBe(null);
+  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Workspace");
+  expect(screen.getByText("hns", { selector: ".hns-topbar__title" })).toBeTruthy();
 
   await userEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
-  assert.ok(await screen.findByRole("dialog", { name: "メニュー" }));
-  assert.equal(screen.getByRole("status").textContent, "接続済み");
+  expect(await screen.findByRole("dialog", { name: "メニュー" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("接続済み");
   const themeGroup = screen.getByRole("group", { name: "テーマ" });
-  assert.ok(themeGroup);
+  expect(themeGroup).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "ダーク" }));
-  assert.equal(document.documentElement.dataset["theme"], "dark");
-  assert.equal(window.localStorage.getItem("hns.theme"), "dark");
+  expect(document.documentElement.dataset["theme"]).toBe("dark");
+  expect(window.localStorage.getItem("hns.theme")).toBe("dark");
 
   await userEvent.click(screen.getByRole("button", { name: "メニューを閉じる" }));
   await waitFor(() => {
-    assert.equal(screen.queryByRole("dialog", { name: "メニュー" }), null);
+    expect(screen.queryByRole("dialog", { name: "メニュー" })).toBe(null);
   });
 });

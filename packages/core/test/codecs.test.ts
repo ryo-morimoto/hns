@@ -1,28 +1,27 @@
-import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { isoTimestamp, operationId, operationIdFrom } from "../src/index.ts";
 
 test("ISO timestamps are built only through the codec", () => {
   const value = isoTimestamp("2026-01-01T00:00:00.000Z");
-  assert.equal(value, "2026-01-01T00:00:00.000Z");
-  assert.throws(() => isoTimestamp("2026-01-01"));
-  assert.throws(() => isoTimestamp("not-a-date"));
+  expect(value).toBe("2026-01-01T00:00:00.000Z");
+  expect(() => isoTimestamp("2026-01-01")).toThrow();
+  expect(() => isoTimestamp("not-a-date")).toThrow();
 });
 
 test("operation ids are built only through the codec", () => {
-  assert.equal(operationId("call-1"), "call-1");
-  assert.throws(() => operationId("bad id"));
-  assert.throws(() => operationId(""));
-  assert.throws(() => operationId("x".repeat(65)));
+  expect(operationId("call-1")).toBe("call-1");
+  expect(() => operationId("bad id")).toThrow();
+  expect(() => operationId("")).toThrow();
+  expect(() => operationId("x".repeat(65))).toThrow();
 });
 
 // Catches: a derived id kept a character the wire format refuses, or ran past its length.
 test("operation ids are derived from arbitrary text inside the rule", () => {
-  assert.equal(operationIdFrom("tool:1793:qwe"), "tool-1793-qwe");
-  assert.equal(operationIdFrom("a".repeat(100)).length, 64);
-  assert.throws(() => operationIdFrom(""));
+  expect(operationIdFrom("tool:1793:qwe")).toBe("tool-1793-qwe");
+  expect(operationIdFrom("a".repeat(100)).length).toBe(64);
+  expect(() => operationIdFrom("")).toThrow();
 });
 
 // Catches: a copy of the ISO validator or of the operationId alphabet outside the codec.
@@ -44,5 +43,5 @@ test("no package source calls v.isoTimestamp or repeats the operationId alphabet
       offenders.push(path.slice(root.length + 1));
     }
   }
-  assert.deepEqual(offenders, []);
+  expect(offenders).toStrictEqual([]);
 });

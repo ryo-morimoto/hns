@@ -1,7 +1,6 @@
-import assert from "node:assert/strict";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { Button } from "../../src/components/Button.tsx";
 
 test("Button runs its action on click", async () => {
@@ -10,7 +9,7 @@ test("Button runs its action on click", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
-  assert.equal(clicks, 1);
+  expect(clicks).toBe(1);
 });
 
 test("a disabled Button refuses the press", async () => {
@@ -23,7 +22,7 @@ test("a disabled Button refuses the press", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
-  assert.equal(clicks, 0);
+  expect(clicks).toBe(0);
 });
 
 // Catches: a loading button that still submits, or hides its busy state from assistive tech.
@@ -35,13 +34,13 @@ test("a loading Button is busy and refuses the press", async () => {
     </Button>,
   );
   const button = screen.getByRole("button", { name: "保存" });
-  assert.ok(button instanceof HTMLButtonElement);
-  assert.equal(button.getAttribute("aria-busy"), "true");
-  assert.equal(button.disabled, true);
+  expect.assert(button instanceof HTMLButtonElement);
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect(button.disabled).toBe(true);
 
   await userEvent.click(button);
 
-  assert.equal(clicks, 0);
+  expect(clicks).toBe(0);
 });
 
 test("an icon Button exposes its accessible name", () => {
@@ -51,5 +50,5 @@ test("an icon Button exposes its accessible name", () => {
     </Button>,
   );
 
-  assert.ok(screen.getByRole("button", { name: "閉じる" }));
+  expect(screen.getByRole("button", { name: "閉じる" })).toBeTruthy();
 });

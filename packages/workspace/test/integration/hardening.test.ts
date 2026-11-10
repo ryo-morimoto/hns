@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import * as v from "valibot";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -23,16 +22,15 @@ for (const testTarget of targets) {
       });
       const current = (await workspace.read("a.txt")).version;
 
-      await assert.rejects(
+      await expect(
         workspace.write({
           path: "a.txt",
           content: "two",
           expectedVersion: current,
           operationId: "same",
         }),
-        Denied,
-      );
-      assert.equal((await workspace.read("a.txt")).content, "one");
+      ).rejects.toThrow(Denied);
+      expect((await workspace.read("a.txt")).content).toBe("one");
       await workspace.close();
     });
   });
@@ -54,8 +52,11 @@ for (const testTarget of targets) {
       const journal = JSON.parse(
         await readFile(join(target.base, "journal-" + name + ".json"), "utf8"),
       );
-      assert.ok(Object.keys(journal.ops).length <= 2, JSON.stringify(Object.keys(journal.ops)));
-      assert.equal((await workspace.read("f-4.txt")).content, "4");
+      expect(
+        Object.keys(journal.ops).length,
+        JSON.stringify(Object.keys(journal.ops)),
+      ).toBeLessThanOrEqual(2);
+      expect((await workspace.read("f-4.txt")).content).toBe("4");
       await workspace.close();
     });
   });
@@ -66,10 +67,10 @@ for (const testTarget of targets) {
       const workspace = await openWorkspace(target, "contains");
       const root = rootOf(target, "contains");
 
-      assert.equal(await workspace.contains(root), true);
-      assert.equal(await workspace.contains(join(root, "nested", "file.txt")), true);
-      assert.equal(await workspace.contains(join(target.base, "outside.txt")), false);
-      assert.equal(await workspace.contains(target.base), false);
+      expect(await workspace.contains(root)).toBe(true);
+      expect(await workspace.contains(join(root, "nested", "file.txt"))).toBe(true);
+      expect(await workspace.contains(join(target.base, "outside.txt"))).toBe(false);
+      expect(await workspace.contains(target.base)).toBe(false);
       await workspace.close();
     });
   });
@@ -89,14 +90,14 @@ for (const testTarget of targets) {
         operationId: "escape",
       });
 
-      assert.equal(applied.status, "applied");
+      expect(applied.status).toBe("applied");
       const journal = v.parse(
         v.object({ ops: v.record(v.string(), v.object({ temp: v.string() })) }),
         JSON.parse(await readFile(join(target.base, "journal-" + name + ".json"), "utf8")),
       );
       const temp = journal.ops.escape?.temp ?? "";
-      assert.match(temp, /\/\.hns-tmp-[0-9a-f-]{36}$/);
-      assert.equal(temp.includes("escape"), false);
+      expect(temp).toMatch(/\/\.hns-tmp-[0-9a-f-]{36}$/);
+      expect(temp.includes("escape")).toBe(false);
       await workspace.close();
     });
   });
@@ -124,7 +125,7 @@ for (const testTarget of targets) {
       process.off("unhandledRejection", onRejection);
     }
 
-    assert.deepEqual(rejections, []);
+    expect(rejections).toStrictEqual([]);
   });
 
   // Catches: a directory read surfaced as a raw FileError instead of a typed failure.
@@ -137,8 +138,8 @@ for (const testTarget of targets) {
         (error: Error) => error,
       );
 
-      assert.ok(failure instanceof FileFailure);
-      assert.equal(failure.code, "is_directory");
+      expect.assert(failure instanceof FileFailure);
+      expect(failure.code).toBe("is_directory");
       await workspace.close();
     });
   });
@@ -162,14 +163,14 @@ for (const testTarget of targets) {
         }),
       ]);
 
-      assert.equal(first.status, "applied");
-      assert.equal(second.status, "applied");
+      expect(first.status).toBe("applied");
+      expect(second.status).toBe("applied");
       await workspace.close();
 
       const fresh = await openWorkspace(target, "concurrent");
-      assert.deepEqual(await fresh.recover(), []);
-      assert.equal((await fresh.read("a.txt")).content, "a");
-      assert.equal((await fresh.read("b.txt")).content, "b");
+      expect(await fresh.recover()).toStrictEqual([]);
+      expect((await fresh.read("a.txt")).content).toBe("a");
+      expect((await fresh.read("b.txt")).content).toBe("b");
       await fresh.close();
     });
   });
@@ -198,7 +199,7 @@ for (const testTarget of targets) {
         expectedVersion: v1,
         operationId: "w3",
       });
-      assert.equal(stale.status, "conflict");
+      expect(stale.status).toBe("conflict");
 
       await writeFile(join(rootOf(target, name), "a.txt"), "v1");
       const retry = await workspace.write({
@@ -208,8 +209,8 @@ for (const testTarget of targets) {
         operationId: "w3",
       });
 
-      assert.equal(retry.status, "conflict");
-      assert.equal((await workspace.read("a.txt")).content, "v1");
+      expect(retry.status).toBe("conflict");
+      expect((await workspace.read("a.txt")).content).toBe("v1");
       await workspace.close();
     });
   });
@@ -221,24 +222,22 @@ for (const testTarget of targets) {
       const name = "op-invalid";
       const workspace = await openWorkspace(target, name);
       const root = rootOf(target, name);
-      await assert.rejects(
+      await expect(
         workspace.write({
           path: "bad.txt",
           content: "x",
           expectedVersion: "absent",
           operationId: "../../escape",
         }),
-        Denied,
-      );
+      ).rejects.toThrow(Denied);
 
       const entries = await readdir(root);
-      assert.deepEqual(
+      expect(
         entries.filter(
           (entry) =>
             entry === "bad.txt" || entry.startsWith(".hns-tmp-") || entry.includes("escape"),
         ),
-        [],
-      );
+      ).toStrictEqual([]);
       const journal = v.parse(
         v.object({
           ops: v.record(v.string(), v.unknown()),
@@ -248,11 +247,10 @@ for (const testTarget of targets) {
         }),
         JSON.parse(await readFile(join(target.base, "journal-" + name + ".json"), "utf8")),
       );
-      assert.deepEqual(Object.keys(journal.ops), []);
-      assert.deepEqual(
-        journal.audit.map((entry) => [entry.operationId, entry.denied]),
-        [[null, true]],
-      );
+      expect(Object.keys(journal.ops)).toStrictEqual([]);
+      expect(journal.audit.map((entry) => [entry.operationId, entry.denied])).toStrictEqual([
+        [null, true],
+      ]);
       await workspace.close();
     });
   });

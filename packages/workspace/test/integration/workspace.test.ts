@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import { mkdir, readdir, rename, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
@@ -19,11 +18,11 @@ for (const testTarget of targets) {
         operationId: "w1",
       });
 
-      assert.equal(applied.status, "applied");
+      expect(applied.status).toBe("applied");
       const read = await workspace.read("a.txt");
 
-      assert.equal(read.content, "one");
-      assert.equal(read.version, applied.status === "applied" ? applied.version : "");
+      expect(read.content).toBe("one");
+      expect(read.version).toBe(applied.status === "applied" ? applied.version : "");
       await workspace.close();
     });
   });
@@ -54,9 +53,9 @@ for (const testTarget of targets) {
           operationId: "w3",
         });
 
-        assert.equal(stale.status, "conflict");
-        assert.notEqual(stale.status === "conflict" ? stale.currentVersion : undefined, v1);
-        assert.equal((await workspace.read("a.txt")).content, "v2");
+        expect(stale.status).toBe("conflict");
+        expect(stale.status === "conflict" ? stale.currentVersion : undefined).not.toBe(v1);
+        expect((await workspace.read("a.txt")).content).toBe("v2");
         await workspace.close();
       });
     },
@@ -87,9 +86,9 @@ for (const testTarget of targets) {
         operationId: "w2",
       });
 
-      assert.deepEqual(replay, first);
+      expect(replay).toStrictEqual(first);
       const external = await target.env.readTextFile(join(rootOf(target, "replay"), "a.txt"), ctx);
-      assert.equal(external.ok ? external.value : undefined, "external");
+      expect(external.ok ? external.value : undefined).toBe("external");
       await workspace.close();
     });
   });
@@ -110,19 +109,18 @@ for (const testTarget of targets) {
           const base = (await first.read("a.txt")).version;
 
           const crashing = await openWorkspace(target, name, { crashAt: step });
-          await assert.rejects(
+          await expect(
             crashing.write({
               path: "a.txt",
               content: "v2",
               expectedVersion: base,
               operationId: "crash",
             }),
-            Crash,
-          );
+          ).rejects.toThrow(Crash);
 
           const fresh = await openWorkspace(target, name);
           const settled = await fresh.recover();
-          assert.deepEqual(settled, [
+          expect(settled).toStrictEqual([
             { operationId: "crash", status: step === "rename" ? "applied" : "pending" },
           ]);
 
@@ -133,8 +131,8 @@ for (const testTarget of targets) {
             operationId: "crash",
           });
 
-          assert.equal(retry.status, "applied");
-          assert.equal((await fresh.read("a.txt")).content, "v2");
+          expect(retry.status).toBe("applied");
+          expect((await fresh.read("a.txt")).content).toBe("v2");
           await fresh.close();
         });
       },
@@ -156,19 +154,18 @@ for (const testTarget of targets) {
         const base = (await first.read("a.txt")).version;
 
         const crashing = await openWorkspace(target, name, { crashAt: "rename" });
-        await assert.rejects(
+        await expect(
           crashing.write({
             path: "a.txt",
             content: "ours",
             expectedVersion: base,
             operationId: "lost",
           }),
-          Crash,
-        );
+        ).rejects.toThrow(Crash);
         await target.env.writeFile(join(target.base, "root-" + name, "a.txt"), "stranger", ctx);
 
         const fresh = await openWorkspace(target, name);
-        assert.deepEqual(await fresh.recover(), [{ operationId: "lost", status: "unknown" }]);
+        expect(await fresh.recover()).toStrictEqual([{ operationId: "lost", status: "unknown" }]);
         const replay = await fresh.write({
           path: "a.txt",
           content: "ours",
@@ -176,7 +173,7 @@ for (const testTarget of targets) {
           operationId: "lost",
         });
 
-        assert.equal(replay.status, "unknown");
+        expect(replay.status).toBe("unknown");
         await fresh.close();
       });
     },
@@ -194,20 +191,18 @@ for (const testTarget of targets) {
       const root = rootOf(target, "root-swap");
       await rename(root, root + "-old");
 
-      await assert.rejects(workspace.read("a.txt"), Denied);
-      await assert.rejects(
+      await expect(workspace.read("a.txt")).rejects.toThrow(Denied);
+      await expect(
         workspace.write({
           path: "a.txt",
           content: "two",
           expectedVersion: "absent",
           operationId: "w2",
         }),
-        Denied,
-      );
+      ).rejects.toThrow(Denied);
 
-      assert.ok(workspace.auditLog.filter((entry) => entry.denied).length >= 2);
-      assert.equal(
-        await target.env.exists(root, ctx).then((result) => result.ok && result.value),
+      expect(workspace.auditLog.filter((entry) => entry.denied).length).toBeGreaterThanOrEqual(2);
+      expect(await target.env.exists(root, ctx).then((result) => result.ok && result.value)).toBe(
         false,
       );
       await rename(root + "-old", root);
@@ -227,14 +222,14 @@ for (const testTarget of targets) {
       const journalPath = join(target.base, "journal-corrupt.json");
       await target.env.writeFile(journalPath, JSON.stringify({ ops: 5 }), ctx);
 
-      await assert.rejects(
+      await expect(
         Workspace.open({
           env: target.env,
           root: join(target.base, "root-corrupt"),
           journalPath,
           context: ctx,
         }),
-      );
+      ).rejects.toThrow();
       await workspace.close();
     });
   });
@@ -243,18 +238,17 @@ for (const testTarget of targets) {
     await withTarget(testTarget, async (target) => {
       const workspace = await openWorkspace(target, "paths");
 
-      await assert.rejects(
+      await expect(
         workspace.write({
           path: ".git/config",
           content: "x",
           expectedVersion: "absent",
           operationId: "w1",
         }),
-        Denied,
-      );
-      await assert.rejects(workspace.read("../outside.txt"), Denied);
-      await assert.rejects(workspace.read("/etc/passwd"), Denied);
-      await assert.rejects(workspace.read("a/../../x"), Denied);
+      ).rejects.toThrow(Denied);
+      await expect(workspace.read("../outside.txt")).rejects.toThrow(Denied);
+      await expect(workspace.read("/etc/passwd")).rejects.toThrow(Denied);
+      await expect(workspace.read("a/../../x")).rejects.toThrow(Denied);
       await workspace.close();
     });
   });
@@ -290,8 +284,8 @@ for (const testTarget of targets) {
           operationId: "swap",
         });
 
-        assert.equal(result.status, "unknown");
-        assert.deepEqual(await readdir(outside), []);
+        expect(result.status).toBe("unknown");
+        expect(await readdir(outside)).toStrictEqual([]);
         await trapped.close();
         await workspace.close();
       });
@@ -310,8 +304,8 @@ for (const testTarget of targets) {
           (error: Error) => error,
         );
 
-      assert.ok(failure instanceof FileFailure);
-      assert.equal(failure.code, "not_found");
+      expect.assert(failure instanceof FileFailure);
+      expect(failure.code).toBe("not_found");
       await workspace.close();
     });
   });

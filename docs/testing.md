@@ -106,8 +106,8 @@ e2e/                                      # Playwright。pages / fixtures / jour
 ### アサーション
 
 - **Vitest の `expect` に統一する。** `node:assert` は使わない（D056）。
-- `assert.equal` 相当はプリミティブなら `toBe`、オブジェクトなら `toStrictEqual`。
-- 型の絞り込みが要る箇所は `defined()` ヘルパーか明示チェックにする。`as` を増やさない。
+- 等値はプリミティブなら `toBe`、オブジェクトなら `toStrictEqual`。
+- 型の絞り込みが要る箇所は `expect.assert(...)` を使う（`expect(...).toBe` は型を絞らない）。`as` を増やさない。
 - テストも `tsrs --noEmit` の対象。`any`・`@ts-ignore`・根拠のない `as` は禁止。
 
 ### 書き方
@@ -159,7 +159,7 @@ e2e/                                      # Playwright。pages / fixtures / jour
 | --- | --- | --- |
 | 0183 | 方針・tsdown / doctest のスパイク | done |
 | 0185 | tiers の二重実行を廃止 | done |
-| 0184 | アサーションを `expect` に統一 | 未着手 |
+| 0184 | アサーションを `expect` に統一 | done |
 | 0186 | コロケーションと issue 参照の削除 | 未着手 |
 | 0187 | TSDoc 契約と doctest の全パッケージ展開 | 未着手 |
 

@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,9 +38,9 @@ test("a turn reads a file and replaces it with the version it read", async () =>
 
     const turn = await agent.send("replace the file");
 
-    assert.equal(turn.settlement.status, "done");
-    assert.equal(turn.text, "done");
-    assert.equal(await readFile(join(root, "a.txt"), "utf8"), "v2");
+    expect(turn.settlement.status).toBe("done");
+    expect(turn.text).toBe("done");
+    expect(await readFile(join(root, "a.txt"), "utf8")).toBe("v2");
   });
 });
 
@@ -62,12 +61,12 @@ test("a write from a stale version comes back as a conflict value", async () => 
     const turn = await agent.send("write with a stale version");
     const results = toolResults(await agent.transcript());
 
-    assert.equal(turn.settlement.status, "done");
-    assert.ok(
+    expect(turn.settlement.status).toBe("done");
+    expect(
       results.some((text) => text.includes('"status":"conflict"')),
       results.join(" | "),
-    );
-    assert.equal(await readFile(join(root, "a.txt"), "utf8"), "v1");
+    ).toBe(true);
+    expect(await readFile(join(root, "a.txt"), "utf8")).toBe("v1");
   });
 });
 
@@ -84,11 +83,11 @@ test("a refused path is reported to the model, not thrown", async () => {
     const turn = await agent.send("read outside the root");
     const results = toolResults(await agent.transcript());
 
-    assert.equal(turn.settlement.status, "done");
-    assert.ok(
+    expect(turn.settlement.status).toBe("done");
+    expect(
       results.some((text) => text.includes('"status":"denied"')),
       results.join(" | "),
-    );
+    ).toBe(true);
   });
 });
 
@@ -96,10 +95,10 @@ test("bash is offered only when a sandbox is available", async () => {
   const status = await sandboxStatus();
 
   await withAgent(async ({ agent }) => {
-    if (status.available) assert.ok(agent.tools.includes("bash"), agent.tools.join(","));
-    else assert.equal(agent.tools.includes("bash"), false, agent.tools.join(","));
-    assert.ok(agent.tools.includes("read_file"));
-    assert.ok(agent.tools.includes("write_file"));
+    if (status.available) expect(agent.tools.includes("bash"), agent.tools.join(",")).toBe(true);
+    else expect(agent.tools.includes("bash"), agent.tools.join(",")).toBe(false);
+    expect(agent.tools.includes("read_file")).toBe(true);
+    expect(agent.tools.includes("write_file")).toBe(true);
   });
 });
 
@@ -116,11 +115,11 @@ test("observation events name the tool, its outcome, and the response", async ()
     const finished = events.filter((event) => event.event === "tool.result");
     const answered = events.filter((event) => event.event === "agent.response");
 
-    assert.equal(called.length, 1);
-    assert.equal(called[0]?.event === "tool.call" ? called[0].tool : "", "read_file");
-    assert.equal(finished[0]?.event === "tool.result" ? finished[0].ok : false, true);
-    assert.equal(answered.length, 1);
-    assert.equal(answered[0]?.event === "agent.response" ? answered[0].text : "", "read it");
+    expect(called.length).toBe(1);
+    expect(called[0]?.event === "tool.call" ? called[0].tool : "").toBe("read_file");
+    expect(finished[0]?.event === "tool.result" ? finished[0].ok : false).toBe(true);
+    expect(answered.length).toBe(1);
+    expect(answered[0]?.event === "agent.response" ? answered[0].text : "").toBe("read it");
   });
 });
 
@@ -138,8 +137,8 @@ test("two writes in one turn both apply, because the call names the operation", 
     ]);
     await agent.send("first write");
     const second = (await workspace.read("a.txt")).version;
-    assert.notEqual(second, first);
-    assert.equal(await readFile(join(root, "a.txt"), "utf8"), "v2");
+    expect(second).not.toBe(first);
+    expect(await readFile(join(root, "a.txt"), "utf8")).toBe("v2");
 
     faux.setResponses([
       fauxAssistantMessage(
@@ -150,7 +149,7 @@ test("two writes in one turn both apply, because the call names the operation", 
     ]);
     await agent.send("second write");
 
-    assert.equal(await readFile(join(root, "a.txt"), "utf8"), "v3");
+    expect(await readFile(join(root, "a.txt"), "utf8")).toBe("v3");
   });
 });
 
@@ -176,12 +175,12 @@ test("a large file is truncated in the tool result", async () => {
       text.startsWith('{"ok":true'),
     );
 
-    assert.ok(result !== undefined, "no read result");
+    expect.assert(result !== undefined, "no read result");
     const parsed = JSON.parse(result);
-    assert.equal(parsed.truncated, true);
-    assert.equal(parsed.characters, big.length);
-    assert.ok(parsed.content.length < big.length);
-    assert.equal(await readFile(join(root, "big.txt"), "utf8"), big);
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.characters).toBe(big.length);
+    expect(parsed.content.length).toBeLessThan(big.length);
+    expect(await readFile(join(root, "big.txt"), "utf8")).toBe(big);
   });
 });
 
@@ -205,7 +204,7 @@ test("a cwd outside the workspace root is refused", async () => {
     ? { kind: "sandboxed", env: createSandboxEnv(env, { root, bwrap: status.bwrap }) }
     : { kind: "disabled", env: createNoExecEnv(env, status), reason: status.reason };
   try {
-    await assert.rejects(
+    await expect(
       openAgent({
         storage: new MemoryStorage(),
         models,
@@ -215,8 +214,7 @@ test("a cwd outside the workspace root is refused", async () => {
         cwd: base,
         context: ctx,
       }),
-      Denied,
-    );
+    ).rejects.toThrow(Denied);
   } finally {
     await workspace.close();
     await rm(base, { recursive: true, force: true });
@@ -226,7 +224,7 @@ test("a cwd outside the workspace root is refused", async () => {
 test("the agent's operationId obeys the wire format", () => {
   const callId = "tool:1793992940083:qazzmqq70wo";
 
-  assert.doesNotThrow(() => v.parse(OperationIdSchema, operationIdFor(callId)));
-  assert.notEqual(operationIdFor(callId), operationIdFor(callId + "x"));
-  assert.equal(operationIdFor("a".repeat(100)).length, 64);
+  expect(() => v.parse(OperationIdSchema, operationIdFor(callId))).not.toThrow();
+  expect(operationIdFor(callId)).not.toBe(operationIdFor(callId + "x"));
+  expect(operationIdFor("a".repeat(100)).length).toBe(64);
 });

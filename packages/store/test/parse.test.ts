@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import type { JsonValue } from "@hns/core";
 import { parseConversation, parseEvent, parseProject, parseTask } from "../src/parse.ts";
@@ -35,7 +34,7 @@ const eventRow = {
 };
 
 test("a project row parses into the public model", () => {
-  assert.deepEqual(parseProject(projectRow), {
+  expect(parseProject(projectRow)).toStrictEqual({
     id: "p1",
     name: "hns",
     created_at: "2026-11-07T00:00:00.000Z",
@@ -43,47 +42,47 @@ test("a project row parses into the public model", () => {
 });
 
 test("archived 0/1 becomes a boolean", () => {
-  assert.equal(parseConversation(conversationRow).archived, false);
-  assert.equal(parseConversation({ ...conversationRow, archived: 1 }).archived, true);
+  expect(parseConversation(conversationRow).archived).toBe(false);
+  expect(parseConversation({ ...conversationRow, archived: 1 }).archived).toBe(true);
 });
 
 test("an unknown archived flag is rejected", () => {
-  assert.throws(() => parseConversation({ ...conversationRow, archived: 2 }));
+  expect(() => parseConversation({ ...conversationRow, archived: 2 })).toThrow();
 });
 
 test("null timestamps stay null", () => {
   const conversation = parseConversation(conversationRow);
 
-  assert.equal(conversation.updated_at, null);
-  assert.equal(conversation.deleted_at, null);
+  expect(conversation.updated_at).toBe(null);
+  expect(conversation.deleted_at).toBe(null);
 });
 
 test("a missing field is rejected", () => {
-  assert.throws(() => parseProject({ id: "p1", created_at: "2026-11-07T00:00:00.000Z" }));
+  expect(() => parseProject({ id: "p1", created_at: "2026-11-07T00:00:00.000Z" })).toThrow();
 });
 
 test("a task row keeps its status", () => {
-  assert.equal(parseTask(taskRow).status, "doing");
+  expect(parseTask(taskRow).status).toBe("doing");
 });
 
 test("an unknown task status fails loudly", () => {
-  assert.throws(() => parseTask({ ...taskRow, status: "paused" }));
+  expect(() => parseTask({ ...taskRow, status: "paused" })).toThrow();
 });
 
 test("event detail is parsed from JSON", () => {
-  assert.deepEqual(parseEvent(eventRow).detail, { a: 1 });
+  expect(parseEvent(eventRow).detail).toStrictEqual({ a: 1 });
 });
 
 test("a null event detail stays null", () => {
-  assert.equal(parseEvent({ ...eventRow, detail: null }).detail, null);
+  expect(parseEvent({ ...eventRow, detail: null }).detail).toBe(null);
 });
 
 test("a broken event detail fails loudly", () => {
-  assert.throws(() => parseEvent({ ...eventRow, detail: "{" }));
+  expect(() => parseEvent({ ...eventRow, detail: "{" })).toThrow();
 });
 
 test("an unknown event level fails loudly", () => {
-  assert.throws(() => parseEvent({ ...eventRow, level: "debug" }));
+  expect(() => parseEvent({ ...eventRow, level: "debug" })).toThrow();
 });
 
 test("rows read from a real SQLite database parse", () => {
@@ -111,7 +110,7 @@ test("rows read from a real SQLite database parse", () => {
     db.prepare("SELECT * FROM conversations").get() as JsonValue,
   );
 
-  assert.equal(project.name, "hns");
-  assert.equal(conversation.archived, true);
+  expect(project.name).toBe("hns");
+  expect(conversation.archived).toBe(true);
   db.close();
 });

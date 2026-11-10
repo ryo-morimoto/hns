@@ -1,5 +1,4 @@
-import { afterAll, test } from "vitest";
-import assert from "node:assert/strict";
+import { expect, afterAll, test } from "vitest";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,9 +48,9 @@ afterAll(async () => {
 });
 
 test("the version of bubblewrap is parsed", () => {
-  assert.deepEqual(parseVersion("bubblewrap 0.12.0"), [0, 12, 0]);
-  assert.deepEqual(parseVersion("0.12.0"), [0, 12, 0]);
-  assert.equal(parseVersion("not a version"), undefined);
+  expect(parseVersion("bubblewrap 0.12.0")).toStrictEqual([0, 12, 0]);
+  expect(parseVersion("0.12.0")).toStrictEqual([0, 12, 0]);
+  expect(parseVersion("not a version")).toBe(undefined);
 });
 
 // Catches: detection used /bin/true, which NixOS lacks, so a working bwrap was reported unavailable.
@@ -59,23 +58,23 @@ test("detection reports a verdict that names the deciding check", async () => {
   const status = await detected();
 
   if (status.available) {
-    assert.equal(status.exec, "enabled");
-    assert.equal(status.userNamespaces, "ok");
-    assert.match(status.version, /^\d+\.\d+\.\d+$/);
-    assert.ok(status.bwrap.startsWith("/"));
+    expect(status.exec).toBe("enabled");
+    expect(status.userNamespaces).toBe("ok");
+    expect(status.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(status.bwrap.startsWith("/")).toBe(true);
     return;
   }
-  assert.equal(status.exec, "disabled");
-  assert.ok(status.code.length > 0);
-  assert.ok(status.reason.length > 0);
+  expect(status.exec).toBe("disabled");
+  expect(status.code.length).toBeGreaterThan(0);
+  expect(status.reason.length).toBeGreaterThan(0);
 });
 
 test("a missing bwrap is a verdict, not an exception", async () => {
   const missing = await detectSandbox(join(base, "no-bwrap"));
 
-  assert.equal(missing.available, false);
-  assert.equal(missing.code, "not-found");
-  assert.equal(missing.exec, "disabled");
+  expect.assert(!missing.available);
+  expect(missing.code).toBe("not-found");
+  expect(missing.exec).toBe("disabled");
 });
 
 test("a program that is not executable is rejected", async () => {
@@ -84,8 +83,8 @@ test("a program that is not executable is rejected", async () => {
 
   const status = await detectSandbox(blocked);
 
-  assert.equal(status.available, false);
-  assert.equal(status.code, "not-executable");
+  expect.assert(!status.available);
+  expect(status.code).toBe("not-executable");
 });
 
 // Catches: a version check alone passed on a host without user namespaces.
@@ -100,16 +99,16 @@ test("a host without user namespaces is named", async () => {
 
   const status = await detectSandbox(blocked);
 
-  assert.equal(status.available, false);
-  assert.equal(status.code, "userns-unavailable");
-  assert.equal(status.userNamespaces, "blocked");
+  expect.assert(!status.available);
+  expect(status.code).toBe("userns-unavailable");
+  expect(status.userNamespaces).toBe("blocked");
 });
 
 test("a root of / is refused", () => {
   const env = new NodeExecutionEnv({ cwd: base });
 
-  assert.throws(() => createSandboxEnv(env, { root: "/" }), Error);
-  assert.throws(() => createSandboxEnv(env, { root: "root" }), Error);
+  expect(() => createSandboxEnv(env, { root: "/" })).toThrow(Error);
+  expect(() => createSandboxEnv(env, { root: "root" })).toThrow(Error);
 });
 
 test("exec is refused when the sandbox is unavailable", async () => {
@@ -118,15 +117,15 @@ test("exec is refused when the sandbox is unavailable", async () => {
   const root = join(base, "root-refused");
   await env.createDir(root, undefined, ctx);
   const missing = await detectSandbox(join(base, "no-bwrap"));
-  assert.ok(!missing.available);
+  expect.assert(!missing.available);
   const disabled = createNoExecEnv(env, missing);
 
   const refused = await disabled.exec("echo should-not-run > refused.txt", undefined, ctx);
-  assert.equal(refused.ok, false);
+  expect(refused.ok).toBe(false);
   if (refused.ok) return;
-  assert.equal(refused.error.code, "shell_unavailable");
-  assert.equal((await readdir(base)).includes("refused.txt"), false);
-  assert.equal(getOrThrow(await disabled.exists(root, ctx)), true);
+  expect(refused.error.code).toBe("shell_unavailable");
+  expect((await readdir(base)).includes("refused.txt")).toBe(false);
+  expect(getOrThrow(await disabled.exists(root, ctx))).toBe(true);
   await connection.close();
 });
 
@@ -144,29 +143,29 @@ test("exec runs inside the root and cannot write outside", async (t) => {
   const escapeName = "hns-escape-" + String(process.pid);
 
   const inside = getOrThrow(await sandbox.exec("echo inside > b.txt", undefined, ctx));
-  assert.equal(inside.exitCode, 0);
-  assert.equal((await readdir(root)).includes("b.txt"), true);
+  expect(inside.exitCode).toBe(0);
+  expect((await readdir(root)).includes("b.txt")).toBe(true);
 
   getOrThrow(await sandbox.exec("echo escape > ../" + escapeName + ".txt", undefined, ctx));
-  assert.equal((await readdir(base)).includes(escapeName + ".txt"), false);
+  expect((await readdir(base)).includes(escapeName + ".txt")).toBe(false);
 
   getOrThrow(await sandbox.exec("echo home > $HOME/" + escapeName + ".txt", undefined, ctx));
-  assert.equal((await readdir(homedir())).includes(escapeName + ".txt"), false);
+  expect((await readdir(homedir())).includes(escapeName + ".txt")).toBe(false);
 
   const read = getOrThrow(await sandbox.exec("head -c 40 /etc/hostname", undefined, ctx));
-  assert.equal(read.exitCode, 0);
+  expect(read.exitCode).toBe(0);
 
   const exited = getOrThrow(await sandbox.exec("exit 7", undefined, ctx));
-  assert.equal(exited.exitCode, 7);
+  expect(exited.exitCode).toBe(7);
 
   const argv = getOrThrow(
     await sandbox.exec([resolveShell(), "-c", "echo argv > c.txt"], undefined, ctx),
   );
-  assert.equal(argv.exitCode, 0);
-  assert.equal((await readdir(root)).includes("c.txt"), true);
+  expect(argv.exitCode).toBe(0);
+  expect((await readdir(root)).includes("c.txt")).toBe(true);
 
   await sandbox.createDir(join(root, "sub"), undefined, ctx);
-  assert.equal(getOrThrow(await sandbox.exists(join(root, "sub"), ctx)), true);
+  expect(getOrThrow(await sandbox.exists(join(root, "sub"), ctx))).toBe(true);
   await env.cleanup(ctx);
   await connection.close();
 });
@@ -184,9 +183,9 @@ test("the sandbox clears the server environment and points HOME at the root", as
   const sandbox = createSandboxEnv(env, { root, bwrap: status.bwrap, shell: status.shell });
   try {
     const secret = await outputOf(sandbox, 'printf %s "$HNS_TEST_SECRET"');
-    assert.equal(secret, "");
+    expect(secret).toBe("");
     const home = await outputOf(sandbox, 'printf %s "$HOME"');
-    assert.equal(home, root);
+    expect(home).toBe(root);
   } finally {
     delete process.env.HNS_TEST_SECRET;
     await env.cleanup(ctx);
@@ -214,7 +213,7 @@ test("a hidden directory is masked inside the sandbox", async (t) => {
   });
   try {
     const listed = await outputOf(sandbox, "ls -A " + secrets);
-    assert.equal(listed.trim(), "");
+    expect(listed.trim()).toBe("");
   } finally {
     await env.cleanup(ctx);
   }

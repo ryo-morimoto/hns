@@ -1,7 +1,6 @@
-import assert from "node:assert/strict";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { Button } from "../../src/components/Button.tsx";
 import { Dialog } from "../../src/components/Dialog.tsx";
 
@@ -16,13 +15,13 @@ test("Dialog opens from its trigger and closes with Escape", async () => {
 
   const dialog = await screen.findByRole("dialog", { name: "仕事を頼む" });
   await waitFor(() => {
-    assert.ok(dialog.contains(document.activeElement));
+    expect(dialog.contains(document.activeElement)).toBe(true);
   });
 
   await userEvent.keyboard("{Escape}");
 
   await waitFor(() => {
-    assert.equal(screen.queryByRole("dialog"), null);
+    expect(screen.queryByRole("dialog")).toBe(null);
   });
 });
 
@@ -36,7 +35,7 @@ test("closing a Dialog returns focus to the trigger", async () => {
   await userEvent.keyboard("{Escape}");
 
   await waitFor(() => {
-    assert.equal(document.activeElement, trigger);
+    expect(document.activeElement).toBe(trigger);
   });
 });
 
@@ -48,6 +47,6 @@ test("the Dialog close button closes it", async () => {
   await userEvent.click(screen.getByRole("button", { name: "閉じる" }));
 
   await waitFor(() => {
-    assert.equal(screen.queryByRole("dialog"), null);
+    expect(screen.queryByRole("dialog")).toBe(null);
   });
 });

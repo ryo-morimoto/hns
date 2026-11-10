@@ -1,7 +1,6 @@
-import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { sandboxStatus, withAgent } from "../support.ts";
 
@@ -23,7 +22,7 @@ test("bash runs inside the root and cannot write outside it", async (t) => {
 
     await agent.send("prove the sandbox");
 
-    assert.equal((await readFile(join(root, "b.txt"), "utf8")).trim(), "inside");
-    await assert.rejects(readFile(join(root, "..", "escape.txt"), "utf8"));
+    expect((await readFile(join(root, "b.txt"), "utf8")).trim()).toBe("inside");
+    await expect(readFile(join(root, "..", "escape.txt"), "utf8")).rejects.toThrow();
   });
 });

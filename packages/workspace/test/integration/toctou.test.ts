@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import { mkdir, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
@@ -108,7 +107,7 @@ for (const testTarget of targets) {
     await withTarget(testTarget, async (target) => {
       const workspace = await openWorkspace(target, "mode");
 
-      assert.equal(workspace.mode, "dirfd");
+      expect(workspace.mode).toBe("dirfd");
       await workspace.close();
     });
   });
@@ -138,10 +137,12 @@ for (const testTarget of targets) {
           operationId: "w1",
         });
 
-        assert.ok(trap.fired);
-        assert.deepEqual(await readdir(outside), ["f.txt"]);
-        assert.equal(result.status, "unknown");
-        assert.ok(trapped.auditLog.some((entry) => entry.reason === "escaped after rename"));
+        expect(trap.fired).toBe(true);
+        expect(await readdir(outside)).toStrictEqual(["f.txt"]);
+        expect(result.status).toBe("unknown");
+        expect(trapped.auditLog.some((entry) => entry.reason === "escaped after rename")).toBe(
+          true,
+        );
         await trapped.close();
       });
     },
@@ -168,8 +169,8 @@ for (const testTarget of targets) {
         operationId: "w1",
       });
 
-      assert.equal(result.status, "unknown");
-      assert.deepEqual(await readdir(outside), []);
+      expect(result.status).toBe("unknown");
+      expect(await readdir(outside)).toStrictEqual([]);
       await trapped.close();
     });
   });
@@ -204,7 +205,7 @@ for (const testTarget of targets) {
         await toggling;
       }
 
-      assert.equal(leaked, false, JSON.stringify({ outside: await readdir(outside), outcomes }));
+      expect(leaked, JSON.stringify({ outside: await readdir(outside), outcomes })).toBe(false);
       // The churn is over; a normal write still applies. Requiring a churn write to apply was
       // flaky: under constant swapping every write can legitimately be refused.
       const settled = await outcomeOf(
@@ -215,7 +216,7 @@ for (const testTarget of targets) {
           operationId: "after-churn",
         }),
       );
-      assert.equal(settled, "applied");
+      expect(settled).toBe("applied");
       await workspace.close();
     });
   });
@@ -248,12 +249,12 @@ for (const testTarget of targets) {
       };
 
       const fallback = await read("read-fallback", false);
-      assert.ok(fallback.fired, "the trap did not fire");
-      assert.equal(fallback.content, "SECRET");
+      expect(fallback.fired, "the trap did not fire").toBe(true);
+      expect(fallback.content).toBe("SECRET");
 
       const dirfd = await read("read-dirfd", true);
-      assert.ok(dirfd.fired, "the trap did not fire");
-      assert.notEqual(dirfd.content, "SECRET");
+      expect(dirfd.fired, "the trap did not fire").toBe(true);
+      expect(dirfd.content).not.toBe("SECRET");
     });
   });
 
@@ -283,7 +284,7 @@ for (const testTarget of targets) {
 
         const content = await contentOf(reader);
 
-        assert.notEqual(content, "SECRET");
+        expect(content).not.toBe("SECRET");
         await reader.close();
         await workspace.close();
       }
@@ -297,7 +298,7 @@ for (const testTarget of targets) {
         rooted: true,
       });
 
-      assert.equal(workspace.mode, "checks");
+      expect(workspace.mode).toBe("checks");
       const written = await workspace.write({
         path: "a.txt",
         content: "kept",
@@ -305,8 +306,8 @@ for (const testTarget of targets) {
         operationId: "w1",
       });
 
-      assert.equal(written.status, "applied");
-      assert.equal((await workspace.read("a.txt")).content, "kept");
+      expect(written.status).toBe("applied");
+      expect((await workspace.read("a.txt")).content).toBe("kept");
       await workspace.close();
     });
   });
@@ -314,10 +315,9 @@ for (const testTarget of targets) {
 test("a required rooted helper refuses to open without exec", async () => {
   for (const testTarget of targets) {
     await withTarget(testTarget, async (target) => {
-      await assert.rejects(
+      await expect(
         openWorkspace(target, "required", { env: new NoExecEnv(target.env), rooted: "required" }),
-        Unavailable,
-      );
+      ).rejects.toThrow(Unavailable);
     });
   }
 });

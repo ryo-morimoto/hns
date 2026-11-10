@@ -135,7 +135,7 @@ The PoC is for manual checks only. New product work goes into `packages/`.
 - **Start from test analysis.** Derive test conditions from the issue's goal, acceptance criteria, docs, and contracts. Record `## テスト条件` and `## テスト設計` in the issue (Example Mapping + Given/When/Then). Test design is a separate step from writing code
 - **Choose the lowest layer that can prove the behavior.** One scenario runs in exactly one layer
 - **Tests live next to the code.** Unit tests are `packages/<pkg>/src/<module>.test.ts`; integration is `packages/<pkg>/test/integration/`; E2E is `e2e/`. In-source (`if (import.meta.vitest)`) and TSDoc `@example` doctests are for small, pure functions and public contracts
-- **Assertions use Vitest `expect`.** For type narrowing, use an explicit check or the `defined()` helper
+- **Assertions use Vitest `expect`.** For type narrowing, use `expect.assert(...)`; matcher calls do not narrow types
 - **A test names the regression it catches.** Write `// Catches: <bug>` for regression tests. Do not put issue numbers in tests, code, or TODO comments
 - Cover failure paths: invalid input, illegal transitions, conflicts, unknown enum values
 - Test behavior, not implementation: no assertions on internal helper names, log wording, or CSS. One behavior per test; a test that passes when the logic is broken is not a test
@@ -159,7 +159,7 @@ Tests live next to the code they prove. Unit tests are `packages/<pkg>/src/<modu
 
 Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS_CHROME` to override the binary.
 
-Existing tests are being migrated: `node:assert` → `expect` (0184), colocation (0186), TSDoc / doctest rollout (0187).
+Existing tests are being migrated: colocation (0186), TSDoc / doctest rollout (0187).
 
 ## Review
 

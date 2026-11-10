@@ -1,7 +1,7 @@
 # 0184: テストのアサーションを Vitest の expect に統一する
 
-status: open
-priority: plan
+status: done
+priority: now
 depends-on: 0185
 touches: packages/*/test/**, tools/gate/test/**, docs/testing.md, AGENTS.md
 
@@ -11,18 +11,20 @@ touches: packages/*/test/**, tools/gate/test/**, docs/testing.md, AGENTS.md
 
 ## Acceptance criteria
 
-- [ ] テストの node:assert/strict import をすべて削除する（0185 後の対象ファイル）
-- [ ] assert.equal / deepEqual / notEqual / ok / throws / rejects / match / fail / doesNotThrow を expect に置換する
-- [ ] 型の絞り込みが必要な箇所は defined() ヘルパーか明示チェックにする（as を増やさない）
-- [ ] tsrs --noEmit と npm test が通る
-- [ ] tools/gate のテストも同じ規約にする
-- [ ] D056 と AGENTS / docs の記述を更新する
+- [x] テストの node:assert/strict import をすべて削除する（24ファイル）
+- [x] assert.equal / deepEqual / notEqual / ok / throws / rejects / match / doesNotThrow を expect に置換する（427アサーション）
+- [x] 型の絞り込みが必要な箇所は expect.assert(...) にする（as を増やさない）
+- [x] tsrs --noEmit と npm test が通る（162 passed）
+- [x] tools/gate のテストも同じ規約にする
+- [x] D056 と AGENTS / docs の記述を更新する
 
 ## Notes
 
-- 0185 の後なので対象ファイル数は変わる（tiers の削除・統合後）。assert.ok は boolean 確認と narrowing が混在している。
+- 対象は 24ファイル / 427アサーション。0185 後のツリーには、統合済み pending lane で削除された core/http・schemas・contract と web/client・fixtures の5ファイルが含まれない。テストのベースラインは 162 passed（以前の 224 ではない）。
+- assert.ok は boolean 確認と narrowing が混在。assert.equal にも narrowing があった（store の run、sandbox の available）。
 - assert.equal はプリミティブなら toBe、オブジェクトなら toStrictEqual。
 - assert.rejects は await expect(p).rejects.toThrow()。
+- 型の絞り込みは `expect.assert(...)` に統一する（`defined()` ヘルパーは作らない）。
 - 1ファイルずつ移行し、都度テストを回す。一括置換はしない。
 - 振る舞いを変えないので、テストの追加・削除はしない。
 
@@ -35,3 +37,16 @@ touches: packages/*/test/**, tools/gate/test/**, docs/testing.md, AGENTS.md
 ## Log
 
 - 2026-11-10: 作成（user）。node:assert 固定は早すぎる決定として削除し、Vitest に統一する。
+- 2026-11-10: 372件の単純変換（equal/deepEqual/notEqual/match/throws/rejects/doesNotThrow）と、47件の assert.ok を codemod で変換。残り13件の絞り込み（assert.ok 9 + assert.equal 4）は `expect.assert(...)` にした。
+- 2026-11-10: `assert.equal` の narrowing（store の run、sandbox の available）を `expect.assert` で補い、`npm run typecheck` を通した。
+- 2026-11-10: `npm test` 162 passed、`npm run check` 成功。
+- 2026-11-10: reviewer-0184 が **PASS**（blocking なし）。low 2件（D056 の defined() 記述、Log の件数）を修正し、D061 を追記。
+
+## Result
+
+- verdict: **PASS**（reviewer-0184。blocking なし）
+- reviewer: reviewer-0184
+- HEAD: 8b45bd7 + 0184 の未コミット変更
+- blocking findings: なし
+- 未確認: assertion ごとの mutation test、`toStrictEqual` の全値での同等性、メッセージ診断の網羅。レビューの green run は HEAD f4ca217 時点。
+- 変更は未コミット（コミットはユーザーの指示で行う）。
