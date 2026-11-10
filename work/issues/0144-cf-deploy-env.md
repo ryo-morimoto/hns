@@ -1,6 +1,6 @@
 # 0144: 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入）
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0140
 touches: tools/deploy/, tools/gate/stages.ts, tools/gate/test/stages.test.ts, vitest.config.ts, package.json, package-lock.json, .gitignore, docs/engineering.md, docs/decisions.md, work/issues/0144, work/issues/0145, work/LANES.md
@@ -59,4 +59,22 @@ touches: tools/deploy/, tools/gate/stages.ts, tools/gate/test/stages.test.ts, vi
 - 2026-11-11: reviewer-0144 が **FAIL**（blocking 3）。--mode 未指定が production に落ちる、rollback の引数、
   0145 / LANES のパスが実ファイルと違う。修正: --mode を必須にし docs を更新、rollback を
   --worker-id / --message 無しに、handoff / ledger を tools/deploy に。secret のキー whitelist も追加。
-- 2026-11-11: 再レビュー待ち。
+- 2026-11-11: reviewer-0144 が **PASS**（blocking 0）。残る low は Result に記録。
+
+## Result
+
+- verdict: **PASS**（初回 FAIL 3 → 修正 → 再レビュー PASS）
+- reviewer: reviewer-0144
+- HEAD: 648730a
+- blocking: なし
+- 受入: 6/6。`npm run check` 成功（182 tests / build / knip / deploy dry-run 918ms）。
+- non-blocking:
+  - 低 / `docs/engineering.md:119-121` / rollback は repo root で実行する（tools/deploy では mode 必須で止まる）。
+  - 低 / `tools/deploy/package.json` / cf は root の devDependency。standalone の npm ci では config の cf/config が解決しない。
+  - 低 / `package.json:16` / deploy:check と deploy stage が同じコマンドを二重に持つ。deploy.sh の whitelist にテストなし。
+  - 低 / `tools/deploy/cloudflare.config.ts:40` / @remarks に「mode は必須」を追記する。
+  - 低 / `AGENTS.md:39` / 本文の stage 説明に deploy を追加する。
+  - 低 / `tools/deploy/deploy.sh` / キー名のみ検査。値の型・空文字は未検査。
+- 未確認: 実アカウントの cf deploy --secrets-file / staging / production / rollback。DO SQLite の非復元の実挙動。
+  fresh clone の npm install → postinstall。prek 経由の pre-push。
+- main への統合は他レーンの作業が終わってから（branch issue/0144-deploy）。
