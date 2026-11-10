@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -175,7 +176,7 @@ test("a large file is truncated in the tool result", async () => {
       text.startsWith('{"ok":true'),
     );
 
-    expect.assert(result !== undefined, "no read result");
+    assert.ok(result !== undefined, "no read result");
     const parsed = JSON.parse(result);
     expect(parsed.truncated).toBe(true);
     expect(parsed.characters).toBe(big.length);

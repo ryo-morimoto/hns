@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import * as v from "valibot";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
@@ -138,7 +139,7 @@ for (const testTarget of targets) {
         (error: Error) => error,
       );
 
-      expect.assert(failure instanceof FileFailure);
+      assert.ok(failure instanceof FileFailure);
       expect(failure.code).toBe("is_directory");
       await workspace.close();
     });

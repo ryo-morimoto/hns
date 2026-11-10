@@ -41,12 +41,13 @@ touches: packages/*/test/**, tools/gate/test/**, docs/testing.md, AGENTS.md
 - 2026-11-10: `assert.equal` の narrowing（store の run、sandbox の available）を `expect.assert` で補い、`npm run typecheck` を通した。
 - 2026-11-10: `npm test` 162 passed、`npm run check` 成功。
 - 2026-11-10: reviewer-0184 が **PASS**（blocking なし）。low 2件（D056 の defined() 記述、Log の件数）を修正し、D061 を追記。
+- 2026-11-11: B 修正。13箇所の絞り込みを `node:assert` に戻し、D062 で D056 / D061 を置換した。通常のアサーションは `expect` のまま。
 
 ## Result
 
 - verdict: **PASS**（reviewer-0184。blocking なし）
 - reviewer: reviewer-0184
-- HEAD: 8b45bd7 + 0184 の未コミット変更
+- HEAD: cd13f67 + B 修正
 - blocking findings: なし
 - 未確認: assertion ごとの mutation test、`toStrictEqual` の全値での同等性、メッセージ診断の網羅。レビューの green run は HEAD f4ca217 時点。
-- 変更は未コミット（コミットはユーザーの指示で行う）。
+- 0184 の expect 移行は 72e4704 / cd13f67 でコミット済み。B 修正（assert 復帰 + D062）は追加コミットに含む。

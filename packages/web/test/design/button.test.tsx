@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import { Button } from "../../src/components/Button.tsx";
 
@@ -34,7 +35,7 @@ test("a loading Button is busy and refuses the press", async () => {
     </Button>,
   );
   const button = screen.getByRole("button", { name: "保存" });
-  expect.assert(button instanceof HTMLButtonElement);
+  assert.ok(button instanceof HTMLButtonElement);
   expect(button.getAttribute("aria-busy")).toBe("true");
   expect(button.disabled).toBe(true);
 

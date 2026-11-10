@@ -5,6 +5,7 @@ import * as v from "valibot";
 import { ConversationIdSchema, ProjectIdSchema, isoTimestamp } from "@hns/core";
 import type { IsoTimestamp } from "@hns/core";
 import type { WorkflowGraph } from "@hns/core";
+import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import { openDatabase, readUserVersion } from "../src/db.ts";
 import { migrate } from "../src/migrate.ts";
@@ -203,8 +204,7 @@ test("workflows keep versions, runs pin the version and nodes move through the s
     expect(updated?.version).toBe(2);
 
     const run = store.workflows.createRun({ workflowId: workflow.id, input: "ship" });
-    expect.assert(run !== undefined);
-    expect(run.version).toBe(2);
+    assert.equal(run?.version, 2);
     expect(store.workflows.getRunGraph(run.id)?.nodes.map((node) => node.id)).toStrictEqual([
       "solo",
     ]);
@@ -238,7 +238,7 @@ test("resuming requeues running nodes and deletes cascade", () => {
       graph: graph([{ id: "a", type: "agent", prompt: "A" }]),
     });
     const run = store.workflows.createRun({ workflowId: workflow.id, input: "x" });
-    expect.assert(run !== undefined);
+    assert.ok(run !== undefined);
     store.workflows.setNodeRunning(run.id, "a", "A");
     store.workflows.setRunStatus(run.id, "running");
     const resumed = store.workflows.resumeRuns();

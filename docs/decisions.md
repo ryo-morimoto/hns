@@ -809,3 +809,17 @@ D056 の「型の絞り込みは defined() ヘルパーか明示チェックで�
 `as` は増やさない。
 
 前提が変わる条件: `expect.assert` が使えない runner に移るとき、または複雑な絞り込みで helper が必要になったとき。
+
+## D062: アサーションは expect を主とし、型の絞り込みには node:assert も使う
+
+date: 2026-11-11 · by: user · issue: 0184
+
+D056 の「expect に統一し、node:assert を使わない」と、D061 の「絞り込みは expect.assert のみ」を置き換える。
+一般には expect を主に使い、型の絞り込みだけ node:assert / expect.assert で補う。どちらか一方への統一を強制しない。
+
+- 通常のアサーションは expect を優先する（差分・メッセージ）。
+- 型の絞り込みは node:assert の assert / assert.ok / assert.equal、または expect.assert(...) を使う。
+- node:assert を禁止しない。expect を禁止しない。混在は意図として説明する。
+
+前提が変わる条件: テストのアサーション規約を1つに固定する必要が出たとき、または node:assert と expect の混在が
+レビューで説明できなくなったとき。

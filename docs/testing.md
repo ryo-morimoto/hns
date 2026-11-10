@@ -105,9 +105,9 @@ e2e/                                      # Playwright。pages / fixtures / jour
 
 ### アサーション
 
-- **Vitest の `expect` に統一する。** `node:assert` は使わない（D056）。
-- 等値はプリミティブなら `toBe`、オブジェクトなら `toStrictEqual`。
-- 型の絞り込みが要る箇所は `expect.assert(...)` を使う（`expect(...).toBe` は型を絞らない）。`as` を増やさない。
+- **通常のアサーションは Vitest の `expect` を使う。** `node:assert` も使ってよい（D062）。どちらか一方に統一しない。
+- 等値はプリミティブなら `toBe`、オブジェクトなら `toStrictEqual`。`node:assert` の `equal` / `deepEqual` も可。
+- 型の絞り込みが要る箇所は `node:assert` の `assert` / `assert.ok` / `assert.equal`、または `expect.assert(...)` を使う（matcher は型を絞らない）。`as` を増やさない。
 - テストも `tsrs --noEmit` の対象。`any`・`@ts-ignore`・根拠のない `as` は禁止。
 
 ### 書き方

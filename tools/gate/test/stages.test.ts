@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import type { PackageInfo } from "../select.ts";
 import { stageNamed, stagesFor } from "../stages.ts";
@@ -12,7 +13,7 @@ test("build and knip only run before a push", () => {
 test("every stage belongs to at least one hook", () => {
   for (const name of ["lint", "fmt", "typecheck", "test", "build", "knip"]) {
     const stage = stageNamed(name);
-    expect.assert(stage !== undefined, name);
+    assert.ok(stage !== undefined, name);
     expect(stage.hooks.length, name).toBeGreaterThan(0);
   }
   expect(stageNamed("nope")).toBe(undefined);
@@ -22,7 +23,7 @@ test("every stage belongs to at least one hook", () => {
 test("the commit tier never runs the whole runner", () => {
   const packages: PackageInfo[] = [{ dir: "core", name: "@hns/core", dependsOn: [] }];
   const stage = stageNamed("test");
-  expect.assert(stage !== undefined);
+  assert.ok(stage !== undefined);
   const unit = stage.run({ root: "/repo", packages, all: true, tier: "unit" })[0]?.argv ?? [];
   expect(unit.includes("--project"), unit.join(" ")).toBe(true);
   expect(unit.includes("core"), unit.join(" ")).toBe(true);

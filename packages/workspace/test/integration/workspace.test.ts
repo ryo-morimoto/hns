@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import { mkdir, readdir, rename, symlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -304,7 +305,7 @@ for (const testTarget of targets) {
           (error: Error) => error,
         );
 
-      expect.assert(failure instanceof FileFailure);
+      assert.ok(failure instanceof FileFailure);
       expect(failure.code).toBe("not_found");
       await workspace.close();
     });

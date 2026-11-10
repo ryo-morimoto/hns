@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { GraphQLBoolean, GraphQLEnumType, GraphQLObjectType, validateSchema } from "graphql";
@@ -44,7 +45,7 @@ test("nullability follows the model", () => {
 test("enum names are SCREAMING_SNAKE_CASE and keep the model values", () => {
   const schema = buildSchema(dummyQuery());
   const type = schema.getType("TaskStatus");
-  expect.assert(type instanceof GraphQLEnumType);
+  assert.ok(type instanceof GraphQLEnumType);
   expect(type.getValues().map((value) => value.name)).toStrictEqual([
     "TODO",
     "DOING",

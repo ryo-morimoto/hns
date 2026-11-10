@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { expect, afterAll, test } from "vitest";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -72,7 +73,7 @@ test("detection reports a verdict that names the deciding check", async () => {
 test("a missing bwrap is a verdict, not an exception", async () => {
   const missing = await detectSandbox(join(base, "no-bwrap"));
 
-  expect.assert(!missing.available);
+  assert.equal(missing.available, false);
   expect(missing.code).toBe("not-found");
   expect(missing.exec).toBe("disabled");
 });
@@ -83,7 +84,7 @@ test("a program that is not executable is rejected", async () => {
 
   const status = await detectSandbox(blocked);
 
-  expect.assert(!status.available);
+  assert.equal(status.available, false);
   expect(status.code).toBe("not-executable");
 });
 
@@ -99,7 +100,7 @@ test("a host without user namespaces is named", async () => {
 
   const status = await detectSandbox(blocked);
 
-  expect.assert(!status.available);
+  assert.equal(status.available, false);
   expect(status.code).toBe("userns-unavailable");
   expect(status.userNamespaces).toBe("blocked");
 });
@@ -117,7 +118,7 @@ test("exec is refused when the sandbox is unavailable", async () => {
   const root = join(base, "root-refused");
   await env.createDir(root, undefined, ctx);
   const missing = await detectSandbox(join(base, "no-bwrap"));
-  expect.assert(!missing.available);
+  assert.ok(!missing.available);
   const disabled = createNoExecEnv(env, missing);
 
   const refused = await disabled.exec("echo should-not-run > refused.txt", undefined, ctx);
