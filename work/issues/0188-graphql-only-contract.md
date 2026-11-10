@@ -64,3 +64,4 @@ REST 面は、それを実装する issue が schema・認証・handler を同�
   shell テストは 14 本そのまま通る。
 - 2026-11-10: D059・docs/packages.md・AGENTS・auth/typescript/review/automation を更新。0037 を superseded、
   0145 / 0176 / 0177 / 0178 / 0182 / 0036 / 0100 / 0102 と BOARD を更新。
+- 2026-11-10: 統合 commit 5cb0ae5 に含めた。独立 review と Result は未実施（status は in-progress のまま）。

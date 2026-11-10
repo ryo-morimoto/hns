@@ -35,14 +35,14 @@ schema-first にしない（型が正本。AGENTS.md）。server と web は同�
 
 - verdict: **PASS**（初回 FAIL: blocking 2 件 → 修正 → 再レビュー PASS）
 - reviewer: graphql-reviewer（この変更を書いていない別エージェント）
-- HEAD: 3c09f8a（未 commit の作業ツリーをレビュー）
+- HEAD: 5cb0ae5（統合 commit。review 時は 3c09f8a + 未コミット）
 - blocking: 2 件。どちらも修正済み。
   - `EXCLUDED` に `ChatResponse` が無かった（モデル型の漏れ）
   - 登録済み enum を `kind:"scalar" / "String"` で書いても型検査を通った
 - 受入: 10/10。`npm run check` exit 0（lint / fmt / tsrs / 72 tests / build / knip、21 秒）
 - non-blocking: 3 件を修正（`NAME_EXCEPTIONS` の残存記述、boolean テストの `// Catches:`、型名の検査を
   実効のある集合比較に変更）。1 件は既知の限界として残す: `EXCLUDED` は `types.ts` の追加を自動検出しない。
-- 未 commit。コミットは user の指示による。
+- 統合 commit 5cb0ae5 に含めた。
 
 ## やらないこと
 
@@ -66,3 +66,4 @@ schema-first にしない（型が正本。AGENTS.md）。server と web は同�
   併せて boolean の `is`/`has` を `defineEntity` で強制し、未使用だった `NAME_EXCEPTIONS` を削除。
   `buildSdl` に generated ヘッダを付け、`buildSchema` の型順を `buildSdl` と一致させた。
   `npm run check` 通過。再レビュー待ち。
+- 2026-11-10: 統合 commit 5cb0ae5 に含めた（0175 / 0183 / 0185 / 0188 の統合）。

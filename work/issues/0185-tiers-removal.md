@@ -39,12 +39,13 @@ workspace は dirfd 経路を integration で1回、daemon は別スモークに
 - 2026-11-10: local daemon は `test/integration/local-daemon.test.ts` のスモーク1本に分離。`toctou.test.ts` も node/dirfd の1ターゲットにした。
 - 2026-11-10: `npm test -w @hns/workspace` 成功（40 tests）。`npm run check` 成功（224 passed）。
 - 2026-11-10: reviewer-0185b が **PASS**（blocking なし）。review は静的な確認で、テスト再実行は author の結果を参照。
+- 2026-11-10: 統合 commit 5cb0ae5 に含めた。
 
 ## Result
 
 - verdict: **PASS**（reviewer-0185b。blocking なし）
 - reviewer: reviewer-0185b
-- HEAD: 3c09f8a + 0185 の未コミット変更
+- HEAD: 5cb0ae5（統合 commit。review 時は 3c09f8a + 未コミット）
 - blocking findings: なし
 - 未確認: `npm run check` は author 実行（224 passed）。移動前後の byte-level diff は未確認。
-- 変更は未コミット（コミットはユーザーの指示で行う）。
+- 統合 commit 5cb0ae5 に含めた。

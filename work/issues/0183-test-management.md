@@ -47,12 +47,13 @@ tsdown と doctest の実行基盤を core で検証し、採用可否を決め�
 - 2026-11-10: vite-plugin-doctest 3.0.0 を導入。`packages/core/src/codecs.ts` の @example が core unit で1件実行。dist には TSDoc コメントだけが残り、テストコードは入らない。
 - 2026-11-10: `npm run check` 成功（271 passed / 1 skipped）。独立 review 待ち。
 - 2026-11-10: reviewer-0183 が **PASS**（blocking なし）。low 3件（AGENTS の declaration emit、D056 の層の表現、testing.md の tiers 表現）を修正し、`npm run check` を再実行して成功。
+- 2026-11-10: 統合 commit 5cb0ae5 に含めた。
 
 ## Result
 
 - verdict: **PASS**（reviewer-0183。low 3件は修正済み）
 - reviewer: reviewer-0183
-- HEAD: 3c09f8a + 0183 の未コミット変更
+- HEAD: 5cb0ae5（統合 commit。review 時は 3c09f8a + 未コミット）
 - blocking findings: なし
-- 変更は未コミット（コミットはユーザーの指示で行う）。
+- 統合 commit 5cb0ae5 に含めた。
 
