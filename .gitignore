@@ -5,3 +5,7 @@ work/scratch/
 dist/
 docs/api/
 .cache/
+.cloudflare/
+.wrangler/
+.dev.vars
+*.secrets.json

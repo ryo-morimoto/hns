@@ -91,6 +91,38 @@ npm 依存ではなく**コピー**として持つ。読んで、必要なら自
 - 例外・握りつぶしは「なぜ無視してよいか」をコメントで残す。
 - エージェントが書いたコードも同じゲートを通す。レビューは [review.md](review.md) の手順（契約 → 振る舞い → 証拠）で行う。
 
+## 配備
+
+Worker は cf で配備する。設定は tools/deploy/cloudflare.config.ts、環境は --mode で切る
+（[Cloudflare CLI projects](https://developers.cloudflare.com/cf/projects/)）。
+cf は npm workspace の root では project を特定できないため、コマンドは tools/deploy で実行する。
+
+| mode | Worker | HNS_AGENT_URL | HNS_MODEL | 秘密 |
+| --- | --- | --- | --- | --- |
+| development | hns-dev | 既定 http://127.0.0.1:8788 | 既定 faux/echo | ローカルの .dev.vars（gitignore） |
+| staging | hns-stg | 必須（https） | 必須 | ~/.config/hns/staging.secrets.json（0600） |
+| production | hns-prod | 必須（https） | 必須 | ~/.config/hns/production.secrets.json（0600） |
+
+- development: cd tools/deploy && cf dev
+- staging: HNS_AGENT_URL=... HNS_MODEL=... bash tools/deploy/deploy.sh staging
+- production: HNS_AGENT_URL=... HNS_MODEL=... bash tools/deploy/deploy.sh production
+
+秘密のキーは HNS_AGENT_SECRET / HNS_SESSION_SECRET / HNS_SERVICE_KEY。provider 鍵は gateway（0151）に置き、
+この Worker には置かない（[auth.md](auth.md)）。secrets は JSON で、リポジトリの外に 0600 で置く。
+投入は cf deploy --secrets-file に統一する。
+
+cf deploy --dry-run はビルドと検証だけで、認証情報もアップロードも不要。npm run check と pre-push の
+deploy stage が tools/deploy で cf deploy --dry-run --mode development を実行する。
+
+ロールバックは version を戻す。
+
+    cf workers versions list --worker hns-prod
+    cf workers deployments create --worker hns-prod \
+      --versions '[{"version_id":"<id>","percentage":100}]' --message "rollback"
+
+secret を跨ぐときだけ --bypass-deployment-checks を使う。DO の SQLite はコードと一緒には戻らない
+（schema / data は残る）。staging で先に試す。
+
 ## 5. 移行
 
 PoC は残す（履歴）。製品コードは `apps` / `packages` に新しく置き、PoC から1機能ずつ移植する。

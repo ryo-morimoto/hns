@@ -826,3 +826,26 @@ D056 の「expect に統一し、node:assert を使わない」と、D061 の「
 
 前提が変わる条件: テストのアサーション規約を1つに固定する必要が出たとき、または node:assert と expect の混在が
 レビューで説明できなくなったとき。
+
+## D063: 配備は cf の modes と root の cloudflare.config.ts で行う
+
+date: 2026-11-11 · by: user · issue: 0144
+
+Worker は cf で配備する。設定は tools/deploy/cloudflare.config.ts、環境は cf の modes で切る。
+cf は npm workspace の root では project を特定できないため、tools/deploy を project root にする。
+
+- cf 1.0.0-beta.28 と wrangler 4.156.0 を exact pin。Node 26.13。
+- development / staging / production の3モード。Worker は hns-dev / hns-stg / hns-prod。
+- staging / production は https の HNS_AGENT_URL と HNS_MODEL を必須にする。development だけ既定を持つ。
+- 秘密は cf deploy --secrets-file に統一。staging / production は ~/.config/hns/<mode>.secrets.json（0600、JSON）。
+  Secrets Store は MVP では採らない（binding と rotate の面が増える。0163 で再検討）。
+- cf deploy --dry-run は認証もアップロードも不要。npm run check と pre-push の deploy stage で
+  --mode development を実行する。
+- cloudflare.config.ts は tools/deploy。0145 までの一時 entrypoint は tools/deploy/worker.ts。
+  0145 が tools/deploy/worker.ts を packages/server/src/edge/worker.ts の re-export に差し替える。
+- DO は Session だけ。Workspace は 0146 / 0156。
+- deploy.sh / config.test.ts / cloudflare.config.ts / worker.ts / tsconfig.json / package.json を
+  tools/deploy/ にまとめる。
+
+前提が変わる条件: cf が複数 Worker を1つの config で扱えるようになったとき、Secrets Store に移るとき、
+または 0145 が deploy project を packages/server に移すとき。
