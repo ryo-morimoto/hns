@@ -12,20 +12,22 @@ touches: docs/auth.md, docs/automation.md, work/issues/0147-machine-agent.md
 ## Acceptance criteria
 
 - [x] 表: provider 鍵 / git・gh の資格情報 / webhook token / DEK / マシンのデバイス鍵 の置き場所
-- [x] provider 鍵は gateway Worker のみが持ち、harness の isolate には置かないと明記
+- [x] provider 鍵は gateway Worker のみが持ち、harness / machine / Session DO には置かないと明記
 - [x] provider 側の支出上限と、gateway の緊急停止を要件に入れる
-- [x] DEK は包んだまま DO、平文は端末だけ（D019 の維持）
+- [x] DEK は包んだまま DO、平文は unlocked 中のブラウザとサーバセッションのメモリだけ（D019 / D020）
 - [x] sandbox の hide（0052）を MVP の前提条件に格上げ
 - [x] 漏洩時の封じ込め手順（キー失効 → ローテーション）を1ページで書く
 
 ## テスト条件
 
 - C1: docs-only。置き場所の表・gateway の鍵分離・DEK・hide・封じ込めが、D019 / D020 / D047 / D059 と矛盾しない。
-- C2: 実装の受入は 0151（gateway の鍵分離・予算・停止）と 0147（hide）が持つ。
+- C2: 実装の受入は 0151（gateway の鍵分離・予算・停止。harness 側の env テストを含む）と
+  0147（machine・デバイス鍵・cloudflared・hide。machine 側の env テストを含む）が持つ。
+  webhook token の暗号化・再表示は 0038 / 0112 / 0131 が持つ。
 
 ## テスト設計
 
-- T1: この issue では文書を review で確認する。コードのテストは 0151 / 0147 で書く。
+- T1: この issue では文書を review で確認する。コードのテストは 0151 / 0147、webhook は 0038 / 0112 / 0131 で書く。
 
 ## Notes
 
@@ -46,3 +48,6 @@ touches: docs/auth.md, docs/automation.md, work/issues/0147-machine-agent.md
   hide の AC、封じ込めの順序と DEK 再暗号化。修正: provider 鍵はマシンから外す、DEK の平文はブラウザと
   サーバセッションのメモリ、webhook は service 鍵で暗号化、0147 の AC を更新、封じ込めに全秘密の停止と
   全 user 秘密の再暗号化を追加。再 review する。
+- 2026-11-11: reviewer-0143 が再度 **FAIL**（blocking 3）。0143 の受入条件の旧文言、provider 鍵の machine 側テストの
+  担当、service 鍵 / cloudflared の rotate・失効の閉包。修正: 受入条件をブラウザ + サーバセッションに、0147 に
+  machine の env テストを追加、封じ込めに service 鍵 / cloudflared を追加。再 review する。

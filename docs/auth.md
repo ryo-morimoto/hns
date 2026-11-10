@@ -49,7 +49,7 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
 | provider 鍵（Ollama / OpenCode 等） | gateway Worker の secret（0151）。provider ごとに1つ | gateway だけ | harness の isolate / Session DO / マシン / repo / ログ | 漏洩: 止める → 旧鍵を失効 → 新鍵 → 確認 → 再開。定期: 新鍵 → 確認 → 旧鍵を失効 |
 | git・gh の資格情報 | マシンの git credential helper / OS keyring（`~/.config/hns` の外）。Cloudflare には渡さない | マシン上の git / gh | Cloudflare / DO / repo / エージェントの env | fine-grained / 短期の token。漏洩時は provider で revoke → 再発行 |
 | webhook token | D1 に暗号文（service 鍵で暗号化）。平文は発行・再表示の応答だけ | Worker の webhook 受付 / 所有者の再表示 | DO / machine / ログ / repo | automation ごとに rotate。archive 後も URL を保持し、物理削除しない |
-| service 秘密の暗号化鍵 | Worker の secret | Worker（service 秘密の暗号化・復号） | repo / ログ / マシン / エージェント | rotate は service 秘密の再暗号化。失効は全 service 秘密の停止 |
+| service 秘密の暗号化鍵 | Worker の secret | Worker（service 秘密の暗号化・復号） | repo / ログ / マシン / エージェント | rotate は service 秘密と webhook token の再暗号化。失効は全 service 秘密と webhook の停止 |
 | DEK | DO に **包んだ DEK** だけ（PRF 包み・復旧コード包み）。平文は unlocked 中のブラウザとサーバセッションのメモリだけ | ブラウザ（PRF unwrap）/ サーバセッション（unlocked） | DO の永続ストレージ（平文） / ログ / マシン | パスキー追加・復旧コード再発行で包み直す。紛失端末の包みは削除。漏洩時は作り直す |
 | マシンのデバイス鍵 | 秘密鍵はマシン（0600）。公開鍵は D1 の Machine レコード（D049） | machine agent / Worker | Cloudflare に秘密鍵を置かない | D1 の公開鍵を無効化 → 再登録 |
 | cloudflared tunnel token | マシンの secret（0600、`~/.config/hns/cloudflared`）。agent の bash からは hide | cloudflared だけ | Cloudflare / repo / ログ / エージェントの env | tunnel を再作成して token を入れ替える |
@@ -77,6 +77,7 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
   sandbox の hide で `~/.config/hns` を隠し、デバイス鍵・cloudflared token をエージェントの bash から読めなくする（0147 / 0052）。
   git 資格情報はその外に置き、エージェントは git を使えるが provider 鍵は読めない、という分担にする。
   helper / keyring を sandbox の bash からどう使うか（repo 設定 / `GIT_CONFIG_GLOBAL` / keyring の bind）は 0147 で決める。
+  エージェントは git の読み取り・fetch を使える。commit / push は製品側の操作に限定し、`.git` の書き込みは 0147 で拒否する。
 
 ### DEK とデバイス鍵
 
@@ -89,9 +90,10 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
 
 ### sandbox の前提
 
-- **hide が配線されていない環境では exec を提供しない（fail closed）。** `createSandboxEnv({ hide: ["~/.config/hns"] })`
-  を起動時に配線し、エージェントの bash からデバイス鍵・cloudflared token を読めないことを実機で確認する
-  （bwrap 無しは SKIP）。provider 鍵はマシンに無いことを 0151 の env テストで固定する。
+- **hide が配線されていない環境では exec を提供しない（fail closed）。** `createSandboxEnv({ hide: [join(homedir(), ".config/hns")] })`
+  のように絶対パスで渡して起動時に配線し、エージェントの bash からデバイス鍵・cloudflared token を読めないことを
+  実機で確認する（bwrap 無しは SKIP）。provider 鍵は harness 側に無いことを 0151、machine 側に無いことを
+  0147 の env / process テストで固定する。
 - 0052 は 0147 に統合済み。0147 の受入条件に「hide の配線」と「隠した場所からデバイス鍵が読めないテスト」を
   追加済み（2026-11-11）。
 - hide を `~/.ssh` まで広げると git の SSH 設定・鍵が見えなくなる。npm は `~/.npmrc` / キャッシュ。
@@ -101,11 +103,15 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
 
 1. **止める（全秘密）**: gateway を緊急停止し、provider の該当キーを失効する。git / gh の token を revoke する。
    webhook は該当 automation を停止して token を rotate する。デバイス鍵は D1 の公開鍵を無効化する。
-   DEK が漏れた疑いがあれば、unlocked セッションをロック / 失効する。
+   service 鍵が漏れたら service 秘密と webhook を停止する。cloudflared token が漏れたら tunnel を停止して
+   token を失効する。DEK が漏れた疑いがあれば、unlocked セッションをロック / 失効する。
 2. **広がりを見る**: provider の利用ログ、gateway の予算、`events`（秘密は残っていない）、どの Run / project が
    その鍵を使えたかを確認する。
 3. **入れ替える**:
-   - provider / git / webhook / cloudflared は新しい値に入れ替え、疎通確認してから旧値を失効する。
+   - provider / git / webhook / cloudflared は新しい値に入れ替え、疎通確認する（漏洩時は step 1 で旧値を失効済み。
+     定期ローテーションは疎通確認後に旧値を失効する）。
+   - service 鍵を入れ替え、service 秘密と webhook token を再暗号化する。cloudflared token は tunnel を
+     作り直して入れ替える。
    - デバイス鍵は再登録する。
    - DEK が漏れたら、新しい DEK を作り、**全 user 秘密を新 DEK で再暗号化**してから包みを包み直す。
      旧 DEK は漏れたものとして扱う。旧暗号文・バックアップ・R2 に残るコピーは旧 DEK で復号できるため、
@@ -115,7 +121,8 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
    秘密そのものは書かない。
 
 TTL の目安: provider 鍵は四半期ごと、git token は 30 日、webhook token は rotate 時（archive 後も保持）、
-デバイス鍵はマシンの再登録時、セッション署名鍵は年1回（または漏洩時）。
+デバイス鍵はマシンの再登録時、cloudflared token は tunnel の再作成時、service 鍵とセッション署名鍵は年1回
+（または漏洩時）。
 
 ## テスト手段（実装済み）
 
