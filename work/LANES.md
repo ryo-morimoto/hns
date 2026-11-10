@@ -7,14 +7,14 @@
 
 | レーン | issue | 所有するパス | owner | reviewer | 状態 | 次の統合 |
 | --- | --- | --- | --- | --- | --- | --- |
-| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/core/README.md`, `packages/store/src/schemas.ts`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | reviewer-0188 | review PASS（8b45bd7, fix 未 commit）・統合待ち | 4 |
-| E2 | [0143](issues/0143-secret-placement.md) 秘密の配置（gateway・git はマシン・DEK） | `docs/auth.md`, `docs/automation.md`, `work/issues/0147-machine-agent.md` | lead | reviewer-0143 | done（4073bc0, PASS） | 2 |
+| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/core/README.md`, `packages/store/src/schemas.ts`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | reviewer-0188 | done（66fc2ea） | 4 |
+| E2 | [0144](issues/0144-cf-deploy-env.md) 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | `cloudflare.config.ts`, `cloudflare.worker.ts`, `tsconfig.deploy.json`, `tools/deploy/`, `tools/gate/stages.ts`, `package.json` | lead | — | 実装中 | 2 |
 | E3 | 統合レーン（このセッション） | `docs/process.md`, `docs/parallel-change.md`, `work/README.md`, `work/LANES.md` | lead | — | 統合済み（5cb0ae5） | 1 |
 
 - E3 は製品コードを書かない。3レーンの運用を文書化し、統合・レビュー・計測だけを行う。E1 / E2 のファイルを書かない。
-- E2（0143）は docs-only、review 待ち。0185 は E2 の前のレーンとして統合済み（5cb0ae5）。
-- E1（0188）は review FAIL（別レーンが修正中）。E2（0143）は `docs/auth.md` だけで E1 と交わらない。
-- E1 の修正は `packages/store` / `docs/decisions.md` / `work/BOARD.md` を触る。E2 は触らない。
+- E2（0144）は実装中。deploy.sh と config.test.ts は `tools/deploy/`、config は root。
+- E1（0188）は done（66fc2ea）。0143 は done（4073bc0）。
+- E2 は `package.json` / `package-lock.json` を触るので、統合は root lock owner として1本で行う。
 - 0141 / 0031 / 0037 は `in-progress` のまま更新が止まっている。レーンとして数える前に status を整理する
   （0037 は 0188 が superseded にする。0141 は 0188 の統合後に再開する）。
 
