@@ -21,6 +21,8 @@
 
 - 実行は既存の Workflow Run に委譲する。Automation は実行状態を持たず、Firing だけ残す。
 - Webhook は `POST /api/hooks/<token>`。token は Automation ごとに発行し、本文を input として渡す。
+- Webhook の token は、製品では service 鍵で暗号化して D1 に保存し、所有者だけに再表示する（0143）。
+  PoC は平文。ログ・イベントには出さない。
 - 同時実行は Automation ごとに 1 つ。実行中に来たものは 1 件だけキューし、それ以外は落とす。
 - 落ちた実行は再試行しない。Firing に理由を残す。時刻の取りこぼしは遡らない（最新のみ）。
 - 停止は `enabled = false`。実行中のものは止めない（次の機会から止まる）。

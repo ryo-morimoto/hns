@@ -3,7 +3,7 @@
 status: in-progress
 priority: now
 depends-on: 0140
-touches: docs/auth.md
+touches: docs/auth.md, docs/automation.md, work/issues/0147-machine-agent.md
 
 ## Goal
 
@@ -20,7 +20,7 @@ touches: docs/auth.md
 
 ## テスト条件
 
-- C1: docs-only。置き場所の表・gateway の鍵分離・DEK・hide・封じ込めが、D019 / D047 / D059 と矛盾しない。
+- C1: docs-only。置き場所の表・gateway の鍵分離・DEK・hide・封じ込めが、D019 / D020 / D047 / D059 と矛盾しない。
 - C2: 実装の受入は 0151（gateway の鍵分離・予算・停止）と 0147（hide）が持つ。
 
 ## テスト設計
@@ -42,3 +42,7 @@ touches: docs/auth.md
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
 - 2026-11-10: [docs/auth.md](../../docs/auth.md) に「秘密の配置（0143）」を追加。表・gateway・git の例外・DEK・
   sandbox hide・封じ込め手順。PoC の service/provider は履歴と明記した。
+- 2026-11-11: reviewer-0143 が **FAIL**（blocking 5）。provider 鍵 / DEK の置き場所、webhook token、0147 の鍵と
+  hide の AC、封じ込めの順序と DEK 再暗号化。修正: provider 鍵はマシンから外す、DEK の平文はブラウザと
+  サーバセッションのメモリ、webhook は service 鍵で暗号化、0147 の AC を更新、封じ込めに全秘密の停止と
+  全 user 秘密の再暗号化を追加。再 review する。
