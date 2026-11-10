@@ -33,10 +33,13 @@ test("production requires an https agent URL and a model", () => {
   expect(() => deploymentFor("production", "https://agent.example", undefined)).toThrow(
     /HNS_MODEL/,
   );
+  expect(() => deploymentFor("production", "http://agent.example", "ollama/llama3")).toThrow(
+    /https/,
+  );
 });
 
-test("an undefined mode defaults to production", () => {
-  expect(() => deploymentFor(undefined, undefined, undefined)).toThrow(/HNS_AGENT_URL/);
+test("a missing mode is rejected", () => {
+  expect(() => deploymentFor(undefined, undefined, undefined)).toThrow(/--mode/);
 });
 
 test("an unknown mode is rejected", () => {

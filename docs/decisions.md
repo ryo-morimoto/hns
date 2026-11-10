@@ -827,7 +827,7 @@ D056 の「expect に統一し、node:assert を使わない」と、D061 の「
 前提が変わる条件: テストのアサーション規約を1つに固定する必要が出たとき、または node:assert と expect の混在が
 レビューで説明できなくなったとき。
 
-## D063: 配備は cf の modes と root の cloudflare.config.ts で行う
+## D063: 配備は cf の modes と tools/deploy の cloudflare.config.ts で行う
 
 date: 2026-11-11 · by: user · issue: 0144
 
@@ -835,7 +835,9 @@ Worker は cf で配備する。設定は tools/deploy/cloudflare.config.ts、�
 cf は npm workspace の root では project を特定できないため、tools/deploy を project root にする。
 
 - cf 1.0.0-beta.28 と wrangler 4.156.0 を exact pin。Node 26.13。
-- development / staging / production の3モード。Worker は hns-dev / hns-stg / hns-prod。
+  型は既存パッケージと同じ @types/node 24.19.2 を使う（Node 26 の型はまだ使わない）。
+- mode は必須（--mode の省略は拒否）。development / staging / production の3モード。
+  Worker は hns-dev / hns-stg / hns-prod。
 - staging / production は https の HNS_AGENT_URL と HNS_MODEL を必須にする。development だけ既定を持つ。
 - 秘密は cf deploy --secrets-file に統一。staging / production は ~/.config/hns/<mode>.secrets.json（0600、JSON）。
   Secrets Store は MVP では採らない（binding と rotate の面が増える。0163 で再検討）。

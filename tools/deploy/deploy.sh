@@ -15,6 +15,18 @@ secrets="${HNS_SECRETS_FILE:-$HOME/.config/hns/$mode.secrets.json}"
 mode_bits="$(stat -c %a "$secrets" 2>/dev/null || stat -f %Lp "$secrets" 2>/dev/null || true)"
 [ "$mode_bits" = "600" ] || { echo "chmod 600 $secrets (current: ${mode_bits:-unknown})" >&2; exit 2; }
 
+node -e '
+  const fs = require("node:fs");
+  const allowed = new Set(["HNS_AGENT_SECRET", "HNS_SESSION_SECRET", "HNS_SERVICE_KEY"]);
+  const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  for (const key of Object.keys(data)) {
+    if (!allowed.has(key)) throw new Error("unexpected secret: " + key);
+  }
+  for (const key of allowed) {
+    if (!(key in data)) throw new Error("missing secret: " + key);
+  }
+' "$secrets" || { echo "invalid secrets file: $secrets" >&2; exit 2; }
+
 : "${HNS_AGENT_URL:?set HNS_AGENT_URL to the tunnel URL}"
 : "${HNS_MODEL:?set HNS_MODEL to the provider model}"
 export HNS_AGENT_URL HNS_MODEL

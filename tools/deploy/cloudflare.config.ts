@@ -46,7 +46,10 @@ export const deploymentFor = (
   agentUrl: string | undefined,
   model: string | undefined,
 ): Deployment => {
-  const selected = mode ?? "production";
+  if (mode === undefined) {
+    throw new Error("--mode is required (development|staging|production)");
+  }
+  const selected = mode;
   if (!isMode(selected)) {
     throw new Error(`unknown mode: ${selected}`);
   }

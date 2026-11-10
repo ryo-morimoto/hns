@@ -46,7 +46,7 @@ Building is not proof of correctness; types and tests are.
 | `npm run gate`                | the commit gate for what is staged                               |
 | `npm run check`               | the gate over every package, every stage                         |
 | `npm run gate pre-push`       | the push gate: everything, including integration tests and build |
-| `npm run gate <stage>`        | one stage: `lint`, `fmt`, `typecheck`, `test`, `build`, `knip`   |
+| `npm run gate <stage>`        | one stage: `lint`, `fmt`, `typecheck`, `test`, `build`, `deploy`, `knip` |
 | `npm test -w @hns/store`      | tests for one package                                            |
 | `npm run build -w @hns/store` | `dist/` for one package                                          |
 | `npm run docs:api`           | TypeDoc API docs into `docs/api/` (outside the gate)             |

@@ -103,22 +103,23 @@ cf は npm workspace の root では project を特定できないため、コ�
 | staging | hns-stg | 必須（https） | 必須 | ~/.config/hns/staging.secrets.json（0600） |
 | production | hns-prod | 必須（https） | 必須 | ~/.config/hns/production.secrets.json（0600） |
 
-- development: cd tools/deploy && cf dev
+- development: cd tools/deploy && cf dev --mode development
 - staging: HNS_AGENT_URL=... HNS_MODEL=... bash tools/deploy/deploy.sh staging
 - production: HNS_AGENT_URL=... HNS_MODEL=... bash tools/deploy/deploy.sh production
 
-秘密のキーは HNS_AGENT_SECRET / HNS_SESSION_SECRET / HNS_SERVICE_KEY。provider 鍵は gateway（0151）に置き、
+秘密のキーは HNS_AGENT_SECRET / HNS_SESSION_SECRET / HNS_SERVICE_KEY の3つだけ。provider 鍵は gateway（0151）に置き、
 この Worker には置かない（[auth.md](auth.md)）。secrets は JSON で、リポジトリの外に 0600 で置く。
-投入は cf deploy --secrets-file に統一する。
+deploy.sh がこの3キー以外を拒否する。投入は cf deploy --secrets-file に統一する。
 
+mode は必須。--mode を省略した cf dev / cf deploy は拒否される。
 cf deploy --dry-run はビルドと検証だけで、認証情報もアップロードも不要。npm run check と pre-push の
 deploy stage が tools/deploy で cf deploy --dry-run --mode development を実行する。
 
 ロールバックは version を戻す。
 
-    cf workers versions list --worker hns-prod
+    cf workers versions list --worker-id hns-prod
     cf workers deployments create --worker hns-prod \
-      --versions '[{"version_id":"<id>","percentage":100}]' --message "rollback"
+      --versions '[{"version_id":"<id>","percentage":100}]'
 
 secret を跨ぐときだけ --bypass-deployment-checks を使う。DO の SQLite はコードと一緒には戻らない
 （schema / data は残る）。staging で先に試す。
