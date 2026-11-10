@@ -1,6 +1,7 @@
 # 0102: App shell と hash router
 
-status: in-progress
+status: done
+priority: now
 depends-on: 0101
 touches: packages/web/src/app, packages/web/src/routes, packages/web/src/api/fixtures.ts, packages/web/src/components/Icon.tsx, packages/web/src/components/Menu.tsx, packages/web/src/main.tsx, packages/web/index.html, packages/web/test/app
 
@@ -43,13 +44,14 @@ hash URL（ワークスペース / 会話）と戻る/進むを提供する。
 - 2026-11-07: ユーザーレビュー「切り替えないと他ワークスペースの進捗が見えない」を受け、横断の状態表示を調査（`work/research/cross-workspace-status-ui.md`）。サイドバーの要件に追加し、0115 に counts の横断取得を足した。件数だけ先に実装する
 - 2026-11-07: fixtures で横断サイドバーを試作（集計ヘッダー + 全ワークスペース行 + 相対時刻 + モバイルの needs バッジ）。ユーザーが形を承認（aggregate 順 / needs に短縮 / 並び / 表示のみ / 赤バッジ）。実データは 0115 待ちで、summarySource（counts）は fixture モードだけに渡す。real mode もワークスペース行 / active 展開の新構造で動くが、counts とバッジは 0115 まで出ない。実行は project を持たないため全ワークスペース共通のセクションに置く
 - 2026-11-07: モバイルを低クロームに変更（ChatGPT モバイル参照）。上バーは戻る/メニュー + 現在地だけにし、プロジェクト切替・テーマ・接続は drawer 下部へ。会話は戻る矢印、コマンドは 0103 まで非表示。本文の余白を 12px に詰め、全幅を使う。web 41 / shell 10 テスト。
+- 2026-11-10: ユーザーがドラフトとして了承（「見た目はドラフト、まだまだ改善の余地あるが、一旦はこれで良し」）。実データ（counts）は 0115 に送り、0102 を done にする。
 
 ## Result
 
-- verdict: PASS（独立レビュー: 初回 PASS（低5）→ 修正 → PASS（低3）→ 修正 → モバイル低クローム PASS（back デルタ込み））
-- reviewer: reviewer-0102（この変更を書いていない別エージェント）
-- HEAD: base ceba0cf。モバイル低クロームの変更はこの Result の後に commit
-- 受入: 8/8。下部バー削除、モバイル低クローム（ChatGPT 参照）、会話の戻る矢印を含む
-- blocking: なし。低 8 件 + モバイル低クロームの低指摘を修正（body margin / backdrop の二重 alpha / 長い名前 / fixture filter / menuitemradio / popup 幅 / check ずれ / モバイル title の重複 / back / コマンド非表示）
-- ユーザーレビュー: 下部バー不要・モバイル低クローム・横断サイドバーの形（集計ヘッダー / 全ワークスペース行 / needs 短縮 / 赤バッジ）を承認済み（2026-11-07）。実データは 0115 待ちのため in-progress 継続
-- 残件: 0105 で会話画面の h1 と本文の戻るリンクを外す（上バーと重複）。モバイル command は 0103、Needs you は 0113。200% zoom・offline・実機タッチは未確認
+- verdict: PASS（独立レビュー: 初回 PASS（低5）→ 修正 → PASS（低3）→ 修正 → モバイル低クローム PASS → 横断サイドバー PASS（blocking 1 → 修正 → PASS））
+- reviewer: reviewer-0102 / reviewer-0102b（この変更を書いていない別エージェント）
+- HEAD: 4bd0dc1（横断サイドバーまで）
+- 受入: 8/8。下部バー削除、モバイル低クローム（ChatGPT 参照）、会話の戻る矢印、横断サイドバー（fixtures 先行）を含む
+- blocking: なし。低指摘を修正（body margin / backdrop / 長い名前 / menuitemradio / runs の誤帰属 / badge コントラスト / 集計 ARIA など）
+- ユーザーレビュー: 2026-11-10 にドラフトとして了承（改善余地あり）。実データの counts は 0115 で入れる
+- 残件: 0115 の per-workspace counts（real mode はまだ件数なし）。0103 の command、0113 の Needs you 導線、0105 の h1/戻るリンク重複。相対時刻の自動更新・99+ の内訳・会話/タスクの error 表示は低。200% zoom・offline・実機タッチは未確認
