@@ -61,6 +61,7 @@ touches: packages/store/src/**, packages/store/test/**, packages/store/package.j
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
 - 2026-11-11: 二重バックエンドは負債と判断（利用者は Worker だけ、D1 の制約を node:sqlite が隠す）。D1 専用に変更し、node:sqlite を削除する。
 - 2026-11-11: D1 専用で実装。`npm run check` green（249 tests）。reviewer-0150 が PASS（初回・修正 diff・rebase 解消とも blocking なし）。low は修正済み。
+- 2026-11-11: 0145 の上に rebase し、main に統合（cff01f4、249 tests）。
 
 ## Result
 
@@ -72,5 +73,5 @@ touches: packages/store/src/**, packages/store/test/**, packages/store/package.j
 - low（再レビュー、修正済み）: LANES の commit 前後表現、Result の欠落、Notes の exec、BOARD / LANES の順序、0166 の parity パス、harness の TSDoc
 - 検証: `npm run check` green（249 tests。store は unit 24 + integration 24）、build、deploy --dry-run、knip。`grep node:sqlite packages/store` は README / CHANGELOG の説明のみ。
 - 未確認: 実 Cloudflare D1 の制約（batch 上限、cross-request の binding 再利用）、`@cloudflare/workers-types` の `D1Database` と `D1Binding` の構造一致（0176 で実 env を型付けして確認）。deploy の D1 binding は U-01。
-- 変更: `issue/0150-d1-only`（base a701f79、0145 b67262e の上に rebase 済み）。
+- 変更: `issue/0150-d1-only`（base a701f79、0145 b67262e の上に rebase 済み）。main に統合（cff01f4）。
 - 残件（main 既存）: 0176 の `depends-on` と BOARD の依存列が一致していない（reviewer-0150 の指摘）。
