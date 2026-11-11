@@ -3,6 +3,7 @@
 2026-11-06 / **v0.1 実装済み（PoC）** / 前提: [D001](decisions.md)
 
 Editor と Agent が同じファイルに触るとき、黙って壊さない。exactly-once は目的ではない。
+Cloudflare 経路（0157 以降）の ack の耐久（どこまで戻せるか）は [durability.md](durability.md) の契約に従う（0141）。
 
 ## 保証
 
@@ -161,10 +162,10 @@ recover（applied / pending / unknown）を実装。**40/40 合格**（Node env 
 - `SandboxOptions.hide` は既定で空。サーバの composition root が鍵のディレクトリを渡す。
 - ヘルパーは操作ごとに Node を起動する（1 操作あたり数百 ms）。リモートの daemon に配る手段は未定。
 - dirfd 経路の読み取りは 8 MiB まで。超えると `invalid` で断る。
-- ディレクトリの fsync をしないため、rename の耐久性は保証しない。
+- ディレクトリの fsync をしない。**v0.1 のローカル経路では rename の耐久性を保証しない**（ack 直後の電源断で失われ得る）。Cloudflare 経路の ack は Workspace DO の outcome 確定後に行うため、ack 済みの保存は電源断・マシン喪失に耐える（[durability.md](durability.md) / 0157 で実装）。作業ツリーの rename は `U` であり、失っても `(C, J)` から戻す。
 - create-if-absent の競合、巨大ファイル、パッチは未対応。
 - bwrap は 0.12.0 でしか検証していない。macOS / Windows の backend は無い（[0006](../work/issues/0006-sandbox-deploy.md)）。
 
 ## 未決
 
-パッチ形式 / 巨大ファイル / create-if-absent / Journal 保存先 / lease / イベント保持 / ヘルパーの配布。
+パッチ形式 / 巨大ファイル / create-if-absent / lease / イベント保持 / ヘルパーの配布。Journal の保存先は Workspace DO（[durability.md](durability.md) / 0169）。
