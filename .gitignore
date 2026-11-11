@@ -5,6 +5,7 @@ work/scratch/
 dist/
 docs/api/
 .cache/
+.npm-cache/
 .cloudflare/
 .wrangler/
 .dev.vars
