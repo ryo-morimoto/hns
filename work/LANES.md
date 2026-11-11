@@ -13,6 +13,7 @@
 | E2 | [0144](issues/0144-cf-deploy-env.md) 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | done（648730a, PASS）・統合済み | — |
 | E3 | [0143](issues/0143-secret-placement.md) 秘密の配置（gateway・git はマシン・DEK） | done（4073bc0, PASS）・統合済み | — |
 | E4 | 統合・テスト基盤（このセッション） | 0187 と store test 分割を統合（b883f3f / 689f4c1） | — |
+| E5 | [0145](issues/0145-worker-edge.md) Worker の入口（認証境界・ルーティング・相関 ID） | done（b67262e, PASS）・main に commit | — |
 
 - 0187 は TSDoc / doctest / tsdown / TypeDoc を 7 commit（be0fbb1..b883f3f）で統合し、store.test の機能分割を 689f4c1 で追加した。現在の main は 0144 の rebase 後（aa1ac20 以降）。
 - 0144 は `tools/deploy/`、gate の deploy stage、`package.json` / lock を統合した。root lock owner の変更は完了している。
@@ -29,7 +30,7 @@
 | 候補 | 依存 | touches | 判定 |
 | --- | --- | --- | --- |
 | [0141](issues/0141-durability-contract.md) 耐久の契約 | 0140 done | `docs/durability.md`, `docs/workspace.md`, `packages/core/src/durability.ts` | 第1候補 |
-| [0145](issues/0145-worker-edge.md) Worker の入口 | 0144 done | `packages/server/src/edge/`, server tests | 0144 完了で着手可 |
+| [0145](issues/0145-worker-edge.md) Worker の入口 | 0144 done | `packages/server/src/edge/`, server tests | **done**（b67262e, PASS） |
 | [0150](issues/0150-store-d1-do-backend.md) store の D1 | 0144 done | `packages/store/src/driver/`, `packages/store/test/driver/` | 0144 完了で着手可 |
 | [0142](issues/0142-lease-fencing.md) lease と fencing | 0141 未マージ | `packages/core/src/lease.ts` | 0141 後 |
 | [0176](issues/0176-graphql-endpoint.md) /graphql | 0145 / 0175 未マージ | `packages/server/src/graphql/` | 0145 後 |

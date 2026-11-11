@@ -1,9 +1,9 @@
 # 0145: Worker の入口（認証境界・ルーティング・相関 ID）
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0144, 0188
-touches: packages/server/, tools/deploy/cloudflare.config.ts, tools/deploy/config.test.ts, tools/deploy/worker.ts, vitest.config.ts, oxlint.config.ts, package-lock.json, docs/{auth,observability,engineering,packages}.md, AGENTS.md, work/issues/0145-worker-edge.md, work/issues/0176-graphql-endpoint.md, work/BOARD.md
+touches: packages/server/, tools/deploy/cloudflare.config.ts, tools/deploy/config.test.ts, tools/deploy/worker.ts, vitest.config.ts, oxlint.config.ts, package-lock.json, docs/{auth,observability,engineering,packages}.md, AGENTS.md, work/issues/0145-worker-edge.md, work/issues/0176-graphql-endpoint.md, work/BOARD.md, work/LANES.md, work/findings/findings.jsonl
 
 ## Goal
 
@@ -12,13 +12,13 @@ touches: packages/server/, tools/deploy/cloudflare.config.ts, tools/deploy/confi
 
 ## Acceptance criteria
 
-- [ ] 面は「静的配信」「GraphQL（`POST /graphql`）」「WS（`/ws`）」の3つだけ。それ以外は 404
-- [ ] 認証はセッション cookie（passkey は 0158）。未認証は 401 で fail closed
-- [ ] すべてのリクエストに相関 ID を付け、DO とマシンまで通す
-- [ ] 1リクエストの上限（body / 時間 / 行）を決めて実装
-- [ ] CORS は既定で閉じる。デバッグ用の口を残さない
-- [ ] DO は公開しない（バインディングのみ）
-- [ ] D1 へのアクセスもこの Worker に閉じる（DO から直接 D1 を触らない）
+- [x] 面は「静的配信」「GraphQL（`POST /graphql`）」「WS（`/ws`）」の3つだけ。それ以外は 404
+- [x] 認証はセッション cookie（passkey は 0158）。未認証は 401 で fail closed
+- [x] すべてのリクエストに相関 ID を付け、DO とマシンまで通す
+- [x] 1リクエストの上限（body / 時間 / 行）を決めて実装
+- [x] CORS は既定で閉じる。デバッグ用の口を残さない
+- [x] DO は公開しない（バインディングのみ）
+- [x] D1 へのアクセスもこの Worker に閉じる（DO から直接 D1 を触らない）
 
 ## Notes
 
@@ -85,3 +85,24 @@ touches: packages/server/, tools/deploy/cloudflare.config.ts, tools/deploy/confi
   workerd smoke（cf の build 成果物を wrangler dev で起動）: `/graphql` は cookie 無し 401 → cookie 有り 501、
   `/ws` は 401 → DO スタブ 501、`/api/debug` 404、`GET /graphql` 405、`x-request-id` の引き継ぎを確認。
   `cf dev` はこの環境で起動直後に終了するため、smoke は build 成果物を直接使った。
+
+## Result
+
+- verdict: **PASS**（blocking 0）
+- reviewer: reviewer-0145（この変更を書いていない別エージェント）
+- HEAD: b67262e（実装 commit。review は 2b59c82 + 作業ツリーの最終状態をハッシュ固定して実施）
+- 受入: 7/7。`npm run check` は 247 tests / 49 files、lint / fmt / typecheck / build / deploy dry-run / knip がすべて ok。
+  回帰検出力は変異で確認（重複 cookie 拒否・署名検証・認証スキップ・Content-Length・ストリーム上限・deadline abort・
+  request-id 形式・x-request-id 付与のどれかを壊すと 1〜8 本が落ちる）。
+- workerd smoke: cf build の成果物を wrangler dev で起動し、`/graphql` 401 → cookie 有り 501、`/ws` 401 → DO スタブ 501、
+  `/api/debug` 404、`GET /graphql` 405、`x-request-id` の引き継ぎを確認。`cf dev` 自体はこの環境で起動直後に終了する。
+- blocking: なし。
+- non-blocking（`work/findings/findings.jsonl` F-0026〜F-0029）:
+  - docs/packages.md の `bin`（hns）が package.json に無い（docs が実装より強い）。
+  - bearer token の回帰テストのコメントが query token も含むと言うが assert は bearer のみ。
+  - request-id の不正値テストが空白入り1件だけで、129文字・制御文字を assert していない。
+  - 101 応答の `x-request-id` スキップと forwarded request のヘッダはテスト未固定（WS 実装時に確認）。
+- 未確認: 実際の WebSocket upgrade（101）を `new Request(...)` で DO へ転送する経路、ASSETS の notFoundHandling /
+  SPA fallback の実設定（0160）、`cf dev` + `.dev.vars` の secret 供給、本番 deploy で HNS_SESSION_SECRET が
+  binding されること（dry-run は secret 一覧を出さない）。
+- 行上限は値を決めて `RowBudget` と `DEFAULT_LIMITS` を実装し、resolver への配線は 0176 に渡す（0145 の受入は「決めて実装」まで）。
