@@ -1,50 +1,43 @@
 # 実行レーン（変更レーン）
 
 [parallel-change.md](../docs/parallel-change.md) の運用。設計の所有単位（D049 の L0〜L9）は [BOARD.md](BOARD.md)。
-ここには**同時に流している変更だけ**を書く。2026-11-10 時点。
+ここには**同時に流している変更だけ**を書く。2026-11-11 時点。
 
 ## 現在
 
-| レーン | issue | 所有するパス | owner | reviewer | 状態 | 次の統合 |
-| --- | --- | --- | --- | --- | --- | --- |
-| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | `packages/core/src`, `packages/core/README.md`, `packages/store/src/schemas.ts`, `packages/web/src`, `packages/web/package.json`, `package-lock.json`, `docs/{decisions,packages,auth,typescript,review,automation}.md`, `docs/design/http.md`, `AGENTS.md`, `work/BOARD.md` | — | reviewer-0188 | done（66fc2ea） | 4 |
-| E2 | [0144](issues/0144-cf-deploy-env.md) 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | `tools/deploy/`, `tools/gate/stages.ts`, `tools/gate/test/stages.test.ts`, `vitest.config.ts`, `package.json`, `docs/engineering.md`, `docs/decisions.md` | lead | reviewer-0144 | done（648730a, PASS） | 2 |
-| E3 | 統合レーン（このセッション） | `docs/process.md`, `docs/parallel-change.md`, `work/README.md`, `work/LANES.md` | lead | — | 統合済み（5cb0ae5） | 1 |
+アクティブな変更レーンはない。0188 / 0144 / 0143 / 0183 / 0185 / 0186 / 0187 はレビュー PASS・ローカル commit 済みで、main に統合済み。
 
-- E3 は製品コードを書かない。3レーンの運用を文書化し、統合・レビュー・計測だけを行う。E1 / E2 のファイルを書かない。
-- E2（0144）は done（648730a, PASS）。config も deploy.sh / config.test.ts も `tools/deploy/`。
-- E1（0188）は done（66fc2ea）。0143 は done（4073bc0）。
-- E2 は `package.json` / `package-lock.json` を触るので、統合は root lock owner として1本で行う。
-- 0141 / 0031 / 0037 は `in-progress` のまま更新が止まっている。レーンとして数える前に status を整理する
-  （0037 は 0188 が superseded にする。0141 は 0188 の統合後に再開する）。
+| レーン | issue | 状態 | 次の統合 |
+| --- | --- | --- | --- |
+| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | done（66fc2ea）・統合済み | — |
+| E2 | [0144](issues/0144-cf-deploy-env.md) 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | done（648730a, PASS）・統合済み | — |
+| E3 | [0143](issues/0143-secret-placement.md) 秘密の配置（gateway・git はマシン・DEK） | done（4073bc0, PASS）・統合済み | — |
+| E4 | 統合・テスト基盤（このセッション） | 0187 と store test 分割を統合（b883f3f / 689f4c1） | — |
+
+- 0187 は TSDoc / doctest / tsdown / TypeDoc を 7 commit（be0fbb1..b883f3f）で統合し、store.test の機能分割を 689f4c1 で追加した。現在の main は aa1ac20（0144 の rebase 後）。
+- 0144 は `tools/deploy/`、gate の deploy stage、`package.json` / lock を統合した。root lock owner の変更は完了している。
+- 0031 / 0141 は `in-progress` のまま。0037 は 0188 が superseded した。0141 は次の変更レーン候補。
+- 未コミットはない（この LANES 同期を除く）。
 
 ## 統合待ち
 
-| 順 | issue | 状態 | 前提 |
-| --- | --- | --- | --- |
-| 1 | [0175](issues/0175-graphql-relay-foundation.md) | 統合済み（5cb0ae5） | なし |
-| 2 | [0183](issues/0183-test-management.md) | 統合済み（5cb0ae5） | なし |
-| 3 | [0185](issues/0185-tiers-removal.md) | 統合済み（5cb0ae5） | 0183 |
-| 4 | [0188](issues/0188-graphql-only-contract.md) | 統合済み（5cb0ae5）・review 待ち | 0175 / 0183 / 0185 の統合後（core と web が重なる） |
-
-統合は1本ずつ。rebase → `npm run check` → review PASS → merge → main で再確認。5cb0ae5 は `npm run check`（162 tests、build、knip）通過後に作成した。
-0175 / 0183 は統合済みなので、0144 の `package.json` / `package-lock.json` の lock は空いた。
-未コミット: 0188 の fix 一式（store schema の空文字拒否、core README / CHANGELOG、遷移テスト、指摘対応）。新規 `packages/core/test/workflow.test.ts` と `packages/store/test/schemas.test.ts` は untracked なので、commit 時に明示的に stage する。
+なし。0175 / 0183 / 0185 / 0188 / 0144 / 0143 / 0186 / 0187 は main に統合済み。
+0187 の統合時は `npm run check`（193 tests、build、knip）、store test 分割後は 194 tests で通過した。
 
 ## 次の変更レーン候補
 
-| 候補 | 依存 | 0188 との重なり | 判定 |
+| 候補 | 依存 | touches | 判定 |
 | --- | --- | --- | --- |
-| [0144](issues/0144-cf-deploy-env.md) 配備と環境 | 0140 done | `package.json` / lock が 0188 と重なった | 0188 の review 後に開く。第1候補 |
-| [0143](issues/0143-secret-placement.md) 秘密の配置 | 0140 done | `docs/auth.md` が 0188 と重なった | 0188 の review 後 |
-| [0141](issues/0141-durability-contract.md) 耐久の契約 | 0140 done | `packages/core/src` が 0188 と重なった | 0188 の review 後 |
-| [0142](issues/0142-lease-fencing.md) lease と fencing | 0141 未マージ | — | 不可 |
-| [0150](issues/0150-store-d1-do-backend.md) store の D1 | 0144 未マージ | — | 不可 |
-| [0176](issues/0176-graphql-endpoint.md) /graphql | 0145 / 0175 未マージ | — | 不可 |
-| [0184](issues/0184-vitest-assertions.md) expect 移行 | 0185 未マージ | テスト全体 | 0185 は統合済み。0188 の review 後に開く。優先度は plan |
+| [0141](issues/0141-durability-contract.md) 耐久の契約 | 0140 done | `docs/durability.md`, `docs/workspace.md`, `packages/core/src/durability.ts` | 第1候補 |
+| [0145](issues/0145-worker-edge.md) Worker の入口 | 0144 done | `packages/server/src/edge/`, server tests | 0144 完了で着手可 |
+| [0150](issues/0150-store-d1-do-backend.md) store の D1 | 0144 done | `packages/store/src/driver/`, `packages/store/test/driver/` | 0144 完了で着手可 |
+| [0142](issues/0142-lease-fencing.md) lease と fencing | 0141 未マージ | `packages/core/src/lease.ts` | 0141 後 |
+| [0176](issues/0176-graphql-endpoint.md) /graphql | 0145 / 0175 未マージ | `packages/server/src/graphql/` | 0145 後 |
+| 0177〜0180 | 0176 / 0145 | web / codegen | 0176 後 |
+| 0184 / 0186 / 0187 | — | — | done。候補から外す |
 
-0188 は review PASS（reviewer-0188）。fix 一式の commit と main での再確認の後に、E1 を 0144 へ入れ替える。
-3本目は引き続き統合レーンとし、製品コードを書かない。
+0141 / 0145 / 0150 は互いに `touches` が交わらない。2本目まで開けるので、0141 と 0145（または 0150）を選び、3本目は統合レーンにする。
+0142 は 0141 の後に開く。0176 以降は 0145 の outcome を見てから順を決める。
 
 ## 更新の規則
 
