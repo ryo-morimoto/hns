@@ -187,8 +187,8 @@
 | [0140](issues/0140-cf-adoption-docs.md) | 正本を Cloudflare に置く決定と docs の書き換え | **done** | — | — |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | in-progress | now | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | open | now | 0141 |
-| [0143](issues/0143-secret-placement.md) | 秘密の配置（gateway・git はマシン・DEK） | open | now | 0140 |
-| [0144](issues/0144-cf-deploy-env.md) | 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | open | now | 0140 |
+| [0143](issues/0143-secret-placement.md) | 秘密の配置（gateway・git はマシン・DEK） | **done** | — | 0140 |
+| [0144](issues/0144-cf-deploy-env.md) | 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | **done** | — | 0140 |
 | [0145](issues/0145-worker-edge.md) | Worker の入口（認証境界・ルーティング・相関 ID） | open | now | 0144 |
 | [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | open | plan | 0145 |
 | [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名・sandbox） | open | plan | 0145 |

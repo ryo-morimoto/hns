@@ -41,6 +41,7 @@ unit テストを src/<module>.test.ts にコロケートし、integration / E2E
 - 2026-11-11: source/test の issue 参照を削除（schema / Gallery / Dialog / Toast / Menu / theme / setup）。codecs の自己スキャンは test ファイルを除外。
 - 2026-11-11: `npm test` 175 passed、`npm run check` 成功。
 - 2026-11-11: reviewer-0186 が初回 **FAIL**（blocking 2: docs/testing の古い配置記述、web の 0102/0106/0103/0115 参照）。docs と参照を修正し、再レビューで **PASS**。
+- 2026-11-11: `store/src/store.test.ts`（466行）を `projects` / `conversations` / `events` / `workflows` / `automations` / `usage` / `store` と `test/support.ts` に分割。store 46 tests（689f4c1）。
 
 ## Result
 
@@ -48,5 +49,6 @@ unit テストを src/<module>.test.ts にコロケートし、integration / E2E
 - reviewer: reviewer-0186
 - HEAD: 66fc2ea + 0186 の未コミット変更
 - blocking（初回、解消）: docs/testing.md の古い `test/` 前提、web の issue 番号参照
-- 未確認: `store/src/store.test.ts` の機能分割は未実施（473行、module 単位のまま）。`npm run gate pre-push` は別途。
-- 変更は未コミット（コミットはこの後）。
+- 解消（2026-11-11）: `store/src/store.test.ts` を機能単位に分割（store 46 tests、689f4c1）。
+- 未確認: `npm run gate pre-push`（`npm run check` で同等の全 stage を実行）。
+- 変更は 0186 本体 `aa90c3c` と 0187 の docs commit `b883f3f` に含めてコミット済み。
