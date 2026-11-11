@@ -14,7 +14,7 @@
 | E3 | [0143](issues/0143-secret-placement.md) 秘密の配置（gateway・git はマシン・DEK） | done（4073bc0, PASS）・統合済み | — |
 | E4 | 統合・テスト基盤（このセッション） | 0187 と store test 分割を統合（b883f3f / 689f4c1） | — |
 
-- 0187 は TSDoc / doctest / tsdown / TypeDoc を 7 commit（be0fbb1..b883f3f）で統合し、store.test の機能分割を 689f4c1 で追加した。現在の main は aa1ac20（0144 の rebase 後）。
+- 0187 は TSDoc / doctest / tsdown / TypeDoc を 7 commit（be0fbb1..b883f3f）で統合し、store.test の機能分割を 689f4c1 で追加した。現在の main は 0144 の rebase 後（aa1ac20 以降）。
 - 0144 は `tools/deploy/`、gate の deploy stage、`package.json` / lock を統合した。root lock owner の変更は完了している。
 - 0031 / 0141 は `in-progress` のまま。0037 は 0188 が superseded した。0141 は次の変更レーン候補。
 - 未コミットはない（この LANES 同期を除く）。
@@ -22,7 +22,7 @@
 ## 統合待ち
 
 なし。0175 / 0183 / 0185 / 0188 / 0144 / 0143 / 0186 / 0187 は main に統合済み。
-0187 の統合時は `npm run check`（193 tests、build、knip）、store test 分割後は 194 tests で通過した。
+0187 の統合時は `npm run check`（193 tests、build、knip）、store test 分割後は 194 tests、0144 統合後は 201 tests で通過した。
 
 ## 次の変更レーン候補
 
