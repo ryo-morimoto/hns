@@ -6,7 +6,7 @@
 
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 10 |
+| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 9 |
 | Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 62 |
 | Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 7 |
 | Q4 | — | — | `hold` | いまはやらない | 8 |
@@ -19,11 +19,10 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（10）
+### now（9）
 
 | # | 作業 | 依存の状態 |
 | --- | --- | --- |
-| [0031](issues/0031-foundation.md) | 製品の土台（core・ゲート） | 0014 |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
 | [0145](issues/0145-worker-edge.md) | Worker の入口（認証境界・ルーティング・相関 ID） | 0144 |
@@ -111,7 +110,7 @@
 | [0028](issues/0028-observability.md) | 観測（要件17） | **done** | — | 0014 |
 | [0029](issues/0029-conversation-management.md) | 会話の管理（要件20） | **done** | — | 0016 |
 | [0030](issues/0030-safety.md) | 安全の残り（要件18） | **done** | — | 0014 |
-| [0031](issues/0031-foundation.md) | 製品の土台（core・ゲート） | in-progress | now | 0014 |
+| [0031](issues/0031-foundation.md) | 製品の土台（core・ゲート） | **done** | — | 0014 |
 | [0032](issues/0032-migrate-packages.md) | 6パッケージへの移植 | open | plan | 0031 |
 | [0033](issues/0033-workspace-package.md) | workspace パッケージ（移植） | **done** | — | 0031 |
 | [0034](issues/0034-agent-package.md) | agent パッケージ（移植） | **done** | — | 0033 |

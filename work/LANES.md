@@ -16,7 +16,7 @@
 
 - 0187 は TSDoc / doctest / tsdown / TypeDoc を 7 commit（be0fbb1..b883f3f）で統合し、store.test の機能分割を 689f4c1 で追加した。現在の main は 0144 の rebase 後（aa1ac20 以降）。
 - 0144 は `tools/deploy/`、gate の deploy stage、`package.json` / lock を統合した。root lock owner の変更は完了している。
-- 0031 / 0141 は `in-progress` のまま。0037 は 0188 が superseded した。0141 は次の変更レーン候補。
+- 0031 は done（CI 接続は受入条件ごと 0041 へ移管）。0141 は `in-progress` のまま、次の変更レーン候補。0037 は 0188 が superseded した。
 - 未コミットはない（この LANES 同期を除く）。
 
 ## 統合待ち
