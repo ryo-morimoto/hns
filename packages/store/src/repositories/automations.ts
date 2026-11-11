@@ -33,15 +33,15 @@ export interface AutomationCreateInput {
  * @remarks
  * Trigger and action are validated before writing, and a webhook token is generated on
  * create when absent. A token is unique across automations. Missing rows return `undefined`,
- * `delete` reports whether a row was removed, and each write runs in one transaction.
+ * `delete` reports whether a row was removed, and each write is one statement.
  */
 export interface AutomationRepository {
   /** Automations across every project, or only `projectId`; oldest first. */
-  list(projectId?: ProjectId | undefined): Automation[];
+  list(projectId?: ProjectId | undefined): Promise<Automation[]>;
   /** The automation with `id`, or `undefined` when it does not exist. */
-  get(id: string): Automation | undefined;
+  get(id: string): Promise<Automation | undefined>;
   /** The webhook automation with `token`, or `undefined` when none has it. */
-  getByToken(token: string): Automation | undefined;
+  getByToken(token: string): Promise<Automation | undefined>;
   /**
    * Create an automation.
    *
@@ -52,7 +52,7 @@ export interface AutomationRepository {
    * @throws ValiError if `trigger` or `action` is invalid.
    * @throws Error if the token collides or the row is missing after the write.
    */
-  create(input: AutomationCreateInput): Automation;
+  create(input: AutomationCreateInput): Promise<Automation>;
   /**
    * Update the given fields, keeping the rest.
    *
@@ -66,11 +66,11 @@ export interface AutomationRepository {
   update(
     id: string,
     patch: Partial<Pick<Automation, "name" | "trigger" | "action" | "enabled">>,
-  ): Automation | undefined;
+  ): Promise<Automation | undefined>;
   /** Delete an automation and, by cascade, its firings; returns whether a row was removed. */
-  delete(id: string): boolean;
+  delete(id: string): Promise<boolean>;
   /** Record when a scheduled automation last fired; a no-op when the automation is missing. */
-  setLastFiredAt(id: string, at: IsoTimestamp): void;
+  setLastFiredAt(id: string, at: IsoTimestamp): Promise<void>;
   /**
    * Record an attempt to run an automation.
    *
@@ -84,7 +84,7 @@ export interface AutomationRepository {
     status: AutomationFiringStatus;
     detail?: string | undefined;
     runId?: string | undefined;
-  }): Firing;
+  }): Promise<Firing>;
   /**
    * Update a firing's status and, when supplied, its detail and run.
    *
@@ -99,11 +99,11 @@ export interface AutomationRepository {
       detail?: string | undefined;
       runId?: string | undefined;
     },
-  ): Firing | undefined;
+  ): Promise<Firing | undefined>;
   /** The firing with `id`, or `undefined` when it does not exist. */
-  getFiring(id: string): Firing | undefined;
+  getFiring(id: string): Promise<Firing | undefined>;
   /** Firings of `automationId`, newest first. */
-  listFirings(automationId: string): Firing[];
+  listFirings(automationId: string): Promise<Firing[]>;
 }
 
 /**
@@ -112,34 +112,34 @@ export interface AutomationRepository {
  * @internal
  */
 export function automationRepository(context: StoreContext): AutomationRepository {
-  const { db, now, newId, transaction } = context;
+  const { sql, now, newId } = context;
 
-  const get = (id: string): Automation | undefined => {
-    const row = db.prepare("SELECT * FROM automations WHERE id = ?").get(id);
+  const get = async (id: string): Promise<Automation | undefined> => {
+    const row = await sql.get("SELECT * FROM automations WHERE id = ?", [id]);
     return row === undefined ? undefined : parseAutomation(row);
   };
 
-  const getFiring = (id: string): Firing | undefined => {
-    const row = db.prepare("SELECT * FROM firings WHERE id = ?").get(id);
+  const getFiring = async (id: string): Promise<Firing | undefined> => {
+    const row = await sql.get("SELECT * FROM firings WHERE id = ?", [id]);
     return row === undefined ? undefined : parseFiring(row);
   };
 
   return {
-    list(projectId) {
+    async list(projectId) {
       const rows =
         projectId === undefined
-          ? db.prepare("SELECT * FROM automations ORDER BY created_at").all()
-          : db
-              .prepare("SELECT * FROM automations WHERE project_id = ? ORDER BY created_at")
-              .all(projectId);
+          ? await sql.all("SELECT * FROM automations ORDER BY created_at")
+          : await sql.all("SELECT * FROM automations WHERE project_id = ? ORDER BY created_at", [
+              projectId,
+            ]);
       return rows.map((row) => parseAutomation(row));
     },
     get,
-    getByToken(token) {
-      const row = db.prepare("SELECT * FROM automations WHERE token = ?").get(token);
+    async getByToken(token) {
+      const row = await sql.get("SELECT * FROM automations WHERE token = ?", [token]);
       return row === undefined ? undefined : parseAutomation(row);
     },
-    create(input) {
+    async create(input) {
       const trigger = v.parse(AutomationTriggerSchema, input.trigger);
       const action = v.parse(AutomationActionSchema, input.action);
       const withToken =
@@ -148,12 +148,11 @@ export function automationRepository(context: StoreContext): AutomationRepositor
           : trigger;
       const token = withToken.type === "webhook" ? (withToken.token ?? null) : null;
       const createdAt = now();
-      const id = newId();
-      transaction(() => {
-        db.prepare(
-          "INSERT INTO automations (id, project_id, name, trigger_json, action_json, token, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ).run(
-          id,
+      const row = await sql.get(
+        "INSERT INTO automations (id, project_id, name, trigger_json, action_json, token, enabled, created_at, updated_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+        [
+          newId(),
           input.projectId,
           input.name,
           JSON.stringify(withToken),
@@ -162,14 +161,13 @@ export function automationRepository(context: StoreContext): AutomationRepositor
           input.enabled === false ? 0 : 1,
           createdAt,
           createdAt,
-        );
-      });
-      const automation = get(id);
-      if (automation === undefined) throw new Error("automation was not created");
-      return automation;
+        ],
+      );
+      if (row === undefined) throw new Error("automation was not created");
+      return parseAutomation(row);
     },
-    update(id, patch) {
-      const current = get(id);
+    async update(id, patch) {
+      const current = await get(id);
       if (current === undefined) return undefined;
       const trigger =
         patch.trigger === undefined
@@ -184,10 +182,10 @@ export function automationRepository(context: StoreContext): AutomationRepositor
           : null;
       const withToken =
         trigger.type === "webhook" && trigger.token === undefined ? { ...trigger, token } : trigger;
-      transaction(() => {
-        db.prepare(
-          "UPDATE automations SET name = ?, enabled = ?, trigger_json = ?, action_json = ?, token = ?, updated_at = ? WHERE id = ?",
-        ).run(
+      const row = await sql.get(
+        "UPDATE automations SET name = ?, enabled = ?, trigger_json = ?, action_json = ?, token = ?, updated_at = ? " +
+          "WHERE id = ? RETURNING *",
+        [
           patch.name ?? current.name,
           patch.enabled === undefined ? (current.enabled ? 1 : 0) : patch.enabled ? 1 : 0,
           JSON.stringify(withToken),
@@ -195,23 +193,18 @@ export function automationRepository(context: StoreContext): AutomationRepositor
           token,
           now(),
           id,
-        );
-      });
-      return get(id);
+        ],
+      );
+      return row === undefined ? undefined : parseAutomation(row);
     },
-    delete(id) {
-      return transaction(() => {
-        const result = db.prepare("DELETE FROM automations WHERE id = ?").run(id);
-        return Number(result.changes) > 0;
-      });
+    async delete(id) {
+      return (await sql.run("DELETE FROM automations WHERE id = ?", [id])) > 0;
     },
-    setLastFiredAt(id, at) {
+    async setLastFiredAt(id, at) {
       const value = v.parse(IsoTimestampSchema, at);
-      transaction(() => {
-        db.prepare("UPDATE automations SET last_fired_at = ? WHERE id = ?").run(value, id);
-      });
+      await sql.run("UPDATE automations SET last_fired_at = ? WHERE id = ?", [value, id]);
     },
-    createFiring(input) {
+    async createFiring(input) {
       const firing = parseFiring({
         id: newId(),
         automation_id: input.automationId,
@@ -221,10 +214,10 @@ export function automationRepository(context: StoreContext): AutomationRepositor
         run_id: input.runId ?? null,
         created_at: now(),
       });
-      transaction(() => {
-        db.prepare(
-          "INSERT INTO firings (id, automation_id, at, status, detail, run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ).run(
+      const row = await sql.get(
+        "INSERT INTO firings (id, automation_id, at, status, detail, run_id, created_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+        [
           firing.id,
           firing.automation_id,
           firing.at,
@@ -232,26 +225,26 @@ export function automationRepository(context: StoreContext): AutomationRepositor
           firing.detail,
           firing.run_id,
           firing.created_at,
-        );
-      });
-      return firing;
+        ],
+      );
+      if (row === undefined) throw new Error("firing was not created");
+      return parseFiring(row);
     },
-    updateFiring(id, patch) {
-      const current = getFiring(id);
-      if (current === undefined) return undefined;
-      transaction(() => {
-        db.prepare(
-          "UPDATE firings SET status = ?, detail = COALESCE(?, detail), run_id = COALESCE(?, run_id) WHERE id = ?",
-        ).run(patch.status, patch.detail ?? null, patch.runId ?? null, id);
-      });
-      return getFiring(id);
+    async updateFiring(id, patch) {
+      const row = await sql.get(
+        "UPDATE firings SET status = ?, detail = COALESCE(?, detail), run_id = COALESCE(?, run_id) " +
+          "WHERE id = ? RETURNING *",
+        [patch.status, patch.detail ?? null, patch.runId ?? null, id],
+      );
+      return row === undefined ? undefined : parseFiring(row);
     },
     getFiring,
-    listFirings(automationId) {
-      return db
-        .prepare("SELECT * FROM firings WHERE automation_id = ? ORDER BY created_at DESC")
-        .all(automationId)
-        .map((row) => parseFiring(row));
+    async listFirings(automationId) {
+      const rows = await sql.all(
+        "SELECT * FROM firings WHERE automation_id = ? ORDER BY created_at DESC",
+        [automationId],
+      );
+      return rows.map((row) => parseFiring(row));
     },
   };
 }

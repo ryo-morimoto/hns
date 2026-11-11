@@ -79,7 +79,7 @@ issue の `## テスト設計` に書く。
 
 - **unit が既定。** 1プロセスで終わらないものだけ integration に上げる。「遅い」は層の理由にしない。
 - **同じシナリオを複数の層で回さない。** シナリオは一度だけ、最も低い層で実行する。
-- store の DB テストは、`:memory:` か temp file を使う。プロセス内なら unit でよい。
+- store の DB テストは miniflare の実 D1 SQLite（workerd）を使う。workerd は子プロセスなので integration 層に置く（D064）。
 - サーバ実装後は、Workers の runtime テストを integration に置く。
 
 ### ケースとレビュー

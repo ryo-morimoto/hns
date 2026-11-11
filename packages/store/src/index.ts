@@ -1,8 +1,9 @@
 export * from "./schemas.ts";
 export * from "./parse.ts";
 export { openStore } from "./store.ts";
-export type { Store } from "./store.ts";
-export type { StoreOptions } from "./db.ts";
+export type { Store, StoreOptions } from "./store.ts";
+export { migrateStore } from "./migrate.ts";
+export type { D1Binding } from "./sql.ts";
 export type { ProjectRepository, TaskRepository } from "./repositories/projects.ts";
 export type {
   ConversationListQuery,

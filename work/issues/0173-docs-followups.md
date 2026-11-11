@@ -12,7 +12,7 @@ D047〜D053 で前提が変わったのに、古い書き方が残っている�
 
 ## Acceptance criteria
 
-- [ ] `AGENTS.md` の planned / target graph に `machine` を足し、永続化の文を「制御データは D1、実行中の状態は DO、ローカルは node:sqlite」に
+- [ ] `AGENTS.md` の planned / target graph に `machine` を足す（永続化の文は 0150 で「制御データは D1、実行中の状態は DO、ローカルも D1」に更新済み）
 - [ ] 0032 を「D029 の 6 パッケージの移植。`machine` は 0147」と明記
 - [ ] 古い issue の `../docs` リンクを `../../docs` に（0035 / 0046 / 0056 / 0170）
 - [ ] `docs/engineering.md` のテスト層に integration を足す（D051 / 0170 と整合）
@@ -34,3 +34,4 @@ D047〜D053 で前提が変わったのに、古い書き方が残っている�
 ## Log
 
 - 2026-11-07: 作成（0140 のレビュー残件）。
+- 2026-11-11: 永続化の文は 0150 の D1 専用化で更新済み。残りは machine の追記。

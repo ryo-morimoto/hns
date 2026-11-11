@@ -3,7 +3,7 @@
 status: open
 priority: plan
 depends-on: 0150, 0157
-touches: packages/server/src/runtime/, packages/store/test/parity/
+touches: packages/server/src/runtime/, packages/store/src/
 
 ## Goal
 
@@ -12,7 +12,7 @@ Cloudflare を正本にしても、テストと開発はローカルで回せる
 
 ## Acceptance criteria
 
-- [ ] ローカル実装（node:sqlite / ローカル env）で全テストが通る
+- [ ] ローカル実装（miniflare / cf dev の D1）で全テストが通る
 - [ ] 出荷は Cloudflare 実装のみ。ローカルはテストと dev と明記
 - [ ] D1 / DO / R2 のどれかを止めても、他が正本を取り違えない（INV-11）
 - [ ] 抽象化の正当化（呼び口2つ）を decision に書く
@@ -31,3 +31,4 @@ Cloudflare を正本にしても、テストと開発はローカルで回せる
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-11: 0150 が `node:sqlite` を削除したため、ローカルは D1（miniflare / cf dev）に変更。

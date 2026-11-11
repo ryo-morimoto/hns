@@ -7,18 +7,18 @@ import { parseProject, parseTask } from "../parse.ts";
  *
  * @remarks
  * A method that can miss returns `undefined` rather than throwing, and `delete` reports
- * whether a row was removed. Each write runs in one transaction; no method opens a
- * transaction on behalf of another repository.
+ * whether a row was removed. A call that writes is one statement, so D1 commits it alone;
+ * no method opens a transaction on behalf of another repository.
  */
 export interface ProjectRepository {
   /** All projects, oldest first. */
-  list(): Project[];
+  list(): Promise<Project[]>;
   /** The project with `id`, or `undefined` when it does not exist. */
-  get(id: ProjectId): Project | undefined;
+  get(id: ProjectId): Promise<Project | undefined>;
   /** Create a project. The id and timestamp come from the store context. */
-  create(name: string): Project;
+  create(name: string): Promise<Project>;
   /** Rename a project; `undefined` when it does not exist. */
-  rename(id: ProjectId, name: string): Project | undefined;
+  rename(id: ProjectId, name: string): Promise<Project | undefined>;
   /**
    * Delete a project.
    *
@@ -28,7 +28,7 @@ export interface ProjectRepository {
    *
    * @returns Whether a row was deleted.
    */
-  delete(id: ProjectId): boolean;
+  delete(id: ProjectId): Promise<boolean>;
   /**
    * Return the default project, creating it when it is missing.
    *
@@ -36,7 +36,7 @@ export interface ProjectRepository {
    * `openStore` calls this, so an opened store always has one project. The id is fixed, so
    * calling this repeatedly is safe.
    */
-  ensureDefault(): Project;
+  ensureDefault(): Promise<Project>;
 }
 
 /**
@@ -44,15 +44,15 @@ export interface ProjectRepository {
  *
  * @remarks
  * Missing rows return `undefined`, `delete` reports whether a row was removed, and each
- * write runs in one transaction.
+ * write is one statement.
  */
 export interface TaskRepository {
   /** Tasks across every project, or only `projectId`; oldest first. */
-  list(projectId?: ProjectId | undefined): Task[];
+  list(projectId?: ProjectId | undefined): Promise<Task[]>;
   /** The task with `id`, or `undefined` when it does not exist. */
-  get(id: string): Task | undefined;
+  get(id: string): Promise<Task | undefined>;
   /** Create a task in `projectId`; a new task starts as `todo`. */
-  create(input: { projectId: ProjectId; title: string }): Task;
+  create(input: { projectId: ProjectId; title: string }): Promise<Task>;
   /**
    * Update the given fields, keeping the rest.
    *
@@ -62,9 +62,9 @@ export interface TaskRepository {
   update(
     id: string,
     patch: { title?: string | undefined; status?: TaskStatus | undefined },
-  ): Task | undefined;
+  ): Promise<Task | undefined>;
   /** Delete a task; returns whether a row was removed. */
-  delete(id: string): boolean;
+  delete(id: string): Promise<boolean>;
 }
 
 // SAFETY: the brand exists only in the type; the default project id is fixed.
@@ -76,55 +76,49 @@ const DEFAULT_PROJECT_ID = "default" as ProjectId;
  * @internal
  */
 export function projectRepository(context: StoreContext): ProjectRepository {
-  const { db, now, newId, transaction } = context;
+  const { sql, now, newId } = context;
 
-  const get = (id: ProjectId): Project | undefined => {
-    const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
+  const get = async (id: ProjectId): Promise<Project | undefined> => {
+    const row = await sql.get("SELECT * FROM projects WHERE id = ?", [id]);
     return row === undefined ? undefined : parseProject(row);
   };
 
   return {
-    list: () =>
-      db
-        .prepare("SELECT * FROM projects ORDER BY created_at")
-        .all()
-        .map((row) => parseProject(row)),
+    async list() {
+      const rows = await sql.all("SELECT * FROM projects ORDER BY created_at");
+      return rows.map((row) => parseProject(row));
+    },
     get,
-    create(name) {
+    async create(name) {
       const project = parseProject({ id: newId(), name, created_at: now() });
-      transaction(() => {
-        db.prepare("INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)").run(
-          project.id,
-          project.name,
-          project.created_at,
-        );
-      });
-      return project;
+      const row = await sql.get(
+        "INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?) RETURNING *",
+        [project.id, project.name, project.created_at],
+      );
+      if (row === undefined) throw new Error("project was not created");
+      return parseProject(row);
     },
-    rename(id, name) {
-      transaction(() => {
-        db.prepare("UPDATE projects SET name = ? WHERE id = ?").run(name, id);
-      });
-      return get(id);
+    async rename(id, name) {
+      const row = await sql.get("UPDATE projects SET name = ? WHERE id = ? RETURNING *", [
+        name,
+        id,
+      ]);
+      return row === undefined ? undefined : parseProject(row);
     },
-    delete(id) {
-      return transaction(() => {
-        const result = db.prepare("DELETE FROM projects WHERE id = ?").run(id);
-        return Number(result.changes) > 0;
-      });
+    async delete(id) {
+      return (await sql.run("DELETE FROM projects WHERE id = ?", [id])) > 0;
     },
-    ensureDefault() {
-      const existing = get(DEFAULT_PROJECT_ID);
+    async ensureDefault() {
+      const existing = await get(DEFAULT_PROJECT_ID);
       if (existing !== undefined) return existing;
       const project = parseProject({ id: "default", name: "default", created_at: now() });
-      transaction(() => {
-        db.prepare("INSERT OR IGNORE INTO projects (id, name, created_at) VALUES (?, ?, ?)").run(
-          project.id,
-          project.name,
-          project.created_at,
-        );
-      });
-      const seeded = get(DEFAULT_PROJECT_ID);
+      const row = await sql.get(
+        "INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?) " +
+          "ON CONFLICT(id) DO NOTHING RETURNING *",
+        [project.id, project.name, project.created_at],
+      );
+      if (row !== undefined) return parseProject(row);
+      const seeded = await get(DEFAULT_PROJECT_ID);
       if (seeded === undefined) throw new Error("default project was not seeded");
       return seeded;
     },
@@ -137,25 +131,25 @@ export function projectRepository(context: StoreContext): ProjectRepository {
  * @internal
  */
 export function taskRepository(context: StoreContext): TaskRepository {
-  const { db, now, newId, transaction } = context;
+  const { sql, now, newId } = context;
 
-  const get = (id: string): Task | undefined => {
-    const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
+  const get = async (id: string): Promise<Task | undefined> => {
+    const row = await sql.get("SELECT * FROM tasks WHERE id = ?", [id]);
     return row === undefined ? undefined : parseTask(row);
   };
 
   return {
-    list(projectId) {
+    async list(projectId) {
       const rows =
         projectId === undefined
-          ? db.prepare("SELECT * FROM tasks ORDER BY created_at").all()
-          : db
-              .prepare("SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at")
-              .all(projectId);
+          ? await sql.all("SELECT * FROM tasks ORDER BY created_at")
+          : await sql.all("SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at", [
+              projectId,
+            ]);
       return rows.map((row) => parseTask(row));
     },
     get,
-    create(input) {
+    async create(input) {
       const task = parseTask({
         id: newId(),
         project_id: input.projectId,
@@ -164,31 +158,24 @@ export function taskRepository(context: StoreContext): TaskRepository {
         created_at: now(),
         updated_at: now(),
       });
-      transaction(() => {
-        db.prepare(
-          "INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        ).run(task.id, task.project_id, task.title, task.status, task.created_at, task.updated_at);
-      });
-      return task;
+      const row = await sql.get(
+        "INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+        [task.id, task.project_id, task.title, task.status, task.created_at, task.updated_at],
+      );
+      if (row === undefined) throw new Error("task was not created");
+      return parseTask(row);
     },
-    update(id, patch) {
-      const current = get(id);
-      if (current === undefined) return undefined;
-      transaction(() => {
-        db.prepare("UPDATE tasks SET title = ?, status = ?, updated_at = ? WHERE id = ?").run(
-          patch.title ?? current.title,
-          patch.status ?? current.status,
-          now(),
-          id,
-        );
-      });
-      return get(id);
+    async update(id, patch) {
+      const row = await sql.get(
+        "UPDATE tasks SET title = COALESCE(?, title), status = COALESCE(?, status), " +
+          "updated_at = ? WHERE id = ? RETURNING *",
+        [patch.title ?? null, patch.status ?? null, now(), id],
+      );
+      return row === undefined ? undefined : parseTask(row);
     },
-    delete(id) {
-      return transaction(() => {
-        const result = db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-        return Number(result.changes) > 0;
-      });
+    async delete(id) {
+      return (await sql.run("DELETE FROM tasks WHERE id = ?", [id])) > 0;
     },
   };
 }

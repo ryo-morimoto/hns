@@ -28,6 +28,12 @@
           "src/**/*.test.ts"
         ]
       },
+      "packages/store": {
+        "entry": [
+          "src/**/*.test.ts",
+          "test/integration/**/*.test.ts"
+        ]
+      },
       "packages/workspace": {
         "entry": [
           "src/rooted-helper.ts"

@@ -1,6 +1,4 @@
 import { expect, test } from "vitest";
-import { DatabaseSync } from "node:sqlite";
-import type { JsonValue } from "@hns/core";
 import { parseConversation, parseEvent, parseProject, parseTask } from "./parse.ts";
 
 const projectRow = { id: "p1", name: "hns", created_at: "2026-11-07T00:00:00.000Z" };
@@ -83,34 +81,4 @@ test("a broken event detail fails loudly", () => {
 
 test("an unknown event level fails loudly", () => {
   expect(() => parseEvent({ ...eventRow, level: "debug" })).toThrow();
-});
-
-test("rows read from a real SQLite database parse", () => {
-  const db = new DatabaseSync(":memory:");
-
-  db.exec(
-    "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL)",
-  );
-  db.exec(
-    "CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT, archived INTEGER NOT NULL DEFAULT 0, deleted_at TEXT)",
-  );
-  db.prepare("INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)").run(
-    "p1",
-    "hns",
-    "2026-11-07T00:00:00.000Z",
-  );
-  db.prepare(
-    "INSERT INTO conversations (id, project_id, title, created_at, archived) VALUES (?, ?, ?, ?, ?)",
-  ).run("c1", "p1", "first", "2026-11-07T00:00:00.000Z", 1);
-
-  // SAFETY: SQLite returns the row we just inserted; the schema checks every field.
-  const project = parseProject(db.prepare("SELECT * FROM projects").get() as JsonValue);
-  // SAFETY: SQLite returns the row we just inserted; the schema checks every field.
-  const conversation = parseConversation(
-    db.prepare("SELECT * FROM conversations").get() as JsonValue,
-  );
-
-  expect(project.name).toBe("hns");
-  expect(conversation.archived).toBe(true);
-  db.close();
 });

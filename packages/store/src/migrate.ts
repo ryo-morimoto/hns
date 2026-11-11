@@ -1,7 +1,7 @@
-import type { DatabaseSync } from "node:sqlite";
-import { readUserVersion, transaction, writeUserVersion } from "./db.ts";
+import * as v from "valibot";
+import { createSql, type D1Binding, type Sql } from "./sql.ts";
 
-/** One forward step: the schema SQL and the `user_version` it records. */
+/** One forward step: the schema SQL and the `schema_migrations` version it records. */
 interface Migration {
   readonly version: number;
   readonly sql: string;
@@ -114,33 +114,92 @@ CREATE INDEX IF NOT EXISTS firings_automation ON firings (automation_id, created
 const MIGRATIONS: readonly Migration[] = [{ version: 1, sql: SCHEMA_V1 }];
 
 /**
- * Apply the pending migrations to `db`.
+ * Split one migration script into statements.
+ *
+ * @remarks
+ * The migrations are our own SQL and contain no semicolons inside literals, so splitting on
+ * `;` is safe. Statements go through `batch` rather than `exec`: D1's batch is atomic and
+ * keeps the multi-line DDL intact.
+ */
+const statements = (script: string): readonly string[] =>
+  script
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+const versionSchema = v.object({ version: v.number() });
+
+const readVersion = async (sql: Sql): Promise<number> =>
+  v.parse(
+    versionSchema,
+    await sql.get("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"),
+  ).version;
+
+/**
+ * Apply the pending migrations to `sql`.
  *
  * @internal
  * @remarks
- * Migrations run in version order, one per transaction: a migration and its `user_version`
- * bump commit together or not at all. The version is monotonic, so reopening an up-to-date
- * database is a no-op and calling this on every open is safe. A database whose version is
- * newer than this build is refused rather than opened and damaged.
+ * The schema version lives in `schema_migrations` so one runner works on D1, which rejects
+ * `PRAGMA user_version`. Each migration's statements and its version row go in one `batch`,
+ * which D1 runs atomically, so a failure leaves no table or version row from that migration
+ * behind (the empty `schema_migrations` table is created first). The version is monotonic, so
+ * reopening an up-to-date database is a no-op.
+ * A database whose version is newer than this build is refused rather than opened and
+ * damaged.
  *
- * @param db - An open connection.
- * @throws Error if `db` records a version newer than this build supports.
- * @throws Whatever a migration or its version bump threw; that migration is rolled back and
- * later ones are not attempted.
+ * @param sql - The D1 adapter for the database.
+ * @throws Error if `sql` records a version newer than this build supports.
+ * @throws Whatever a migration threw; that migration is rolled back and later ones are not
+ * attempted. A lost race with another opener whose version already advanced is not an error.
  */
-export function migrate(db: DatabaseSync): void {
-  const current = readUserVersion(db);
+export async function migrate(sql: Sql): Promise<void> {
+  await sql.batch([
+    { sql: "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)" },
+  ]);
   const latest = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
+  const current = await readVersion(sql);
   if (current > latest) {
     throw new Error(
       "store schema version " + current + " is newer than " + latest + "; open a new database",
     );
   }
+  let applied = current;
   for (const migration of MIGRATIONS) {
-    if (migration.version <= current) continue;
-    transaction(db, () => {
-      db.exec(migration.sql);
-      writeUserVersion(db, migration.version);
-    });
+    if (migration.version <= applied) continue;
+    try {
+      await sql.batch(
+        [
+          ...statements(migration.sql),
+          "INSERT INTO schema_migrations (version) VALUES (" + migration.version + ")",
+        ].map((statement) => ({ sql: statement })),
+      );
+      applied = migration.version;
+    } catch (error) {
+      // Another isolate can apply the same version between our read and this write. D1
+      // rolled our script back, so continue only when the version now includes this step.
+      const after = await readVersion(sql);
+      if (after < migration.version) throw error;
+      applied = after;
+    }
+  }
+}
+
+/**
+ * Apply the pending migrations through a D1 binding.
+ *
+ * @remarks
+ * `openStore` runs the same runner. This entry is for a deploy or maintenance step that
+ * must migrate without opening the repositories.
+ *
+ * @param d1 - The D1 binding to migrate.
+ * @throws Error if the database is newer than this build or a migration fails.
+ */
+export async function migrateStore(d1: D1Binding): Promise<void> {
+  const sql = createSql(d1);
+  try {
+    await migrate(sql);
+  } finally {
+    await sql.close();
   }
 }

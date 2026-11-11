@@ -21,7 +21,7 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
 - Target package graph: `server → agent / store / workspace → core`; `web → core`. Never the other way
 - GraphQL is the one app contract (`@hns/core/graphql` generates the SDL from the model). REST is not declared in advance: the issue that implements a REST face adds its schema, auth, and handler together (D059)
 - Conversation runtime is pi-durable 1.5.0 (external, pinned). We compose it, not fork it
-- Persistence is SQLite through `node:sqlite`; there is no ORM
+- Persistence is D1 for control data and DO SQLite for runtime state; there is no ORM
 - Types are the source of truth; valibot schemas are typed against them (`v.GenericSchema<unknown, T>`)
 - Product code is TypeScript strict. The PoC is JavaScript and stays that way
 - Workflow / automation state transitions live only in `packages/core/src/workflow.ts`

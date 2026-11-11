@@ -29,7 +29,7 @@
 | `@hns/core`      | モデル（`types.ts`・`codecs.ts`）と、その射影。`./graphql` で SDL を起こす                   | —（id の検証に valibot、`./graphql` に graphql） |
 | `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離                                 | core, pi-durable/env                  |
 | `@hns/agent`     | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode）   | core, workspace, pi-durable, pi-ai    |
-| `@hns/store`     | SQLite / D1、migration、リポジトリ。`./identity` で token・passkey・セッション・秘密              | node:sqlite, D1                       |
+| `@hns/store`     | D1、migration、リポジトリ。`./identity` で token・passkey・セッション・秘密                     | D1                                    |
 | `@hns/server`    | Worker（edge）・Durable Object（Session / Workspace）・GraphQL の resolver・認証・WS・Workflow / Automation の組み立て | core, agent, store, workspace（0145 の edge は core を使わない） |
 | `@hns/web`       | React UI（D043 で前倒し）。Relay で `/graphql` を読む（D055）                                      | core（モデル・SDL）                    |
 | `@hns/machine`   | マシン側の常駐エージェント。`ExecutionEnv` の実装、署名検証、ROOT 封じ込め、sandbox（0147）       | core, workspace                       |
@@ -95,12 +95,12 @@ REST は事前に宣言しない（D059）。GraphQL に載せない面（passke
 
 - `@hns/core`: `.`（モデルと検証）、`./graphql`（モデルから起こした SDL。web の bundle には入れない）。
 - `@hns/workspace`: `.`（Workspace）、`./sandbox`（ExecutionEnv デコレータ）。
-- `@hns/store`: `.`（リポジトリ）、`./identity`（認証・秘密）。exec を使わないアプリが
-  bubblewrap に依存しないようにする。
+- `@hns/store`: `.`（D1 のリポジトリ。Worker はこれをそのまま import する。`node:sqlite` を持たない）、
+  `./identity`（認証・秘密）。exec を使わないアプリが bubblewrap に依存しないようにする。
 - `@hns/agent`: `.`。
 - `@hns/machine`: `.`（常駐エージェント。単体で起動する）。
 - `@hns/server`: `.`（Worker の default。0145 では edge のみで、DO のクラスは 0146 が足す）と `bin`（`hns`）。
-  Worker が `@hns/store` を import するときは D1 対応のサブパスだけ（0150）。`node:sqlite` を Worker に持ち込まない。
+  Worker は `@hns/store` をそのまま import する（0150 で `node:sqlite` を削除し、D1 専用にした）。
 
 ## 今は切らないもの
 

@@ -6,7 +6,7 @@
 
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 9 |
+| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 7 |
 | Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 62 |
 | Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 7 |
 | Q4 | — | — | `hold` | いまはやらない | 8 |
@@ -19,13 +19,12 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（8）
+### now（7）
 
 | # | 作業 | 依存の状態 |
 | --- | --- | --- |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
-| [0150](issues/0150-store-d1-do-backend.md) | store の D1 バックエンド（node:sqlite との二重化） | 0144 |
 | [0176](issues/0176-graphql-endpoint.md) | Worker に /graphql を載せる | 0145, 0146, 0150, 0175 |
 | [0177](issues/0177-global-id.md) | global id（Relay の store 要件） | 0176 |
 | [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | 0177 |
@@ -192,7 +191,7 @@
 | [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名・sandbox） | open | plan | 0145 |
 | [0148](issues/0148-machine-registry.md) | Machine レジストリ（D1 + fetch） | open | plan | 0147 |
 | [0149](issues/0149-d1-projection.md) | 会話・run の索引（D1） | open | plan | 0150 |
-| [0150](issues/0150-store-d1-do-backend.md) | store の D1 バックエンド（node:sqlite との二重化） | open | now | 0144 |
+| [0150](issues/0150-store-d1-do-backend.md) | store を D1 専用にする（node:sqlite の削除） | **done** | — | 0144 |
 | [0151](issues/0151-provider-gateway.md) | provider gateway（鍵の分離・予算・緊急停止） | open | plan | 0143, 0144 |
 | [0152](issues/0152-real-provider.md) | 実プロバイダ（faux → 実・ストリーミング・usage） | open | plan | 0146, 0151 |
 | [0153](issues/0153-r2-object-store.md) | R2 オブジェクトストア（git object 互換・pack アップロード） | open | plan | 0141, 0144 |
@@ -312,7 +311,7 @@ D047 以前の波は、下の **D049 のレーン**に置き換わった。以�
 | --- | --- | --- |
 | L0 契約 | `docs/`, `packages/core/src/{durability,lease}.ts` | 0140 → 0141 → 0142 ∥ 0143 |
 | L0c 撤去 | `packages/core/src/`, `packages/web/src/`, `docs/packages.md` | 0188（L1 より先） |
-| L1 基盤 | `deploy/`, `package.json`, `server/src/edge/`, `store/src/{driver,migrations/d1}/` | 0144 ∥ 0150 → 0145 |
+| L1 基盤 | `deploy/`, `package.json`, `server/src/edge/`, `packages/store/src/`（L5 の `index/` を除く） | 0144 → 0145、0150 は 0145 の後に統合 |
 | L2 会話 | `server/src/do/session.ts`（PiHarness・1 ワークスペース 1 つ）, `packages/agent/`, `core/src/stream.ts` | 0146 → 0152 ∥ 0159 |
 | L3 マシン | `packages/machine/`, `server/src/machines/`, `core/src/machine.ts` | 0147 → 0148 ∥ 0165 |
 | L4 耐久 | `workspace/src/*`, `server/src/do/{workspace,journal}.ts`, `server/src/routes/files.ts` | 0153 ∥ 0156 → 0169 ∥ 0157 → 0154 → 0155 → 0168 → 0167 |
@@ -330,7 +329,7 @@ L4 だけは 0147（L3）を待つ。
 | ファイル | 所有者 | 扱い |
 | --- | --- | --- |
 | `packages/server/src/routes/index.ts` | 0145 | 以降のレーンは自分のルートを1行足すだけ。マージ直前に rebase |
-| `package.json` | 0144 | lock owner。0150 以降は依存を足さない |
+| `package.json` | 0144 → 0150 | lock owner。0150 が miniflare の devDependency を1件だけ足した。以降は依存を足さない |
 | `docs/safety.md` | 0143 | 0165 は 0143 の後に書く |
 | `docs/workspace.md` | 0141 | 0142 は触らない（型だけ） |
 | `cloudflare.config.ts` | 0144 | Cron Triggers と Assets の追記は 0160 / 0161 が1行ずつ |
