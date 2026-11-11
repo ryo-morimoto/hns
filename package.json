@@ -15,7 +15,8 @@
     "fmt:check": "node tools/gate/main.ts fmt --all",
     "typecheck": "node tools/gate/main.ts typecheck --all",
     "test": "node tools/gate/main.ts test --all",
-    "build": "node tools/gate/main.ts build --all"
+    "build": "node tools/gate/main.ts build --all",
+    "docs:api": "typedoc --options typedoc.json"
   },
   "knip": {
     "workspaces": {
@@ -54,6 +55,8 @@
     "oxlint": "1.78.0",
     "tsdown": "0.23.7",
     "tsrs": "0.22.0-ts7.1.0-beta",
+    "typedoc": "0.28.20",
+    "typescript": "5.9.3",
     "vite-plugin-doctest": "3.0.0",
     "vitest": "5.1.0"
   }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "hns API",
+  "entryPoints": ["packages/core", "packages/store", "packages/workspace", "packages/agent"],
+  "entryPointStrategy": "packages",
+  "out": "docs/api",
+  "excludeInternal": true,
+  "readme": "none",
+  "cleanOutputDir": true,
+  "validation": {
+    "notDocumented": false,
+    "notExported": true,
+    "invalidLink": true
+  }
+}
