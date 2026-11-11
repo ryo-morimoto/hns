@@ -136,13 +136,15 @@ e2e/                                      # Playwright。pages / fixtures / jour
 - インラインコメントは **why** だけ。what の再説明はしない。
 - `@example` は [vite-plugin-doctest](https://github.com/ssssota/doc-vitest) で実行する。コードフェンスは ` ```ts @import.meta.vitest `。
 - doctest の制約: static import 不可（dynamic import を使う）、lifecycle hook 不可、型検査不可。複雑なセットアップが要るものはコロケートテストに置く。
-- 本番ビルドに doctest / in-source のコードを残さない。パッケージのビルドは tsdown（Rolldown。core で採用、他は 0187 までに移行）で、`import.meta.vitest` を `undefined` に置換して落とす。
+- 本番ビルドに doctest / in-source のコードを残さない。core / store / workspace / agent のビルドは tsdown（Rolldown）で、`import.meta.vitest` を `undefined` に置換して落とす。`tools/gate/dist-check.ts` が dist の JS に `import.meta.vitest` や `test()` / `expect()` が残っていないかを検査し、ビルドを落とす。
+- in-source テストを書くファイルがあるパッケージは、`tsconfig.json` の `types` に `vitest/importMeta` を入れる。
 
 ### トレーサビリティ
 
 - **中央カタログも docs の検証表も作らない。**
 - 要求 → docs（why / ドメイン規則）→ TSDoc（契約）→ テスト（証明）の順で辿る。
 - 横断表示が必要なら TypeDoc の API ドキュメントとテストレポートを生成する。手で維持する表は作らない。
+- `npm run docs:api` が `docs/api/` に API ドキュメントを生成する（ゲート外。生成物はコミットしない）。公開 signature が `@internal` の型を参照する箇所は TypeDoc が warning を出す。0 errors を条件にし、この warning は許容する。
 - issue 番号はテスト・コード・TODO に書かない。issue 側からパスを参照する。
 
 ## 4. ゲート
@@ -159,11 +161,11 @@ e2e/                                      # Playwright。pages / fixtures / jour
 | --- | --- | --- |
 | 0183 | 方針・tsdown / doctest のスパイク | done |
 | 0185 | tiers の二重実行を廃止 | done |
-| 0184 | アサーションを `expect` に統一 | done |
+| 0184 | アサーション方針（expect + assert） | done |
 | 0186 | コロケーションと issue 参照の削除 | done |
-| 0187 | TSDoc 契約と doctest の全パッケージ展開 | 未着手 |
+| 0187 | TSDoc 契約と doctest の全パッケージ展開 | done |
 
-unit テストは各パッケージの `src` にコロケートされ、doctest は core の1関数で動いている。
+unit テストは各パッケージの `src` にコロケートされ、doctest と in-source テストは core / store / workspace / agent の4パッケージで動いている。
 
 ## 参考
 

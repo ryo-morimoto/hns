@@ -1,4 +1,4 @@
-# 0184: テストのアサーションを Vitest の expect に統一する
+# 0184: テストのアサーション方針を expect + assert に整理する
 
 status: done
 priority: now
@@ -7,7 +7,7 @@ touches: packages/*/test/**, tools/gate/test/**, docs/testing.md, AGENTS.md
 
 ## Goal
 
-テストから node:assert/strict を外し、Vitest の expect に統一する。D038 のアサーション固定を D056 で置換する。振る舞いは変えない。
+通常のアサーションは Vitest の expect、型の絞り込みは node:assert / expect.assert にする。D056 / D061 を D062 で置換する。振る舞いは変えない。
 
 ## Acceptance criteria
 

@@ -49,6 +49,7 @@ Building is not proof of correctness; types and tests are.
 | `npm run gate <stage>`        | one stage: `lint`, `fmt`, `typecheck`, `test`, `build`, `knip`   |
 | `npm test -w @hns/store`      | tests for one package                                            |
 | `npm run build -w @hns/store` | `dist/` for one package                                          |
+| `npm run docs:api`           | TypeDoc API docs into `docs/api/` (outside the gate)             |
 | `npm run lint`                | the gate's lint stage over every package                         |
 | `npm run fmt`                 | oxfmt, in place                                                  |
 
@@ -105,8 +106,8 @@ packages/store/
 ├── package.json       # name, exports with the "source" condition, files, scripts
 ├── tsconfig.json      # strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes, customConditions: ["source"]
 ├── tsconfig.build.json
-├── src/
-├── test/              # vitest, *.test.ts
+├── src/               # includes unit tests (*.test.ts)
+├── test/              # integration, support, fixtures
 ├── README.md
 └── CHANGELOG.md
 ```
@@ -159,7 +160,7 @@ Tests live next to the code they prove. Unit tests are `packages/<pkg>/src/<modu
 
 Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS_CHROME` to override the binary.
 
-Existing tests are being migrated: TSDoc / doctest rollout (0187).
+TSDoc contracts and doctests are part of the test discipline ([docs/testing.md](docs/testing.md)).
 
 ## Review
 
@@ -174,7 +175,7 @@ Existing tests are being migrated: TSDoc / doctest rollout (0187).
 - **oxlint** with the vendored [anti-slop](https://github.com/dmmulroy/anti-slop) rules (`tools/oxlint/anti-slop/`). Read a rule before disabling it; record every edit to the vendored copy in `UPSTREAM.md`
 - **oxfmt** owns whitespace. `require-readable-spacing` is disabled because the two disagree
 - `npm run lint` / `npm run fmt`; the pre-commit hook runs the gate (`tools/gate/`), scoped to the staged packages
-- Type checks run per workspace (`tsrs --noEmit`, D044); declaration emit is `tsdown` (core; other packages migrate in 0187)
+- Type checks run per workspace (`tsrs --noEmit`, D044); declaration emit is `tsdown` for the library packages (D057)
 
 ## Commit Guidelines
 

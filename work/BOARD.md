@@ -235,7 +235,7 @@
 | [0184](issues/0184-vitest-assertions.md) | テストのアサーションを Vitest の expect に統一する | **done** | — | 0185 |
 | [0185](issues/0185-tiers-removal.md) | tiers の二重実行を廃止する | **done** | — | 0183 |
 | [0186](issues/0186-test-colocation.md) | テストをコロケートし、issue 参照を削除する | **done** | — | 0184, 0185 |
-| [0187](issues/0187-tsdoc-doctest.md) | TSDoc 契約と doctest を展開する | open | plan | 0186 |
+| [0187](issues/0187-tsdoc-doctest.md) | TSDoc 契約と doctest を展開する | **done** | — | 0186 |
 
 ## ゲート
 

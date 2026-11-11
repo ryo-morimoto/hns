@@ -12,9 +12,9 @@
 | DB            | 制御データは D1、実行中の状態は DO SQLite、ローカルは `node:sqlite`                         | 引く用途は SQL、調整は DO に向く（D049）                                             | Postgres（今は不要）                               |
 | UI            | React 19 + Vite 8（Rolldown）+ Relay（GraphQL）+ TanStack Query 5 + Base UI（D055）          | 最終段の UX を詰めやすい。Relay の colocated fragment と正規化 store で画面単位の要求を 0 にできる | 素の DOM（UI が育たない）                          |
 | 型検査        | tsrs 0.22（D044）                                                                           | tsc 互換の Rust 実装。型検査を速く保つ。emit は tsdown                               | tsc だけ（遅い）                                   |
-| ビルド        | **tsdown 0.23.7**（Rolldown。core で採用、他は移行中）                                        | ESM + d.ts。`import.meta.vitest` を define で落とせる                                 | tsc だけ（DCE なし）                               |
+| ビルド        | **tsdown 0.23.7**（Rolldown。core / store / workspace / agent で採用）                                              | ESM + d.ts。`import.meta.vitest` を define で落とせる                                 | tsc だけ（DCE なし）                               |
 | エディタ      | CodeMirror 6                                                                                | 軽い。diff は自前で持っている                                                        | Monaco（重い）                                     |
-| テスト        | Vitest 5（unit / contract / integration / component）+ Playwright E2E（0043）               | 1 runner で backend と React を同じ規律に。アサーションは `expect`。層はプロセスで分ける | Jest（重い）、node:test（UI で二重化）             |
+| テスト        | Vitest 5（unit / contract / integration / component）+ Playwright E2E（0043）               | 1 runner で backend と React を同じ規律に。通常は `expect`、絞り込みは `assert` も可。層はプロセスで分ける | Jest（重い）、node:test（UI で二重化）             |
 | Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored）         | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる                         | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
 | パッケージ    | **npm workspaces**（`packages/*` + `apps/*`）                                               | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直          | pnpm（今のところ利点より設定が増える）             |
 
