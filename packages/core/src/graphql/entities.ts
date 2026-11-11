@@ -5,8 +5,10 @@ import { defineEntity, enumOf } from "./spec.ts";
 // The SDL is generated from these specs; it is never edited by hand.
 // Model field -> GraphQL field is explicit: `project_id` -> `projectId`, `archived` -> `isArchived`.
 
+/** The `TaskStatus` GraphQL enum; values keep the model's declaration order. */
 export const TaskStatusEnum = enumOf("TaskStatus", TASK_STATUSES);
 
+/** The `Project` GraphQL type. Model snake_case fields are exposed as camelCase. */
 export const ProjectEntity = defineEntity<Project>({
   name: "Project",
   fields: {
@@ -16,6 +18,13 @@ export const ProjectEntity = defineEntity<Project>({
   },
 });
 
+/**
+ * The `Conversation` GraphQL type.
+ *
+ * @remarks
+ * `archived` is exposed as `isArchived`; the nullable model fields (`updatedAt`,
+ * `deletedAt`) stay nullable.
+ */
 export const ConversationEntity = defineEntity<Conversation>({
   name: "Conversation",
   fields: {
@@ -29,6 +38,7 @@ export const ConversationEntity = defineEntity<Conversation>({
   },
 });
 
+/** The `Task` GraphQL type; `status` is the `TaskStatus` enum. */
 export const TaskEntity = defineEntity<Task>({
   name: "Task",
   fields: {
@@ -41,10 +51,18 @@ export const TaskEntity = defineEntity<Task>({
   },
 });
 
+/** The model entities the SDL exposes, in declaration order. */
 export const ENTITIES = [ProjectEntity, ConversationEntity, TaskEntity] as const;
+/** The model enums the SDL exposes, in declaration order. */
 export const ENUMS = [TaskStatusEnum] as const;
 
-/** Model types that the SDL does not carry yet, with the reason. */
+/**
+ * Model types that the SDL does not carry yet, with the reason.
+ *
+ * @remarks
+ * Entries are unique. Remove an entry when its model type gains a projection; the reason says
+ * what blocks it, not just that it is pending.
+ */
 export const EXCLUDED = [
   { type: "Automation", reason: "needs an entity and a mutation" },
   { type: "AutomationAction", reason: "discriminated union; needs a union type" },
