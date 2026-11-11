@@ -1,6 +1,6 @@
 # 0146: Session DO（PiHarness・会話・run）
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0145
 touches: packages/agent/src/, packages/agent/test/, packages/agent/{package.json,tsdown.config.ts,README.md,CHANGELOG.md}, packages/server/src/do/, packages/server/src/index.ts, packages/server/test/, packages/server/{package.json,README.md,CHANGELOG.md}, tools/deploy/worker.ts, tools/deploy/tsconfig.json, tools/gate/stages.ts, tools/gate/test/stages.test.ts, vitest.config.ts, package-lock.json, docs/{packages,engineering}.md, docs/decisions.md, work/issues/0145-worker-edge.md, work/issues/0146-session-do.md, work/BOARD.md, work/LANES.md
@@ -168,7 +168,7 @@ DO はこの runtime を 1 つ持ち、内部 RPC（`/rpc/conversations...`）�
 - 2026-11-11: `work/BOARD.md` / `work/LANES.md` を `touches` から外した（lead 所有。並列の単位をファイルに緩めた決定に伴う）。
 - 2026-11-11: 実装。`@hns/agent/session`（複数会話・メタデータ・transcript）、Session DO（plain class、
   `openDurableObjectSqliteStorage`、onWake/alarm/resume、内部 RPC）、faux model、cf dev integration。
-  `npm run check` は 277 tests / 57 files、build / deploy dry-run / knip 通過。
+  `npm run check` は 277 tests / 57 files、build / deploy dry-run / knip 通過（最終確認）。
 - 2026-11-11: cf dev（XDG_CONFIG_HOME を workspace 内）で product Worker と test Worker を起動して確認:
   /graphql 401→501、/ws 401→501、/api/debug 404、x-request-id、create→send→list→transcript、
   cf dev 再起動後の復帰。`--persist-to` は cf dev が受け付けないため使わない。
@@ -177,3 +177,22 @@ DO はこの runtime を 1 つ持ち、内部 RPC（`/rpc/conversations...`）�
   token 単位 commit を検出できない、alarm 経路が未テスト。limit を valibot で検証して 400 にし、RPC の
   400/404/413/415/503/500 を unit で固定。row テストを長い応答 + assistant entry 1 件に強化。
   `Session` に runtime factory を注入し、fake DO state + 実 Harness で alarm を二重に呼ぶ integration を追加。
+
+## Result
+
+- verdict: **PASS**（初回 FAIL: blocking 3 → 修正 → 再レビュー PASS）
+- reviewer: reviewer-0146（この変更を書いていない別エージェント）
+- HEAD: 024bb03（実装 commit。再レビューは 6bbe21a + staged diff）
+- 受入: 10/10。`npm run check` は 277 tests / 57 files、lint / fmt / typecheck / build / deploy dry-run / knip がすべて ok。
+- blocking（初回、いずれも解消）:
+  - 不正 limit が型付き失敗にならなかった → valibot で正整数・上限を parse し 400。RPC の 400/404/413/415/503/500 を unit で固定。
+  - row 上限テストが短すぎて token 単位 commit を検出できなかった → 200 語の応答 + assistant entry 1 件に強化。
+  - alarm 経路が未テストだった → fake DO state + 実 Harness で alarm を 2 回呼び、alarm の arm と resume 呼び出しを観測。空実装なら落ちる。
+- non-blocking（残し）:
+  - `ModelUnavailableError` の RPC 分岐は、現在 model 不在が DO open 時に 503 になるため防御的（到達しない）。
+  - cf integration の test project は cf dev の dev server として `wrangler` を package.json に宣言する。
+    cf の内部 bundler であり、直接コマンドは実行しない（D065 / U-01）。
+  - 実 WebSocket upgrade（101）と、eviction を 75 秒待つ形の確認は未実施。cf dev の再起動で storage recovery は確認。
+- 未確認: 実際の WebSocket upgrade（101）を `new Request(...)` で DO へ転送する経路、staging / production の 503 実経路、
+  実プロバイダ（0152）、実 cf deploy、長時間 eviction。
+- cf は `cf dev` / `cf deploy --dry-run` のみ。product Worker と test Worker の両方を cf dev で起動して確認した。
