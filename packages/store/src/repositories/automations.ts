@@ -13,6 +13,12 @@ import { AutomationActionSchema, AutomationTriggerSchema } from "../schemas.ts";
 import type { StoreContext } from "../db.ts";
 import { parseAutomation, parseFiring } from "../parse.ts";
 
+/**
+ * Input for {@link AutomationRepository.create}.
+ *
+ * @remarks
+ * A webhook trigger without a token gets a generated one; `enabled` defaults to true.
+ */
 export interface AutomationCreateInput {
   readonly projectId: ProjectId;
   readonly name: string;
@@ -21,17 +27,57 @@ export interface AutomationCreateInput {
   readonly enabled?: boolean | undefined;
 }
 
+/**
+ * Automations and their firings.
+ *
+ * @remarks
+ * Trigger and action are validated before writing, and a webhook token is generated on
+ * create when absent. A token is unique across automations. Missing rows return `undefined`,
+ * `delete` reports whether a row was removed, and each write runs in one transaction.
+ */
 export interface AutomationRepository {
+  /** Automations across every project, or only `projectId`; oldest first. */
   list(projectId?: ProjectId | undefined): Automation[];
+  /** The automation with `id`, or `undefined` when it does not exist. */
   get(id: string): Automation | undefined;
+  /** The webhook automation with `token`, or `undefined` when none has it. */
   getByToken(token: string): Automation | undefined;
+  /**
+   * Create an automation.
+   *
+   * @remarks
+   * The trigger and action are validated before the write. A webhook trigger without a token
+   * gets one derived from a fresh id.
+   *
+   * @throws ValiError if `trigger` or `action` is invalid.
+   * @throws Error if the token collides or the row is missing after the write.
+   */
   create(input: AutomationCreateInput): Automation;
+  /**
+   * Update the given fields, keeping the rest.
+   *
+   * @remarks
+   * Trigger and action are re-validated when supplied. A webhook trigger keeps its existing
+   * token unless the patch supplies one; a trigger that changes to webhook gets a generated
+   * token. `undefined` when the automation does not exist.
+   *
+   * @throws ValiError if a supplied trigger or action is invalid.
+   */
   update(
     id: string,
     patch: Partial<Pick<Automation, "name" | "trigger" | "action" | "enabled">>,
   ): Automation | undefined;
+  /** Delete an automation and, by cascade, its firings; returns whether a row was removed. */
   delete(id: string): boolean;
+  /** Record when a scheduled automation last fired; a no-op when the automation is missing. */
   setLastFiredAt(id: string, at: IsoTimestamp): void;
+  /**
+   * Record an attempt to run an automation.
+   *
+   * @remarks
+   * `detail` and `runId` are null when omitted. The repository does not enforce firing
+   * transitions; the caller supplies the status.
+   */
   createFiring(input: {
     automationId: string;
     at: IsoTimestamp;
@@ -39,6 +85,13 @@ export interface AutomationRepository {
     detail?: string | undefined;
     runId?: string | undefined;
   }): Firing;
+  /**
+   * Update a firing's status and, when supplied, its detail and run.
+   *
+   * @remarks
+   * An omitted `detail` or `runId` keeps the stored value. `undefined` when the firing does
+   * not exist.
+   */
   updateFiring(
     id: string,
     patch: {
@@ -47,10 +100,17 @@ export interface AutomationRepository {
       runId?: string | undefined;
     },
   ): Firing | undefined;
+  /** The firing with `id`, or `undefined` when it does not exist. */
   getFiring(id: string): Firing | undefined;
+  /** Firings of `automationId`, newest first. */
   listFirings(automationId: string): Firing[];
 }
 
+/**
+ * Build the automation repository over `context`.
+ *
+ * @internal
+ */
 export function automationRepository(context: StoreContext): AutomationRepository {
   const { db, now, newId, transaction } = context;
 

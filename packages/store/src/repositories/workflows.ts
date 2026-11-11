@@ -13,26 +13,84 @@ import { WorkflowGraphSchema } from "../schemas.ts";
 import type { StoreContext } from "../db.ts";
 import { parseWorkflow, parseWorkflowRun, parseWorkflowRunNode } from "../parse.ts";
 
+/**
+ * Input for {@link WorkflowRepository.create}.
+ *
+ * @remarks
+ * `graph` is parsed for shape before it is written; a malformed graph throws and stores
+ * nothing. This does not reject cycles or unknown endpoints: the caller checks the DAG with
+ * `validateWorkflowGraph` before storing a runnable workflow.
+ */
 export interface WorkflowCreateInput {
   readonly projectId: ProjectId;
   readonly name: string;
+  /** The graph to store; only its shape is validated here, not the DAG. */
   readonly graph: WorkflowGraph;
 }
 
+/**
+ * Workflows and their runs.
+ *
+ * @remarks
+ * `create` and `update` validate the graph's shape before writing, not its DAG. A run pins the workflow's
+ * `version` and graph at the moment it is created, so later edits do not change a run in
+ * flight. Missing rows return `undefined`, `delete` reports whether a row was removed, and
+ * each write runs in one transaction.
+ */
 export interface WorkflowRepository {
+  /** Workflows across every project, or only `projectId`; oldest first. */
   list(projectId?: ProjectId | undefined): Workflow[];
+  /** The workflow with `id`, or `undefined` when it does not exist. */
   get(id: string): Workflow | undefined;
+  /**
+   * Create a workflow at version 1.
+   *
+   * @throws ValiError if `graph` is not a valid graph.
+   */
   create(input: WorkflowCreateInput): Workflow;
+  /**
+   * Replace the graph and bump the version by one.
+   *
+   * @remarks
+   * Runs keep the graph and version they pinned, so an edit never changes a run in flight.
+   * `undefined` when the workflow does not exist.
+   *
+   * @throws ValiError if `graph` is not a valid graph.
+   */
   update(id: string, graph: WorkflowGraph): Workflow | undefined;
+  /** Delete a workflow and, by cascade, its runs and node rows; returns whether a row was removed. */
   delete(id: string): boolean;
+  /**
+   * Start a run of `workflowId`, copying its current version and graph.
+   *
+   * @remarks
+   * The run starts `queued` with one `pending` row per node. `undefined` when the workflow
+   * does not exist, so a deleted workflow cannot be run.
+   */
   createRun(input: { workflowId: string; input: string }): WorkflowRun | undefined;
+  /** The run with `id` and its nodes, or `undefined` when it does not exist. */
   getRun(id: string): WorkflowRun | undefined;
-  /** The graph the run pinned when it started, even if the workflow moved on. */
+  /**
+   * The graph the run pinned when it started, even if the workflow moved on.
+   *
+   * @remarks
+   * `undefined` when the run does not exist. The stored graph is validated on read.
+   */
   getRunGraph(id: string): WorkflowGraph | undefined;
+  /** Runs across every workflow, or only `workflowId`; newest first. */
   listRuns(workflowId?: string | undefined): WorkflowRun[];
+  /** Set the run status; a no-op when the run does not exist. */
   setRunStatus(id: string, status: WorkflowRunStatus): void;
+  /**
+   * Finish a run: set its status, optional output, and `finished_at`.
+   *
+   * @remarks
+   * `output` is stored as given and null when omitted. A no-op when the run does not exist.
+   */
   finishRun(id: string, status: WorkflowRunStatus, output?: string | undefined): void;
+  /** Mark a node running with its prompt and start time; a no-op when the node is missing. */
   setNodeRunning(runId: string, nodeId: string, prompt: string): void;
+  /** Record a node's terminal status, output, and conversation; a no-op when the node is missing. */
   setNodeResult(
     runId: string,
     nodeId: string,
@@ -40,11 +98,31 @@ export interface WorkflowRepository {
     output: string,
     conversationId?: ConversationId | undefined,
   ): void;
+  /** Mark a node waiting for input with its prompt and start time; a no-op when the node is missing. */
   setNodeWaiting(runId: string, nodeId: string, prompt: string): void;
+  /**
+   * Complete a waiting node with `output`.
+   *
+   * @remarks
+   * Only a `waiting` node can be completed here. `undefined` when the node is missing or not
+   * waiting, so a duplicate resume cannot overwrite a finished node.
+   */
   completeNode(runId: string, nodeId: string, output: string): WorkflowRunNode | undefined;
+  /**
+   * Recover runs interrupted by a restart.
+   *
+   * @remarks
+   * Nodes left `running` go back to `pending`, then the `queued` and `running` runs are
+   * returned oldest first. Runs in other states are not returned.
+   */
   resumeRuns(): WorkflowRun[];
 }
 
+/**
+ * Build the workflow repository over `context`.
+ *
+ * @internal
+ */
 export function workflowRepository(context: StoreContext): WorkflowRepository {
   const { db, now, newId, transaction } = context;
 

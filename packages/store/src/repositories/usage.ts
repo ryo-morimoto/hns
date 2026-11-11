@@ -2,6 +2,12 @@ import type { ConversationId, Usage } from "@hns/core";
 import type { StoreContext } from "../db.ts";
 import { parseUsageToday } from "../parse.ts";
 
+/**
+ * One usage record to append.
+ *
+ * @remarks
+ * `tokens` is rounded to an integer before it is stored; `cost` is stored as given.
+ */
 export interface UsageInput {
   readonly conversationId?: ConversationId | undefined;
   readonly tokens: number;
@@ -9,11 +15,30 @@ export interface UsageInput {
   readonly requestId?: string | undefined;
 }
 
+/**
+ * Recorded model usage.
+ *
+ * @remarks
+ * `add` appends one row in a transaction. `today` aggregates by the date prefix of `at`;
+ * an empty day returns zeroed totals rather than null.
+ */
 export interface UsageRepository {
+  /** Append one usage record, stamped with the context clock and id source. */
   add(input: UsageInput): void;
+  /**
+   * Totals for one day.
+   *
+   * @param date - The date prefix to match (`YYYY-MM-DD`); defaults to the clock's date.
+   * @returns Turns, tokens, and cost for that day.
+   */
   today(date?: string): Usage["today"];
 }
 
+/**
+ * Build the usage repository over `context`.
+ *
+ * @internal
+ */
 export function usageRepository(context: StoreContext): UsageRepository {
   const { db, now, newId, transaction } = context;
 

@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readUserVersion, transaction, writeUserVersion } from "./db.ts";
 
+/** One forward step: the schema SQL and the `user_version` it records. */
 interface Migration {
   readonly version: number;
   readonly sql: string;
@@ -112,7 +113,21 @@ CREATE INDEX IF NOT EXISTS firings_automation ON firings (automation_id, created
 
 const MIGRATIONS: readonly Migration[] = [{ version: 1, sql: SCHEMA_V1 }];
 
-/** Apply pending migrations, each in one transaction. Safe to call on every open. */
+/**
+ * Apply the pending migrations to `db`.
+ *
+ * @internal
+ * @remarks
+ * Migrations run in version order, one per transaction: a migration and its `user_version`
+ * bump commit together or not at all. The version is monotonic, so reopening an up-to-date
+ * database is a no-op and calling this on every open is safe. A database whose version is
+ * newer than this build is refused rather than opened and damaged.
+ *
+ * @param db - An open connection.
+ * @throws Error if `db` records a version newer than this build supports.
+ * @throws Whatever a migration or its version bump threw; that migration is rolled back and
+ * later ones are not attempted.
+ */
 export function migrate(db: DatabaseSync): void {
   const current = readUserVersion(db);
   const latest = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

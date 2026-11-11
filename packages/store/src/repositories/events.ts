@@ -12,26 +12,69 @@ import {
 import type { StoreContext } from "../db.ts";
 import { parseEvent, parseUsageToday } from "../parse.ts";
 
+/**
+ * Filters for {@link EventRepository.list}.
+ *
+ * @remarks
+ * `since` is an inclusive lower bound compared as text, so it must be an ISO timestamp.
+ * `limit` is clamped to 1..1000 and defaults to 100.
+ */
 export interface EventListQuery {
+  /** Maximum rows; clamped to 1..1000. Defaults to 100. */
   readonly limit?: number | undefined;
+  /** Only events at this level. */
   readonly level?: EventLevel | undefined;
+  /** Only events at or after this ISO timestamp. */
   readonly since?: string | undefined;
 }
 
+/**
+ * One event to append.
+ *
+ * @remarks
+ * `detail` is stored as JSON text; `undefined` means no detail and becomes null. `level`
+ * defaults to `info`. `status` and `durationMs` describe an HTTP response and stay null on
+ * other events.
+ */
 export interface EventInput {
   readonly level?: EventLevel | undefined;
   readonly event: EventName;
+  /** The request that produced the event, when one applies. */
   readonly requestId?: string | undefined;
   readonly conversationId?: ConversationId | undefined;
   readonly status?: number | undefined;
   readonly durationMs?: number | undefined;
+  /** Structured detail; stored as JSON text and decoded on read. */
   readonly detail?: JsonValue | undefined;
 }
 
+/**
+ * The append-only event log and the aggregates computed from it.
+ *
+ * @remarks
+ * `add` and `prune` run in one transaction. Metrics read the last 24 hours plus today's
+ * usage; they return zeros on an empty log rather than null.
+ */
 export interface EventRepository {
+  /** Append one event, stamped with the context clock and id source. */
   add(input: EventInput): void;
+  /** Events matching `query`, newest first. */
   list(query?: EventListQuery): Event[];
+  /**
+   * Delete events older than `days` before now.
+   *
+   * @param days - The retention window; defaults to 30.
+   * @returns The number of rows deleted.
+   */
   prune(days?: number): number;
+  /**
+   * Aggregate the event log for the observability view.
+   *
+   * @remarks
+   * `http` percentiles, `chats`, `errors`, tool counts, and `byEvent` cover the last 24
+   * hours. `workflowRuns` and `firings` count every row by status, and `tokensToday` reads
+   * today's usage.
+   */
   metrics(): Metrics;
 }
 
@@ -45,6 +88,11 @@ const namedCountSchema = v.object({ event: v.picklist(EVENT_NAMES), count: v.num
 const countOf = (row: Record<string, SQLOutputValue> | undefined): number =>
   v.parse(countSchema, row ?? { count: 0 }).count;
 
+/**
+ * Build the event repository over `context`.
+ *
+ * @internal
+ */
 export function eventRepository(context: StoreContext): EventRepository {
   const { db, now, newId, transaction } = context;
 
