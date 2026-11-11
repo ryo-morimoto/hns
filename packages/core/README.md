@@ -1,6 +1,7 @@
 # @hns/core
 
-hns のモデル。`src/types.ts` が唯一の正本。GraphQL の SDL はここから起こす。
+hns のモデル。モデルの正本は `src/types.ts`。GraphQL の SDL はここから起こす。
+耐久の契約語彙は `src/durability.ts` に置き、GraphQL には載せない。
 
 ```bash
 npm run typecheck
@@ -11,6 +12,7 @@ npm run build
 
 - `src/types.ts` — Project / Conversation / Task / Workflow / Automation / Event / Metrics などのモデルと語彙。
 - `src/codecs.ts` — IsoTimestamp / OperationId の brand・schema・constructor。規則の owner はここ1箇所。
+- `src/durability.ts` — 耐久の契約語彙（`FAILURE_CLASSES` / `DURABILITY_AUTHORITIES`）と `CheckpointRef` / `DurableUnit`。
 - `src/workflow.ts` — Workflow / Automation の状態遷移と `validateWorkflowGraph()`。
 - `src/result.ts` — `Result<T, E>`。想定内の失敗を値で返す。
 - `src/graphql/` — `types.ts` から SDL を起こす射影。`@hns/core/graphql` として公開し、ルート entry には出さない。
@@ -23,6 +25,7 @@ npm run build
 - Project / Conversation / Task / Workflow / Automation / Firing / Event / Usage — `store` が作る。
 - WorkflowRun / WorkflowRunNode — `store` / Session DO が作る。
 - FileRead / MutationResult — `workspace` が返す。
+- CheckpointRef / DurableUnit / FailureClass / DurabilityAuthority — 耐久の契約。0153〜0155 が消費する（現時点の product call site は無い）。
 - Limits — 運用の面が読む。
 
 Row 型（`archived: 0 | 1` など）は `store`、実行中の内部状態は `agent`、ファイル操作の内部型は `workspace`。
