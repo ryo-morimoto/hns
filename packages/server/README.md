@@ -1,10 +1,12 @@
 # @hns/server
 
-Worker の入口。公開する面を GraphQL / WS / 静的の3つに絞り、境界でセッション cookie・相関 ID・上限を扱う。
+Worker の入口と Session Durable Object。公開する面を GraphQL / WS / 静的の3つに絞り、
+境界でセッション cookie・相関 ID・上限を扱う。会話と run は Session DO が持つ。
 
-- `src/edge/worker.ts` — 本番の組み立て。`/graphql` は 501、`/ws` は Session DO へ転送する（DO は 501）。
+## Edge
+
+- `src/edge/worker.ts` — 本番の組み立て。`/graphql` は 501、`/ws` は Session DO へ転送する。
 - `src/edge/handler.ts` — `createEdge(deps, limits)`。ルーティング、認証、相関 ID、時間制限。
-  GraphQL と WS の handler は引数で差し替える。
 - `src/edge/session.ts` — `hns_session` の署名・検証。値は `<base64url(payload)>.<base64url(HMAC-SHA256(payload))>`。
 - `src/edge/correlation.ts` — `x-request-id`。受信値は形式を検査して引き継ぎ、不正なら生成する。
 - `src/edge/body.ts` — JSON body の上限付き読み取り。`Content-Length` とストリームの両方で数える。
@@ -30,15 +32,26 @@ Worker の入口。公開する面を GraphQL / WS / 静的の3つに絞り、�
 - `HNS_SESSION_SECRET`（32文字以上）で HMAC-SHA256 を検証する。未設定・短い・期限切れ・改ざん・重複は 401。
 - `Set-Cookie` の属性（`Secure` / `HttpOnly` / `SameSite=Lax` / 30日）は 0158 が付ける。
 
-## Durable Object と D1
+## Session Durable Object
 
-- DO は HTTP の面にしない。`/ws` だけが `SESSION` binding の `default` へ転送する。
-  `default` は単一ワークスペースの暫定 ID。ワークスペース選択が入ったら置き換える。
+- `src/do/session.ts` — 1 ワークスペースに 1 つの `Session`。plain class（`DurableObject` を継承しない）で、
+  `constructor(state, env)` / `fetch` / `alarm` を持つ。
+- `openDurableObjectSqliteStorage(ctx.storage, { prefix: "hns_session" })` で Harness を開く。
+- `onWake` → DO alarm → `resume()`。active 中は 60 秒の heartbeat、idle なら alarm を消す。
+  `HarnessOptions.setTimer` は渡さない。durable wakeup は alarm だけ。
+- `src/do/session-rpc.ts` — 内部 RPC。create / list / get / transcript / messages / abort。
+  edge には公開しない。0176 の resolver が binding から呼ぶ。
+- `src/do/models.ts` — 0146 は development の `faux/<id>` だけ。staging / production は 503（0152 まで）。
+- `src/do/alarm.ts` — `armWake`。idempotent で、二重 alarm でも run を二重に作らない。
+- 会話の title / project / timestamps は session document（`hns.conversation.index`）に残る。
+  pi-durable の conversation record は transcript と ID を持ち、一覧は `scanConversations` で引く。
+
+## D1 と DO
+
 - D1 は Worker だけが触る。DO から D1 を直接触らない（0150 / 0146）。
+- 会話の D1 索引は 0149。0146 は DO 内のメタデータまで。
 
-0145 の edge は `@hns/core` を使わない。GraphQL の型を足すときに依存を追加する（0150 / 0146 の後）。
-
-## 開発
+## 開発・検証
 
 ```bash
 npm test -w @hns/server
@@ -46,5 +59,13 @@ npm run typecheck -w @hns/server
 npm run build -w @hns/server
 ```
 
-配備の入口は [tools/deploy/worker.ts](../../tools/deploy/worker.ts)。edge を re-export し、
-Session DO のスタブを置いている。`cf dev` では `HNS_SESSION_SECRET` を `.dev.vars` に置く（git に入れない）。
+配備の入口は [tools/deploy/worker.ts](../../tools/deploy/worker.ts)。edge と `Session` を re-export する。
+コマンドは cf だけを使う（wrangler を直接実行しない）。
+
+```bash
+cd tools/deploy
+XDG_CONFIG_HOME=$PWD/../../.work/cf/config XDG_CACHE_HOME=$PWD/../../.cache cf dev --mode development
+```
+
+`HNS_SESSION_SECRET` は `.dev.vars`（gitignore、32文字以上）に置く。cf dev の local state は
+`XDG_CONFIG_HOME` 配下に残る。`--persist-to` は cf dev が受け付けない。

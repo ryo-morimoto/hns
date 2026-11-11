@@ -37,7 +37,10 @@ test("the deploy stage builds the development config", () => {
     {
       cwd: "/repo/tools/deploy",
       argv: ["/repo/node_modules/.bin/cf", "deploy", "--dry-run", "--mode", "development"],
-      env: { WRANGLER_LOG_PATH: "/repo/tools/deploy/.wrangler/logs" },
+      env: {
+        XDG_CONFIG_HOME: "/repo/.work/cf/config",
+        XDG_CACHE_HOME: "/repo/.cache",
+      },
     },
   ]);
 });

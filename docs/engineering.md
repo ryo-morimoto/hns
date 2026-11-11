@@ -103,9 +103,15 @@ cf は npm workspace の root では project を特定できないため、コ�
 | staging | hns-stg | 必須（https） | 必須 | ~/.config/hns/staging.secrets.json（0600） |
 | production | hns-prod | 必須（https） | 必須 | ~/.config/hns/production.secrets.json（0600） |
 
-- development: cd tools/deploy && cf dev --mode development
+- development: `cd tools/deploy && XDG_CONFIG_HOME=$PWD/../../.work/cf/config XDG_CACHE_HOME=$PWD/../../.cache cf dev --mode development`
+  （state は `XDG_CONFIG_HOME` 配下。`--persist-to` は cf dev が受け付けない）
 - staging: HNS_AGENT_URL=... HNS_MODEL=... bash tools/deploy/deploy.sh staging
 - production: HNS_AGENT_URL=... HNS_MODEL=... bash tools/deploy/deploy.sh production
+
+コマンドは **cf だけ**を使う。wrangler を直接実行しない（D065）。wrangler は cf の Wrangler bundler が
+内部で必要とする依存として tools/deploy に残るが、テスト・scripts・手順の入口にはしない。
+cf の local state とログは `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` を workspace 内（`.work/` / `.cache/`）に
+向ける。gate の deploy stage も同じ。
 
 秘密のキーは HNS_AGENT_SECRET / HNS_SESSION_SECRET / HNS_SERVICE_KEY の3つだけ。provider 鍵は gateway（0151）に置き、
 この Worker には置かない（[auth.md](auth.md)）。secrets は JSON で、リポジトリの外に 0600 で置く。
@@ -115,8 +121,8 @@ mode は必須。--mode を省略した cf dev / cf deploy は拒否される。
 cf deploy --dry-run はビルドと検証だけで、認証情報もアップロードも不要。npm run check と pre-push の
 deploy stage が tools/deploy で cf deploy --dry-run --mode development を実行する。
 
-`tools/deploy/worker.ts` は `packages/server/src/edge/worker.ts` の default を re-export する。
-Session DO は 0146 までのスタブ。`HNS_SESSION_SECRET` は `bindings.secret()` で宣言し、development では
+`tools/deploy/worker.ts` は `packages/server/src/index.ts` の default（edge）と `Session`（Durable Object）を
+re-export する。`HNS_SESSION_SECRET` は `bindings.secret()` で宣言し、development では
 `tools/deploy/.dev.vars`（gitignore、32文字以上）に置く。静的 Assets の設定は 0160 が足す。
 
 ロールバックは version を戻す。

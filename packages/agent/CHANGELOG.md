@@ -3,6 +3,8 @@
 ## 0.1.0
 
 - \`openAgent()\`: Harness, conversation, tools, and observation composed at one boundary.
+- \`openSession()\` behind \`./session\`: a Worker-safe, multi-conversation runtime with conversation
+  metadata, listing, transcript, send, and abort. It does not import node: modules.
 - Workspace tools whose refusals are values (denied / conflict / unknown), not exceptions.
 - `write_file` names its operation after the tool call, so the model cannot collapse two writes into one.
 - `read_file` returns at most 64 KiB and reports the whole file's version; `openAgent` refuses a cwd outside the root.

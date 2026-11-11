@@ -874,3 +874,24 @@ Worker だけで、Node 側に store を使う機能は無い。二重バック�
 
 前提が変わる条件: Node で store を使う製品機能（CLI・バックアップ）ができたとき、または D1 に interactive
 transaction が入ったとき。
+
+## D065: CLI は cf に統一し、wrangler を直接使わない
+
+date: 2026-11-11 · by: user · issue: 0146
+
+開発・検証・配備のコマンドは `cf` だけにする。`cf dev` / `cf deploy --dry-run` / `cf deploy` を使い、
+`wrangler` コマンドは tests・scripts・docs・手順のどこでも実行しない。
+
+- `wrangler` は cf の Wrangler bundler が内部で必要とするため、tools/deploy の依存には残る。
+  これは cf の実装詳細であり、直接の入口ではない。
+- `cf dev` の local state は `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` で workspace 内
+  （`.work/` / `.cache/`）に置く。`--persist-to` は cf dev が受け付けないため使わない。
+  `WRANGLER_LOG_PATH` は使わない。
+- gate の deploy stage も cf だけを呼び、`WRANGLER_*` 環境変数を使わない。
+- 0145 の Result にあった `wrangler dev` の smoke は無効とし、cf dev で再確認する。
+
+却下: wrangler を開発用の近道として残す（cf と設定・状態・ログの入口が二重になる）、
+`WRANGLER_LOG_PATH` を cf の下で使い続ける（cf-only の監査ができない）。
+
+前提が変わる条件: cf が Vite bundler を採用し、wrangler 依存自体を外せるようになったとき。
+そのときは 0144 の bundler 選択を見直す。

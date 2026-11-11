@@ -3,6 +3,8 @@
 Durable の組み立て。Workspace のツール、観測イベント、モデルのアダプタ。
 
 - `src/agent.ts` — `openAgent()` が Harness・conversation・ツール・観測を 1 箇所で組み立てる。依存（storage / models / workspace / shell）はここで受け取り、import 時に接続しない。
+- `src/session.ts` — `./session` の Worker-safe な複数会話 runtime（`openSession`）。node: を import せず、
+  Session DO が使う。会話メタデータ（title / project / timestamps）は session document に置く。
 - `src/tools.ts` — `read_file` / `write_file` は Workspace を通し、拒否は**値**（`{ok:false, status, message}`）でモデルに返す。
   - `write_file` の `operationId` はモデルではなく**ツール呼び出し**から作る（`call-<callId>` を wire の書式に整えたもの）。モデルが id を使い回して書き込みが消えるのを防ぐ。
   - `read_file` は 32 K 文字で切って `truncated` と `characters` を返す（`version` は全体の版）。
@@ -15,6 +17,14 @@ Durable の組み立て。Workspace のツール、観測イベント、モデ�
 ```ts
 const agent = await openAgent({ storage, models, workspace, shell, model, cwd, context, onEvent });
 const turn = await agent.send("このファイルを直して");
+
+import { openSession } from "@hns/agent/session";
+import { createRegistry } from "@earendil-works/pi-durable";
+
+const registry = createRegistry();
+const session = await openSession({ storage, models, registry, model, context });
+const conversation = await session.createConversation({ title: "New" });
+await session.send(conversation.id, "hello");
 ```
 
 ```bash

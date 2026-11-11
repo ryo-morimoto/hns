@@ -113,7 +113,10 @@ export const stages: readonly Stage[] = [
       {
         cwd: join(root, "tools/deploy"),
         argv: [binary(root, "cf"), "deploy", "--dry-run", "--mode", "development"],
-        env: { WRANGLER_LOG_PATH: join(root, "tools/deploy/.wrangler/logs") },
+        env: {
+          XDG_CONFIG_HOME: join(root, ".work/cf/config"),
+          XDG_CACHE_HOME: join(root, ".cache"),
+        },
       },
     ],
   },

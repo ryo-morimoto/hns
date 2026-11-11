@@ -1,7 +1,7 @@
 {
   "name": "@hns/server",
   "version": "0.1.0",
-  "description": "The hns Worker edge: faces, session auth, correlation, and limits",
+  "description": "The hns Worker edge and Session Durable Object",
   "files": [
     "dist",
     "README.md",
@@ -25,9 +25,14 @@
     "typecheck": "tsrs --noEmit"
   },
   "dependencies": {
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@hns/agent": "0.1.0",
     "valibot": "^1.5.0"
   },
   "devDependencies": {
+    "@hns/core": "0.1.0",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0"
   }

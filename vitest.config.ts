@@ -16,6 +16,10 @@ const alias = [
     replacement: source("./packages/workspace/src/sandbox.ts"),
   },
   { find: /^@hns\/agent$/, replacement: source("./packages/agent/src/index.ts") },
+  {
+    find: /^@hns\/agent\/session$/,
+    replacement: source("./packages/agent/src/session.ts"),
+  },
   { find: /^@hns\/server$/, replacement: source("./packages/server/src/index.ts") },
 ];
 
