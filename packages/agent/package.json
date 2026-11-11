@@ -20,7 +20,7 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsdown && node ../../tools/gate/dist-check.ts",
     "test": "vitest run --root ../.. --project 'agent*'",
     "typecheck": "tsrs --noEmit"
   },
