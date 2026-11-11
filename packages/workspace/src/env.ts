@@ -21,10 +21,20 @@ import type {
  * An ExecutionEnv that forwards every member to another one. Subclasses
  * override what they wrap, and the compiler refuses one that forgets a member
  * added to ExecutionEnv.
+ *
+ * @remarks
+ * This is the shared base for environments that change one behavior: a
+ * subclass overrides that method and inherits the rest unchanged, so the file
+ * API is never narrowed by accident. Individual methods are not documented
+ * here because each one is a pass-through with the inner environment's
+ * semantics; a sandbox wrapper overrides `exec` alone.
+ *
+ * @internal
  */
 export class ForwardingEnv implements ExecutionEnv {
   readonly #inner: ExecutionEnv;
 
+  /** Wrap `inner`; this class holds no state of its own. */
   constructor(inner: ExecutionEnv) {
     this.#inner = inner;
   }

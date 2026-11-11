@@ -56,12 +56,29 @@ const JournalSchema: v.GenericSchema<unknown, JournalState> = v.object({
   audit: v.array(AuditEntrySchema),
 });
 
-/** An empty journal, for a workspace that has not written one yet. */
+/**
+ * An empty journal, for a workspace that has not written one yet.
+ *
+ * @remarks
+ * An absent journal file is a new workspace; this is the state it starts from.
+ *
+ * @internal
+ */
 export function emptyJournal(): JournalState {
   return { ops: {}, seq: 0, events: [], audit: [] };
 }
 
-/** Parse a stored journal. A corrupt one throws instead of reading as empty. */
+/**
+ * Parse a stored journal. A corrupt one throws instead of reading as empty.
+ *
+ * @param input - The parsed JSON from the journal file.
+ * @returns A journal whose fields all passed validation.
+ * @throws When the stored shape does not match, including an unreadable
+ * `outcome` variant. The error is valibot's; opening a workspace with a corrupt
+ * journal is a refusal, not a fresh start.
+ *
+ * @internal
+ */
 export function parseJournal(input: JsonValue): JournalState {
   return v.parse(JournalSchema, input);
 }

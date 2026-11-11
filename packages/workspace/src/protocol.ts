@@ -1,6 +1,16 @@
 import * as v from "valibot";
 
-/** What every helper call carries: which root, and which directory must still be there. */
+/**
+ * What every helper call carries: which root, and which directory must still be there.
+ *
+ * @remarks
+ * `root` must be absolute. `id` is the journal identity: the helper reads the
+ * root's own marker through the opened dirfd and refuses one that names another
+ * workspace, so a swapped directory cannot impersonate the root. `dev` and
+ * `ino` are the ones the probe recorded; they are absent only while probing.
+ *
+ * @internal
+ */
 export interface HelperBase {
   readonly root: string;
   /** Journal id; the helper refuses a root whose marker names another one. */
@@ -11,11 +21,27 @@ export interface HelperBase {
 }
 
 const HELPER_OPS = ["probe", "hash", "read", "commit"] as const;
+/**
+ * The helper operations, in one closed vocabulary.
+ *
+ * @remarks
+ * Each request runs one helper process, and the op name is also its first argv
+ * word, so the helper can check it before reading paths.
+ *
+ * @internal
+ */
 export type HelperOp = (typeof HELPER_OPS)[number];
 
 /**
  * One operation, as argv: the op name and JSON. Every path is a list of names
  * below the root, so the helper never sees ".." or an absolute path.
+ *
+ * @remarks
+ * `commit` names the target as names below the root and the temp as a single
+ * name beside it, because the helper renames from one dirfd to another. The
+ * helper re-validates every component; this type only carries them.
+ *
+ * @internal
  */
 export type HelperRequest =
   | (HelperBase & { readonly op: "probe" })
@@ -28,7 +54,15 @@ export type HelperRequest =
       readonly expectedVersion: string;
     });
 
-/** What the helper prints. The client checks the shape before using it. */
+/**
+ * What the helper prints. The client checks the shape before using it.
+ *
+ * @remarks
+ * This is untrusted text from another process: a reply that does not match one
+ * of these variants becomes a failed outcome, never a trusted value.
+ *
+ * @internal
+ */
 export type HelperReply =
   | { readonly ok: true; readonly dev: number; readonly ino: number }
   | { readonly ok: true; readonly version: string }
@@ -37,7 +71,16 @@ export type HelperReply =
   | { readonly ok: true; readonly status: "conflict"; readonly currentVersion: string }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
-/** What the client reports to the workspace, after checking the reply. */
+/**
+ * What the client reports to the workspace, after checking the reply.
+ *
+ * @remarks
+ * `failed` keeps the helper's code vocabulary (`not_found`, `root_replaced`,
+ * `root_missing`, `invalid`, ...) so the workspace can map it to a Denied or a
+ * FileFailure instead of parsing a message.
+ *
+ * @internal
+ */
 export type HelperOutcome =
   | { readonly kind: "probe"; readonly dev: number; readonly ino: number }
   | { readonly kind: "version"; readonly version: string }
@@ -78,7 +121,17 @@ const ReplySchema = v.union([
 /** The marker inside the root, which names the workspace that owns it. */
 const MarkerSchema = v.object({ id: v.string() });
 
-/** Parse what the workspace passed to the helper. Throws on anything else. */
+/**
+ * Parse what the workspace passed to the helper. Throws on anything else.
+ *
+ * @param text - The JSON payload from argv.
+ * @returns A request whose root is absolute and whose path is a string array.
+ * The path components are checked by `namesOf` before the helper uses them.
+ * @throws When the payload is not JSON, or does not match a request shape: a
+ * syntax error or valibot's validation error.
+ *
+ * @internal
+ */
 export function parseRequest(text: string): HelperRequest {
   return v.parse(RequestSchema, JSON.parse(text));
 }
@@ -89,7 +142,17 @@ const failed = (code: string, message: string): HelperOutcome => ({
   message,
 });
 
-/** Turn the helper's stdout into an outcome the workspace can act on. */
+/**
+ * Turn the helper's stdout into an outcome the workspace can act on.
+ *
+ * @param op - The request that produced the reply; the reply must fit its shape.
+ * @param text - The helper's stdout.
+ * @returns An outcome; malformed output becomes `failed("io", ...)` rather than
+ * an exception, because a helper that printed nothing is a failed operation and
+ * not a crash in the caller.
+ *
+ * @internal
+ */
 export function parseReply(op: HelperOp, text: string): HelperOutcome {
   let raw: unknown;
   try {
@@ -123,7 +186,16 @@ export function parseReply(op: HelperOp, text: string): HelperOutcome {
   }
 }
 
-/** The id a root marker names, or undefined when the text is not one. */
+/**
+ * The id a root marker names, or undefined when the text is not one.
+ *
+ * @param text - The raw marker file body.
+ * @returns The marker's id, or undefined for absent, unparsable, or shapeless
+ * text. Callers decide what undefined means: an existing workspace refuses, while
+ * a new workspace may mint an id.
+ *
+ * @internal
+ */
 export function parseMarker(text: string): string | undefined {
   let raw: unknown;
   try {

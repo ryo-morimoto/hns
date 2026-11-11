@@ -12,14 +12,25 @@ import type { FileHandle } from "node:fs/promises";
 import { parseMarker, parseRequest } from "./protocol.ts";
 import type { HelperReply, HelperRequest } from "./protocol.ts";
 
+/** Largest file the read op returns; above it the op fails as `too_large`. */
 const MAX_READ = 8 * 1024 * 1024;
 const CHUNK = 1 << 20;
+// O_NOFOLLOW on every directory keeps a symbolic link from redirecting the walk.
 const DIR_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
 // O_NONBLOCK keeps a FIFO from blocking the open, as pi-durable's reader does.
 const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
+/**
+ * The path that gives Node openat(2) semantics: a name resolved below a live fd.
+ *
+ * @remarks
+ * ExecutionEnv's file API takes only paths, so the helper opens the root and
+ * each parent once and then opens below the held fd. The kernel resolves the
+ * name against that directory, not against a path that may have been swapped.
+ */
 const procFd = (fd: number, name: string): string => "/proc/self/fd/" + fd + "/" + name;
 
+/** A failure carrying the code vocabulary the workspace maps to Denied or FileFailure. */
 class Failure extends Error {
   readonly code: string;
 
@@ -45,7 +56,15 @@ const CODE_BY_ERRNO = new Map<string, string>([
   ["ENAMETOOLONG", "invalid"],
 ]);
 
-/** Run one file system call, reporting the errno the way the workspace expects. */
+/**
+ * Run one file system call, reporting the errno the way the workspace expects.
+ *
+ * @param work - The call to run.
+ * @param name - The path component or operation named in the message.
+ * @returns The call's value.
+ * @throws {Failure} With a code from `CODE_BY_ERRNO`, or `io` when the errno
+ * is not one the workspace knows.
+ */
 async function attempt<T>(work: () => Promise<T>, name: string): Promise<T> {
   try {
     return await work();
@@ -56,10 +75,24 @@ async function attempt<T>(work: () => Promise<T>, name: string): Promise<T> {
   }
 }
 
+/**
+ * Open `name` below `dirFd` with `flags`, so the name is resolved against the
+ * held directory and not re-walked from `/`.
+ *
+ * @returns The open handle; the caller closes it.
+ * @throws {Failure} When the open fails.
+ */
 function openAt(dirFd: number, name: string, flags: number): Promise<FileHandle> {
   return attempt(() => open(procFd(dirFd, name), flags), name);
 }
 
+/**
+ * Read the id from `.hns/root.json` below the root dirfd.
+ *
+ * @returns The marker id, or undefined when the directory or file is absent.
+ * A missing marker is not an error at this layer; the caller compares the result
+ * with the expected id and fails closed.
+ */
 async function readMarker(rootFd: number): Promise<string | undefined> {
   let dir: FileHandle;
   try {
@@ -86,7 +119,16 @@ async function readMarker(rootFd: number): Promise<string | undefined> {
   }
 }
 
-/** The root as a directory fd, after checking it is still the one we opened. */
+/**
+ * The root as a directory fd, after checking it is still the one we opened.
+ *
+ * @remarks
+ * Two checks pin the root: the recorded `dev`/`ino` must match the directory
+ * opened now, and the marker below that fd must name the journal's id. A root
+ * that was replaced or remounted fails closed as `root_replaced`; one that no
+ * longer exists is `root_missing`. The handle is closed on every failure path,
+ * so a refused call leaks no fd.
+ */
 async function openRoot(request: HelperRequest): Promise<FileHandle> {
   let root: FileHandle;
   try {
@@ -110,7 +152,15 @@ async function openRoot(request: HelperRequest): Promise<FileHandle> {
   }
 }
 
-/** Directory handles for every component, the last one being the target's parent. */
+/**
+ * Directory handles for every component, the last one being the target's parent.
+ *
+ * @param root - The already-pinned root handle.
+ * @param names - The parent components, outermost first.
+ * @returns The parent's handle, or undefined when the target sits directly in
+ * the root. Intermediate handles are closed as the walk advances, and the walk
+ * stops at the first component that is not a real directory (`O_NOFOLLOW`).
+ */
 async function openParentChain(
   root: FileHandle,
   names: readonly string[],
@@ -131,6 +181,14 @@ async function openParentChain(
   }
 }
 
+/**
+ * Open the target itself below the pinned parent (or the root, when the target
+ * has no parent below it).
+ *
+ * @remarks
+ * `O_NOFOLLOW` refuses a final symbolic link and `O_NONBLOCK` keeps a FIFO from
+ * blocking the open; `expectRegular` then rejects anything that is not a file.
+ */
 function openTarget(
   root: FileHandle,
   parent: FileHandle | undefined,
@@ -140,6 +198,13 @@ function openTarget(
   return attempt(() => open(procFd(fd, name), FILE_FLAGS), name);
 }
 
+/**
+ * Refuse anything that is not a regular file.
+ *
+ * @returns The file's size in bytes, for the caller to bound its read.
+ * @throws {Failure} `is_directory` for a directory and `invalid` for any other
+ * file type, so a device or FIFO cannot stand in for a document.
+ */
 async function expectRegular(file: FileHandle): Promise<number> {
   const stat = await file.stat();
   if (stat.isDirectory()) fail("is_directory", "is a directory");
@@ -147,6 +212,11 @@ async function expectRegular(file: FileHandle): Promise<number> {
   return stat.size;
 }
 
+/**
+ * Hash an open file's content, streaming so size does not bound the work.
+ *
+ * @returns The version string, `"sha256:<hex>"`, over the whole content.
+ */
 async function hashFile(file: FileHandle): Promise<string> {
   const hash = createHash("sha256");
   const buffer = Buffer.allocUnsafe(CHUNK);
@@ -159,7 +229,12 @@ async function hashFile(file: FileHandle): Promise<string> {
   }
 }
 
-/** The version of the named file, or "absent" when the name is free. */
+/**
+ * The version of the named file, or "absent" when the name is free.
+ *
+ * @throws {Failure} For any failure other than a missing name; a permission
+ * error must not read as an absent file.
+ */
 async function versionAt(
   root: FileHandle,
   parent: FileHandle | undefined,
@@ -180,6 +255,15 @@ async function versionAt(
   }
 }
 
+/**
+ * Validate a request's path as component names.
+ *
+ * @param path - The names below the root, outermost first.
+ * @returns The same names, once every one is a single real component.
+ * @throws {Failure} `invalid` for an empty path, `.`, `..`, a name containing
+ * "/" or NUL, or an empty name. The helper re-checks this even though the
+ * workspace normalized the path: the request crosses a process boundary.
+ */
 function namesOf(path: readonly string[]): readonly string[] {
   if (path.length === 0) fail("invalid", "path is empty");
   for (const name of path) {
@@ -189,6 +273,16 @@ function namesOf(path: readonly string[]): readonly string[] {
   return path;
 }
 
+/**
+ * Dispatch one request against the pinned root.
+ *
+ * @remarks
+ * `commit` hashes the current target, compares it with `expectedVersion`, and
+ * only then renames. Both steps use the same parent dirfd, which closes the
+ * swapped-parent window; the same-name swap between the hash and the rename is
+ * the residual window, and `unknown` covers what cannot be decided. `temp`
+ * must be one component because the rename starts at the root dirfd.
+ */
 async function run(request: HelperRequest): Promise<HelperReply> {
   if (request.op === "probe") {
     return probe(request);
@@ -221,6 +315,12 @@ async function run(request: HelperRequest): Promise<HelperReply> {
   }
 }
 
+/**
+ * Prove the root opens and is the one the caller pinned.
+ *
+ * @returns The root's `dev`/`ino`, for the workspace to send with later calls.
+ * @throws {Failure} `root_missing` or `root_replaced`, as any other op would.
+ */
 async function probe(request: HelperRequest): Promise<HelperReply> {
   const root = await openRoot(request);
   try {
@@ -231,6 +331,13 @@ async function probe(request: HelperRequest): Promise<HelperReply> {
   }
 }
 
+/**
+ * Read a regular file's content, bounded by `MAX_READ`.
+ *
+ * @returns The content as base64, because stdout is the only reply channel.
+ * @throws {Failure} `too_large` above 8 MiB, so one read cannot exhaust the
+ * pipe or the caller's memory.
+ */
 async function readContent(
   root: FileHandle,
   parent: FileHandle | undefined,
@@ -253,6 +360,14 @@ async function readContent(
   }
 }
 
+/**
+ * Entry point: `rooted-helper <op> <json>` prints one JSON reply on stdout.
+ *
+ * @remarks
+ * A failure is printed as `{ ok: false, code, message }` and the exit status
+ * stays 0, because the client reads the reply and a non-zero exit would be
+ * indistinguishable from a helper that never ran. Usage errors exit 2.
+ */
 async function main(): Promise<void> {
   const [op, payload] = process.argv.slice(2);
   if (op === undefined || payload === undefined) {
