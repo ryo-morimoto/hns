@@ -100,7 +100,7 @@ REST は事前に宣言しない（D059）。GraphQL に載せない面（passke
 - `@hns/agent`: `.`。
 - `@hns/machine`: `.`（常駐エージェント。単体で起動する）。
 - `@hns/server`: `.`（Worker の default。0145 では edge のみで、DO のクラスは 0146 が足す）と `bin`（`hns`）。
-  Worker は `@hns/store` をそのまま import する（0150 で `node:sqlite` を削除し、D1 専用にした）。
+
 
 ## 今は切らないもの
 
