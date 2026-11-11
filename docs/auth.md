@@ -37,6 +37,16 @@ GraphQL の `/graphql` はセッション cookie を要求し、resolver が対�
 REST の面（passkey・files・hooks・運用・machine）は、それを実装する issue が認証方式を同じ変更で宣言する
 （D059。宣言だけの面は置かない）。認証の入口は Worker に1つ置き、面ごとの表を二重管理しない。
 
+## セッション cookie（0145）
+
+- cookie 名は `hns_session`。値は `<base64url(payload)>.<base64url(HMAC-SHA256(payload))>`。
+  payload は `{v:1,sub,exp}`（`exp` は unix 秒）。署名の対象は payload の base64url 文字列。
+- Worker は `HNS_SESSION_SECRET`（32文字以上）で検証する。未設定、短すぎる、期限切れ、署名不一致、
+  `v` が 1 でない、`sub` が空、同じ名前の cookie が複数、はすべて 401。既定値への fallback はしない。
+- `Set-Cookie` の属性（`Secure` / `HttpOnly` / `SameSite=Lax` / `Path=/` / 30日）を付けるのは 0158。
+  0145 は値の署名（`signSession`）と検証（`readSessionCookie`）を持つ。
+- `Authorization: Bearer` や `?token=` をセッションの代わりに使わない。
+
 ## 秘密の配置（0143、設計）
 
 > 実装は 0151（gateway）・0147（machine / hide）・0158（認証）。この節は置き場所の決定で、コードはまだ無い。

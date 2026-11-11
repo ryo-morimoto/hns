@@ -72,26 +72,34 @@ export const deploymentFor = (
   };
 };
 
+/**
+ * Build the Worker section for a deployment.
+ *
+ * @remarks
+ * Kept separate from the default export so the binding set can be tested without evaluating
+ * the cf config function or reading process.env.
+ */
+export const workerFor = (deployment: Deployment) => ({
+  name: deployment.workerName,
+  compatibilityDate: "2026-10-30",
+  compatibilityFlags: ["nodejs_compat"],
+  entrypoint: "worker.ts",
+  exports: {
+    Session: exports.durableObject({ storage: "sqlite" }),
+  },
+  env: {
+    HNS_ENV: bindings.text(deployment.env),
+    HNS_SESSION_SECRET: bindings.secret(),
+    HNS_AGENT_URL: bindings.text(deployment.agentUrl),
+    HNS_MODEL: bindings.text(deployment.model),
+    SESSION: bindings.durableObject({
+      worker: deployment.workerName,
+      exportName: "Session",
+    }),
+  },
+});
+
 export default defineConfig(({ mode }) => {
   const deployment = deploymentFor(mode, process.env.HNS_AGENT_URL, process.env.HNS_MODEL);
-  return {
-    worker: {
-      name: deployment.workerName,
-      compatibilityDate: "2026-10-30",
-      compatibilityFlags: ["nodejs_compat"],
-      entrypoint: "worker.ts",
-      exports: {
-        Session: exports.durableObject({ storage: "sqlite" }),
-      },
-      env: {
-        HNS_ENV: bindings.text(deployment.env),
-        HNS_AGENT_URL: bindings.text(deployment.agentUrl),
-        HNS_MODEL: bindings.text(deployment.model),
-        SESSION: bindings.durableObject({
-          worker: deployment.workerName,
-          exportName: "Session",
-        }),
-      },
-    },
-  };
+  return { worker: workerFor(deployment) };
 });

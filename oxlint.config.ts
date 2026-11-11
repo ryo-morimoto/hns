@@ -78,5 +78,21 @@ export default defineConfig({
         ],
       },
     },
+    {
+      files: ["packages/server/**/*.ts"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["@hns/*", "!@hns/core", "!@hns/agent", "!@hns/store", "!@hns/workspace"],
+                message: "server may import core, agent, store, and workspace only (docs/packages.md)",
+              },
+            ],
+          },
+        ],
+      },
+    },
   ],
 });

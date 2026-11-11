@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { deploymentFor } from "./cloudflare.config.ts";
+import { deploymentFor, workerFor } from "./cloudflare.config.ts";
 
 // Catches: a mode mapping that sends staging to the production Worker, or lets a missing URL/model through.
 
@@ -44,4 +44,11 @@ test("a missing mode is rejected", () => {
 
 test("an unknown mode is rejected", () => {
   expect(() => deploymentFor("staging2", undefined, undefined)).toThrow(/unknown mode/);
+});
+
+// Catches: the edge reading HNS_SESSION_SECRET without a declared binding.
+test("the worker declares the session secret binding", () => {
+  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  expect(worker.env).toHaveProperty("HNS_SESSION_SECRET");
+  expect(worker.env).toHaveProperty("SESSION");
 });

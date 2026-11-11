@@ -2,7 +2,7 @@
 
 status: open
 priority: now
-depends-on: 0145, 0175, 0188
+depends-on: 0145, 0146, 0150, 0175, 0188
 touches: packages/server/src/graphql/, packages/server/test/
 
 ## Goal
@@ -25,7 +25,8 @@ resolver は DO か D1 のどちらを読むかを明示する。
 - 実装の出発点: [work/poc/graphql-relay/src/gql.mjs](../../work/poc/graphql-relay/src/gql.mjs)
 - まとめ読みは resolver の単位で明示する（PoC の DataLoader 相当）。RPC 数をテストで固定する
 - 計測: WS ごとにまとめると 12 RPC、会話ごとだと 40/120（[RESULTS.md](../../work/poc/graphql-relay/RESULTS.md)）
-- 索引（0149）はまだ無いので、初期は DO から読む（12 RPC/画面、実測 $0.39/月 @300k loads）
+- 索引（0149）はまだ無いので、初期は会話を DO から読む（12 RPC/画面、実測 $0.39/月 @300k loads）。
+  Project / Task は D1（0150 のドライバ）。この2つの読み先が揃うまで着手しない。
 
 ## 未確定
 
@@ -44,3 +45,5 @@ resolver は DO か D1 のどちらを読むかを明示する。
 
 - 2026-11-10: 作成（user。D055）。
 - 2026-11-10: 0188 で REST 契約を撤去したため、0176 は「ルートを足す」ではなく schema・resolver・上限を足す担当。
+- 2026-11-11: 0145 の入口を 501 で閉じた。読み先の Session DO（0146）と D1 の store ドライバ（0150）が
+  未実装のため、0176 は 0150 / 0146 の後に着手する。

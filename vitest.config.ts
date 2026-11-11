@@ -16,6 +16,7 @@ const alias = [
     replacement: source("./packages/workspace/src/sandbox.ts"),
   },
   { find: /^@hns\/agent$/, replacement: source("./packages/agent/src/index.ts") },
+  { find: /^@hns\/server$/, replacement: source("./packages/server/src/index.ts") },
 ];
 
 // Two projects per package: the in-process tests a commit runs, and the
@@ -61,6 +62,7 @@ export default defineConfig({
       ...packageProjects("store"),
       ...packageProjects("workspace"),
       ...packageProjects("agent"),
+      ...packageProjects("server"),
       ...packageProjects("web", {
         environment: "jsdom",
         setupFiles: ["packages/web/test/setup.ts"],

@@ -36,7 +36,8 @@
 | `GET /api/events?limit=&level=&since=` | 新しい順のイベント                                                                                                                                          |
 | `GET /api/metrics`                     | 24時間の HTTP 件数・status 別・p50/p95、chat 件数、agent ターン数・ツール呼び出し数・ツールエラー数、Workflow / Firing の status 別、エラー数、今日の利用量 |
 
-- 各レスポンスに `x-request-id` を返す。指定があれば引き継ぐ。
+- 各レスポンスに `x-request-id` を返す。受信値が `[A-Za-z0-9._:-]{1,128}` に合えば引き継ぎ、
+  不正なら生成する（0145 の境界で検査）。
 - 相関は `requestId` / `conversationId` / `runId` で追える。
 
 ## まだ無いもの

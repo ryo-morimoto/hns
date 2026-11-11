@@ -115,6 +115,10 @@ mode は必須。--mode を省略した cf dev / cf deploy は拒否される。
 cf deploy --dry-run はビルドと検証だけで、認証情報もアップロードも不要。npm run check と pre-push の
 deploy stage が tools/deploy で cf deploy --dry-run --mode development を実行する。
 
+`tools/deploy/worker.ts` は `packages/server/src/edge/worker.ts` の default を re-export する。
+Session DO は 0146 までのスタブ。`HNS_SESSION_SECRET` は `bindings.secret()` で宣言し、development では
+`tools/deploy/.dev.vars`（gitignore、32文字以上）に置く。静的 Assets の設定は 0160 が足す。
+
 ロールバックは version を戻す。
 
     cf workers versions list --worker-id hns-prod
