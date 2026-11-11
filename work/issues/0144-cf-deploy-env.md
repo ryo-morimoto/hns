@@ -65,7 +65,7 @@ touches: tools/deploy/, tools/gate/stages.ts, tools/gate/test/stages.test.ts, vi
 
 - verdict: **PASS**（初回 FAIL 3 → 修正 → 再レビュー PASS）
 - reviewer: reviewer-0144
-- HEAD: 648730a
+- HEAD: 86f9c96（review 時 648730a。main へ rebase 後）
 - blocking: なし
 - 受入: 6/6。`npm run check` 成功（182 tests / build / knip / deploy dry-run 918ms）。
 - non-blocking:
