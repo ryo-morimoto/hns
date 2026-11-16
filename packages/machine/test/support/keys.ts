@@ -20,7 +20,7 @@ const rawPublicKey = (key: KeyObject): Uint8Array => {
 };
 
 /**
- * Make an in-memory machine identity, standing in for the D1 record 0148 adds.
+ * Make an in-memory machine identity, standing in for the D1 Machine record.
  *
  * @param machineId - The id the agent and the record share.
  * @returns The key pair, its raw public half, and a registry that serves it.

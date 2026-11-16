@@ -155,7 +155,7 @@ export class NonceCache {
 export interface RequestVerifierOptions {
   /** The machine this agent runs for; a request naming another one is refused. */
   readonly machineId: string;
-  /** Where the registered public key comes from (D1 in 0148). */
+  /** Where the registered public key comes from (the D1 Machine record). */
   readonly keys: MachineKeyRegistry;
   /** The clock; tests pass a fixed one. Defaults to `Date.now`. */
   readonly now?: (() => number) | undefined;

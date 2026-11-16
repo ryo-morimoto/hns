@@ -9,7 +9,7 @@ hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agent
 - `packages/` — product code, one package per capability
   - `packages/core` — the model (`src/types.ts`, `src/codecs.ts`), its GraphQL projection (`src/graphql/`), workflow state transitions (`src/workflow.ts`)
   - `packages/store` — SQLite row schemas and `parse*` functions that produce the public model
-  - existing: `workspace`, `agent`, `server`, `web`; planned: `machine` (see [docs/packages.md](docs/packages.md))
+  - existing: `workspace`, `agent`, `machine`, `server`, `web` (see [docs/packages.md](docs/packages.md))
 - `work/` — remaining work and history
   - `work/poc/` — the integrated PoC app (plain JS). **Not product code.** Do not add features here
   - `work/BOARD.md`, `work/issues/` — the backlog and per-issue notes

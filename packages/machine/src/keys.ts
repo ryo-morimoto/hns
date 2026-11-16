@@ -9,7 +9,7 @@ export const ED25519_PUBLIC_KEY_BYTES = 32;
  * Where the agent finds the public key of the machine record.
  *
  * @remarks
- * 0148 supplies this from the D1 Machine record; tests supply a fixture, so the
+ * The D1 Machine record supplies this in production; tests supply a fixture, so the
  * agent is written against the interface instead of a database that does not
  * exist yet. The key is the public half of the device key whose private half
  * stays on the machine (mode 0600, never in Cloudflare).

@@ -17,7 +17,7 @@ export interface Limits {
   readonly maxResponseBytes: number;
 }
 
-/** The defaults for an agent: a minute, eight at once, 16 MiB in, 256 KiB out. */
+/** The defaults for an agent: 30 seconds, eight at once, 16 MiB in, 256 KiB out. */
 export const DEFAULT_LIMITS: Limits = {
   timeoutMs: 30_000,
   maxConcurrency: 8,
