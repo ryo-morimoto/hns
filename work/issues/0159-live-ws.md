@@ -5,7 +5,7 @@ priority: now
 design: agreed
 design-ref: D047
 depends-on: 0146
-touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/server/src/do/session.ts, packages/server/src/do/state.ts, packages/server/src/do/session-rpc.test.ts, packages/server/src/do/session.test.ts, packages/server/test/support/live.ts, packages/server/src/edge/problem.ts, packages/server/test/integration/session-do.test.ts, packages/core/src/stream.ts, packages/core/src/stream.test.ts, packages/agent/src/session.ts, packages/agent/src/session.test.ts, packages/web/src/live/, packages/web/src/app/, packages/web/test/live/, packages/server/README.md, work/issues/0159-live-ws.md
+touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/server/src/do/session.ts, packages/server/src/do/state.ts, packages/server/src/do/session-rpc.test.ts, packages/server/src/do/session.test.ts, packages/server/test/support/live.ts, packages/server/src/edge/problem.ts, packages/server/test/integration/session-do.test.ts, packages/core/src/stream.ts, packages/core/src/stream.test.ts, packages/agent/src/session.ts, packages/agent/src/session.test.ts, packages/web/src/live/, packages/web/src/app/, packages/web/src/main.tsx, packages/web/test/live/, packages/server/README.md, work/issues/0159-live-ws.md
 
 ## Goal
 
@@ -65,6 +65,7 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 - 2026-11-17: 実装開始。token delta の実経路のため `packages/agent/src/session.ts`（ConversationView watch）と `do/state.ts`、ws / stream のテストを touches に追加（lead へ報告）。edge の転送は既存のまま 101 を通す想定で触らない。
 - 2026-11-17: 実装（c3c4116）。`core/src/stream.ts` の `LiveFrame` union と `LiveDeltaBatcher`、`server/src/ws.ts` の `acceptWebSocket` + attachment、`do/session.ts` の再購読、agent の `watchConversation`、web の再接続 client と `LiveConnection`。SSE は製品コードに未実装だったため削除対象は無い（0050 / 0118 は superseded のまま）。
 - 2026-11-17: cf dev に production edge 経由の実 WS を追加（署名 cookie を test Worker が注入）。test Worker の DO 名を edge と同じ `default` に揃え、edge → Session DO の 101 転送を実経路で確認。
+- 2026-11-17: UI を Shell の conversation route に接続（`main.tsx` が `browserLiveSocket` を渡す）。テスト用に `liveSocket` を省略した場合は socket を開かない。
 
 ## Result
 
@@ -75,6 +76,6 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
   - snapshot → 差分 + cursor: `server/src/ws.ts` が接続ごとに snapshot を先に送り、以後 append / delta。`server/src/ws.test.ts` と cf dev の実 WebSocket（`server/test/integration/session-do.test.ts`）で、接続 → snapshot → send → append、切断中の send → 再接続 snapshot を確認。production edge の `/ws` についても、署名 cookie を注入した test Worker から実 upgrade → 101 → snapshot を確認。
   - `acceptWebSocket`: `do/session.ts` が socket を tag 付きで accept し、attachment（conversationId / cursor）から wake 後に再購読。fake DO state の `server/src/do/session.test.ts` で、再生成後の snapshot / ping / close を確認。
   - delta 間引き: `core/src/stream.ts` の `LiveDeltaBatcher` が 100ms または 64KiB でまとめ、frame は 64KiB 以下。`stream.test.ts` が 1 秒の frame 上限と 64KiB 分割を固定。`ws.test.ts` が replace の chunk を確認。
-  - UI の切断説明: `web/src/live/state.ts` の `explainConnection` と `web/src/app/LiveConnection.tsx`。jsdom の `client.test.ts` / `state.test.ts` / `LiveConnection.test.tsx` が再接続 cursor・試行回数・offline の説明を確認。画面への mount は 0105。
+  - UI の切断説明: `web/src/live/state.ts` の `explainConnection` と `web/src/app/LiveConnection.tsx`。Shell の conversation route は `liveSocket` を受けたときだけ接続し、production の `main.tsx` が `browserLiveSocket` を渡す。jsdom の `client.test.ts` / `state.test.ts` / `LiveConnection.test.tsx` / `Shell.test.tsx` が再接続 cursor・試行回数・offline と画面表示を確認。会話画面の本実装（transcript / composer）は 0105 が置き換える。
 - 実経路で確認したこと: cf dev の test Worker → Session DO で実 WebSocket upgrade / 101、snapshot、ping → pong、send 後の append、切断中の send、再接続 snapshot。production edge 経由でも、署名 cookie を注入した upgrade が 101 になり snapshot が届くこと（edge → Session DO の転送）を確認。
 - 未確認 / reviewer 向け: 実 eviction（75 秒 hibernation 後の wake）は cf dev が evict しないため再現しておらず、C4 は fake DO state の accept / attachment / 再購読まで。実 provider の token 速度は 0152。reviewer は未割当。
