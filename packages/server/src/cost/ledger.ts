@@ -176,7 +176,7 @@ export async function readMonthlyTotal(db: D1Binding, at: Date): Promise<CostUsa
  * @throws Error when the row is missing or corrupt; the caller fails closed.
  *
  * @remarks
- * This is the same row the gateway spends against (0151); reading it here is reuse, not a
+ * This is the same row the provider gateway spends against; reading it here is reuse, not a
  * second copy of the money state. The gateway's 429 is per call; this check is per run.
  */
 export async function readProviderMonth(db: D1Binding, at: Date): Promise<ProviderMonth> {

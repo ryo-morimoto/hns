@@ -47,7 +47,7 @@ export interface TurnActivity {
   readonly conversationId: string;
   /** Durable Object requests the turn spent. Defaults to 0. */
   readonly requests?: number | undefined;
-  /** R2 objects the turn put. Defaults to 0; the write path that counts them is 0157. */
+  /** R2 objects the turn put. Defaults to 0 until the object write path reports them. */
   readonly r2Objects?: number | undefined;
 }
 
