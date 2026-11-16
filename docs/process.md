@@ -18,6 +18,16 @@
 同時に流す変更は [parallel-change.md](parallel-change.md) の「変更レーン」に従う。同時に流すのは最大3本で、
 増やす条件は人が判定する。agent は自分でレーンを増やさない。
 
+## 完了・記録・成果
+
+完了は Result の追記ではなく、1 issue 1 レコードで表す（[D067](decisions.md)）。置き場とスキーマは [0195](../work/issues/0195-work-record-contract.md) で決める（YAML は D067）。done level はレコードから導出する。
+
+- 成果は四半期のテーゼと Moat 台帳で見る（D068）。週次デモ30分、月次キルリストを置く。
+- レビューは意図・設計・実装・結果の4層に分ける（D069）。月次で指摘をルール・テスト・eval・decisions に蒸留する。
+- 製品のループは外部に開く（D070）。hns は判断と記録を持ち、観測は OutcomeSource から参照する。
+
+詳細は [work/proposals](../work/proposals/) にある。
+
 ## 何を使うか（早見）
 
 | 状況                                | 使うもの                                       |

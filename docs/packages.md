@@ -1,6 +1,6 @@
 # パッケージ構成
 
-2026-11-07 決定（D029）。pi の packages を参考にした **7 パッケージ**（D047 で `machine` を足した）。
+2026-11-07 決定（D029）。pi の packages を参考にした **8 パッケージ**（D047 で `machine`、D071 で `record` を足した）。
 2026-11-10、D059 で `core` の意味を「系が合意する語彙（モデルと、その射影）」に確定した。
 
 ## 原則
@@ -27,6 +27,7 @@
 | パッケージ       | 責任（公開するもの）                                                                              | 依存                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------- |
 | `@hns/core`      | モデル（`types.ts`・`codecs.ts`）と、その射影。`./graphql` で SDL を起こす                   | —（id の検証に valibot、`./graphql` に graphql） |
+| `@hns/record`    | 仕事の記録の schema・done level の導出・YAML・CLI                                          | core, valibot, yaml                   |
 | `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離                                 | core, pi-durable/env                  |
 | `@hns/agent`     | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode）。`./session` は Worker-safe な複数会話 runtime | core, workspace, pi-durable, pi-ai    |
 | `@hns/store`     | D1、migration、リポジトリ。`./identity` で token・passkey・セッション・秘密                     | D1                                    |
@@ -45,10 +46,13 @@ server ─┬─► agent ─┬─► workspace ─► core
 
 machine ─┬─► workspace ─► core
          └─► core
+
+record ──► core
 ```
 
 - `agent` は pi-ai と pi-durable に依存する。`providers` は分けず、`agent/src/providers/` に置く。
 - `workspace` と `store` は互いに独立。`machine` は `server` に依存しない（別に配布する）。
+- `record` は core にだけ依存する（時刻の codec）。製品ドメイン（Project / Task）とは別の、仕事の記録の語彙を持つ。
 - 逆向き（`store` → `server`、`core` → `workspace`）は禁止。`oxlint.config.ts` の `no-restricted-imports` がこの表と import を照合する（0042）。
 
 ## 境界の検査
@@ -57,7 +61,7 @@ machine ─┬─► workspace ─► core
 
 未使用の export・依存・ファイルの検出は knip を使う（[0042](../work/issues/0042-boundaries-knip.md) で導入）。
 
-パッケージを足すときは、この表と `oxlint.config.ts` の該当ブロックを同時に更新する。`machine` を足すのは 0147 で、そのとき `oxlint.config.ts` も更新する。
+パッケージを足すときは、この表と `oxlint.config.ts` の該当ブロックを同時に更新する。`machine` を足すのは 0147 で、そのとき `oxlint.config.ts` も更新する。`record` は 0196 で足した（D071）。
 
 ## 型の置き場所
 
@@ -69,6 +73,7 @@ machine ─┬─► workspace ─► core
 | `@hns/store`     | Row 型（DB の形）と、Row → 公開型の変換。JSON 列に入るモデル（graph / trigger / action）の検証 |
 | `@hns/agent`     | 実行中の内部状態（Durable の検査結果など）                                              |
 | `@hns/workspace` | ファイル操作の内部型（`FileRead` / `MutationResult` は core）                        |
+| `@hns/record`    | 仕事の記録の型・schema・done level（製品の WorkItem とは別の語彙）                    |
 | `@hns/server`    | 要求・応答の封筒、GraphQL の resolver が使う入力型、運用 view の型                      |
 
 判断のしかた:
