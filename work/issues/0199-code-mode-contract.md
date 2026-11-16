@@ -5,7 +5,7 @@ priority: next
 design: agreed
 design-ref: D098
 depends-on: -
-touches: packages/core/src/types.ts, packages/core/src/agent-profile.ts, packages/core/src/agent-profile.test.ts, packages/core/src/index.ts, packages/agent/src/code-mode/contract.ts, packages/agent/src/conversation-metadata.ts, packages/agent/src/code-mode/events.ts, packages/agent/src/code-mode/contract.test.ts, packages/agent/src/conversation-metadata.test.ts, packages/agent/src/code-mode/events.test.ts, docs/code-mode.md, work/issues/0199-code-mode-contract.md
+touches: packages/core/src/types.ts, packages/core/src/agent-profile.ts, packages/core/src/agent-profile.test.ts, packages/core/src/index.ts, packages/agent/src/code-mode/contract.ts, packages/agent/src/conversation-metadata.ts, packages/agent/src/session.ts, packages/agent/src/code-mode/events.ts, packages/agent/src/code-mode/contract.test.ts, packages/agent/src/conversation-metadata.test.ts, packages/agent/src/code-mode/events.test.ts, docs/code-mode.md, work/issues/0199-code-mode-contract.md
 
 ## Intent
 
@@ -30,12 +30,12 @@ code mode の実行時契約を 1 箇所に固定する。
 
 - [ ] `AgentProfile` / `CodeModeLimits` を **`@hns/core`**（`packages/core/src/agent-profile.ts`）に定義し、`core/src/index.ts` から `export * from "./agent-profile.ts";` する。`toolSurface: "direct" | "code"`、`subagents: boolean`、`limits` の直交した設定にし、**2 値の mode にはしない**
 - [ ] `DEFAULT_AGENT_PROFILE` は `{ toolSurface: "direct", subagents: false, limits: DEFAULT_CODE_MODE_LIMITS }`
-- [ ] `CodeModeLimits` / `RunBudget` の型・既定値・検証を置く。予算の消費・判定は 0201、送信時の検査は 0202
+- [ ] `CodeModeLimits` の型・既定値・検証を core に置く。`RunBudget` の型は agent に置き、実装・永続化は 0201、送信時の検査は 0202
 - [ ] `CodeModeEvent` / `CodeModeEventSink` を `code-mode/events.ts` に置く。既存の `AgentEvent`（direct tools / ツール観測）は変えない。本文・引数・出力は入れない
 - [ ] core の `EVENT_NAMES` に `code.call` / `code.result` / `subagent.spawn` / `subagent.settle` / `budget.exceeded` / `model.mismatch` を足す
 - [ ] `CodeModeEvent` → `EventName` の対応を 1 関数に閉じる（`toCoreEventName`）。未知は `never` で落ちる
 - [ ] `CodeModeFailureCode` を閉じた union にする（`profile_unavailable` / `model_mismatch` / `budget_exceeded` / `depth_exceeded` / `children_exceeded` / `sandbox_unavailable`）
-- [ ] `ConversationMetadata` / `ConversationIndexDoc` / `ensureMetadata` / `writeMetadata` を `conversation-metadata.ts` に **新設**する。既存 `session.ts` の旧定義の削除と import への切替は 0202。**すべての会話（subagent の子を含む）が index に 1 entry を持つ**
+- [ ] `ConversationMetadata` / `ConversationIndexDoc` / `ensureMetadata` / `writeMetadata` を `conversation-metadata.ts` に **移動**する。`session.ts` の旧定義の削除と import への切替は 0199 で行う（0202 は import のみ）。ensure/write を提供する。**全 conversation（subagent の子を含む）への保証は 0202 の `conversationCreated`**
 - [ ] `docs/code-mode.md` に、profile・ツール表面・イベント・予算・安全・非目標を書く
 - [ ] `npm run check` が通る
 
@@ -54,44 +54,14 @@ pi-durable 1.5.0 の `configure` が持つのは `extensions` / `tools` / `model
 export const TOOL_SURFACES = ["direct", "code"] as const;
 export type ToolSurface = (typeof TOOL_SURFACES)[number];
 
-export interface AgentProfile extends JsonObject {
-  /** direct = 今のツールをモデルに並べる。code = codemode 1 個に絞る。 */
-  readonly toolSurface: ToolSurface;
-  /** subagent ツールを有効にするか。toolSurface とは独立。 */
-  readonly subagents: boolean;
-  /** code mode / subagent の実行予算。 */
-  readonly limits: CodeModeLimits;
-}
-
-export const DEFAULT_AGENT_PROFILE: AgentProfile = {
-  toolSurface: "direct",
-  subagents: false,
-  limits: DEFAULT_CODE_MODE_LIMITS,
-};
-
-// 実装順: CodeModeLimits / DEFAULT_CODE_MODE_LIMITS を先に定義する。
-// この順でないと DEFAULT_AGENT_PROFILE の初期化が TDZ で落ちる。
-```
-
-- `toolSurface: "code"` は「モデルに `codemode` だけを見せる」。script からは callable な全ツールを呼べる。
-- `subagents: true` は「モデルに `subagent` ツールを足す」。`toolSurface` が `direct` でも `code` でもよい。
-- `limits` は code / subagent の両方に効く。`direct` + `subagents: false` では実質未使用。
-- UI の「Direct / Code / Delegate」などのプリセットは **UI の表現** で、保存するのは `AgentProfile`。
-- `AgentProfile` / `CodeModeLimits` は **`@hns/core`** に置く。理由: WS の snapshot / GraphQL / web が `@hns/agent` に依存できない（core は誰にも依存しない）。`@hns/agent` は core から import して re-export する。
-- `packages/core/src/agent-profile.ts` は `JsonObject`（`./types.ts`）と valibot を import する。`AgentProfile` / `CodeModeLimits` は `extends JsonObject` で、`defineDoc` と `ConversationMetadata` に直接入る。
-- 既存会話は `DEFAULT_AGENT_PROFILE`（direct / no subagents）。
-
-**なぜ 2 値ではないか**: 2 値は「code mode を使うか」と「subagent を使うか」を混ぜる。
-モデルの能力・コスト・危険度は別々に変わるので、別の軸にする。プリセットは後から増やせるが、データは増やさない。
-```ts
-export interface CodeModeLimits extends JsonObject {
+export type CodeModeLimits = {
   /** 子 RLM の深さ。0 = 子なし。code mode の既定は 1。 */
   readonly maxDepth: number;
   /** 1 実行で作れる子会話の数。 */
   readonly maxChildren: number;
   /** 同時に走らせる子会話の数。 */
   readonly maxConcurrentChildren: number;
-  /** code mode から呼ぶ入れ子ツールの総数。 */
+  /** code mode から呼ぶ入れ子ツールの総数（`call.parent` 付きのみ。subagent は含めない）。 */
   readonly maxSubCalls: number;
   /** 実行ツリーのトークン上限。null は会話の日次予算に委ねる。 */
   readonly maxTreeTokens: number | null;
@@ -111,6 +81,34 @@ export const DEFAULT_CODE_MODE_LIMITS: CodeModeLimits = {
   maxTurns: 12,
 };
 
+export type AgentProfile = {
+  /** direct = 今のツールをモデルに並べる。code = codemode 1 個に絞る。 */
+  readonly toolSurface: ToolSurface;
+  /** subagent ツールを有効にするか。toolSurface とは独立。 */
+  readonly subagents: boolean;
+  /** code mode / subagent の実行予算。 */
+  readonly limits: CodeModeLimits;
+}
+
+export const DEFAULT_AGENT_PROFILE: AgentProfile = {
+  toolSurface: "direct",
+  subagents: false,
+  limits: DEFAULT_CODE_MODE_LIMITS,
+};
+
+```
+
+- `toolSurface: "code"` は「モデルに `codemode` だけを見せる」。script からは callable な全ツールを呼べる。
+- `subagents: true` は「モデルに `subagent` ツールを足す」。`toolSurface` が `direct` でも `code` でもよい。
+- `limits` は code / subagent の両方に効く。`direct` + `subagents: false` では実質未使用。
+- UI の「Direct / Code / Delegate」などのプリセットは **UI の表現** で、保存するのは `AgentProfile`。
+- `AgentProfile` / `CodeModeLimits` は **`@hns/core`** に置く。理由: WS の snapshot / GraphQL / web が `@hns/agent` に依存できない（core は誰にも依存しない）。`@hns/agent` は core から import して re-export する。
+- `packages/core/src/agent-profile.ts` は valibot だけを import する。`AgentProfile` / `CodeModeLimits` は `type` alias（index signature を持たない）。`ConversationMetadata` は agent 側で `JsonObject`（`@earendil-works/pi-durable`）を extends し、`profile?: AgentProfile` を持つ。
+- 既存会話は `DEFAULT_AGENT_PROFILE`（direct / no subagents）。
+
+**なぜ 2 値ではないか**: 2 値は「code mode を使うか」と「subagent を使うか」を混ぜる。
+モデルの能力・コスト・危険度は別々に変わるので、別の軸にする。プリセットは後から増やせるが、データは増やさない。
+```ts
 export const CodeModeLimitsSchema: v.GenericSchema<unknown, CodeModeLimits> = v.strictObject({
   maxDepth: v.pipe(v.number(), v.integer(), v.minValue(0)),
   maxChildren: v.pipe(v.number(), v.integer(), v.minValue(0)),
@@ -131,29 +129,36 @@ export const AgentProfileSchema: v.GenericSchema<unknown, AgentProfile> = v.stri
 export function parseAgentProfile(value: unknown): AgentProfile {
   return v.parse(AgentProfileSchema, value);
 }
+```
 
-export interface RunBudget {
+### 1.1 RunBudget（agent の型）
+
+`RunBudget` は pi-durable の numeric `ConversationId` を持つため **core には置かない**。agent の `code-mode/contract.ts` に置く。
+
+```ts
+export type RunBudget = {
   readonly runId: string;
-  readonly conversationId: string;
-  readonly limits: CodeModeLimits;
+  readonly conversationId: ConversationId; // pi-durable の numeric brand
   readonly children: number;
   readonly subCalls: number;
   readonly activeChildren: number;
   readonly tokens: number;
   readonly startedAt: string;
-}
+};
 ```
 
 `maxTreeTokens: null` は「会話の日次予算（`docs/limits.md`）を超えない範囲で使う」の意味。
+`RunBudget.conversationId` と `ensureMetadata` の `id` は pi-durable の numeric `ConversationId`。doc の key は `String(id)` を使う（core の string brand と混ぜない）。
+`RunBudget` の実装・永続化は 0201 の `code-mode/budget.ts`。0199 は型だけを持ち、`limits` は profile から読む（RunBudget に複製しない）。
 gateway の USD 予算（`packages/server/src/gateway/budget.ts`）とは別物で、混ぜない。
 
 ### 2. profile は ConversationMetadata の内部 field
 
 `Conversation`（core）は変えない。profile は `ConversationMetadata`（[session.ts](../../packages/agent/src/session.ts) の session-scoped index）に置く。
-D1 の会話行を増やさず、既存の metadata と同じ commit で書ける。**metadata に `profile` を足すのは 0202**。
+D1 の会話行を増やさず、既存の metadata と同じ commit で書ける。**profile の書き込みは 0202**。
 
 ```ts
-export interface ConversationMetadata extends JsonObject {
+export interface ConversationMetadata extends JsonObject { // JsonObject は @earendil-works/pi-durable の型
   readonly title: string;
   readonly projectId: string;
   readonly createdAt: string;
@@ -187,7 +192,7 @@ export async function writeMetadata(tx: Tx, id: ConversationId, metadata: Conver
 
 ### 2.1 Conversation metadata
 
-`ConversationIndexDoc` は `conversation-metadata.ts` に新設する。既存 `session.ts` の旧定義の削除と import への切替は 0202（0199 は session.ts を触らない）。
+`ConversationIndexDoc` は `conversation-metadata.ts` へ移設し、`session.ts` の旧定義の削除と import への切替も 0199 で行う（0202 は import のみ）。
 `ConversationIndexDoc` の `kind` / `version` は変えない。`ensureMetadata` は entry が無いときだけ書き、`writeMetadata` は上書きする。
 これで subagent の子の `metadataOf` が throw しない。
 
@@ -284,8 +289,8 @@ core `EVENT_NAMES` への追加:
 | --- | --- | --- |
 | `packages/core/src/agent-profile.ts` | **0199** | `AgentProfile` / `CodeModeLimits`（wire でも使う語彙） |
 | `packages/core/src/index.ts` | **0199** | `agent-profile.ts` の re-export（public surface） |
-| `packages/agent/src/code-mode/contract.ts` | **0199** | failure code・`toCoreEventName`・`ModelHealth`・agent 側の re-export |
-| `packages/agent/src/conversation-metadata.ts` | **0199** | `ConversationMetadata` / `ConversationIndexDoc` / `ensureMetadata` / `writeMetadata` |
+| `packages/agent/src/code-mode/contract.ts` | **0199** | failure code・`toCoreEventName`・`ModelHealth`・`RunBudget`（numeric ConversationId）・agent 側の re-export |
+| `packages/agent/src/conversation-metadata.ts` | **0199** | `ConversationMetadata` / `ConversationIndexDoc` / `ensureMetadata` / `writeMetadata`（`session.ts` から移設） |
 | `packages/agent/src/code-mode/events.ts` | **0199** | `CodeModeEvent` / `CodeModeEventSink` |
 | `packages/core/src/types.ts` | **0199** | `EVENT_NAMES` の追加のみ |
 | `packages/agent/src/code-mode/codemode.ts` | **0200** | sandbox access、`codemode` 拡張、structured outputs |
@@ -310,13 +315,13 @@ code mode と capability（0220〜0229）は一部のファイルが重なる。
 
 | ファイル | code mode の所有者 | 競合 | 決め |
 | --- | --- | --- | --- |
-| `packages/agent/src/session.ts` | 0202 | 0149 / 0221 / 0226 | 0149 → 0202 → capability。0202 を先に統合する |
+| `packages/agent/src/session.ts` | 0199（移設）→ 0202 | 0149 / 0221 / 0226 | 0199 → 0149 → 0202 → capability。0199 は移設だけ、0202 が合成 |
 | `packages/server/src/do/{session,state,session-rpc}.ts` | 0203 | 0049 / 0222 / 0224 / 0226 | 0049 → 0203 → capability。0203 を先に統合する |
 | `tools/deploy/cloudflare.config.ts` | 0214 | 0224 | 0214 を先に統合する |
 | `packages/web/src/app/Shell.tsx` | 0215 | 0103 / 0229 | 0103 → 0215 → 0229。0105 の後 |
 | `packages/core/src/stream.ts` | 0105 | 0215 | 0105 → 0215 |
+| `packages/web/src/live/state.ts` | 0203（pass-through）→ 0215 | 0105 | 0203 → 0215。本描画は 0215 |
 | `packages/server/src/ws.ts` | 0105 | 0165 / 0215 | 0105 → 0165 → 0215 |
-| `packages/web/schema.graphql` / `src/__generated__` | 0215 | 0228 | 0228 → 0215 |
 | `packages/agent/src/{agent,tools,events}.ts` | 0221 | code mode | **code mode は触らない**。`code-mode/tools.ts` / `code-mode/events.ts` / `code-mode/codemode-node.ts` に閉じる |
 | `packages/core/src/types.ts` | 0199 | 0116 / 0117 / 0127 / 0129 / 0192 / 0197 | 0199 を先に統合する。他は rebase |
 | `work/BOARD.md` / `work/LANES.md` | lead | — | この issue 群の追加は lead が行う |
@@ -351,6 +356,12 @@ export class CodeModeError extends Error {
 - `depth_exceeded` / `children_exceeded`: 子の制限。
 - `sandbox_unavailable`: 選択後、sandbox の起動・実行が失敗した。profile 選択時の不在は `profile_unavailable`。
 
+| `budget.exceeded.scope` | 返す `CodeModeFailureCode` |
+| --- | --- |
+| `depth` | `depth_exceeded` |
+| `children` | `children_exceeded` |
+| `subcalls` / `tokens` / `wall` | `budget_exceeded` |
+
 ## テスト条件
 
 | ID | 条件（Given → When → Then） | リスク | 出所 |
@@ -367,7 +378,7 @@ export class CodeModeError extends Error {
 
 | ID | 条件 | 技法 | 層 | テスト |
 | --- | --- | --- | --- | --- |
-| T1 | C1 / C2 / C3 | 同値分割・境界 | unit | `packages/core/src/agent-profile.test.ts` / `packages/agent/src/code-mode/contract.test.ts` |
+| T1 | C1 / C2 / C3 | 同値分割・境界 | unit | `packages/core/src/agent-profile.test.ts` / `packages/agent/src/code-mode/contract.test.ts`（contract.ts の全 export を 1 度 import し、knip の unused export を防ぐ） |
 | T2 | C4 / C5 | 表 + 型 | unit | `packages/agent/src/code-mode/events.test.ts` |
 | T3 | C6 | 状態遷移 | unit（MemoryStorage） | `packages/agent/src/conversation-metadata.test.ts` |
 | T4 | C7 | ゲート | static | `npm run check` |
