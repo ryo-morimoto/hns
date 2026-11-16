@@ -14,6 +14,8 @@ import { projectIdFrom } from "../routes/ids.ts";
 import { formatHash } from "../routes/route.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
+import type { LiveSocketFactory } from "../live/client.ts";
+import { LiveConnection } from "./LiveConnection.tsx";
 import { QueryBoundary } from "./QueryBoundary.tsx";
 import {
   Sidebar,
@@ -37,6 +39,14 @@ export interface ShellProps {
   readonly panel?: ReactNode;
   /** Fixture-only until the overview API returns cross-workspace counts. */
   readonly summarySource?: (() => Promise<readonly WorkspaceSummary[]>) | undefined;
+  /**
+   * The live socket factory.
+   *
+   * @remarks
+   * Production passes the browser's WebSocket; tests leave it out, so a conversation route
+   * never opens a network connection. 0105 moves the subscription into the conversation screen.
+   */
+  readonly liveSocket?: LiveSocketFactory | undefined;
 }
 
 /**
@@ -56,7 +66,7 @@ export function Shell(props: ShellProps): ReactElement {
 }
 
 /** Run the shell's two reads and hand the fragment refs to the frame. */
-function ShellData({ onOpenCommand, panel, summarySource }: ShellProps): ReactElement {
+function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellProps): ReactElement {
   const route = useRoute();
   const projectKey = route.projectId === null ? null : projectIdFrom(route.projectId);
   const hasProject = projectKey !== null;
@@ -98,6 +108,7 @@ function ShellData({ onOpenCommand, panel, summarySource }: ShellProps): ReactEl
       conversationsFailed={hasProject && conversationsRef === null}
       tasksRef={tasksRef}
       tasksFailed={hasProject && tasksRef === null}
+      liveSocket={liveSocket}
     />
   );
 }
@@ -122,6 +133,7 @@ function ShellFrame({
   conversationsFailed,
   tasksRef,
   tasksFailed,
+  liveSocket,
 }: ShellFrameProps): ReactElement {
   const route = useRoute();
   const mobile = useMediaQuery("(max-width: 768px)");
@@ -221,6 +233,7 @@ function ShellFrame({
             project={project}
             conversationId={route.conversationId}
             title={conversationTitle}
+            liveSocket={liveSocket}
           />
         ) : (
           <WorkspaceView project={project} conversations={conversations} tasks={tasks} />
@@ -303,15 +316,24 @@ interface ConversationViewProps {
   readonly project: ProjectLink;
   readonly conversationId: string;
   readonly title: string | undefined;
+  readonly liveSocket: LiveSocketFactory | undefined;
 }
 
-function ConversationView({ project, conversationId, title }: ConversationViewProps): ReactElement {
+function ConversationView({
+  project,
+  conversationId,
+  title,
+  liveSocket,
+}: ConversationViewProps): ReactElement {
   return (
     <section className="hns-view" aria-labelledby="conversation-title">
       <h1 id="conversation-title">{title ?? "会話"}</h1>
       <p className="hns-view__meta">
         {project.name} · {conversationId}
       </p>
+      {liveSocket === undefined ? null : (
+        <LiveConnection conversationId={conversationId} socket={liveSocket} />
+      )}
       <a className="hns-view__link" href={formatHash({ kind: "workspace", projectId: project.id })}>
         ワークスペースへ戻る
       </a>

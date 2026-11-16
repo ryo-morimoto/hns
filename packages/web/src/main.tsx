@@ -6,6 +6,7 @@ import { Shell } from "./app/Shell.tsx";
 import { fixtureSummarySource } from "./app/fixtureSummaries.ts";
 import { applyTheme, readTheme } from "./app/theme.ts";
 import { Gallery } from "./design/Gallery.tsx";
+import { browserLiveSocket } from "./live/client.ts";
 import { createEnvironment } from "./relay/environment.ts";
 import "./design/system.css";
 
@@ -29,7 +30,7 @@ createRoot(container).render(
     ) : (
       <RelayEnvironmentProvider environment={environment}>
         <QueryClientProvider client={queryClient}>
-          <Shell summarySource={fixtureSummarySource} />
+          <Shell summarySource={fixtureSummarySource} liveSocket={browserLiveSocket} />
         </QueryClientProvider>
       </RelayEnvironmentProvider>
     )}

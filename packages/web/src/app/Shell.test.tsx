@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, afterEach, beforeEach, test } from "vitest";
@@ -7,6 +8,8 @@ import { RelayEnvironmentProvider } from "react-relay";
 import { createTestEnvironment } from "../../test/support/relay.ts";
 import type { Environment } from "relay-runtime";
 import { workspaceFixture } from "../../test/support/workspaceFixtures.ts";
+import { socketFactory } from "../../test/live/support.ts";
+import type { LiveSocketFactory } from "../live/client.ts";
 import { fixtureSummarySource } from "./fixtureSummaries.ts";
 import { Shell } from "./Shell.tsx";
 import type { WorkspaceSummary } from "./workspaceSummary.ts";
@@ -42,13 +45,19 @@ function renderShell(
   onOpenCommand?: () => void,
   panel?: ReactNode,
   summarySource?: () => Promise<readonly WorkspaceSummary[]>,
+  liveSocket?: LiveSocketFactory,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const { environment } = createTestEnvironment(workspaceFixture);
   return render(
     <RelayEnvironmentProvider environment={environment}>
       <QueryClientProvider client={queryClient}>
-        <Shell onOpenCommand={onOpenCommand} panel={panel} summarySource={summarySource} />
+        <Shell
+          onOpenCommand={onOpenCommand}
+          panel={panel}
+          summarySource={summarySource}
+          liveSocket={liveSocket}
+        />
       </QueryClientProvider>
     </RelayEnvironmentProvider>,
   );
@@ -270,4 +279,24 @@ test("mobile opens the drawer from the top bar", async () => {
   await waitFor(() => {
     expect(screen.queryByRole("dialog", { name: "メニュー" })).toBe(null);
   });
+});
+// Catches: the conversation route never mounting the live status, so a disconnected user sees nothing.
+test("a conversation route shows the live status when a socket is provided", async () => {
+  Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+  window.location.hash = "#/p/project-hns/c/conversation-intent";
+  const { factory, sockets } = socketFactory();
+  renderShell(undefined, undefined, undefined, factory);
+
+  expect(await screen.findByText("ライブ更新に接続しています。")).toBeTruthy();
+  act(() => {
+    sockets[0]?.open();
+  });
+  expect(screen.getAllByRole("status").some((element) => element.textContent === "接続済み")).toBe(
+    true,
+  );
+
+  act(() => {
+    sockets[0]?.drop();
+  });
+  expect(screen.getByText(/1回目の再接続/u)).toBeTruthy();
 });
