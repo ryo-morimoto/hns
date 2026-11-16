@@ -1,7 +1,7 @@
 # 0169: Journal と切り詰め（append・watermark・256KB閾値）
 
-status: in-progress
-priority: plan
+status: done
+priority: now
 design: agreed
 design-ref: docs/durability.md §5
 depends-on: 0141, 0156
@@ -76,8 +76,19 @@ Workspace DO の中の Journal を append 専用にし、checkpoint の watermar
 - 保持と GC（0168）。
 - restore と、Journal を読む wire 形式（0155）。
 
+## Result
+
+- verdict: **PASS**（reviewer-0169、blocking 0）
+- reviewer: reviewer-0169（この変更を書いていない別エージェント）
+- HEAD: 4fc9c7c（main に ff 統合）
+- 受入: 8/8。`npm run check` exit 0（549 tests / 98 files、36.0s）
+- 確認: append-only（INSERT のみ、UPDATE は meta の seq / watermark）、seq は transaction で採番。1 表に 4 種を kind で持ち、CHECK と parser で閉じる。256KB ちょうどは行内、+1 は R2 に 1 回 put してから行を確定（失敗時は行なし）。watermark は未確定 intent を越える要求と後退を 409。cursor は keyset、operationId の再送は outcome を返す。実 SQLite の unit 16 + cf dev の watermark 永続 1。
+- 非 blocking（低 8、follow-up）: コードの TSDoc に issue 番号（0168 / 0154）/ watermark が未来の seq を受理し得る（0154 は commit 前に N を捕捉）/ unsafe integer は 500 / CHECK の説明が parser の不変条件より強い / read で sha256 を再計算しない / read が body を全件 materialize（0155 で byte 上限）/ docs/packages の store 説明が journal を反映していない / 語彙の手写しが core と部分集合でしか結ばれない・行数定数を API で強制していない。
+
 ## Log
 
 - 2026-11-07: 作成（0156 から分割。D048）。
+- 2026-11-17: 第2波で now へ（0153 の R2 ストアと 0156 の Workspace DO が揃った）。
 - 2026-11-17: 実装前のテスト分析・設計を追加（C1–C11 / T1–T11）。`touches` を実装に合わせて更新: テストは include に入る `packages/server/src/do/journal.test.ts`、store の公開面 `packages/store/src/index.ts`、DO 配線の `packages/server/src/do/workspace.ts`、共有する SQLite fake の `packages/server/test/support/sqlite.ts` と `workspace.test.ts`、cf dev の `workspace-do.test.ts`。`store/src/migrations/0003` は不要（DO の表は DO が作る）。
 - 2026-11-17: 実装。`@hns/store/journal` に1表（`journal`）の DDL・行 schema・`parse`・本文の object key と語彙を置き、`packages/server/src/do/journal.ts` に append（intent / outcome / audit / event）・operationId の再送照合・operationId ごとの unique 部分 index・cursor 読み出し・watermark と切り詰めを実装。本文は 256KB まで行、超えるものは `env.OBJECTS` に1回 put してから行を確定する。`Workspace` は Journal を初期化し、`POST /rpc/journal/watermark` を公開（下げる要求と未確定 intent を越える要求は 409）。unit 16（実 SQLite、fake bucket、同時 append・境界・故障・再送）+ DO の unit（watermark RPC）+ cf dev の integration 1。`npm run check` exit 0（549 tests / 98 files）。
+- 2026-11-17: reviewer-0169 PASS（blocking 0）。main へ ff 統合（4fc9c7c）。低 8 を Result に記録。
