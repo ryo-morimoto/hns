@@ -66,7 +66,7 @@ export type HelperRequest =
 export type HelperReply =
   | { readonly ok: true; readonly dev: number; readonly ino: number }
   | { readonly ok: true; readonly version: string }
-  | { readonly ok: true; readonly base64: string }
+  | { readonly ok: true; readonly base64: string; readonly size: number }
   | { readonly ok: true; readonly status: "applied" }
   | { readonly ok: true; readonly status: "conflict"; readonly currentVersion: string }
   | { readonly ok: false; readonly code: string; readonly message: string };
@@ -113,7 +113,11 @@ const ReplySchema = v.union([
   v.object({ ok: v.literal(false), code: v.string(), message: v.string() }),
   v.object({ ok: v.literal(true), dev: v.number(), ino: v.number() }),
   v.object({ ok: v.literal(true), version: v.string() }),
-  v.object({ ok: v.literal(true), base64: v.string() }),
+  v.object({
+    ok: v.literal(true),
+    base64: v.string(),
+    size: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  }),
   v.object({ ok: v.literal(true), status: v.literal("applied") }),
   v.object({ ok: v.literal(true), status: v.literal("conflict"), currentVersion: v.string() }),
 ]);
@@ -173,10 +177,13 @@ export function parseReply(op: HelperOp, text: string): HelperOutcome {
       return "version" in reply
         ? { kind: "version", version: reply.version }
         : failed("io", "no version");
-    case "read":
-      return "base64" in reply
-        ? { kind: "content", bytes: Buffer.from(reply.base64, "base64") }
-        : failed("io", "no content");
+    case "read": {
+      if (!("base64" in reply) || !("size" in reply)) return failed("io", "no content");
+      const bytes = Buffer.from(reply.base64, "base64");
+      // Base64 decoders drop bad characters, so the length is the only sign of a cut reply.
+      if (bytes.length !== reply.size) return failed("io", "the helper reply is the wrong length");
+      return { kind: "content", bytes };
+    }
     case "commit":
       if (!("status" in reply)) return failed("io", "no verdict");
       if (reply.status === "applied") return { kind: "applied" };

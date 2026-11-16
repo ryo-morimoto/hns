@@ -306,7 +306,8 @@ async function run(request: HelperRequest): Promise<HelperReply> {
         await attempt(() => rename(procFd(root.fd, request.temp), target), "rename");
         return { ok: true, status: "applied" };
       }
-      return { ok: true, base64: await readContent(root, parent, name) };
+      const content = await readContent(root, parent, name);
+      return { ok: true, base64: content.base64, size: content.size };
     } finally {
       if (parent !== undefined) await parent.close();
     }
@@ -334,7 +335,8 @@ async function probe(request: HelperRequest): Promise<HelperReply> {
 /**
  * Read a regular file's content, bounded by `MAX_READ`.
  *
- * @returns The content as base64, because stdout is the only reply channel.
+ * @returns The content as base64, because stdout is the only reply channel, and
+ * the number of bytes encoded, so the client can detect a cut reply.
  * @throws {Failure} `too_large` above 8 MiB, so one read cannot exhaust the
  * pipe or the caller's memory.
  */
@@ -342,7 +344,7 @@ async function readContent(
   root: FileHandle,
   parent: FileHandle | undefined,
   name: string,
-): Promise<string> {
+): Promise<{ readonly base64: string; readonly size: number }> {
   const file = await openTarget(root, parent, name);
   try {
     const size = await expectRegular(file);
@@ -354,7 +356,7 @@ async function readContent(
       if (bytesRead === 0) break;
       offset += bytesRead;
     }
-    return buffer.subarray(0, offset).toString("base64");
+    return { base64: buffer.subarray(0, offset).toString("base64"), size: offset };
   } finally {
     await file.close();
   }
