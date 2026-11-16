@@ -1029,4 +1029,20 @@ date: 2026-11-16 · by: user · issue: 0176
 
 前提が変わる条件: 0149 の索引が会話の読み先を D1 に変えたとき（resolver の読み先だけが変わる）、または subscriptions（0159）を同じ schema に載せるとき。
 
+## D074: web は Relay 20.1.1 で読み、schema は server から生成する
+
+date: 2026-11-17 · by: user · issue: 0178
+
+D055 の「Relay を使う」を実装に落とす。react-relay / relay-runtime 20.1.1、relay-compiler 20.1.1、babel-plugin-relay 20.1.1、graphql 16.11.0 を exact pin する（PoC の実測と同じ組）。`@types/react-relay` / `@types/relay-runtime` は型だけ。
+
+- `graphql` タグは babel-plugin-relay でコンパイルする。@vitejs/plugin-react 6 は babel オプションを持たないため、`packages/web/vite.relay.ts` の小さな plugin（@babel/core + babel-plugin-relay）を build と vitest の両方で使う。
+- schema は `npm run codegen` が `@hns/server/graphql` の `buildSchemaSdl()` から `packages/web/schema.graphql` に書き、relay-compiler が `packages/web/src/__generated__/` に artifact を出す。**どちらも commit する**（0180 が drift をゲートで落とす）。
+- 読みは 1 箇所の environment（network + store）に集め、fetch を注入できる。テストは実 fetch を出さない。
+- TanStack Query は画面状態（ローディング・再取得の契機）に残す。読みの正本は Relay の store。
+
+却下: schema を手で持つ（SDL が正本に反する）、graphql-codegen で web の型を作る（型は core のモデル）、vite-plugin-relay を足す（20 行の plugin で足り、依存を増やさない）、artifact を commit しない（ビルド時生成だけでは型検査が stale を見逃す）。
+
+前提が変わる条件: Relay が babel を不要にしたとき、artifact の量がレビューを圧迫したとき、または subscriptions（0159）で同じ plugin が使えなくなったとき。
+
+
 
