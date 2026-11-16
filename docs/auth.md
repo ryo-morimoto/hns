@@ -62,6 +62,7 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
 | service 秘密の暗号化鍵 | Worker の secret | Worker（service 秘密の暗号化・復号） | repo / ログ / マシン / エージェント | rotate は service 秘密と webhook token の再暗号化。失効は全 service 秘密と webhook の停止 |
 | DEK | DO に **包んだ DEK** だけ（PRF 包み・復旧コード包み）。平文は unlocked 中のブラウザとサーバセッションのメモリだけ | ブラウザ（PRF unwrap）/ サーバセッション（unlocked） | DO の永続ストレージ（平文） / ログ / マシン | パスキー追加・復旧コード再発行で包み直す。紛失端末の包みは削除。漏洩時は作り直す |
 | マシンのデバイス鍵 | 秘密鍵はマシン（0600）。公開鍵は D1 の Machine レコード（D049） | machine agent / Worker | Cloudflare に秘密鍵を置かない | D1 の公開鍵を無効化 → 再登録 |
+| control-plane 鍵（inbound の署名） | 秘密鍵は Worker の secret。公開鍵は enrollment でマシンへ配る（複数可） | Worker（署名）/ machine agent（検証） | repo / ログ / 平文のファイル | 旧鍵と新鍵を併記 → 配布 → 旧鍵を削除 |
 | cloudflared tunnel token | マシンの secret（0600、`~/.config/hns/cloudflared`）。agent の bash からは hide | cloudflared だけ | Cloudflare / repo / ログ / エージェントの env | tunnel を再作成して token を入れ替える |
 | セッション cookie の署名鍵 | Worker の secret | Worker | repo / クライアント | rotate すると全セッションが切れる（許容） |
 
@@ -130,6 +131,17 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
 - 紛失した端末の包み（`user_keys` の行）は削除する。他の包みは残す（D021）。
 - マシンのデバイス鍵は秘密鍵をマシンに、公開鍵を D1 の Machine レコードに置く（D049）。秘密鍵を Cloudflare に送らない。
 - セッション cookie の署名鍵は Worker の secret。rotate は全セッション失効として扱う。
+
+### control-plane 鍵（inbound の署名）
+
+- **inbound（Worker → マシン）の要求は control-plane の Ed25519 鍵で署名する。** 秘密鍵は Worker の secret だけに置き、
+  repo・ログ・マシンに置かない。公開鍵は enrollment でマシンへ配り、マシンはその公開鍵で検証する（0147）。
+- **ローテーションのため、マシンは複数の公開鍵を持つ。** 旧鍵と新鍵を併記した状態で配布し、疎通を確認してから
+  旧鍵を配布リストから外す。外れた鍵の署名は次の要求から 401 になる。
+- **device key とは用途を分ける。** device key（秘密はマシン 0600、公開鍵は D1 の Machine レコード）は
+  machine → Worker（登録・heartbeat・outbound）用で、inbound の検証には使わない。control-plane 鍵をマシンに
+  配るのは公開鍵だけで、秘密鍵は渡さない。
+- 0148 が両方を供給する（machine の device 公開鍵は D1、control-plane 公開鍵は enrollment）。
 
 ### sandbox の前提
 
