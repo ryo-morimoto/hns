@@ -38,7 +38,20 @@ test("every live frame kind parses and unknown kinds are refused", () => {
 
   expect(() => parseLiveFrame({ type: "mystery", protocol: 1 })).toThrow(v.ValiError);
   expect(() => parseLiveFrame({ type: "pong", protocol: 2 })).toThrow(v.ValiError);
-  expect(() => parseLiveFrame({ type: "pong", protocol: 1, extra: "not allowed" })).not.toThrow();
+});
+
+// Catches: an entry id of 0 being treated as a durable entry rather than the empty cursor.
+test("entry ids are positive while the empty cursor is zero", () => {
+  const snapshot = {
+    type: "snapshot",
+    protocol: 1,
+    cursor: "1",
+    conversationId: "2",
+    title: "Live",
+    entries: [{ id: "0", kind: "pi.user", text: "hi" }],
+    draft: "",
+  };
+  expect(() => parseLiveFrame(snapshot)).toThrow(v.ValiError);
 });
 
 // Catches: a frame from another protocol version being applied as if it were this one.

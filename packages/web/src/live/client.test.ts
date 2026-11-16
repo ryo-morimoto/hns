@@ -100,3 +100,15 @@ test("retry clears the attempt count and opens a fresh socket", () => {
   expect(client.state.attempt).toBe(0);
   expect(sockets).toHaveLength(2);
 });
+
+// Catches: a stale close from the replaced socket scheduling a second reconnect.
+test("retry does not let the replaced socket schedule another reconnect", () => {
+  const { client, sockets, scheduled } = clientWithQueue();
+  sockets[0]?.open();
+  client.retry();
+  expect(sockets).toHaveLength(2);
+  expect(scheduled).toHaveLength(0);
+  sockets[0]?.drop();
+  expect(scheduled).toHaveLength(0);
+  expect(client.state.status).toBe("connecting");
+});

@@ -130,6 +130,12 @@ export type LiveFrame =
 /** One client-to-server message. */
 export type LiveClientMessage = { readonly type: "ping" } | { readonly type: "resync" };
 
+const IdSchema = v.pipe(
+  v.string(),
+  v.regex(/^[1-9][0-9]*$/u),
+  v.check((value) => Number.isSafeInteger(Number(value)), "entry id is out of range"),
+);
+
 const CursorSchema = v.pipe(
   v.string(),
   v.regex(/^(0|[1-9][0-9]*)$/u),
@@ -137,7 +143,7 @@ const CursorSchema = v.pipe(
 );
 
 const LiveEntrySchema = v.object({
-  id: CursorSchema,
+  id: IdSchema,
   kind: v.pipe(v.string(), v.minLength(1)),
   text: v.string(),
 });

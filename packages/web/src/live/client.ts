@@ -126,9 +126,13 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
     const nextSocket = options.socket(socketUrl(path, options.conversationId, state.cursor));
     socket = nextSocket;
     nextSocket.onopen = () => {
+      if (socket !== nextSocket) return;
+      cancelRetry?.();
+      cancelRetry = undefined;
       publish({ ...state, status: "online", attempt: 0, error: null });
     };
     nextSocket.onmessage = (event) => {
+      if (socket !== nextSocket) return;
       let value: unknown;
       try {
         value = JSON.parse(event.data);
@@ -143,6 +147,7 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
       }
     };
     nextSocket.onclose = () => {
+      if (socket !== nextSocket) return;
       socket = undefined;
       if (closed) return;
       const attempt = state.attempt + 1;
@@ -174,12 +179,17 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
       closed = true;
       cancelRetry?.();
       cancelRetry = undefined;
-      socket?.close();
+      const previous = socket;
       socket = undefined;
+      previous?.close();
     },
     retry() {
       if (closed) return;
       cancelRetry?.();
+      cancelRetry = undefined;
+      const previous = socket;
+      socket = undefined;
+      previous?.close();
       publish({ ...state, status: "connecting", attempt: 0, error: null });
       connect();
     },

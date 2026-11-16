@@ -378,7 +378,9 @@ export class LiveConnection {
  * @remarks
  * The conversation is checked before the upgrade, so an unknown id is a 404 rather than an
  * accepted socket that immediately errors. The initial snapshot is sent before the watch starts;
- * changes in between are queued by the watch and arrive as appends.
+ * changes in between are queued by the watch and arrive as appends. A client `cursor` in the query
+ * is accepted for correlation, but the snapshot is authoritative: the client never has to replay
+ * its cursor to reconstruct the view.
  */
 export async function openLiveSocket(options: {
   readonly request: Request;
