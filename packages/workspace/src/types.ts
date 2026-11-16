@@ -66,7 +66,8 @@ export type FileEventDraft =
  * @remarks
  * Written for refusals and containment violations. A FileFailure is reported to
  * the caller but not audited, because it is an environment failure rather than a
- * refusal.
+ * refusal. A temp file that could not be removed is recorded here too, so a
+ * failed cleanup is not silent; its reason names the temp step.
  */
 export interface AuditEntry {
   /** ISO 8601 (UTC). */

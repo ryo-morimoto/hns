@@ -262,6 +262,7 @@ export class Workspace {
     }
     this.#identityPath = this.#canonicalRoot + "/.hns/root.json";
     this.#identity = await this.#establishIdentity();
+    await this.#removeOrphanTemps();
     this.#rooted = this.#rootedAllowed
       ? await Rooted.probe({
           env: this.#env,
@@ -909,7 +910,7 @@ export class Workspace {
       // Compare and rename inside the helper, under one pinned parent.
       const committed = await this.#commitRooted(rec, abs, expectedVersion);
       if (committed.status === "conflict") {
-        await this.#removeTemp(rec);
+        await this.#removeTemp(rec, operationId);
         return this.#record(operationId, {
           status: "conflict",
           operationId,
@@ -917,13 +918,13 @@ export class Workspace {
         });
       }
       if (committed.status !== "applied") {
-        await this.#removeTemp(rec);
+        await this.#removeTemp(rec, operationId);
         return this.#record(operationId, { status: "unknown", operationId, reason: "io" });
       }
     } else {
       const again = await this.#versionOfFile(abs);
       if (again !== expectedVersion) {
-        await this.#removeTemp(rec);
+        await this.#removeTemp(rec, operationId);
         return this.#record(operationId, {
           status: "conflict",
           operationId,
@@ -933,14 +934,14 @@ export class Workspace {
       const parent = abs.slice(0, abs.lastIndexOf("/"));
       const parentNow = await this.#canonicalForWrite(parent);
       if (parentNow !== parent) {
-        await this.#removeTemp(rec);
+        await this.#removeTemp(rec, operationId);
         return this.#record(operationId, { status: "unknown", operationId, reason: "io" });
       }
       try {
         await this.#verifyIdentity();
       } catch (error) {
         if (!(error instanceof Denied)) throw error;
-        await this.#removeTemp(rec);
+        await this.#removeTemp(rec, operationId);
         return this.#record(operationId, { status: "unknown", operationId, reason: "io" });
       }
       this.#require(await this.#env.renameFile(rec.temp, abs, this.#context), "rename");
@@ -971,13 +972,57 @@ export class Workspace {
   /**
    * Remove the temp file after a commit that did not apply.
    *
+   * @param rec - The intent whose temp is no longer needed.
+   * @param operationId - The attempt, for the audit entry when the removal fails.
+   *
    * @remarks
-   * Best effort: the result is not checked. A temp that cannot be removed stays
-   * beside the root under a name the watcher ignores, and a later write uses a
-   * fresh name, so it cannot be picked up by mistake.
+   * A removal that fails is audited rather than dropped: the orphan stays beside
+   * the root under a name the watcher ignores, so the audit trail is the only
+   * place it would surface. The write's own outcome is still recorded.
    */
-  async #removeTemp(rec: JournalIntent): Promise<void> {
-    await this.#env.remove(rec.temp, { force: true }, this.#context);
+  async #removeTemp(rec: JournalIntent, operationId: string): Promise<void> {
+    const removed = await this.#env.remove(rec.temp, { force: true }, this.#context);
+    if (removed.ok) return;
+    await this.#audit({
+      operationId,
+      path: rec.rel,
+      reason: "cannot remove temp: " + removed.error.message,
+      denied: true,
+    });
+  }
+
+  /**
+   * Remove temp files a previous write left in the root, except the ones a
+   * pending intent still owns.
+   *
+   * @remarks
+   * A crash after the intent was saved leaves its temp behind; recovery reads
+   * that intent, so its temp must stay. Every other `.hns-tmp-*` file directly
+   * in the root is orphaned. A listing that fails is not a reason to refuse the
+   * open; a removal that fails is audited and not retried here. A second journal
+   * over the same root is not supported, so only this journal's intents are
+   * spared.
+   */
+  async #removeOrphanTemps(): Promise<void> {
+    const listed = await this.#env.listDir(this.#canonicalRoot, this.#context);
+    if (!listed.ok) return;
+    const pending = new Set<string>();
+    for (const rec of Object.values(this.#journal.ops)) {
+      if (rec.outcome === undefined && rec.temp !== "") pending.add(rec.temp);
+    }
+    for (const entry of listed.value) {
+      if (entry.kind !== "file" || !entry.name.startsWith(".hns-tmp-")) continue;
+      const abs = this.#joinRoot(entry.name);
+      if (pending.has(abs)) continue;
+      const removed = await this.#env.remove(abs, { force: true }, this.#context);
+      if (removed.ok) continue;
+      await this.#audit({
+        operationId: null,
+        path: entry.name,
+        reason: "cannot remove orphan temp: " + removed.error.message,
+        denied: true,
+      });
+    }
   }
 
   /**

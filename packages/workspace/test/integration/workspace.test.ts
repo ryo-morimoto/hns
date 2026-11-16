@@ -292,6 +292,9 @@ for (const testTarget of targets) {
 
         expect(result.status).toBe("unknown");
         expect(await readdir(outside)).toStrictEqual([]);
+        expect(
+          (await readdir(rootOf(target, "swap"))).filter((entry) => entry.startsWith(".hns-tmp-")),
+        ).toStrictEqual([]);
         await trapped.close();
       });
     },
