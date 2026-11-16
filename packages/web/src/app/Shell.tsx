@@ -180,7 +180,6 @@ function ShellFrame({
       summariesPending={summarySource !== undefined && summaries.isPending}
       projectsFailed={projectsFailed}
       route={route}
-      loading={false}
       failed={failed}
       onClose={mobile ? () => setDrawerOpen(false) : undefined}
     />

@@ -8,9 +8,9 @@
 
 ## 読み
 
-読みは Relay の environment（`src/relay/environment.ts`）から行う。shell は `createRelaySource` を
-経由して `ProjectsQuery` / `WorkspaceQuery` を読み、選択を component へ移すのは 0179。
+読みは Relay が持つ。`Shell` が `ShellProjectsQuery` と `ShellWorkspaceQuery` を `useLazyLoadQuery`
+（`store-or-network`）で読み、`Sidebar` は `SidebarProjects` / `SidebarConversations` / `SidebarTasks`
+の fragment を `useFragment` で描く（選択は component が持つ）。project 未選択では会話・タスクの
+field を `@include(if: $hasProject)` で skip し、Session RPC を出さない。
 
-- `npm run dev -w @hns/web`: Vite。`/graphql` へは同じ origin で送る（配信は 0160）
-- `npm run typecheck / build / test -w @hns/web`
 - `npm run codegen`: schema と artifact の再生成（リポジトリのルートで実行）

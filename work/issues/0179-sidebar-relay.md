@@ -3,7 +3,7 @@
 status: in-progress
 priority: now
 depends-on: 0178, 0102
-touches: packages/web/src/app/, packages/web/test/, packages/web/src/__generated__/, work/issues/0179-sidebar-relay.md, work/BOARD.md, work/LANES.md
+touches: packages/web/src/app/, packages/web/test/, packages/web/src/__generated__/, packages/web/README.md, work/issues/0179-sidebar-relay.md, work/BOARD.md, work/LANES.md
 
 ## Goal
 
@@ -41,15 +41,15 @@ touches: packages/web/src/app/, packages/web/test/, packages/web/src/__generated
 ## Notes
 
 - 実測: 再訪 network 0、初回 12 RPC（[RESULTS.md](../../work/poc/graphql-relay/RESULTS.md) §14）
-- 鮮度: この時点では network-only で明示的に取り直す。方針は 0181
+- 鮮度: この時点は store-or-network（再訪 network 0）。network-only に切り替えるかの方針は 0181
 - 0115 の overview は 0149 の後に別 issue で通す
 
 ## Design: reference-level
 
-- 選択は component が持つ。`Sidebar` が `ProjectsQuery` と `WorkspaceQuery(projectId)` を `useLazyLoadQuery`（`fetchPolicy: "store-or-network"`）で読み、0178 の `createRelaySource` は削除する。Shell は route と選択だけを持つ。
-- 会話・タスクは 1 project = 1 `WorkspaceQuery`。初回の DO RPC は選択中のワークスペース数（1）に固定する。
+- 選択は component が持つ。`Sidebar` が `SidebarProjects` / `SidebarConversations` / `SidebarTasks` の fragment を定義し、`useFragment` で描く。Shell が2つの query（`ShellProjectsQuery`、`ShellWorkspaceQuery`）を `useLazyLoadQuery`（`fetchPolicy: "store-or-network"`）で実行し、fragment ref を渡す。0178 の `createRelaySource` は削除する。
+- 会話・タスクは 1 project = 1 `ShellWorkspaceQuery`。初回の DO RPC は選択中のワークスペース数（1）に固定する。project 未選択では `@include(if: $hasProject)` で field を skip し、request 自体を送らない。
 - 2 回目の表示は Relay の store から返る（network 0）。テストは harness の `calls` で数える。
-- 遅延・更新中は Suspense の fallback と `useIsFetching` の口を用意し、索引（0149）が入ったら「更新中」を出す。
+- 遅延は Suspense の fallback、失敗は `QueryBoundary` の画面（読み込み直すボタン）で答える。「更新中」の表示は索引（0149）で足す。
 - global id は表示に使わず、URL と model の比較は復号した raw id で行う（`fromGlobalId`）。
 
 ## やらないこと
@@ -60,4 +60,6 @@ touches: packages/web/src/app/, packages/web/test/, packages/web/src/__generated
 ## Log
 
 - 2026-11-10: 作成（user。D055）。
-- 2026-11-17: 実装。Sidebar が `SidebarProjects` / `SidebarConversations` / `SidebarTasks` の fragment を持ち、`useFragment` で描く。Shell は 2 つの query（`ShellProjectsQuery`、`ShellWorkspaceQuery`）を `useLazyLoadQuery`（store-or-network）で読み、project 未選択では `@include(if: $hasProject)` で会話・タスクを skip（DO RPC 0）。Suspense と ErrorBoundary を `QueryBoundary` に置き、0178 の `createRelaySource` と `fixtureSource` を削除した。web 38 tests / `npm run check` 通過。
+- 2026-11-17: 実装。Sidebar が `SidebarProjects` / `SidebarConversations` / `SidebarTasks` の fragment を持ち、`useFragment` で描く。Shell は 2 つの query（`ShellProjectsQuery`、`ShellWorkspaceQuery`）を `useLazyLoadQuery`（store-or-network）で読み、project 未選択では `@include(if: $hasProject)` で会話・タスクを skip（request を送らない）。Suspense と ErrorBoundary を `QueryBoundary` に置き、0178 の `createRelaySource` と `workspaceSource` を削除した。web 45 tests / `npm run check` 通過。
+- 2026-11-17: 独立レビュー PASS（blocking 0、低 8）。低を反映: README を現在に更新、Design / Notes を実装に合わせ、失敗画面に「読み込み直す」、`taskStatusOf` を閉じた union に、失敗系（typed failure / network / malformed id / unknown status）のテストを追加、dead な `loading` prop を削除。
+- 残件（低）: Suspense がシェル全体を包むため、初回と未キャッシュの切替では chrome も fallback に替わる（本文・サイドバー単位の boundary は 0149 以降の仕上げ）。project 未選択時は skip 用の sentinel id を組み立てる（request は送られない）。

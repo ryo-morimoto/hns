@@ -22,7 +22,10 @@ function ShellFailure(): ReactElement {
       <main className="hns-shell__main">
         <section className="hns-view">
           <h1>読み込めません</h1>
-          <p className="hns-view__note">接続を確かめて、もう一度開いてください。</p>
+          <p className="hns-view__note">接続を確かめて、読み込み直してください。</p>
+          <button type="button" className="hns-view__link" onClick={() => window.location.reload()}>
+            読み込み直す
+          </button>
         </section>
       </main>
     </div>

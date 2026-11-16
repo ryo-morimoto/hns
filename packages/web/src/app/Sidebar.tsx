@@ -7,8 +7,8 @@ import type { SidebarTasks$key } from "../__generated__/SidebarTasks.graphql";
 import { Badge } from "../components/Badge.tsx";
 import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
-import { formatHash, type Route } from "../routes/route.ts";
 import { Skeleton } from "../components/Skeleton.tsx";
+import { formatHash, type Route } from "../routes/route.ts";
 import { formatRelative } from "./relativeTime.ts";
 import { conversationLinkOf, projectLinkOf, taskLinkOf, type ProjectLink } from "./viewModel.ts";
 import { breakdownOf, totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
@@ -55,7 +55,7 @@ export interface SidebarProps {
   /** True when the shell's project read returned a typed failure. */
   readonly projectsFailed: boolean;
   readonly route: Route;
-  readonly loading: boolean;
+  /** True when the selected workspace's read returned a typed failure. */
   readonly failed: boolean;
   readonly onClose?: (() => void) | undefined;
 }
@@ -167,7 +167,6 @@ export function Sidebar({
   summariesPending,
   projectsFailed,
   route,
-  loading,
   failed,
   onClose,
 }: SidebarProps): ReactElement {
@@ -269,9 +268,8 @@ export function Sidebar({
                     aria-label={project.name + " の作業"}
                   >
                     <h3 className="hns-sidebar__subtitle">会話</h3>
-                    {loading ? <Skeleton width="80%" height={10} /> : null}
                     {failed ? <p className="hns-sidebar__empty">読み込めません</p> : null}
-                    {!loading && !failed && conversations.length === 0 ? (
+                    {!failed && conversations.length === 0 ? (
                       <p className="hns-sidebar__empty">会話はありません</p>
                     ) : null}
                     <ul className="hns-sidebar__list">

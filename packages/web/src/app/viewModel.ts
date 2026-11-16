@@ -37,8 +37,11 @@ function rawId(globalId: string, type: string): string {
   return decoded.value.id;
 }
 
-/** The GraphQL enum name to the model's status. */
-function taskStatusOf(value: string): TaskStatus {
+/** The GraphQL enum names the schema defines, plus the forward-compatibility marker. */
+type TaskStatusName = "TODO" | "DOING" | "DONE" | "BLOCKED" | "%future added value";
+
+/** The GraphQL enum name to the model's status; the union is closed. */
+function taskStatusOf(value: TaskStatusName): TaskStatus {
   switch (value) {
     case "TODO":
       return "todo";
@@ -50,8 +53,6 @@ function taskStatusOf(value: string): TaskStatus {
       return "blocked";
     case "%future added value":
       throw new Error("the server sent a task status this build does not know");
-    default:
-      throw new Error("the server sent an unknown task status: " + value);
   }
 }
 
@@ -83,7 +84,7 @@ export function conversationLinkOf(view: {
 export function taskLinkOf(view: {
   readonly id: string;
   readonly title: string;
-  readonly status: string;
+  readonly status: TaskStatusName;
 }): TaskLink {
   return {
     id: rawId(view.id, "Task"),
