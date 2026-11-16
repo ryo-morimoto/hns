@@ -1,0 +1,34 @@
+schema: 1
+issue: "0177"
+intent: "Relay の正規化 store が同じ raw id を2つの型に割り当てないよう、GraphQL の境界で id を型付きにする"
+criteria:
+  - id: C1
+    kind: test
+    status: passed
+    evidence: "packages/core/src/graphql/global-id.test.ts（往復）"
+  - id: C2
+    kind: test
+    status: passed
+    evidence: "global-id.test.ts（Conversation 1 と Item 1 が別 id）"
+  - id: C3
+    kind: test
+    status: passed
+    evidence: "global-id.test.ts（空・base64 でない・区切り無し・空の型/id・不正 UTF-8）"
+  - id: C4
+    kind: test
+    status: passed
+    evidence: "packages/server/src/graphql/handler.test.ts（生 id / 別型の id は INVALID_ARGUMENT）"
+  - id: C5
+    kind: eval
+    status: passed
+    evidence: "npm run check（gate ok）と独立レビュー PASS"
+limits:
+  - "ブラウザの実 Relay store で衝突警告が消えることは未確認（web の配線は 0178）"
+  - "node interface は未実装（必要になったら）"
+decision:
+  by: "review-0177"
+  at: "2026-11-17T00:22:00.000Z"
+  basis: "blocking 0 の PASS。型接頭辞を外す壊し実験で C2 が落ちることを確認"
+invalidation:
+  - "Relay の node interface を足して id を再取得に使うとき"
+  - "REST 面を足して id の表現を共有するとき"

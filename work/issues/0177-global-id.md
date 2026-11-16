@@ -1,6 +1,6 @@
 # 0177: id を型をまたいで一意にする（Relay の store 要件）
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0176
 touches: packages/core/src, packages/core/test, packages/server/src/graphql/, packages/server/test/
@@ -55,6 +55,14 @@ Relay の正規化 store は、同じ id を 2 つの型に割り当てられな
 | --- | --- | --- |
 | Project | `toGlobalId("Project", "default")` | 一覧と参照の両方 |
 | Conversation | `toGlobalId("Conversation", "1")` | Task は raw id（型の衝突が無い）が、0177 では全部に付ける |
+
+## Result
+
+- verdict: **PASS**（blocking 0、低 4）
+- reviewer: review-0177（この変更を書いていない別エージェント）。判定時 HEAD fe5147c。
+- 受入: 5/5。`npm run check` は 334 tests で ok。
+- 低の修正（39e7b54）: Design の `unsupported_type` を削除、`TextDecoder` を fatal にして不正 UTF-8 を `malformed` に、空 id と GraphQL 名でない型のテストを追加、コード内の issue 番号を削除、CHANGELOG に新 API を追記。
+- 記録: [work/records/0177.yaml](../records/0177.yaml)（verified）。
 
 ## やらないこと
 
