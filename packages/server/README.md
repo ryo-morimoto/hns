@@ -48,6 +48,16 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
 - 会話の title / project / timestamps は session document（`hns.conversation.index`）に残る。
   pi-durable の conversation record は transcript と ID を持ち、一覧は `scanConversations` で引く。
 
+## Workspace Durable Object
+
+- `src/do/workspace.ts` — 1 ワークスペースに 1 つの `Workspace`。lease（epoch は発行のたびに増える）、
+  `path → 版` の表、Journal を持つ。書き込みの直列化点で、版の比較と記録は 1 トランザクション。
+- `src/do/journal.ts` — append 専用の Journal。intent / outcome / audit / event を 1 表に `kind` で持ち、
+  `seq` はトランザクションで採番する。本文は 256KB まで行に置き、超えるものは `env.OBJECTS` に置いて
+  hash / key だけ残す。読み出しは cursor、切り詰めは checkpoint の watermark（[durability.md §5](../../docs/durability.md)）。
+- 内部 RPC: `POST /rpc/apply`、`GET /rpc/read?path=`、`POST /rpc/journal/watermark`、
+  `POST /rpc/lease/{acquire,renew,release}`。edge には公開しない。
+
 ## D1 と DO
 
 - D1 は Worker だけが触る。DO から D1 を直接触らない（0150 / 0146）。

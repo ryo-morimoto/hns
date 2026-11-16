@@ -79,6 +79,12 @@ const Apply = v.object({
   ]),
 });
 const Refused = v.object({ ok: v.literal(false), code: v.picklist(LEASE_REFUSALS) });
+const Watermark = v.object({
+  ok: v.literal(true),
+  watermark: v.object({ throughSeq: v.number(), at: v.string() }),
+  truncated: v.number(),
+});
+const Conflict = v.object({ ok: v.literal(false), code: v.string() });
 
 interface Running {
   readonly child: ChildProcess;
@@ -341,6 +347,52 @@ test.skipIf(!existsSync(CF))(
         applyBody({ epoch: 2, expectedVersion: winnerVersion, version: "sha256:persisted" }),
       );
       expect(resumed.result.status).toBe("applied");
+    } finally {
+      await stop(running);
+      running = undefined;
+    }
+  },
+  TIMEOUT_MS,
+);
+
+test.skipIf(!existsSync(CF))(
+  "the Workspace DO keeps the journal watermark across a restart",
+  async () => {
+    project = await writeProject();
+    const firstPort = await freePort();
+    running = await start(project, firstPort);
+    try {
+      const written = await call(firstPort, "POST", "/t/rpc/journal/watermark", Watermark, {
+        workspaceId: "w1",
+        throughSeq: 7,
+      });
+      expect(written.watermark.throughSeq).toBe(7);
+      expect(written.truncated).toBe(0);
+
+      // Catches: a watermark moving backwards, which would replay absorbed entries.
+      const lower = await send(firstPort, "POST", "/t/rpc/journal/watermark", {
+        workspaceId: "w1",
+        throughSeq: 3,
+      });
+      expect(lower.status).toBe(409);
+      expect(v.parse(Conflict, JSON.parse(lower.text)).code).toBe("conflict");
+
+      await stop(running);
+      running = undefined;
+      const secondPort = await freePort();
+      running = await start(project, secondPort);
+
+      // Catches: a watermark that lives only in memory, not in the object's SQLite.
+      const persisted = await send(secondPort, "POST", "/t/rpc/journal/watermark", {
+        workspaceId: "w1",
+        throughSeq: 3,
+      });
+      expect(persisted.status).toBe(409);
+      const same = await call(secondPort, "POST", "/t/rpc/journal/watermark", Watermark, {
+        workspaceId: "w1",
+        throughSeq: 7,
+      });
+      expect(same.watermark.throughSeq).toBe(7);
     } finally {
       await stop(running);
       running = undefined;

@@ -1,10 +1,8 @@
 import { IsoTimestampSchema, LEASE_REFUSALS, type LeaseRefusal } from "@hns/core";
-import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
 import * as v from "valibot";
-import { Workspace, type WorkspaceState } from "./workspace.ts";
-
-type SqlValue = ArrayBuffer | string | number | null;
+import { openSqliteState } from "../../test/support/sqlite.ts";
+import { Workspace } from "./workspace.ts";
 
 const LeaseOk = v.object({
   ok: v.literal(true),
@@ -30,76 +28,6 @@ const ApplyOk = v.object({
 });
 const ProtocolFailure = v.object({ ok: v.literal(false), code: v.string() });
 
-/**
- * A SQLite-backed \`DurableObjectState\` for the unit layer.
- *
- * @remarks
- * The real object runs one transaction at a time and retries on conflict; \`queue\` models
- * that contract so a concurrent read-check-write is actually serialized here. The schema and
- * SQL are real \`node:sqlite\`, so a wrong column or constraint fails the test.
- */
-function openState() {
-  const db = new DatabaseSync(":memory:");
-  let queue: Promise<void> = Promise.resolve();
-  const state: WorkspaceState = {
-    storage: {
-      sql: {
-        exec(query, ...bindings) {
-          const values = bindings.map((value) =>
-            value instanceof ArrayBuffer ? new Uint8Array(value) : value,
-          );
-          const rows = db
-            .prepare(query)
-            .all(...values)
-            .map(toRow);
-          let index = 0;
-          return {
-            next() {
-              const value = rows[index];
-              if (value === undefined) return { done: true as const };
-              index += 1;
-              return { value };
-            },
-            toArray() {
-              return rows;
-            },
-          };
-        },
-      },
-      transaction<T>(run: () => Promise<T>): Promise<T> {
-        const result = queue.then(async () => {
-          db.exec("BEGIN IMMEDIATE");
-          try {
-            const value = await run();
-            db.exec("COMMIT");
-            return value;
-          } catch (error) {
-            db.exec("ROLLBACK");
-            throw error;
-          }
-        });
-        queue = result.then(
-          () => undefined,
-          () => undefined,
-        );
-        return result;
-      },
-    },
-    blockConcurrencyWhile<T>(run: () => Promise<T>): Promise<T> {
-      return run();
-    },
-  };
-  return { state, close: () => db.close() };
-}
-
-/** The values node:sqlite can return; its own SQLOutputValue is not exported. */
-type SqlRowValue = null | number | bigint | string | Uint8Array;
-
-/** Parse one node:sqlite row into the DO SQL binding's value shape. */
-function toRow(row: Record<string, SqlRowValue>): Record<string, SqlValue> {
-  return v.parse(v.record(v.string(), v.union([v.null(), v.string(), v.number()])), row);
-}
-
 interface Harness {
   readonly workspace: Workspace;
   advance(ms: number): void;
@@ -108,7 +36,7 @@ interface Harness {
 
 function harness(leaseTtlMs = 1_000): Harness {
   let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
-  const opened = openState();
+  const opened = openSqliteState();
   const workspace = new Workspace(opened.state, { now: () => nowMs, leaseTtlMs });
   return {
     workspace,

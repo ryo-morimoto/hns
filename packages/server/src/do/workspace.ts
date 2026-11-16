@@ -9,6 +9,7 @@ import {
 import * as v from "valibot";
 import { readBody } from "../edge/body.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
+import { Journal, JournalWatermarkError, type JournalBucket } from "./journal.ts";
 
 /** How long an issued lease stays valid unless renewed. */
 const DEFAULT_LEASE_TTL_MS = 60_000;
@@ -20,7 +21,7 @@ const LEASE_ACTIONS = ["acquire", "renew", "release"] as const;
 type LeaseAction = (typeof LEASE_ACTIONS)[number];
 
 /** The closed failure codes that are not lease refusals. */
-type WorkspaceRpcCode = "invalid_request" | "not_found" | "unavailable" | "internal";
+type WorkspaceRpcCode = "invalid_request" | "not_found" | "conflict" | "unavailable" | "internal";
 
 /** The slice of `DurableObjectState` the Workspace uses. */
 export interface WorkspaceState {
@@ -34,6 +35,20 @@ export interface WorkspaceOptions {
   readonly now?: (() => number) | undefined;
   /** Lease lifetime in milliseconds; defaults to 60 seconds. */
   readonly leaseTtlMs?: number | undefined;
+}
+
+/**
+ * The bindings the deploy passes as the constructor's second argument.
+ *
+ * @remarks
+ * Cloudflare constructs a Durable Object as `new Workspace(ctx, env)`, so the second argument is
+ * the Worker's environment, not only test options. The object declares the one binding it reads,
+ * structurally, so a fake and the real `R2Bucket` both fit; the Worker's `WorkerEnv.OBJECTS`
+ * remains the edge's own type.
+ */
+export interface WorkspaceBindings {
+  /** The bucket for journal bodies over 256KB. */
+  readonly OBJECTS?: JournalBucket | undefined;
 }
 
 interface StoredLease {
@@ -81,6 +96,11 @@ const ApplySchema = v.object({
   path: NonEmptyText,
   expectedVersion: NonEmptyText,
   version: NonEmptyText,
+});
+
+const WatermarkSchema = v.object({
+  workspaceId: NonEmptyText,
+  throughSeq: v.pipe(v.number(), v.integer(), v.minValue(0)),
 });
 
 const MetaRowSchema = v.object({ value: v.string() });
@@ -204,6 +224,9 @@ async function bodyOf(
  * comparison. A live lease gates every write; an expired lease or a stale epoch fails closed
  * with the core `LEASE_REFUSALS` vocabulary. Reads need no lease.
  *
+ * The object also owns the workspace's Journal (`./journal.ts`): entries are appended here and
+ * the checkpoint watermark truncates them. `env.OBJECTS` holds bodies over 256KB.
+ *
  * `apply` returns `applied` or `conflict`. The `unknown` member of `MutationResult`
  * describes a write whose transport died before the outcome reached the DO; this face never
  * produces it.
@@ -211,6 +234,7 @@ async function bodyOf(
  * RPC face (`/rpc`):
  * - `POST /rpc/apply` — compare and record a version.
  * - `GET /rpc/read?path=` — the recorded version, or `"absent"`.
+ * - `POST /rpc/journal/watermark` — write the checkpoint watermark and truncate the Journal.
  * - `POST /rpc/lease/acquire` — issue the workspace's only lease.
  * - `POST /rpc/lease/renew` — extend the holder's lease.
  * - `POST /rpc/lease/release` — drop the holder's lease.
@@ -224,14 +248,15 @@ export class Workspace {
   readonly #state: WorkspaceState;
   readonly #clock: () => number;
   readonly #leaseTtlMs: number;
+  readonly #journal: Journal;
   readonly #ready: Promise<void>;
 
   /**
    * @param state - The object's storage; tests provide a SQLite-backed fake.
-   * @param options - Clock and lease lifetime overrides; production uses the defaults.
+   * @param options - Options in tests, the Worker environment in production.
    * @throws RangeError when `leaseTtlMs` is not a positive integer.
    */
-  constructor(state: WorkspaceState, options: WorkspaceOptions = {}) {
+  constructor(state: WorkspaceState, options: WorkspaceOptions & WorkspaceBindings = {}) {
     const ttl = options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
     if (!Number.isSafeInteger(ttl) || ttl <= 0) {
       throw new RangeError("leaseTtlMs must be a positive integer");
@@ -239,6 +264,10 @@ export class Workspace {
     this.#state = state;
     this.#clock = options.now ?? (() => Date.now());
     this.#leaseTtlMs = ttl;
+    this.#journal = new Journal(state.storage, {
+      now: this.#clock,
+      bucket: options.OBJECTS,
+    });
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -252,6 +281,7 @@ export class Workspace {
     this.#exec(
       "CREATE TABLE IF NOT EXISTS workspace_version (path TEXT PRIMARY KEY, version TEXT NOT NULL)",
     );
+    this.#journal.ensureSchema();
   }
 
   /**
@@ -305,6 +335,15 @@ export class Workspace {
         return failure("invalid_request", "Only GET is allowed here.", 405);
       }
       return this.#read(url);
+    }
+    if (face === "journal") {
+      if (segments.length !== 3 || segments[2] !== "watermark") {
+        return failure("not_found", "No Workspace RPC route matches this path.", 404);
+      }
+      if (request.method !== "POST") {
+        return failure("invalid_request", "Only POST is allowed here.", 405);
+      }
+      return await this.#watermark(request);
     }
     if (face === "lease") {
       const action = segments[2];
@@ -419,6 +458,33 @@ export class Workspace {
       };
     });
     return outcome.ok ? json({ ok: true, result: outcome.result }) : refusal(outcome.code);
+  }
+
+  /**
+   * Write the checkpoint watermark and truncate what the checkpoint absorbed.
+   *
+   * @remarks
+   * The checkpoint flow (0154) calls this from the Worker; the object stays the serialization
+   * point for the Journal. A watermark that would move backwards, or pass an intent with no
+   * outcome, is refused with 409 instead of losing reconciliation evidence.
+   */
+  async #watermark(request: Request): Promise<Response> {
+    const body = await bodyOf(request);
+    if (!body.ok) return body.response;
+    const parsed = v.safeParse(WatermarkSchema, body.value);
+    if (!parsed.success) {
+      return failure("invalid_request", "Invalid journal watermark input.", 400);
+    }
+    this.#assertWorkspace(parsed.output.workspaceId);
+    try {
+      const written = await this.#journal.writeWatermark(parsed.output.throughSeq);
+      return json({ ok: true, watermark: written.watermark, truncated: written.truncated });
+    } catch (error) {
+      if (error instanceof JournalWatermarkError) {
+        return failure("conflict", error.message, 409);
+      }
+      throw error;
+    }
   }
 
   #read(url: URL): Response {

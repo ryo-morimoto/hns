@@ -1,5 +1,6 @@
 export * from "./schemas.ts";
 export * from "./parse.ts";
+export * from "./journal/index.ts";
 export { openStore } from "./store.ts";
 export type { Store, StoreOptions } from "./store.ts";
 export { migrateStore } from "./migrate.ts";

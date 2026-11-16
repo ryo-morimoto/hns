@@ -8,6 +8,7 @@ Cloudflare D1 の永続化。migration、リポジトリ、Row → 公開モデ�
 - `src/migrations/` — 1版1ファイル。表を足すときは `NNNN-name.ts` を足し、`index.ts` の `MIGRATIONS` に1行足す。
 - `src/store.ts` — `openStore({ d1 })`。projects / tasks / conversations / events / workflows / automations / usage を名前空間で公開する。
 - `src/schemas.ts` / `src/parse.ts` — Row の valibot schema と公開型への `parse`。不正な Row は throw する。
+- `src/journal/` — Workspace DO の Journal の行 schema・`parse`・本文の object key。表は DO が開くときに作り、D1 の migration ではない。
 - `src/repositories/` — 各リポジトリ。書き込みは1文か D1 の batch、読み取りは `parse` を通す。
 
 ```ts
@@ -28,4 +29,5 @@ identity（users / sessions / secrets）は `./identity` に分ける（0048）�
 
 `openStore` は migration を適用してから default project を用意する。`schema_migrations` が自分より新しい版を
 持つ DB は fail closed で開かない。`migrateStore(d1)` はリポジトリを開かずに migration だけを適用する。
-store は D1 専用で、`node:sqlite` は持たない（D064）。テストは workerd を起動するため integration 層に置く。
+store は DB ドライバを持たない（`node:sqlite` は持たない、D064）。D1 は binding、Journal は Workspace DO の SQLite で、
+ここは schema と `parse` だけを持つ。D1 のテストは workerd を起動するため integration 層に置く。
