@@ -1,7 +1,7 @@
 # 0059: agent の bash も観測する
 
 status: open
-priority: plan
+priority: now
 design: agreed
 design-ref: 設計を変えない（0034 の観測の揃え）
 depends-on: 0034
@@ -26,3 +26,4 @@ touches: packages/agent
 ## Log
 
 - 2026-11-07: 作成（コードレビューで bash だけ観測が無いのを見つけた）。
+- 2026-11-17: 第2波で now へ（0147 / 0159 の統合後）。BOARD は別セッションの編集が落ち着いてから lead が反映。

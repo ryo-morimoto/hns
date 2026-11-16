@@ -1,7 +1,7 @@
 # 0153: R2 オブジェクトストア（git object 互換・pack アップロード）
 
 status: open
-priority: plan
+priority: now
 design: agreed
 design-ref: D048, docs/durability.md §1・§5
 depends-on: 0141, 0144
@@ -33,3 +33,4 @@ touches: packages/workspace/src/objects.ts, packages/workspace/test/objects.test
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-17: 第2波で now へ（0154 の checkpoint と 0169 の 256KB 超の本文を開ける）。BOARD は別セッションの編集が落ち着いてから lead が反映。
