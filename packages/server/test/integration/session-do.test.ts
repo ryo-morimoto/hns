@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import * as v from "valibot";
+import { signSession } from "../../src/edge/session.ts";
 
 const ROOT = resolve(import.meta.dirname, "../../../..");
 const CF = join(ROOT, "node_modules", ".bin", "cf");
@@ -27,6 +28,7 @@ const CONFIG = [
   '      SESSION: bindings.durableObject({ worker: "hns-session-do-test", exportName: "Session" }),',
   '      HNS_ENV: bindings.text("dev"),',
   '      HNS_MODEL: bindings.text("faux/echo"),',
+  '      HNS_SESSION_SECRET: bindings.text("test-secret-0123456789abcdef0123456789"),',
   "    },",
   "  },",
   "});",
@@ -34,7 +36,7 @@ const CONFIG = [
 ].join("\n");
 
 const WORKER = [
-  'import { Session } from "@hns/server";',
+  'import worker, { Session } from "@hns/server";',
   "",
   "interface Env {",
   "  readonly SESSION: {",
@@ -49,9 +51,17 @@ const WORKER = [
   "  async fetch(request: Request, env: Env): Promise<Response> {",
   "    const url = new URL(request.url);",
   '    if (url.pathname === "/health") return new Response("ok");',
-  '    if (!url.pathname.startsWith("/t/")) return new Response("not found", { status: 404 });',
-  '    const forwarded = new Request("https://session" + url.pathname.slice(2) + url.search, request);',
-  '    return env.SESSION.get(env.SESSION.idFromName("test")).fetch(forwarded);',
+  '    if (url.pathname.startsWith("/t/")) {',
+  '      const forwarded = new Request("https://session" + url.pathname.slice(2) + url.search, request);',
+  '      return env.SESSION.get(env.SESSION.idFromName("default")).fetch(forwarded);',
+  "    }",
+  '    if (url.pathname === "/ws") {',
+  '      const cookie = url.searchParams.get("cookie");',
+  "      const headers = new Headers(request.headers);",
+  '      if (cookie !== null) headers.set("cookie", cookie);',
+  "      return worker.fetch(new Request(request, { headers }), env);",
+  "    }",
+  '    return new Response("not found", { status: 404 });',
   "  },",
   "};",
   "",
@@ -417,6 +427,48 @@ test.skipIf(!existsSync(CF) || !HAS_WEBSOCKET)(
       expect(reopened.cursor).not.toBe("0");
       expect(reopened.entries.filter((entry) => entry.kind === "pi.assistant")).toHaveLength(2);
       reconnect.close();
+    } finally {
+      await stop(running);
+      running = undefined;
+    }
+  },
+  TIMEOUT_MS,
+);
+
+// Catches: the production edge dropping the upgrade while forwarding to the Session DO.
+test.skipIf(!existsSync(CF) || !HAS_WEBSOCKET)(
+  "the production edge authenticates and forwards a live WebSocket",
+  async () => {
+    project = await writeProject();
+    const port = await freePort();
+    running = await start(project, port);
+    try {
+      const created = await call(port, "POST", "/t/rpc/conversations", Create, { title: "Edge" });
+      const id = created.conversation.id;
+      const cookie =
+        "hns_session=" +
+        (await signSession("test-secret-0123456789abcdef0123456789", {
+          subject: "owner",
+          expiresAt: Date.now() + 60_000,
+        }));
+      // A browser sends the cookie as a header; the test Worker reads this query and injects it,
+      // so the edge's authentication runs on the real upgrade request.
+      let socket: WebSocket;
+      try {
+        socket = await openSocket(
+          port,
+          "/ws?conversationId=" + id + "&cookie=" + encodeURIComponent(cookie),
+        );
+      } catch (error) {
+        throw new Error(String(error) + "\ncf dev output:\n" + (running?.output() ?? ""));
+      }
+      const first = v.parse(
+        Snapshot,
+        await withTimeout(frameReader(socket).next(), 10_000, "the edge snapshot"),
+      );
+      expect(first.conversationId).toBe(id);
+      expect(first.cursor).toBe("0");
+      socket.close();
     } finally {
       await stop(running);
       running = undefined;
