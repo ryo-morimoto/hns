@@ -11,7 +11,7 @@ import {
   parseReadResult,
   parseStatResult,
 } from "../../src/index.ts";
-import type { RefusalCode } from "../../src/index.ts";
+import type { MachineKeyRegistry, RefusalCode } from "../../src/index.ts";
 import { generateMachineKeys } from "../support/keys.ts";
 import { openSuspendedRequest, readAll, waitFor, withAgent } from "../support/machine.ts";
 import type { MachineAnswer } from "../support/machine.ts";
@@ -122,6 +122,28 @@ test("a replayed nonce is refused", async () => {
       expect(second.status).toBe(409);
       expect(codeOf(second)).toBe("replayed");
     },
+  );
+});
+
+test("a verification that never finishes meets the deadline", async () => {
+  const silent: MachineKeyRegistry = {
+    publicKey: () =>
+      new Promise<Uint8Array | undefined>(() => {
+        // Never settles: only the request deadline can end this request.
+      }),
+  };
+  await withAgent(
+    async () => {},
+    async (fixture) => {
+      const first = await fixture.call({ body: health });
+      expect(first.status).toBe(408);
+      expect(codeOf(first)).toBe("deadline_exceeded");
+      const second = await fixture.call({ body: health });
+      expect(second.status).toBe(408);
+      expect(codeOf(second)).toBe("deadline_exceeded");
+      expect(fixture.agent.inFlight).toBe(0);
+    },
+    { registry: silent, limits: { maxConcurrency: 1, timeoutMs: 100 } },
   );
 });
 
