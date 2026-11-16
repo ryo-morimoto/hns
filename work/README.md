@@ -64,7 +64,11 @@ blocking 指摘とその修正 commit を書き、途中の FAIL は `## Log` �
 - `touches` は契約。書いていないファイルは触らない。必要になったら、先に issue の `touches` を更新する。
 - `depends-on` が未マージなら着手しない。依存先のファイルを先回りして変えない。
 - `package.json` / `package-lock.json` を触る issue は同時に1つ（lock owner）。依存を足さない issue は触らない。
-- 同じ `packages/*` を触る issue は直列。別パッケージなら並列可。
+- 並列の単位はパッケージではなく **`touches` のファイル**。同じ `packages/*` でもサブツリーが分かれていれば並列可
+  （例: `server/src/edge/` と `server/src/do/`）。守るのは次の2つ。
+- 共有ファイルは所有者を1レーンに決め、他は統合直前に rebase する。`package.json` / `package-lock.json`
+  （lock owner）、`packages/server/src/index.ts`、`packages/server/src/edge/handler.ts`、`tools/deploy/worker.ts`、
+  `tools/deploy/cloudflare.config.ts`、`work/BOARD.md` / `work/LANES.md`（lead）。
 - 統合は一度に1本。rebase → `npm run check` → review PASS → merge。merge 後に main でもう一度確認する。
 - main が赤なら、新しい統合を止めて直すのを最優先にする。
 - レーンが外部待ち・依存待ちで止まったら、4本目を足さず、そのレーンを入れ替える。
