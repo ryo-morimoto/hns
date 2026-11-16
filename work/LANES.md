@@ -5,27 +5,28 @@
 
 ## 現在
 
-`now` は 5 件（0147 / 0151 / 0156 / 0159 / 0190）。同時に流すのは 3 本で、いまは 0190 / 0151 / 0147。
-0190 と 0151 はレビュー中、0147 は作業中。0142 は done（460c00b、review PASS）で 0156 を開けた。
-0156 は 0190 の統合後に開き、0159 は次の枠。完了したレーンは BOARD の履歴に残る。
+`now` は 4 件（0147 / 0151 / 0156 / 0159）。同時に流すのは 3 本で、いまは 0147 / 0151 / 0156。
+0190 は done（6eb2a21、review PASS）で main に統合済み。0151 は修正の再レビュー中、0147 はレビュー中、0156 は作業中。
+0159 は次の枠。完了したレーンは BOARD の履歴に残る。
 
 | レーン | issue | 所有するパス | owner / reviewer | 状態 | 次の統合 |
 | --- | --- | --- | --- | --- | --- |
-| E15 | [0190](issues/0190-workspace-debt.md) workspace の低負債 | `packages/workspace/` | lane-0190 / reviewer-0190 | レビュー中（a5c674e） | 1（小さい・依存なし） |
-| E16 | [0151](issues/0151-provider-gateway.md) provider gateway | `server/src/gateway/`, `server/test/gateway/`, `store/src/migrations/`, `tools/deploy/` | lane-0151 / reviewer-0151 | レビュー中（17f0f9b） | 2（store migration の枠を持つ） |
-| E17 | [0147](issues/0147-machine-agent.md) マシンエージェント | `packages/machine/`, `docs/packages.md`, `oxlint.config.ts`, `vitest.config.ts`, lock | lane-0147 / reviewer-0147 | 作業中（lock owner） | 3（依存なし・新パッケージ） |
-| — | [0156](issues/0156-journal-in-do.md) Workspace DO の骨格 | `server/src/do/workspace.ts`, `server/test/do/workspace.test.ts` | 未割当 / 未割当 | 待機（0190 の統合後） | 4 |
-| — | [0159](issues/0159-live-ws.md) ライブ WS | `server/src/ws.ts`, `core/src/stream.ts`, `do/session.ts`, `web/src/live/`, `web/src/app/` | 未割当 / 未割当 | 待機（3 本のどれかが空いたら） | 5 |
+| E16 | [0151](issues/0151-provider-gateway.md) provider gateway | `packages/server/src/gateway/`, `packages/server/test/gateway/`, `packages/store/src/migrations/`, `tools/deploy/` | lane-0151 / reviewer-0151 | 修正の再レビュー中（bbc2631） | 1（store migration の枠を持つ） |
+| E17 | [0147](issues/0147-machine-agent.md) マシンエージェント | `packages/machine/`, `docs/packages.md`, `oxlint.config.ts`, `vitest.config.ts`, lock | lane-0147 / reviewer-0147 | レビュー中（fbdd230） | 2（新パッケージ・lock owner） |
+| E18 | [0156](issues/0156-journal-in-do.md) Workspace DO の骨格 | `packages/server/src/do/workspace.ts`, `packages/server/test/do/workspace.test.ts` | lane-0156 / 未割当 | 作業中 | 3 |
+| — | [0159](issues/0159-live-ws.md) ライブ WS | `packages/server/src/ws.ts`, `packages/core/src/stream.ts`, `packages/server/src/do/session.ts`, `packages/web/src/live/`, `packages/web/src/app/` | 未割当 / 未割当 | 待機（3 本のどれかが空いたら） | 4 |
 
-- E15 / E16 / E17 の `touches` は交わらない。共有ファイルは E17 が lock、E16 が store migration と `tools/deploy/` を持つ。
-- E16 が `tools/deploy/` を持つあいだ、0160 / 0161 は開かない（直列化点）。
+- E16 が `tools/deploy/` を持つあいだ、0160 / 0161 は開かない（直列化点）。0156 の deploy 配線は E16 の統合後。
 - `server/src/index.ts` / `edge/handler.ts` / `edge/worker.ts` は 0145 の所有のまま。0159 は 0151 の統合後に開く。
 - **design 軸（D076）**: `now` は `design: agreed` かつ依存充足。0153 / 0059 は順番待ち、設計待ちの 13 件は設計レビュー待ち。
-- lead は 3 本の review と統合、BOARD / LANES の更新を持つ。
+- lead は review と統合、BOARD / LANES の更新を持つ。
 
 ## 統合待ち
 
-なし。統合順は 0190 → 0151 → 0147（小さい順・共有ファイルの所有者順）。レビュー PASS のものから 1 本ずつ。
+- 0151: 修正 bbc2631 の再レビュー待ち。PASS 後に rebase → gate → merge。
+- 0147: reviewer-0147 の判定待ち。PASS 後に rebase → gate → merge。
+- 0156: 実装中（merge 候補ではない）。
+- 統合順は 0151 → 0147 → 0156。レビュー PASS のものから 1 本ずつ。
 
 ## 次の変更レーン候補
 

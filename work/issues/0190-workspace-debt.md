@@ -1,6 +1,6 @@
 # 0190: workspace の低負債を一括で閉じる（0056・0057・0058・0060）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: 設計を変えない（0056–0060 の欠陥返済）
@@ -25,7 +25,7 @@ touches: packages/workspace/, work/issues/0190-workspace-debt.md
 - [x] 0058: 同じ扱いが要る他の getter を確認する（`mode` を除く）
 - [x] 0060: helper の `read` 応答に `size` を足し、復号後の長さを照合する。違えば `failed("io")`
 - [x] 上記それぞれに回帰テストを足す
-- [ ] `npm run check`（workspace の全層）が通り、独立レビューが PASS する
+- [x] `npm run check`（workspace の全層）が通り、独立レビューが PASS する
 
 ## テスト条件
 
@@ -58,6 +58,14 @@ touches: packages/workspace/, work/issues/0190-workspace-debt.md
 - 0057 の二重 open は同一プロセス内の claim（絶対 journalPath の Set）で拒否する。別プロセス間の検出は `docs/workspace.md` の「保証しない」に含まれるため行わない。保存 temp の UUID で衝突だけを消す。
 - 0056 の起動時掃除は root 直下の通常ファイル `.hns-tmp-*` だけを対象にする。一覧が取れない場合は開くのを止めず、削除の失敗は audit に残す。
 
+## Result
+
+- verdict: **PASS**（reviewer-0190、blocking 0）
+- reviewer: reviewer-0190（この変更を書いていない別エージェント）
+- HEAD: a5c674e（rebase 後 6eb2a21。main に ff 統合）
+- 受入: 8/8。`npm run check` exit 0（359 tests / 73 files、24.6s）
+- non-blocking（低 8）: journal 保存 temp が root 直下の掃除対象外 / claim は close 必須 / C1 は base でも通る / journal read 失敗時に pending が空になる / symlink 別表記の二重 open / remove 失敗の audit 種別 / audit save 失敗時の記述 / 本 Result。運用で拾うものは 0191 か新しい issue に切る。
+
 ## やらないこと
 
 - 0172（0191 が引き取る）。
@@ -71,3 +79,4 @@ touches: packages/workspace/, work/issues/0190-workspace-debt.md
 - 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L4。3本のうちの1本で、workspace の窓を閉じる。
 - 2026-11-17: 実装。0057（journal の claim と保存 temp）→ 0056（temp の掃除と audit）→ 0058（auditLog の写し）→ 0060（helper read の size 照合）。回帰は設計どおり T1–T4: `temp.test.ts`（C1–C3）、`journal.test.ts`（C4–C5）、`workspace.test.ts`（C6）、`protocol.test.ts`（C7）。
 - 2026-11-17: `npm run check` exit 0（28.5s、system node 24.22.2）。独立レビュー待ち。
+- 2026-11-17: 独立レビュー PASS（reviewer-0190、blocking 0）。rebase 後に main へ ff 統合（6eb2a21）。`npm run check` は main でも exit 0。

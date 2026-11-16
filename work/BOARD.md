@@ -6,7 +6,7 @@
 
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 5 |
+| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 4 |
 | Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 59 |
 | Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 5 |
 | Q4 | — | — | `hold` | いまはやらない | 8 |
@@ -27,18 +27,17 @@
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 - `now` は `design: agreed` かつ `depends-on` 充足のときだけ（[README](README.md) の「設計の合意」）。`design: pending` は設計レビューを先に通す。
 
-### now（5）
+### now（4）
 
 | # | 作業 | 依存の状態 | 設計レーン |
 | --- | --- | --- | --- |
-| [0190](issues/0190-workspace-debt.md) | workspace の低負債（0056・0057・0058・0060） | 0045 done | L4 |
 | [0156](issues/0156-journal-in-do.md) | Workspace DO の骨格（lease・版・所有） | 0142 / 0145 done | L4 |
 | [0151](issues/0151-provider-gateway.md) | provider gateway（鍵の分離・予算・緊急停止） | 0143 / 0144 done | L9 |
 | [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名） | 0145 done | L3 |
 | [0159](issues/0159-live-ws.md) | ライブ更新の WS 化（SSE の置き換え） | 0146 done | L2 |
 
-同時に流すのは3本（[LANES.md](LANES.md)）。いまは **0190 / 0151 / 0147**。0190 の統合後に 0156、枠が空いたら 0159。0153 / 0059 は順番待ち。
-0190 は 0191 と 0153 を、0156 は 0169 / 0157 を、0151 は 0152 を、0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を開ける。
+同時に流すのは3本（[LANES.md](LANES.md)）。いまは **0151 / 0147 / 0156**（0151 と 0147 はレビュー中、0156 は開始）。0159 は次の枠。0153 / 0059 は順番待ち。
+0156 は 0169 / 0157 を、0151 は 0152 を、0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を、0190 の後は 0191 と 0153 を開ける。
 
 ### 次の昇格
 
@@ -249,7 +248,7 @@
 | [0186](issues/0186-test-colocation.md) | テストをコロケートし、issue 参照を削除する | **done** | — | 0184, 0185 |
 | [0187](issues/0187-tsdoc-doctest.md) | TSDoc 契約と doctest を展開する | **done** | — | 0186 |
 | [0189](issues/0189-d1-wiring.md) | Worker から D1 の store を開通させる | **done** | — | 0145, 0150 |
-| [0190](issues/0190-workspace-debt.md) | workspace の低負債を一括で閉じる（0056・0057・0058・0060） | open | now | 0045 |
+| [0190](issues/0190-workspace-debt.md) | workspace の低負債を一括で閉じる（0056・0057・0058・0060） | **done** | — | 0045 |
 | [0191](issues/0191-workspace-perf.md) | workspace の実行性能を測って固定する（0172） | open | plan | 0190 |
 | [0192](issues/0192-findings-reconcile.md) | findings 13 件を再判定し、直す | open | batch | 0145, 0146 |
 | [0193](issues/0193-backlog-metadata.md) | backlog のメタデータを現在に合わせる | open | batch | 0141, 0146 |
