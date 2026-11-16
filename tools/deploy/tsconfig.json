@@ -13,5 +13,13 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["cloudflare.config.ts", "worker.ts", "config.test.ts"]
+  "include": [
+    "cloudflare.config.ts",
+    "modes.ts",
+    "worker.ts",
+    "config.test.ts",
+    "gateway/cloudflare.config.ts",
+    "gateway/worker.ts",
+    "gateway/config.test.ts"
+  ]
 }

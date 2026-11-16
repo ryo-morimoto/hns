@@ -2,6 +2,9 @@
   "name": "@hns/deploy",
   "private": true,
   "type": "module",
+  "scripts": {
+    "postinstall": "npm install --prefix gateway --no-audit --no-fund"
+  },
   "devDependencies": {
     "wrangler": "4.156.0"
   }

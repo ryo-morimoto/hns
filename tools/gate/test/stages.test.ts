@@ -40,14 +40,20 @@ test("the deploy stage builds the development config", () => {
   assert.ok(stage !== undefined);
   expect(stage.hooks).toStrictEqual(["pre-push"]);
   const runs = stage.run({ root: "/repo", packages: [], all: true, tier: "all" });
+  const env = {
+    XDG_CONFIG_HOME: "/repo/.work/cf/config",
+    XDG_CACHE_HOME: "/repo/.cache",
+  };
   expect(runs).toStrictEqual([
     {
       cwd: "/repo/tools/deploy",
       argv: ["/repo/node_modules/.bin/cf", "deploy", "--dry-run", "--mode", "development"],
-      env: {
-        XDG_CONFIG_HOME: "/repo/.work/cf/config",
-        XDG_CACHE_HOME: "/repo/.cache",
-      },
+      env,
+    },
+    {
+      cwd: "/repo/tools/deploy/gateway",
+      argv: ["/repo/node_modules/.bin/cf", "deploy", "--dry-run", "--mode", "development"],
+      env,
     },
   ]);
 });

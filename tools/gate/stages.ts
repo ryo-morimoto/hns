@@ -136,16 +136,19 @@ export const stages: readonly Stage[] = [
   {
     name: "deploy",
     hooks: ["pre-push"],
-    run: ({ root }) => [
-      {
-        cwd: join(root, "tools/deploy"),
+    // Both Workers are checked: the gateway's config is its own cf project because one
+    // cloudflare.config.ts describes one Worker.
+    run: ({ root }) => {
+      const env = {
+        XDG_CONFIG_HOME: join(root, ".work/cf/config"),
+        XDG_CACHE_HOME: join(root, ".cache"),
+      };
+      return ["tools/deploy", "tools/deploy/gateway"].map((dir) => ({
+        cwd: join(root, dir),
         argv: [binary(root, "cf"), "deploy", "--dry-run", "--mode", "development"],
-        env: {
-          XDG_CONFIG_HOME: join(root, ".work/cf/config"),
-          XDG_CACHE_HOME: join(root, ".cache"),
-        },
-      },
-    ],
+        env,
+      }));
+    },
   },
   {
     name: "knip",
