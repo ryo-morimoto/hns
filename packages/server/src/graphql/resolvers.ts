@@ -1,5 +1,6 @@
 import * as v from "valibot";
 import { ProjectIdSchema, type ProjectId } from "@hns/core";
+import { fromGlobalId, type GlobalIdResult } from "@hns/core/graphql";
 import type { GraphQLContext } from "./context.ts";
 import { queryFailure, QueryReadError, type QueryFailureView } from "./failures.ts";
 import {
@@ -84,16 +85,28 @@ function pageSize(first: number | null | undefined, maximum: number): number {
 }
 
 /**
- * Parse the required project id.
+ * Decode the required `projectId` argument.
  *
  * @internal
- * @throws QueryReadError with `invalid_argument` when the argument is empty.
+ * @throws QueryReadError with `invalid_argument` when the argument is missing, is not a global
+ * id, or names a type other than `Project`.
+ *
+ * @remarks
+ * The argument is a global id (0177). A raw id is refused rather than guessed, so a client
+ * cannot address a conversation id as a project id by accident.
  */
 function requiredProjectId(value: string | null | undefined): ProjectId {
   if (value === null || value === undefined || value.length === 0) {
     throw new QueryReadError("invalid_argument", "projectId is required.");
   }
-  return v.parse(ProjectIdSchema, value);
+  const decoded: GlobalIdResult = fromGlobalId(value);
+  if (!decoded.ok) {
+    throw new QueryReadError("invalid_argument", "projectId must be a global id.");
+  }
+  if (decoded.value.type !== "Project") {
+    throw new QueryReadError("invalid_argument", "projectId must name a Project.");
+  }
+  return v.parse(ProjectIdSchema, decoded.value.id);
 }
 
 /**

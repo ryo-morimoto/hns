@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { JsonValue } from "@hns/core";
+import { toGlobalId } from "@hns/core/graphql";
 import { createEdge } from "../edge/handler.ts";
 import { envWith, sessionCookie, sessionWith } from "../../test/support/edge.ts";
 import { conversation, project, task } from "../../test/support/graphql.ts";
@@ -45,7 +46,9 @@ test("projects are served from the injected read", async () => {
     data: {
       projects: {
         __typename: "ProjectList",
-        projects: [{ id: "p1", name: "One", createdAt: "2026-01-01T00:00:00.000Z" }],
+        projects: [
+          { id: toGlobalId("Project", "p1"), name: "One", createdAt: "2026-01-01T00:00:00.000Z" },
+        ],
       },
     },
   });
@@ -61,14 +64,23 @@ test("conversations are filtered to the requested project", async () => {
   });
   const response = await send({
     query:
-      '{ conversations(projectId: "p1") { __typename ... on ConversationList { conversations { id projectId title isArchived } } } }',
+      '{ conversations(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '") { __typename ... on ConversationList { conversations { id projectId title isArchived } } } }',
   });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
     data: {
       conversations: {
         __typename: "ConversationList",
-        conversations: [{ id: "c1", projectId: "p1", title: "Mine", isArchived: false }],
+        conversations: [
+          {
+            id: toGlobalId("Conversation", "c1"),
+            projectId: toGlobalId("Project", "p1"),
+            title: "Mine",
+            isArchived: false,
+          },
+        ],
       },
     },
   });
@@ -99,7 +111,9 @@ test("conversations are one Session RPC carrying the request id", async () => {
   const response = await send(
     {
       query:
-        '{ conversations(projectId: "p1") { __typename ... on ConversationList { conversations { id } } } }',
+        '{ conversations(projectId: "' +
+        toGlobalId("Project", "p1") +
+        '") { __typename ... on ConversationList { conversations { id } } } }',
     },
     envWith({ session: session.namespace }),
   );
@@ -111,7 +125,12 @@ test("conversations are one Session RPC carrying the request id", async () => {
   expect(forwarded.url).toContain("/rpc/conversations?limit=");
   expect(forwarded.headers.get("x-request-id")).toBe(response.headers.get("x-request-id"));
   expect(await response.json()).toMatchObject({
-    data: { conversations: { __typename: "ConversationList", conversations: [{ id: "c1" }] } },
+    data: {
+      conversations: {
+        __typename: "ConversationList",
+        conversations: [{ id: toGlobalId("Conversation", "c1") }],
+      },
+    },
   });
 });
 
@@ -121,7 +140,10 @@ test("a failed Session read is an unavailable union", async () => {
   const send = edgeWith();
   const response = await send(
     {
-      query: '{ conversations(projectId: "p1") { __typename ... on QueryFailure { code } } }',
+      query:
+        '{ conversations(projectId: "' +
+        toGlobalId("Project", "p1") +
+        '") { __typename ... on QueryFailure { code } } }',
     },
     envWith({ session: session.namespace }),
   );
@@ -137,11 +159,19 @@ test("tasks are served from the injected read with the enum name", async () => {
     reads: { tasks: () => Promise.resolve([task("t1", "p1", "Do it", "doing")]) },
   });
   const response = await send({
-    query: '{ tasks(projectId: "p1") { __typename ... on TaskList { tasks { id status } } } }',
+    query:
+      '{ tasks(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '") { __typename ... on TaskList { tasks { id status } } } }',
   });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
-    data: { tasks: { __typename: "TaskList", tasks: [{ id: "t1", status: "DOING" }] } },
+    data: {
+      tasks: {
+        __typename: "TaskList",
+        tasks: [{ id: toGlobalId("Task", "t1"), status: "DOING" }],
+      },
+    },
   });
 });
 
@@ -154,6 +184,33 @@ test("an invalid first is a typed failure at HTTP 200", async () => {
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
     data: { projects: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+  });
+});
+
+// Catches: a raw or wrong-typed id accepted as a project id.
+test("a project id that is not a Project global id is a typed failure", async () => {
+  const send = edgeWith({ reads: { projects: () => Promise.resolve([]) } });
+  const raw = await send({
+    query: '{ tasks(projectId: "p1") { __typename ... on QueryFailure { code } } }',
+  });
+  expect(raw.status).toBe(200);
+  expect(await raw.json()).toMatchObject({
+    data: { tasks: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+  });
+  const wrongType = await send({
+    query:
+      '{ tasks(projectId: "' +
+      toGlobalId("Conversation", "p1") +
+      '") { __typename ... on QueryFailure { code } } }',
+  });
+  expect(await wrongType.json()).toMatchObject({
+    data: { tasks: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+  });
+  const malformed = await send({
+    query: '{ tasks(projectId: "not-a-global-id") { __typename ... on QueryFailure { code } } }',
+  });
+  expect(await malformed.json()).toMatchObject({
+    data: { tasks: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
   });
 });
 

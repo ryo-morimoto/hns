@@ -1,3 +1,4 @@
+import { toGlobalId } from "@hns/core/graphql";
 import type { Conversation, Project, Task } from "@hns/core";
 
 /**
@@ -34,16 +35,26 @@ export interface TaskView {
   readonly updatedAt: string;
 }
 
-/** Map a project to its GraphQL shape. */
+/**
+ * Map a project to its GraphQL shape.
+ *
+ * @remarks
+ * Ids cross the GraphQL boundary as global ids: the same raw id under another type must not
+ * collide in Relay's normalized store.
+ */
 export function projectView(project: Project): ProjectView {
-  return { id: project.id, name: project.name, createdAt: project.created_at };
+  return {
+    id: toGlobalId("Project", project.id),
+    name: project.name,
+    createdAt: project.created_at,
+  };
 }
 
 /** Map a conversation to its GraphQL shape. */
 export function conversationView(conversation: Conversation): ConversationView {
   return {
-    id: conversation.id,
-    projectId: conversation.project_id,
+    id: toGlobalId("Conversation", conversation.id),
+    projectId: toGlobalId("Project", conversation.project_id),
     title: conversation.title,
     createdAt: conversation.created_at,
     updatedAt: conversation.updated_at,
@@ -55,8 +66,8 @@ export function conversationView(conversation: Conversation): ConversationView {
 /** Map a task to its GraphQL shape. */
 export function taskView(task: Task): TaskView {
   return {
-    id: task.id,
-    projectId: task.project_id,
+    id: toGlobalId("Task", task.id),
+    projectId: toGlobalId("Project", task.project_id),
     title: task.title,
     status: task.status,
     createdAt: task.created_at,

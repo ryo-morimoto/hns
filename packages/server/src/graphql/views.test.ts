@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ENTITIES } from "@hns/core/graphql";
+import { ENTITIES, toGlobalId } from "@hns/core/graphql";
 import { conversation, project, task } from "../../test/support/graphql.ts";
 import { conversationView, projectView, taskView } from "./views.ts";
 
@@ -19,11 +19,21 @@ test("each view carries exactly the GraphQL fields of its entity", () => {
   expect(Object.keys(taskView(task("t1", "p1"))).sort()).toStrictEqual(fieldsOf("Task"));
 });
 
+// Catches: a raw id crossing the boundary, where two types could share it in Relay's store.
+test("the project view carries global ids", () => {
+  expect(projectView(project("p1"))).toStrictEqual({
+    id: toGlobalId("Project", "p1"),
+    name: "p1",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  expect(taskView(task("t1", "p1")).projectId).toBe(toGlobalId("Project", "p1"));
+});
+
 // Catches: a storage field leaking under its snake_case name, or the archived rename being lost.
 test("the conversation view renames archived and keeps nullable fields null", () => {
   expect(conversationView(conversation("c1", "p1", "Title"))).toStrictEqual({
-    id: "c1",
-    projectId: "p1",
+    id: toGlobalId("Conversation", "c1"),
+    projectId: toGlobalId("Project", "p1"),
     title: "Title",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: null,
