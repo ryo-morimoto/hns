@@ -312,9 +312,15 @@ export class Workspace {
     return this.#rooted === undefined ? "checks" : "dirfd";
   }
 
-  /** Refused operations, for the audit trail, oldest first. */
+  /**
+   * Refused operations, for the audit trail, oldest first.
+   *
+   * @remarks
+   * The array and its entries are copies, so a caller that changes what it got
+   * cannot change the journal or the next read.
+   */
   get auditLog(): readonly AuditEntry[] {
-    return this.#journal.audit;
+    return this.#journal.audit.map((entry) => ({ ...entry }));
   }
 
   /**
