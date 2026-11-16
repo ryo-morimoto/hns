@@ -97,10 +97,15 @@ function requiredProjectId(value: string | null | undefined): ProjectId {
 }
 
 /**
- * Charge the read to the request's row budget.
+ * Charge the page to the request's row budget before the read.
  *
  * @internal
- * @throws QueryReadError with `limit_exceeded` when the rows do not fit.
+ * @throws QueryReadError with `limit_exceeded` when the page does not fit.
+ *
+ * @remarks
+ * The page size is charged rather than the rows returned, so an over-budget request is refused
+ * before it touches D1 or the Session. Without a `LIMIT` in the store queries the read itself
+ * still returns every row until 0149 adds the index and the limit.
  */
 function spend(context: GraphQLContext, rows: number): void {
   if (!context.budget.spend(rows)) {
@@ -123,8 +128,8 @@ export async function resolveProjects(
 ): Promise<ProjectListResult> {
   const result = await guarded(async () => {
     const limit = pageSize(args.first, context.maxRowsPerList);
+    spend(context, limit);
     const projects = (await context.reads.projects()).slice(0, limit);
-    spend(context, projects.length);
     return projects.map(projectView);
   });
   if (!result.ok) return result.failure;
@@ -147,8 +152,8 @@ export async function resolveTasks(
   const result = await guarded(async () => {
     const projectId = requiredProjectId(args.projectId);
     const limit = pageSize(args.first, context.maxRowsPerList);
+    spend(context, limit);
     const tasks = (await context.reads.tasks(projectId)).slice(0, limit);
-    spend(context, tasks.length);
     return tasks.map(taskView);
   });
   if (!result.ok) return result.failure;
@@ -175,10 +180,10 @@ export async function resolveConversations(
   const result = await guarded(async () => {
     const projectId = requiredProjectId(args.projectId);
     const limit = pageSize(args.first, context.maxRowsPerList);
+    spend(context, limit);
     const conversations = (await context.reads.conversations(limit))
       .filter((conversation) => conversation.project_id === projectId)
       .slice(0, limit);
-    spend(context, conversations.length);
     return conversations.map(conversationView);
   });
   if (!result.ok) return result.failure;

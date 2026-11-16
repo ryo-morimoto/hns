@@ -156,8 +156,9 @@ export function buildSdl(): string {
  * Builds a Query root from the model's object types.
  *
  * @remarks
- * The root receives the schema's own instances, so a Query field can name `Project` or
- * `Conversation` without defining a second type of that name.
+ * The root receives the schema's own object instances, so a Query field can name `Project` or
+ * `Conversation` without defining a second type of that name. Enums are not in the map; a Query
+ * field that needs a model enum reaches for `ENUMS` or the map grows in a later change.
  */
 export type QueryRootFactory = (
   objects: ReadonlyMap<string, GraphQLObjectType>,

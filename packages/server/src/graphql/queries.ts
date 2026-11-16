@@ -116,6 +116,29 @@ function fragmentsOf(document: DocumentNode): ReadonlyMap<string, SelectionSetNo
 }
 
 /**
+ * Refuse a query text over the byte budget.
+ *
+ * @param query - The query text, measured in UTF-8 bytes.
+ * @param limits - The budgets; production uses {@link DEFAULT_GRAPHQL_LIMITS}.
+ * @throws GraphQLRequestLimitError when the text is too large.
+ *
+ * @remarks
+ * Separate from {@link assertWithinLimits} so the face can refuse a large body before it pays
+ * for `parse`.
+ */
+export function assertWithinBytes(
+  query: string,
+  limits: GraphQLRequestLimits = DEFAULT_GRAPHQL_LIMITS,
+): void {
+  const bytes = new TextEncoder().encode(query).length;
+  if (bytes > limits.maxBytes) {
+    throw new GraphQLRequestLimitError(
+      "The query is " + String(bytes) + " bytes; the limit is " + String(limits.maxBytes) + ".",
+    );
+  }
+}
+
+/**
  * Refuse a query that is larger, deeper, or more expensive than the limits allow.
  *
  * @param query - The query text, measured in UTF-8 bytes.
@@ -132,12 +155,7 @@ export function assertWithinLimits(
   document: DocumentNode,
   limits: GraphQLRequestLimits = DEFAULT_GRAPHQL_LIMITS,
 ): void {
-  const bytes = new TextEncoder().encode(query).length;
-  if (bytes > limits.maxBytes) {
-    throw new GraphQLRequestLimitError(
-      "The query is " + String(bytes) + " bytes; the limit is " + String(limits.maxBytes) + ".",
-    );
-  }
+  assertWithinBytes(query, limits);
   const fragments = fragmentsOf(document);
   for (const definition of document.definitions) {
     if (definition.kind !== Kind.OPERATION_DEFINITION) continue;

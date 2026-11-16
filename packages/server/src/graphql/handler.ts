@@ -14,6 +14,7 @@ import type { GraphQLRequest } from "../edge/handler.ts";
 import { DEFAULT_LIMITS, type EdgeLimits } from "../edge/limits.ts";
 import { createContext, type GraphQLReads } from "./context.ts";
 import {
+  assertWithinBytes,
   assertWithinLimits,
   DEFAULT_GRAPHQL_LIMITS,
   GraphQLRequestLimitError,
@@ -117,6 +118,16 @@ function parseRequest(
   };
 }
 
+/**
+ * True when the engine refused the request itself (variable coercion, unknown operation name)
+ * rather than a resolver failing: those carry no path and no original error.
+ *
+ * @internal
+ */
+function isRequestError(error: GraphQLError): boolean {
+  return error.originalError === undefined && error.path === undefined;
+}
+
 /** Every operation in the document, in declaration order. */
 function operationsOf(document: DocumentNode): readonly OperationDefinitionNode[] {
   return document.definitions.filter(
@@ -151,6 +162,14 @@ export function createGraphQLFace(
   return async function graphqlFace(request: GraphQLRequest): Promise<Response> {
     const parsed = parseRequest(request.body);
     if (!parsed.ok) return failure(parsed.message, REQUEST_INVALID, 400);
+
+    // Bytes are bounded before parsing: a 1 MiB body would otherwise cost a 40 ms parse.
+    try {
+      assertWithinBytes(parsed.value.query, queryLimits);
+    } catch (error) {
+      if (!(error instanceof GraphQLRequestLimitError)) throw error;
+      return failure(error.message, REQUEST_INVALID, 400);
+    }
 
     let document: DocumentNode;
     try {
@@ -210,8 +229,17 @@ export function createGraphQLFace(
     }
 
     if (result.data === undefined || result.data === null) {
-      for (const error of result.errors ?? []) {
-        logUnexpected(request.requestId, error.originalError ?? error);
+      const failures = result.errors ?? [];
+      const requestErrors = failures.filter(isRequestError);
+      if (requestErrors.length === failures.length) {
+        return failure(
+          requestErrors.map((error) => error.message).join("; "),
+          REQUEST_INVALID,
+          400,
+        );
+      }
+      for (const error of failures) {
+        if (!isRequestError(error)) logUnexpected(request.requestId, error.originalError ?? error);
       }
       return failure("Unexpected failure.", INTERNAL, 500);
     }
