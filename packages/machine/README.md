@@ -52,6 +52,9 @@ cloudflared は外向きの接続を保ち、この agent へは `127.0.0.1` で
 - パスは ROOT 相対に正規化する。`/` 始まりは ROOT 相対で、`..` は拒否する。親は canonical 化し、ROOT の外を指す
   symlink の親は拒否する。最終要素の symlink は read も list も拒否する（read は `O_NOFOLLOW`、list は `lstat`）。
   `stat` は追わず `kind: "symlink"` を返す。
+- 残余の TOCTOU: 同じユーザーが `lstat` / 親の canonical 化と open の間に親を差し替えると、ROOT の外を読める・一覧できる。
+  read は最終 symlink を、list は最終要素を拒否するが、この窓は dirfd helper（workspace と同じ。0194 / 0054）で閉じる。
+  同一ユーザーを信頼境界にしない。書き込み op が無いので、ROOT の外に書く経路は無い。
 - 上限: 同時実行数（超えたら 429）、要求 body（413）、応答（413。切り詰めない）、1 要求の時間（408）。
   FIFO・device・socket は read しない（`O_NONBLOCK` の open と非 regular の拒否で thread pool を塞がない）。
 - exec と書き込みは出さない。sandbox が無い環境で exec を出さない（fail closed）。0194 で足す。
