@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, realpath, symlink, truncate, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import type { JsonValue } from "@hns/core";
@@ -261,6 +262,32 @@ test("a symbolic link as the final component is not followed", async () => {
       });
       expect(answer.status).toBe(403);
       expect(codeOf(answer)).toBe("forbidden");
+    },
+  );
+});
+
+test("a socket is refused as a non-regular file", async () => {
+  await withAgent(
+    async () => {},
+    async (fixture) => {
+      const server = createServer();
+      const socketPath = join(fixture.root, "agent.sock");
+      await new Promise<void>((resolve) => {
+        server.listen(socketPath, resolve);
+      });
+      try {
+        const answer = await fixture.call({
+          body: JSON.stringify({ op: "read", path: "agent.sock" }),
+        });
+        expect(answer.status).toBe(400);
+        expect(codeOf(answer)).toBe("invalid_request");
+      } finally {
+        await new Promise<void>((resolve) => {
+          server.close(() => {
+            resolve();
+          });
+        });
+      }
     },
   );
 });
