@@ -1,5 +1,6 @@
-import { expect, test } from "vitest";
+import { expect, expectTypeOf, test } from "vitest";
 import { isoTimestamp } from "./codecs.ts";
+import type { IsoTimestamp } from "./codecs.ts";
 import { LEASE_REFUSALS } from "./lease.ts";
 import type { LeaseRefusal, WorkspaceLease } from "./lease.ts";
 
@@ -11,6 +12,11 @@ test("the lease contract names its three refusals", () => {
     "lease_epoch_stale",
   ];
   expect(LEASE_REFUSALS).toStrictEqual(expected);
+});
+
+// Catches: expiresAt widening to string, which loses the ISO timestamp contract.
+test("a lease keeps the IsoTimestamp brand on expiresAt", () => {
+  expectTypeOf<WorkspaceLease["expiresAt"]>().toEqualTypeOf<IsoTimestamp>();
 });
 
 // Compile-time proof only: the contract has no runtime behavior yet.

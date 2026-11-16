@@ -25,7 +25,7 @@
 
 `U` はまだどこにも確定していない変更で、durable ではない（INV-05）。契約は [durability.md](docs/durability.md)。
 
-要件2（複数マシンで Agent を動かす）は、同じ workspace を2台から同時に編集できることを意味しない。書き込みの権利は lease で 1 台に閉じ、読み取りは lease を要さない（INV-13 / [durability.md](docs/durability.md) §3.4）。
+要件2（複数マシンで Agent を動かす）は、同じ workspace の同時編集を意味しない（INV-13）。規則は [durability.md](docs/durability.md) §3.4。
 
 ## 構成
 

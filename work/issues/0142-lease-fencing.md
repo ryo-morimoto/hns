@@ -32,7 +32,7 @@ touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/c
 
 | ID | 条件 | 技法 | 層 | テスト |
 | --- | --- | --- | --- | --- |
-| T1 | C1–C2 | 契約語彙の固定 | unit | `packages/core/src/lease.test.ts` |
+| T1 | C1–C2 | 契約語彙と brand の固定 | static / unit | `packages/core/src/lease.test.ts`（`expectTypeOf` + 語彙） |
 | T2 | C3–C4 | 文書の突合 | manual | 独立レビューで docs / ARCH / issue を照合 |
 | T3 | C5 | ゲート | static / build | `npm run check` |
 
@@ -41,9 +41,6 @@ touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/c
 - 実装は 0156（DO の lease 発行・版の表）と 0157（ack の経路）。0142 は型と規則だけ。
 - `WorkspaceLease` の `epoch` は number（発行のたびに増える）。brand は付けない（同じ数が別の意味で交わらない）。
 - 拒否の語彙は snake_case（0156 の `lease_expired` に合わせる）。
-
-## Notes
-
 - lease が切れたら「書けない」で止める。ローカルに2つ目の正本を作らない。
 - 読み取りは lease 不要。
 
@@ -57,3 +54,4 @@ touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/c
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
 - 2026-11-17: ユーザーの判断で `now` のまま最初に閉じる。touches を 0141 の形（test・index・README・CHANGELOG・docs）に合わせた。3本の同時実行（0190 / 0151 / 0147）とはファイルが交わらない。
 - 2026-11-17: 実装。core に `WorkspaceLease` / `LEASE_REFUSALS`（+ index / README / CHANGELOG）、docs/durability.md §3.4、ARCH の INV-13 と要件2の読み方、workspace.md の未決を更新。
+- 2026-11-17: 独立レビュー BLOCKED（blocking 1・低 8）。blocking: §3.4 が「古い epoch は拒否」と「unknown」を併記し、ack が DO を通ることも曖昧。§3.4 を「委譲は版チェックだけ、ack は §3.1 のまま」「古い epoch は `lease_epoch_stale`、`unknown` は outcome 欠落だけ」に修正。低も反映: issue 番号の除去、`expectTypeOf` で brand を固定、Notes の統合、要件2 の重複を 2 箇所に、取得競合と接続断の規則を追加。

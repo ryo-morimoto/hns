@@ -133,12 +133,14 @@ cover するには checkpoint の契機を増やすしかない（しない、�
 書き込みの権利は、Workspace DO が発行する lease で 1 台のマシンに閉じる（[0142](../work/issues/0142-lease-fencing.md)）。
 
 - lease の型は core の `WorkspaceLease`（`workspaceId` / `machineId` / `epoch` / `expiresAt`）。
-- 取得・更新・解放は Workspace DO。`epoch` は発行のたびに増え、1 ワークスペースで有効な lease は 1 本だけ。
-- 保持中は、書き込みのたびに DO へ問い合わせない。ローカルの版チェック（dirfd + hash、ヘルパーが無ければ `checks`）をそのまま使う。lease は版チェックを外すのではなく、置き場所をマシンに移す。
-- 期限切れ・未取得では書かない。マシンは DO に届かないとき、自分の lease がまだ有効か確かめられないので fail closed にする。拒否は閉じた語彙（`LEASE_REFUSALS`）で返す。
-- 別マシンからの書き込みは `epoch` で拒否する。古い epoch の intent は適用せず、`unknown` として照合する（INV-04）。
+- 取得・更新・解放は Workspace DO。`epoch` は成功した発行のたびに増え、1 ワークスペースで有効な lease は 1 本だけ。保持中の取得は拒否し、epoch は配り直さない。
+- 委譲されるのは**版チェック**であって ack ではない。エディタ保存とツール呼び出しは §3.1 のとおり DO を通り、ack は outcome と同じトランザクションで閉じる（INV-10）。agent の shell / git / npm は §3.3 のとおり、Run の終わりまで U のままでよい。
+- 保持中は、マシンが行う書き込みの版チェックをローカル（dirfd + hash、ヘルパーが無ければ `checks`）で行い、そのために DO へ往復しない。lease は版チェックを外すのではなく、置き場所をマシンに移す。
+- 期限切れ・未取得では書かない（fail closed）。拒否は閉じた語彙（`LEASE_REFUSALS`）で返す。
+- 古い epoch の intent は適用せず `lease_epoch_stale` で拒否する。`unknown` は適用済みで outcome を欠き、ハッシュでも決まらない場合の語であり、lease の拒否には使わない（§3.1 / INV-04）。
+- DO に届かないことは lease の失効ではない。期限内でも、ack を要する書き込みは失敗させ（§3.1）、shell の変更は U のまま残す（§3.3）。
 - 読み取りは lease を要さない。
-- 同じ workspace を2台から同時に編集することは要件2（複数マシンで Agent を動かす）に含まない。1 台に閉じる。
+- 同じ workspace を2台から同時に編集することは要件2（複数マシンで Agent を動かす）に含まない。[ARCH.md](../ARCH.md) の要件2の行が正で、規則はこの節。
 
 ## 4. 読みの経路
 
