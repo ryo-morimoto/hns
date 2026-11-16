@@ -1,6 +1,6 @@
 # 0141: 耐久の契約（ack の故障クラス・checkpoint・restore）
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0140
 touches: docs/durability.md, docs/workspace.md, packages/core/src/durability.ts, packages/core/src/durability.test.ts, packages/core/src/index.ts, packages/core/README.md, packages/core/CHANGELOG.md, work/issues/0141-durability-contract.md
@@ -26,7 +26,7 @@ checkpoint の単位と restore の手順を、以後の実装が迷わない形
 - [x] `docs/workspace.md` の「rename の耐久性を保証しない」を、誰がいつ埋めるかに置き換える
 - [x] `docs/durability.md` を正とし、Session DO / Workspace DO / R2 の分担を core の型に落とす
 - [x] INV-09（正本は `(C, J)`）と INV-10（ack は単一システム）が ARCH にある（0140 と調整）
-- [ ] `npm run check` と独立レビュー PASS を `## Result` に記録する
+- [x] `npm run check` と独立レビュー PASS を `## Result` に記録する
 
 ## テスト条件
 
@@ -198,10 +198,11 @@ M6 の契約として先に固定し、0153〜0169 がこの契約に従って�
 - 2026-11-11: RFC / design doc の形に再構成。故障クラス表・RPO 表・テスト条件 / 設計・代替案・compatibility を追加。core の型と workspace.md を更新。
 - 2026-11-11: `work/BOARD.md` / `work/LANES.md` を `touches` から外した（lead 所有）。
 - 2026-11-11: 独立レビュー PASS（blocking 0）。full check は他レーンの未コミット変更が fmt / lint で落ちるため、統合時に再実行する。
+- 2026-11-16: full `npm run check` が exit 0（277 tests / build / deploy dry-run / knip）。受入 9/9 で done。
 
 ## Result
 
 - 独立レビュー: durability-reviewer-2 / **PASS** / HEAD 13e6486（作業ツリー）/ blocking 0
-- 受入: 8/9。文書・型・テスト・ARCH の確認は完了。最終 working tree の `npm run check` は、他レーン（E7 / E9）の未コミット `packages/agent` / `packages/server` 変更が fmt / lint で落ちるため未完了。
-- 自変更の検証: `packages/core` の lint / fmt / typecheck / 30 tests / build が通過。他レーンの変更前の full check は 252 tests / build / deploy dry-run / knip で exit 0。
+- `npm run check`: exit 0（lint / fmt / typecheck / 277 tests / build / deploy dry-run / knip、22.2s）
+- 受入: 9/9。文書・型・テスト・ARCH の確認は完了。
 - 非 blocking（レビュー comment）: 電源断行の「失われる」と本文の「残らないことがある」の表現差、`DURABILITY_AUTHORITIES` の R2 説明、core README の消費 issue 範囲、§8/§10 の監視条件の具体化、T1 に C6 の docs 突合を含める。
