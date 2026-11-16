@@ -69,12 +69,45 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
 
 - provider 鍵は **gateway Worker の secret だけ**に置く。harness（Session DO）は gateway を service binding で呼び、
   鍵も provider の URL も持たない。マシンは provider を直接呼ばない。
-- gateway は「モデル呼び出し」だけを受ける。任意 URL の proxy にしない（0151）。
+- gateway は「モデル呼び出し」だけを受ける。面は固定で `POST /v1/<provider>/chat/completions`
+  （`ollama-cloud` / `opencode-go`）。パスがルート表の1行を選び、上流 URL は deployment の env で決まる。
+  body・ヘッダ・クエリから URL を選べない。実装は [packages/server/src/gateway/](../packages/server/src/gateway/)、
+  配備は別の cf project [tools/deploy/gateway/](../tools/deploy/gateway/)（1 つの `cloudflare.config.ts` は 1 Worker）。
 - **支出上限**を二重に持つ: provider 側の hard limit / alert と、gateway の D1 予算行（日次・月次）。
-  gateway は `UPDATE ... WHERE spent < limit` が 0 行なら 429。
-- **緊急停止**は D1 のフラグで行う。デプロイを待たず 503。停止中は新しいモデル呼び出しを一切通さない。
-- 鍵のローテーション: 漏洩時は「停止 → 旧鍵を失効 → 新鍵 → 1 回だけ疎通確認 → 再開」。
-  定期は「新鍵を追加 → 疎通確認 → 旧鍵を失効」。失効の順序を leak と定期で混ぜない。
+- 予算は D1 の1行（`provider_gateway`、store の migration 2）。呼び出しごとに単価を
+  `UPDATE ... WHERE stopped = 0 AND spent + price <= limit` で先に引く。0 行なら 429、`stopped = 1` なら 503。
+  上流が 2xx 以外・例外なら同じ額を戻す（失敗した呼び出しは課金しない）。
+  日次・月次は行の `day_key` / `month_key` で切り替わる。
+- **緊急停止**は D1 フラグで行う。デプロイを待たず 503。停止中は課金も上流呼び出しもしない。
+
+#### 運用（D1 に 1 文ずつ）
+
+- 状態: `SELECT day_key, day_spent, day_limit, month_spent, month_limit, stopped FROM provider_gateway WHERE id = 'gateway';`
+- 上限: `UPDATE provider_gateway SET day_limit = 5, month_limit = 50 WHERE id = 'gateway';`（既定は日 5 / 月 50 USD。migration は変えない）
+- 止める: `UPDATE provider_gateway SET stopped = 1 WHERE id = 'gateway';`
+- 再開: `UPDATE provider_gateway SET stopped = 0 WHERE id = 'gateway';`
+- 単価: deployment の `HNS_GATEWAY_CALL_PRICE_USD`（既定 0.01 USD）。許可するモデルの 1 回あたり最大費用に合わせる。
+  予算が抑えるのは「回数 × 単価」なので、実際の請求額の天井は provider 側に置く（次節）。
+- gateway は route を持たない（service binding だけ）。0160 で route を付けるなら、呼び出し元の認証を同時に足す。
+
+#### provider 側の支出上限とアラート
+
+- **OpenCode Console**: Controls › Add policy › Entire workspace › Budget に月次の上限（USD）を入れる。
+  予算は毎月 1 日 00:00 UTC にリセットされ、超えるとリクエストが止まる（残高 0 は 402）。
+  gateway の `month_limit` より **低く** して、先に gateway が 429 を返すようにする。Go の利用上限は Billing の Go limits で見る。
+- **Ollama Cloud**: hard limit の設定は無いので、gateway の日次上限を天井にする。利用は usage ページ、
+  または `/api/usage` / `/api/balance` で確認する（[Usage](https://docs.ollama.com/cloud/usage)）。
+- どちらも日次で `provider_gateway` の `day_spent` と provider の usage を突き合わせる。差が大きい（単価が実費用より低い）なら
+  単価を上げるか許可するモデルを狭める。アラートは provider の通知（50% / 80%）とこの日次確認の二段にする。
+
+#### 鍵のローテーション
+
+- 漏洩時（旧鍵は漏れたものとして扱う）: **止める**（`stopped = 1`）→ 旧鍵を provider で失効 → 新しい鍵を
+  `~/.config/hns/<mode>.gateway.secrets.json`（0600）に入れて `bash tools/deploy/deploy.sh <mode>`（gateway → main の順に配備）→
+  再開（`stopped = 0`）→ 1 回だけ疎通を確認 → 失敗するなら即また止める。
+- 定期: 新しい鍵を **追加**（provider が複数鍵を持てる場合）→ 配備 → 疎通確認 → 旧鍵を失効。失効の順序を漏洩時と混ぜない。
+- secrets ファイルは `OLLAMA_CLOUD_API_KEY` / `OPENCODE_GO_API_KEY` の2キーだけ。deploy.sh が 0600 とキー集合を検査し、
+  main Worker の secrets ファイルが provider 鍵を持てば拒否する。
 
 ### マシン（git・gh）
 
@@ -149,7 +182,7 @@ TTL の目安: provider 鍵は四半期ごと、git token は 30 日、webhook t
 秘密は**スコープで分ける**（実装済み）。§user§ は人のもの、§service§ は Automation 用。
 §secrets.mjs§ が AES-256-GCM で保存し、§getService§ は §user§ を読めない。
 Provider 鍵は §service/provider.<name>§ に置けば、ファイルや env を汚さずに使える（PoC の履歴）。
-**0151 以降、provider 鍵は gateway Worker の secret だけに置く（上の「秘密の配置」。0151 は未実装）。**
+**0151 以降、provider 鍵は gateway Worker の secret だけに置く（上の「秘密の配置」。実装は `packages/server/src/gateway/`）。**
 
 ### PRF で包む（実装済み）
 
