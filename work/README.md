@@ -33,6 +33,9 @@ priority: now | plan | batch | hold
 depends-on: NNNN, NNNN
 touches: 触るパス
 
+## Intent
+（誰のどの課題を、なぜ今か。レコードの intent と揃える）
+
 ## Goal
 ## Acceptance criteria
 - [ ] 検証できる形で書く
@@ -48,9 +51,11 @@ touches: 触るパス
 ## Result
 ```
 
+完了の記録は 1 issue 1 レコード（D067）。置き場とスキーマは [0195](issues/0195-work-record-contract.md) で決める（YAML は D067）。決まるまで Result は verdict / reviewer / HEAD / blocking を書く。
+
 振る舞いを変える issue は「テスト条件」と「テスト設計」を書く。テストとコードに issue 番号を書かない（issue 側からパスを参照する）。
 
-review の要否と記録は [docs/review.md](../docs/review.md) と [review/process.md](../docs/review/process.md)。対象なら `## Result` に最終 verdict（PASS / BLOCKED）・reviewer・HEAD・
+review の要否と記録は [docs/review.md](../docs/review.md) と [review/process.md](../docs/review/process.md)。対象なら記録に最終 verdict（PASS / BLOCKED）・reviewer・HEAD・
 blocking 指摘とその修正 commit を書き、途中の FAIL は `## Log` に残す。対象外なら理由を1行書く。
 どちらも無い issue は `done` にしない。
 

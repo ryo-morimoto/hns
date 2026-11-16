@@ -1,0 +1,29 @@
+schema: 1
+issue: "0195"
+intent: "仕事の記録を、レビュー・進捗・次セッションの判断に使える形にする"
+criteria:
+  - id: C1
+    kind: manual
+    status: passed
+    evidence: "work/issues/0195-work-record-contract.md"
+  - id: C2
+    kind: manual
+    status: passed
+    evidence: "docs/decisions.md D067-D070"
+  - id: C3
+    kind: manual
+    status: passed
+    evidence: "work/issues/0196-record-package.md"
+limits:
+  - "製品 UI / D1 / GraphQL は未実装（0197）"
+  - "OutcomeSource は未接続（0198 候補）"
+decision:
+  by: user
+  at: "2026-11-16T13:00:00.000Z"
+  basis: "J1〜J4 を決定し、実装と製品統合の issue を切った"
+invalidation:
+  - "record schema を v2 にしたとき"
+  - "J1〜J4 を見直したとき"
+learning:
+  ref: "docs/decisions.md#D067"
+  at: "2026-11-16T13:00:00.000Z"

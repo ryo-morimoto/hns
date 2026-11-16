@@ -1,0 +1,31 @@
+schema: 1
+issue: "0196"
+intent: "完了の記録を、レビュー・進捗・次セッションが読める構造化データにする"
+criteria:
+  - id: C1
+    kind: test
+    status: passed
+    evidence: "npm test -w @hns/record（20 tests）"
+  - id: C2
+    kind: test
+    status: passed
+    evidence: "npm run typecheck -w @hns/record"
+  - id: C3
+    kind: eval
+    status: passed
+    evidence: "npm run check（gate ok）"
+  - id: C4
+    kind: manual
+    status: passed
+    evidence: "record-reviewer PASS（1回目 FAIL の修正後）"
+limits:
+  - "製品統合（D1 / GraphQL / UI）は 0197"
+  - "Node 26 以外の実行は未確認"
+  - "runInit の write 失敗は未処理"
+decision:
+  by: "record-reviewer"
+  at: "2026-11-16T13:36:00.000Z"
+  basis: "blocking 0 の PASS。ゲートも ok"
+invalidation:
+  - "schema を v2 にしたとき"
+  - "0197 で WorkItem / Evidence への写像を変えたとき"
