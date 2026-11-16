@@ -70,7 +70,7 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 ## Result
 
 - 実装: c3c4116（branch `issue/0159-live-ws`）。status は open のまま（独立レビュー前）。
-- ゲート: `npm run check` exit 0。310 tests / 59 files、lint / fmt / typecheck / build / deploy dry-run / knip すべて ok。
+- ゲート: `npm run check` exit 0。448 tests / 85 files、lint / fmt / typecheck / build / deploy dry-run / knip すべて ok。
 - 受入の証拠:
   - 閉じた union: static な `LIVE_FRAME_TYPES` / valibot variant と `core/src/stream.test.ts`（未知 type・別 protocol は拒否）。
   - snapshot → 差分 + cursor: `server/src/ws.ts` が接続ごとに snapshot を先に送り、以後 append / delta。`server/src/ws.test.ts` と cf dev の実 WebSocket（`server/test/integration/session-do.test.ts`）で、接続 → snapshot → send → append、切断中の send → 再接続 snapshot を確認。production edge の `/ws` についても、署名 cookie を注入した test Worker から実 upgrade → 101 → snapshot を確認。
