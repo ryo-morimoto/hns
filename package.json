@@ -36,6 +36,15 @@
           "test/integration/**/*.test.ts"
         ]
       },
+      "packages/machine": {
+        "entry": [
+          "src/**/*.test.ts",
+          "test/integration/**/*.test.ts"
+        ],
+        "ignoreBinaries": [
+          "mkfifo"
+        ]
+      },
       "packages/workspace": {
         "entry": [
           "src/rooted-helper.ts"
