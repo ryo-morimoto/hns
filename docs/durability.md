@@ -128,6 +128,18 @@ cover するには checkpoint の契機を増やすしかない（しない、�
 
 プロセスの crash はこの「中断」に含まれない。後始末の checkpoint を打つプロセスが死んでいるため、U は durable でない。同じマシンに作業ツリーが残っていれば次の Run の checkpoint が拾い得るが、保証はしない（§1 の process crash 行）。
 
+### 3.4 lease と fencing（版チェックの委譲）
+
+書き込みの権利は、Workspace DO が発行する lease で 1 台のマシンに閉じる（[0142](../work/issues/0142-lease-fencing.md)）。
+
+- lease の型は core の `WorkspaceLease`（`workspaceId` / `machineId` / `epoch` / `expiresAt`）。
+- 取得・更新・解放は Workspace DO。`epoch` は発行のたびに増え、1 ワークスペースで有効な lease は 1 本だけ。
+- 保持中は、書き込みのたびに DO へ問い合わせない。ローカルの版チェック（dirfd + hash、ヘルパーが無ければ `checks`）をそのまま使う。lease は版チェックを外すのではなく、置き場所をマシンに移す。
+- 期限切れ・未取得では書かない。マシンは DO に届かないとき、自分の lease がまだ有効か確かめられないので fail closed にする。拒否は閉じた語彙（`LEASE_REFUSALS`）で返す。
+- 別マシンからの書き込みは `epoch` で拒否する。古い epoch の intent は適用せず、`unknown` として照合する（INV-04）。
+- 読み取りは lease を要さない。
+- 同じ workspace を2台から同時に編集することは要件2（複数マシンで Agent を動かす）に含まない。1 台に閉じる。
+
 ## 4. 読みの経路
 
 - ファイル: **マシンから読む**。R2 は読みの経路に入れない（U が見えない）
@@ -197,6 +209,7 @@ R2 を使う理由は金額ではなく、**128MB のメモリ上限と復帰時
 | INV-06 | Progress は永続化済みの事実（J とイベント）から復元できる                                               |
 | INV-09 | 正本は `(C, J)`。ツリーは写像であり、失ってよい                                                         |
 | INV-10 | ack は単一システムで閉じる（DO の 1 トランザクション、または R2 → DO の順）                             |
+| INV-13 | 書き込みの権利は lease で 1 台に閉じる。未取得・期限切れ・古い epoch は fail closed                      |
 
 ## 10. 撤退条件
 

@@ -25,6 +25,8 @@
 
 `U` はまだどこにも確定していない変更で、durable ではない（INV-05）。契約は [durability.md](docs/durability.md)。
 
+要件2（複数マシンで Agent を動かす）は、同じ workspace を2台から同時に編集できることを意味しない。書き込みの権利は lease で 1 台に閉じ、読み取りは lease を要さない（INV-13 / [durability.md](docs/durability.md) §3.4）。
+
 ## 構成
 
 ```text
@@ -83,6 +85,7 @@ passkey・hooks・health / metrics / usage・machine agent・ファイルのバ�
 | INV-10 | ack は単一システムで閉じる（DO の 1 トランザクション、または R2 → DO の順） |
 | INV-11 | 実行中の状態は DO、確定したレコードは D1。どちらも他方の複製を正本にしない |
 | INV-12 | migration は新規テーブルと nullable / 既定値付きの新列のみ（加算）。古い build は新しい DB を開かない（fail closed） |
+| INV-13 | 書き込みの権利は lease で 1 台に閉じる。未取得・期限切れ・古い epoch は fail closed |
 
 ## Phases
 

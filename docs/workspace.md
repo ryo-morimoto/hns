@@ -164,8 +164,9 @@ recover（applied / pending / unknown）を実装。**40/40 合格**（Node env 
 - dirfd 経路の読み取りは 8 MiB まで。超えると `invalid` で断る。
 - ディレクトリの fsync をしない。**v0.1 のローカル経路では rename の耐久性を保証しない**（ack 直後の電源断で失われ得る）。Cloudflare 経路の ack は Workspace DO の outcome 確定後に行うため、ack 済みの保存は電源断・マシン喪失に耐える（[durability.md](durability.md) / 0157 で実装）。作業ツリーの rename は `U` であり、失っても `(C, J)` から戻す。
 - create-if-absent の競合、巨大ファイル、パッチは未対応。
+- 同じ workspace を2台から同時に編集することは要件2に含まない。書き込みは lease で1台に閉じ、未取得・期限切れ・古い epoch は fail closed（[durability.md](durability.md) §3.4 / [0142](../work/issues/0142-lease-fencing.md)）。読み取りは lease を要さない。
 - bwrap は 0.12.0 でしか検証していない。macOS / Windows の backend は無い（[0006](../work/issues/0006-sandbox-deploy.md)）。
 
 ## 未決
 
-パッチ形式 / 巨大ファイル / create-if-absent / lease / イベント保持 / ヘルパーの配布。Journal の保存先は Workspace DO（[durability.md](durability.md) / 0169）。
+パッチ形式 / 巨大ファイル / create-if-absent / イベント保持 / ヘルパーの配布。Journal の保存先は Workspace DO（[durability.md](durability.md) / 0169）。
