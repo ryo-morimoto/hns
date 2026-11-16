@@ -8,8 +8,11 @@
 - 実装: `packages/server/src/cost/`（Session DO の送信前の上限判定と、ターン終了時の記録）。
 - ランタイム: pi-durable 1.5.0 の実 Harness。SQLite は Node の `node:sqlite`（workerd ではなく、
   Durable Object の `sql.exec` と同じ形のアダプタ）。
-- モデル: faux（`faux/echo`）。**text 1 ターン、ツール無し。**
-- 計測コード: `packages/server/src/do/session-cost.test.ts`（同じ数字を回帰テストとして固定している）。
+- モデル: faux。**text 1 ターン、ツール無し、応答は 200 語（999 文字）。**
+  応答は `Session` の runtime factory に注入している（短い既定応答だと、delta ごとに commit する実装でも
+  行数が同じになり、token 単位 commit を検出できない）。
+- 計測コード: `packages/server/src/do/session-cost.test.ts`。合計（9 行）は回帰テストで固定し、生の行数差と
+  一致することも確かめている。表ごとの内訳は計測時の観察で、固定はしていない。
 - 行は「増えた行」（実行前後の `COUNT(*)` 差）。更新で書き直された行は差に出ないため、**行書き込みの下限**。
 
 ## 実測
@@ -38,7 +41,8 @@
 | DO リクエスト | 10,000 | 1,000,000 | 1% |
 | R2 オブジェクト | 0 | 1,000,000 | 0% |
 
-既定の上限は `cost_limits` の seed（docs/durability.md §7 の無料枠）。**支配的なのはモデル代**で、
+既定の上限は `cost_limits` の seed（行と R2 は docs/durability.md §7 の無料枠、DO リクエストは同じ桁の運用方針）。
+**支配的なのはモデル代**で、
 プラットフォーム側は 1 桁小さい。だから token 単位 commit のような桁の変化を検出できることが要る
 （`session-cost.test.ts` の行数上限 24。token ごとなら 100〜500 倍になる）。
 
@@ -47,5 +51,6 @@
 - ツールを使うターンは行が増える（1 op = 1 intent/outcome + イベント）。実ターンのツール込みの計測は
   [poc/cf-harness/RESULTS.md](../../work/poc/cf-harness/RESULTS.md) の「1 ターン 4 op で ~10 行」と整合する。
 - 更新の書き直しは行の増分に出ないので、DO の「行書き込み」課金に対してはこの数字は下限。桁を見るには足りる。
-- 計測をやり直す: `npm test -w @hns/server` の `session-cost.test.ts` が同じ表を回す。数字が変わったら
-  この表と `ROW_BUDGET`（24）を見直す。
+- 計測をやり直す: `npm test -w @hns/server` の `session-cost.test.ts` が同じ表を回す。合計が 9 から変わると
+  テストが落ちる（runtime の書き込み方が変わった合図）。そのときはこの表を実測し直し、テストの
+  `ROWS_PER_TURN` と上限（24）も合わせる。
