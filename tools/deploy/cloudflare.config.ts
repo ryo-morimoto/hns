@@ -96,6 +96,7 @@ export const workerFor = (deployment: Deployment) => ({
       worker: deployment.workerName,
       exportName: "Session",
     }),
+    DB: bindings.d1({ name: deployment.workerName }),
   },
 });
 

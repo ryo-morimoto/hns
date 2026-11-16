@@ -49,6 +49,7 @@ Worker の入口と Session Durable Object。公開する面を GraphQL / WS / �
 ## D1 と DO
 
 - D1 は Worker だけが触る。DO から D1 を直接触らない（0150 / 0146）。
+- `WorkerEnv.DB` は `@hns/store` の `D1Binding`。`workerFor()` が `bindings.d1({ name })` を1件だけ宣言する。binding 不在・D1 障害は 0149 以降の face が 503 にする。
 - 会話の D1 索引は 0149。0146 は DO 内のメタデータまで。
 
 ## 開発・検証

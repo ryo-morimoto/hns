@@ -1,3 +1,4 @@
+import type { D1Binding } from "@hns/store";
 import type {
   AssetFetcher,
   DurableObjectId,
@@ -100,17 +101,41 @@ export function sessionWith(
   return { namespace, ids, requests };
 }
 
+/** The statement shape the store reads; the binding below keeps it deliberately empty. */
+interface FakeStatement {
+  bind(...values: readonly (string | number | null)[]): FakeStatement;
+  all(): Promise<{ readonly results: readonly string[] }>;
+  first(): Promise<null>;
+  run(): Promise<{ readonly meta: { readonly changes: number } }>;
+}
+
+/** A D1 binding that answers every statement with no rows and no changes. */
+export function d1With(): D1Binding {
+  const statement: FakeStatement = {
+    bind: () => statement,
+    all: () => Promise.resolve({ results: [] }),
+    first: () => Promise.resolve(null),
+    run: () => Promise.resolve({ meta: { changes: 0 } }),
+  };
+  return {
+    prepare: () => statement,
+    batch: () => Promise.resolve([]),
+  };
+}
+
 /** Build an env; pass an empty secret to exercise the fail-closed branch. */
 export function envWith(
   options: {
     readonly assets?: AssetFetcher;
     readonly session?: DurableObjectNamespace;
+    readonly db?: D1Binding;
     readonly secret?: string;
   } = {},
 ): WorkerEnv {
   return {
     ASSETS: options.assets,
     SESSION: options.session,
+    DB: options.db,
     HNS_SESSION_SECRET: options.secret ?? TEST_SECRET,
   };
 }

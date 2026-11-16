@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { expect, test, vi } from "vitest";
-import { assetsWith, envWith, sessionCookie } from "../../test/support/edge.ts";
+import { assetsWith, d1With, envWith, sessionCookie } from "../../test/support/edge.ts";
 import {
   createEdge,
   type EdgeRequest,
@@ -258,6 +258,25 @@ test("an unexpected handler failure becomes a 500 with the request id", async ()
   } finally {
     spy.mockRestore();
   }
+});
+
+// Catches: the D1 binding being dropped at the edge, so no face can reach the store.
+test("a face receives the D1 binding from env", async () => {
+  const cookie = await sessionCookie("owner");
+  const db = d1With();
+  let seen: unknown;
+  const deps: HandlerDependencies = {
+    graphql(request: GraphQLRequest): Promise<Response> {
+      seen = request.env.DB;
+      return Promise.resolve(new Response("ok"));
+    },
+    ws(): Promise<Response> {
+      return Promise.resolve(new Response("ok"));
+    },
+  };
+  const response = await createEdge(deps)(post("/graphql", "{}", { cookie }), envWith({ db }));
+  expect(response.status).toBe(200);
+  expect(seen).toBe(db);
 });
 
 // Catches: a slow resolver holding the request past the deadline without cancellation.

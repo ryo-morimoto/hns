@@ -997,3 +997,20 @@ D067 のレコードを、製品ドメイン（Project / Task）とは別のパ�
 却下: core に置く（YAML と CLI がコアに入る）、tools に置く（製品から使えない）、store に置く（D1 前提になり、CLI が使えない）。
 
 前提が変わる条件: 製品が record を使わず CLI 専用になったとき（tools へ戻す）、または record が core の型に依存し始めたとき（境界を見直す）。
+
+## D072: Worker の D1 binding と migration の版ファイル
+
+date: 2026-11-16 · by: user · issue: 0189
+
+Worker から D1 の store を開く経路を1回だけ作る。binding と migration の足し方を各面に任せると、同じ2ファイルを複数の issue が編集し、migration の順序と「いつ走るか」がばらける。
+
+- `WorkerEnv.DB`（`@hns/store` の `D1Binding`）を1箇所で宣言し、face は `request.env.DB` で受け取る。face（0149 以降）は binding 不在・D1 障害・migration 失敗を 503 で fail closed にし、成功に見せない。
+- `workerFor()` は `bindings.d1({ name: workerName })` を1件だけ宣言する。binding 名は `DB` で固定する。
+- migration は1版1ファイル（`src/migrations/NNNN-name.ts`）とし、`index.ts` の配列に1行足す。`migrate()` は適用前に版が 1..n・昇順・重複なしを検証し、違反なら1文も実行しない。
+- open は isolate の初回に1回で足りる（`openStore`）。`migrateStore` は deploy / 保守の入口として残す。
+- migration は加算のみ（INV-12）。破壊的変更は expand → contract に分ける。
+
+却下: 各面が自分の binding と配列の行を足す（衝突と順序のばらつき）、deploy 時の migration（前フックが未確認）、毎リクエスト open（cold start の利点が消える）。
+
+前提が変わる条件: cf が binding 名で database を解決できない、または cold start の +1 read が計測で無視できなくなったとき。
+

@@ -82,6 +82,7 @@ passkey・hooks・health / metrics / usage・machine agent・ファイルのバ�
 | INV-09 | 正本は `(C, J)`。作業ツリーは写像であり、失ってよい |
 | INV-10 | ack は単一システムで閉じる（DO の 1 トランザクション、または R2 → DO の順） |
 | INV-11 | 実行中の状態は DO、確定したレコードは D1。どちらも他方の複製を正本にしない |
+| INV-12 | migration は新規テーブルと nullable / 既定値付きの新列のみ（加算）。古い build は新しい DB を開かない（fail closed） |
 
 ## Phases
 

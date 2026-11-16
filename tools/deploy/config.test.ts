@@ -46,6 +46,12 @@ test("an unknown mode is rejected", () => {
   expect(() => deploymentFor("staging2", undefined, undefined)).toThrow(/unknown mode/);
 });
 
+// Catches: a face reading env.DB without a declared D1 binding.
+test("the worker declares one D1 binding named for the worker", () => {
+  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  expect(worker.env.DB).toStrictEqual({ type: "d1", name: "hns-dev" });
+});
+
 // Catches: the edge reading HNS_SESSION_SECRET without a declared binding.
 test("the worker declares the session secret binding", () => {
   const worker = workerFor(deploymentFor("development", undefined, undefined));

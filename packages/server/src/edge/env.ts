@@ -1,3 +1,5 @@
+import type { D1Binding } from "@hns/store";
+
 /**
  * The subset of the Cloudflare bindings the edge uses.
  *
@@ -37,6 +39,14 @@ export interface DurableObjectNamespace {
 export interface WorkerEnv {
   readonly ASSETS?: AssetFetcher | undefined;
   readonly SESSION?: DurableObjectNamespace | undefined;
+  /**
+   * The control database: projects, tasks, and the conversation index.
+   *
+   * @remarks
+   * Optional so a missing binding fails closed at the face (503) instead of crashing the
+   * isolate at startup. Faces open it through `openStore`; they never query D1 directly.
+   */
+  readonly DB?: D1Binding | undefined;
   /** HMAC key for `hns_session`; at least 32 characters. Never logged. */
   readonly HNS_SESSION_SECRET?: string | undefined;
 }

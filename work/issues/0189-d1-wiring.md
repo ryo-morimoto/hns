@@ -1,9 +1,9 @@
 # 0189: Worker から D1 の store を開通させる
 
-status: open
+status: in-progress
 priority: now
 depends-on: 0145, 0150
-touches: packages/store/src/migrate.ts, packages/store/src/migrations/, packages/store/test/, packages/store/README.md, packages/server/src/edge/env.ts, packages/server/src/edge/handler.test.ts, packages/server/package.json, packages/server/README.md, package-lock.json, tools/deploy/cloudflare.config.ts, tools/deploy/config.test.ts, ARCH.md, docs/decisions.md
+touches: packages/store/src/migrate.ts, packages/store/src/migrations/, packages/store/test/, packages/store/README.md, packages/server/src/edge/env.ts, packages/server/src/edge/handler.test.ts, packages/server/test/support/edge.ts, packages/server/package.json, packages/server/README.md, package-lock.json, tools/deploy/cloudflare.config.ts, tools/deploy/config.test.ts, ARCH.md, docs/decisions.md
 
 ## Summary
 
@@ -250,6 +250,7 @@ packages/store/src/migrate.ts  # MIGRATIONS を import。適用ループは変�
 - 2026-11-11: 作成（0141 / 0146 と並行する3本目。0148 / 0149 / 0151 / 0158 の共通前提）。
 - 2026-11-11: RFC / design doc の形に再構成（rfc-design-docs）。D1（isolate 初回 open）/ D2（版ファイル）/ D3（store の型）/ D4（binding と env の seam）/ D5（INV-12）/ D6（migrateStore は保守用）を決めた。
 - 2026-11-11: seam は `HandlerDependencies` ではなく `EdgeRequest.env` にした（env は既に全 face に渡っており、依存の口を増やさないため）。
+- 2026-11-16: 実装。`WorkerEnv.DB`（@hns/store の `D1Binding`）、`workerFor()` の `bindings.d1({ name })`、migration の版ファイル分割（`src/migrations/`）、適用前の 1..n 検証、integration テスト（v1→v2・不正な配列）、`ARCH.md` の INV-12、D072。`npm run typecheck`（store / server / deploy）と unit + store integration が通過。
 - 2026-11-16: 独立レビュー（review-0189 / FAIL）を受けて修正。rollback は Worker と D1 をセットにし、旧 build は新しい DB を開かない（fail closed、503）と明記した。テストの重複を既存テスト参照に、lock の前提を 0146 統合済みに更新した。
 
 ## Result

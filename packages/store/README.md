@@ -5,6 +5,7 @@ Cloudflare D1 の永続化。migration、リポジトリ、Row → 公開モデ�
 - `src/sql.ts` — D1 binding の最小の型と、rows / changes を正規化する `createSql`。
 - `src/db.ts` — 注入可能な clock / id と、リポジトリが共有する context。
 - `src/migrate.ts` — schema と `schema_migrations` の migration。開くたびに冪等。
+- `src/migrations/` — 1版1ファイル。表を足すときは `NNNN-name.ts` を足し、`index.ts` の `MIGRATIONS` に1行足す。
 - `src/store.ts` — `openStore({ d1 })`。projects / tasks / conversations / events / workflows / automations / usage を名前空間で公開する。
 - `src/schemas.ts` / `src/parse.ts` — Row の valibot schema と公開型への `parse`。不正な Row は throw する。
 - `src/repositories/` — 各リポジトリ。書き込みは1文か D1 の batch、読み取りは `parse` を通す。
