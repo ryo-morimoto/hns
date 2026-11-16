@@ -5,7 +5,7 @@ priority: now
 design: agreed
 design-ref: D047, D053
 depends-on: 0145
-touches: packages/machine/, docs/packages.md, docs/safety.md, oxlint.config.ts, vitest.config.ts, package.json, package-lock.json, AGENTS.md, work/issues/0147-machine-agent.md
+touches: packages/machine/, docs/packages.md, docs/auth.md, docs/safety.md, oxlint.config.ts, vitest.config.ts, package.json, package-lock.json, AGENTS.md, work/issues/0147-machine-agent.md
 
 ## Goal
 
@@ -15,7 +15,8 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 ## Acceptance criteria
 
 - [ ] `cloudflared` の後ろで `127.0.0.1` に待ち受ける（inbound ポートを開けない）
-- [ ] リクエスト署名（Ed25519。秘密鍵はマシン（0600）、公開鍵は D1 の Machine レコード（D049））と時刻窓・nonce で再生を拒否
+- [ ] inbound（Worker → マシン）の要求は control-plane の Ed25519 公開鍵（enrollment で配布。ローテーションのため複数可）で検証し、時刻窓・nonce で再生を拒否
+- [ ] device key（秘密鍵はマシン（0600）、公開鍵は D1 の Machine レコード（D049））は machine → Worker（登録・heartbeat・outbound）用で、inbound の検証には使わない（0148 が供給）
 - [ ] パスは ROOT 内に正規化し、symlink の親で外に出ない。失敗は型付きの拒否
 - [ ] 同時実行数・出力サイズ・時間の上限
 - [ ] 二重接続のうち古い方を seq で弾く
@@ -27,10 +28,10 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 | ID  | 条件（Given → When → Then）                                                                                      | リスク | 出所       |
 | --- | ---------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
 | C1  | 正しい鍵で署名した health → 200、ROOT と pid を返す                                                              | 高     | AC1, AC2   |
-| C2  | 署名が無い / 別の鍵 / body だけ差し替え → 401 unauthorized。op は実行されない                                    | 高     | AC2        |
+| C2  | 署名が無い / 別の control-plane 鍵 / body だけ差し替え → 401 unauthorized。op は実行されない                     | 高     | AC2        |
 | C3  | timestamp が窓（±60s）の外（過去・未来）→ 401 stale_request                                                      | 高     | AC2        |
 | C4  | 同じ nonce と同じ署名の 2 回目 → 409 replayed。1 回目の結果は変わらない                                          | 高     | AC2        |
-| C5  | 登録に無い machine id / 鍵 → 401 unauthorized                                                                    | 中     | AC2, 0148  |
+| C5  | 登録に無い machine id / enrollment に control-plane 鍵が無い → 401 unauthorized                                   | 中     | AC2, 0148  |
 | C6  | 古い接続の seq → 409 stale_connection。より大きい seq の接続は通り、以後古い接続は通らない。同じ seq の別接続も拒否 | 高     | AC5        |
 | C7  | `..` を含むパス → 400 path_denied。`/` 始まりは ROOT 相対に正規化され、ROOT の外は指さない                     | 高     | AC3        |
 | C8  | 親が ROOT 外を指す symlink（`link/secret.txt`）→ 400 path_denied。内容は応答に出ない                            | 高     | AC3        |
@@ -41,20 +42,22 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 | C13 | 応答（read/list）が上限を超える → 413 too_large。内容は返さない                                                   | 中     | AC4        |
 | C14 | body を送り切らない要求 → 時間上限で 408 deadline_exceeded。待ち続けない                                          | 中     | AC4        |
 | C15 | 待受アドレスは 127.0.0.1（bind を直接検証）。ループバック以外の interface からは接続できない。外部 IPv4 が無いホストは理由付きで skip | 高     | AC1        |
-| C16 | デバイス鍵: 0600 は読め、0644 は拒否、symlink は拒否                                                              | 高     | AC2        |
 | C17 | 未対応 op / JSON でない body → 400 invalid_request                                                                | 中     | AC3        |
 | C18 | POST 以外 → 405 method_not_allowed、`/rpc` 以外 → 404 not_found                                                   | 低     | AC1        |
 | C19 | FIFO への read → 400 invalid_request。thread pool を塞がず、続く通常の read は通る                                 | 高     | AC4        |
 | C20 | 登録鍵の取得が返らない（never-resolving registry）→ 408 deadline_exceeded。slot は解放され、次の要求も 429 ではなく 408 | 高     | AC4        |
 | C21 | 遅い read（16 MiB）の実行中 → 別の要求は 429 busy。read が終わると slot が空き、次の要求は 200           | 中     | AC4        |
-| C22 | deadline を超える read（64 MiB、10ms）→ 408 deadline_exceeded。その後 slot が空き、health は 200         | 中     | AC4        |
+| C22 | deadline を超える read（64 MiB、2ms）→ 408 deadline_exceeded で slot が空く。性能依存の smoke（決定的な deadline の証明は C20 / C21） | 中     | AC4        |
 | C23 | socket への read → 400 invalid_request（device は mknod 不可なので対象外）                                   | 中     | AC3        |
 | C24 | 405 の応答に `Allow: POST` が付く                                                                          | 低     | AC1        |
+| C25 | ローテーション: 旧鍵と新鍵を併記 → どちらの署名も 200。どちらでもない control-plane 鍵は 401                     | 高     | AC2        |
+| C26 | machine の device key で署名した inbound の要求 → 401（用途分離）                                                 | 高     | AC2        |
 
 テストしない条件:
 
 - bwrap・hide・env 純度・実機の cloudflared 経由（理由: 環境依存。0194 が実機で確認する）。
-- D1 への登録・失効（理由: 0148。ここは `MachineKeyRegistry` の interface と fixture で固定する）。
+- D1 への登録・失効と control-plane 公開鍵の配布（理由: 0148。ここは `ControlPlaneKeys` の interface と fixture で固定する）。
+- device key（0600 の読込・machine → Worker の outbound 署名）（理由: 0148。0147 は inbound の検証だけを持つ）。
 - exec と書き込み（理由: sandbox が無い環境で exec を出さない（fail closed）。0194 で足す）。
 - Windows / macOS の sandbox（理由: 0006 の範囲外）。
 - 非 abortable な遅い呼び出し（`lstat` / `readdir`）が deadline を過ぎてから settle するまでの slot 保持
@@ -67,12 +70,12 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 | ID  | 条件 | 技法             | 層          | テスト                                                                              |
 | --- | ---- | ---------------- | ----------- | ----------------------------------------------------------------------------------- |
 | T1  | C1   | ユースケース     | integration | `test/integration/agent.test.ts` "a signed health call is answered"                |
-| T2  | C2   | 故障注入         | integration | 同 "an unsigned request, a foreign key, and a swapped body are refused"              |
+| T2  | C2   | 故障注入         | integration | 同 "an unsigned request, a foreign key, and a swapped body are refused" / "a signature from another control-plane key is refused" |
 | T3  | C3   | 境界値分析       | unit        | `src/signature.test.ts` "the window accepts the boundary and refuses beyond it"     |
 | T4  | C3   | 故障注入         | integration | `test/integration/agent.test.ts` "a stale timestamp is refused"                     |
 | T5  | C4   | 状態遷移         | integration | 同 "a replayed nonce is refused"                                                     |
 | T6  | C4   | 境界値分析       | unit        | `src/signature.test.ts` "a nonce is remembered until its window closes"             |
-| T7  | C5   | 同値分割         | integration | 同 "an unregistered machine is refused"                                              |
+| T7  | C5   | 同値分割         | integration | 同 "an enrollment with no key is refused"                                            |
 | T8  | C6   | 状態遷移         | unit        | `src/connection.test.ts` "a newer connection takes over and the older one is stale"  |
 | T9  | C6   | 故障注入         | integration | 同 "the older connection is refused after a newer one connects"                       |
 | T10 | C7   | 同値分割         | unit        | `src/containment.test.ts` "normalization names stay inside the root"                 |
@@ -85,16 +88,17 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 | T17 | C13  | 境界値分析       | integration | 同 "a response over the output limit is refused"                                      |
 | T18 | C14  | 故障注入         | integration | 同 "a request that never finishes its body meets the deadline"                        |
 | T19 | C15  | 契約テスト       | integration | 同 "the agent binds to loopback only" / "a non-loopback interface cannot reach the agent"（外部 IPv4 が無いホストは理由付き skip） |
-| T20 | C16  | 同値分割         | unit        | `src/device-key.test.ts` "a key readable by group or other is refused"               |
 | T21 | C17  | 同値分割         | unit        | `src/wire.test.ts` "an unknown operation or a non-JSON body is refused"              |
 | T22 | C18  | 同値分割         | integration | 同 "a wrong method and a wrong route are refused distinctly"                           |
 | T23 | C11  | 状態遷移         | unit        | `src/limits.test.ts` "a slot is released once and never below zero"                  |
 | T24 | C19  | 故障注入         | integration | 同 "a FIFO is refused without blocking the pool"                                      |
 | T25 | C20  | 故障注入         | integration | 同 "a verification that never finishes meets the deadline"                            |
 | T26 | C21  | 競合テスト       | integration | 同 "a slow read holds its slot until it finishes"                                     |
-| T27 | C22  | 故障注入         | integration | 同 "a read that outlives the deadline is aborted"                                     |
+| T27 | C22  | 故障注入         | integration | 同 "a read that outlives the deadline is aborted"（64 MiB は 2ms では読めない前提の smoke。abort の決定的な証明は T25 の verify と T26 の slot 保持） |
 | T28 | C23  | 同値分割         | integration | 同 "a socket is refused as a non-regular file"                                        |
 | T29 | C24  | 契約テスト       | integration | 同 "a wrong method and a wrong route are refused distinctly"（`allow` ヘッダ）        |
+| T30 | C25  | 同値分割         | integration | 同 "either key in a rotation is accepted"（unit: `src/signature.test.ts` "either key in a rotation is accepted"） |
+| T31 | C26  | 故障注入         | integration | 同 "the machine's device key cannot sign an inbound request"                          |
 
 ## Notes
 
@@ -104,18 +108,13 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 
 ## 未確定
 
-- U-02: 署名の向きが AC と実装で一致しない。
-  - 現状の矛盾: AC は「秘密鍵はマシン（0600）、公開鍵は D1 の Machine レコード」としつつ、machine が要求を検証する形を求めている。
-    秘密鍵がマシンにあるなら、Worker は machine の device key で署名できない（machine が検証する側に回れない）。
-  - 案1: **control-plane 鍵を分ける**。Worker（harness）が自分の鍵で要求に署名し、machine はその公開鍵で検証する。
-    device key（秘密はマシン / 公開は D1）は machine → Worker の署名にだけ使う。AC の parenthetical と D049 はこのまま生きる。
-  - 案2: **向きを反転**。machine を呼び出し側にし、machine が device key で署名して Worker の endpoint を叩く（machine は検証しない）。
-    AC の「署名を検証し」を落とす必要がある。
-  - 案3: **0148 へ移す**。0147 は署名メッセージと検証器を interface として置くだけにし、どの鍵を Machine レコードに載せるか・
-    どちらが署名するかを 0148 の登録・失効と一緒に決める。
-  - いまの実装は案1ではない。`MachineKeyRegistry`・`keys.ts`・fixture はすべてマシンの device key（公開鍵）のままで、
-    `RequestVerifier` はその鍵で受け取った要求を検証する。案1の control-plane 鍵の分離は決定後に実装する。
-    決定はユーザー待ち。
+- U-02: **解決（A: control-plane 鍵を分ける）**。
+  - inbound（Worker → マシン）は control-plane の Ed25519 秘密鍵（Worker の secret）で署名し、マシンは enrollment で
+    配られた公開鍵で検証する。公開鍵はローテーションのため複数受け取れる（旧鍵と新鍵を併記）。
+  - device key（秘密はマシン 0600 / 公開は D1）は machine → Worker（登録・heartbeat・outbound）用で、inbound の
+    検証には使わない。0148 が両方を供給する。
+  - 0147 は `ControlPlaneKeys`（inbound の公開鍵）と検証器だけを持ち、device key の読込と outbound 署名は 0148 に移す。
+  - 却下した案: 向きの反転（machine は検証しない）と 0148 へ全面的に移す（この issue で検証を固定しない）。
 
 ## やらないこと
 
@@ -159,3 +158,15 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
   「テストしない条件」に理由付きで残した。socket への read 400（C23/T28）と 405 の `Allow: POST`（C24/T29）も追加。
   README と docs/safety.md に machine の残余 TOCTOU（同一ユーザーの親差し替え）を書き、AGENTS.md・
   vitest.config.ts・issue の末尾改行を直した。U-02 の記述を「現実装は案1ではない」に訂正。
+
+- 2026-11-17: ユーザーが A（control-plane 鍵を分ける）を採用。inbound の検証を `ControlPlaneKeys`（enrollment で
+  配られる control-plane 公開鍵。複数可）に変え、`RequestVerifier` は enrolled な鍵のどれかで署名が通ることを見る。
+  `MachineKeyRegistry`・`keys.ts`・device key の読込（`readDeviceKey`）・outbound 署名（`signRequest`）は 0147 から外し、
+  device key は machine → Worker 用として 0148 に移した。fixture は control-plane 鍵で署名する。C2/C5 を更新し、
+  ローテーション（C25/T30）と用途分離（C26/T31）を追加。AC2 を inbound と device key に分け、U-02 を解決にした。
+  docs/auth.md に control-plane 鍵の節（秘密は Worker の secret、公開は enrollment、用途分離、ローテーション）を追加。
+
+- 2026-11-17: レビューの低 2 件と C22 の timing 依存を修正。docs/safety.md の末尾改行を戻し、socket テストの
+  listen 失敗に error ハンドラを足した（失敗時に 30s ハングしない）。C22 は 64 MiB の read を 2ms の deadline で
+  切る smoke にし、64 MiB が 2ms では読めない前提を C22 / T27 に明記した。deadline の決定的な証明は C20
+  （verify の race）と C21（slot 保持）が持つ。3 回連続で pass を確認。
