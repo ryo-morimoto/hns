@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, realpath, symlink, truncate, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import type { JsonValue } from "@hns/core";
@@ -328,6 +328,56 @@ test("a request beyond the concurrency limit is refused", async () => {
       }
     },
     { limits: { maxConcurrency: 1, timeoutMs: 300 } },
+  );
+});
+
+test("a slow read holds its slot until it finishes", async () => {
+  await withAgent(
+    async ({ root }) => {
+      await writeFile(join(root, "big.bin"), "");
+      await truncate(join(root, "big.bin"), 16 * 1024 * 1024);
+    },
+    async (fixture) => {
+      const slow = fixture.call({ body: JSON.stringify({ op: "read", path: "big.bin" }) });
+      await waitFor(() => fixture.agent.inFlight === 1, "the slow read to take the slot");
+      const busy = await fixture.call({ body: health });
+      expect(busy.status).toBe(429);
+      expect(codeOf(busy)).toBe("busy");
+      const finished = await slow;
+      expect(finished.status).toBe(200);
+      await waitFor(() => fixture.agent.inFlight === 0, "the slot to be released");
+      expect((await fixture.call({ body: health })).status).toBe(200);
+    },
+    {
+      limits: {
+        maxConcurrency: 1,
+        timeoutMs: 5_000,
+        maxResponseBytes: 32 * 1024 * 1024,
+      },
+    },
+  );
+});
+
+test("a read that outlives the deadline is aborted", async () => {
+  await withAgent(
+    async ({ root }) => {
+      await writeFile(join(root, "big.bin"), "");
+      await truncate(join(root, "big.bin"), 64 * 1024 * 1024);
+    },
+    async (fixture) => {
+      const slow = await fixture.call({ body: JSON.stringify({ op: "read", path: "big.bin" }) });
+      expect(slow.status).toBe(408);
+      expect(codeOf(slow)).toBe("deadline_exceeded");
+      await waitFor(() => fixture.agent.inFlight === 0, "the slot to be released");
+      expect((await fixture.call({ body: health })).status).toBe(200);
+    },
+    {
+      limits: {
+        maxConcurrency: 1,
+        timeoutMs: 10,
+        maxResponseBytes: 128 * 1024 * 1024,
+      },
+    },
   );
 });
 
