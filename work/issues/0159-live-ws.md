@@ -52,7 +52,7 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 
 ## Notes
 
-- PoC はポーリング（run.mjs）。WS は未実装。
+- PoC はポーリング（run.mjs）。製品の WS はこの issue。
 - フレーム数を増やすと DO のリクエスト課金とレイテンシの両方に効く。100ms か 64KB でまとめる。
 
 ## やらないこと
@@ -64,6 +64,7 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。- 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L2。3本が空くまで待機し、`do/session.ts` と `web/src/app/` を touches に足した。
 - 2026-11-17: 実装開始。token delta の実経路のため `packages/agent/src/session.ts`（ConversationView watch）と `do/state.ts`、ws / stream のテストを touches に追加（lead へ報告）。edge の転送は既存のまま 101 を通す想定で触らない。
 - 2026-11-17: 実装（c3c4116）。`core/src/stream.ts` の `LiveFrame` union と `LiveDeltaBatcher`、`server/src/ws.ts` の `acceptWebSocket` + attachment、`do/session.ts` の再購読、agent の `watchConversation`、web の再接続 client と `LiveConnection`。SSE は製品コードに未実装だったため削除対象は無い（0050 / 0118 は superseded のまま）。
+- 2026-11-17: cf dev に production edge 経由の実 WS を追加（署名 cookie を test Worker が注入）。test Worker の DO 名を edge と同じ `default` に揃え、edge → Session DO の 101 転送を実経路で確認。
 
 ## Result
 
@@ -71,9 +72,9 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 - ゲート: `npm run check` exit 0。310 tests / 59 files、lint / fmt / typecheck / build / deploy dry-run / knip すべて ok。
 - 受入の証拠:
   - 閉じた union: static な `LIVE_FRAME_TYPES` / valibot variant と `core/src/stream.test.ts`（未知 type・別 protocol は拒否）。
-  - snapshot → 差分 + cursor: `server/src/ws.ts` が接続ごとに snapshot を先に送り、以後 append / delta。`server/src/ws.test.ts` と cf dev の実 WebSocket（`server/test/integration/session-do.test.ts`）で、接続 → snapshot → send → append、切断中の send → 再接続 snapshot を確認。
+  - snapshot → 差分 + cursor: `server/src/ws.ts` が接続ごとに snapshot を先に送り、以後 append / delta。`server/src/ws.test.ts` と cf dev の実 WebSocket（`server/test/integration/session-do.test.ts`）で、接続 → snapshot → send → append、切断中の send → 再接続 snapshot を確認。production edge の `/ws` についても、署名 cookie を注入した test Worker から実 upgrade → 101 → snapshot を確認。
   - `acceptWebSocket`: `do/session.ts` が socket を tag 付きで accept し、attachment（conversationId / cursor）から wake 後に再購読。fake DO state の `server/src/do/session.test.ts` で、再生成後の snapshot / ping / close を確認。
   - delta 間引き: `core/src/stream.ts` の `LiveDeltaBatcher` が 100ms または 64KiB でまとめ、frame は 64KiB 以下。`stream.test.ts` が 1 秒の frame 上限と 64KiB 分割を固定。`ws.test.ts` が replace の chunk を確認。
   - UI の切断説明: `web/src/live/state.ts` の `explainConnection` と `web/src/app/LiveConnection.tsx`。jsdom の `client.test.ts` / `state.test.ts` / `LiveConnection.test.tsx` が再接続 cursor・試行回数・offline の説明を確認。画面への mount は 0105。
-- 実経路で確認したこと: cf dev の test Worker → Session DO で実 WebSocket upgrade / 101、snapshot、ping → pong、send 後の append、切断中の send、再接続 snapshot。
-- 未確認 / reviewer 向け: 実 eviction（75 秒 hibernation 後の wake）は cf dev で再現しておらず、C4 は fake DO state の accept / attachment / 再購読まで。production edge の `/ws` upgrade 転送は unit（x-request-id）までで、実 101 は DO 直結の test Worker 経由。実 provider の token 速度は 0152。reviewer は未割当。
+- 実経路で確認したこと: cf dev の test Worker → Session DO で実 WebSocket upgrade / 101、snapshot、ping → pong、send 後の append、切断中の send、再接続 snapshot。production edge 経由でも、署名 cookie を注入した upgrade が 101 になり snapshot が届くこと（edge → Session DO の転送）を確認。
+- 未確認 / reviewer 向け: 実 eviction（75 秒 hibernation 後の wake）は cf dev が evict しないため再現しておらず、C4 は fake DO state の accept / attachment / 再購読まで。実 provider の token 速度は 0152。reviewer は未割当。
