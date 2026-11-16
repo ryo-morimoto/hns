@@ -5,8 +5,9 @@ import type { D1Binding } from "@hns/store";
  *
  * @remarks
  * These are structural stand-ins, not a copy of the Workers API: the edge only calls
- * `fetch`, `idFromName`, and `get`. Adding `@cloudflare/workers-types` is deferred until
- * the Durable Object and WebSocket code needs the full surface.
+ * `fetch`, `idFromName`, `get`, and the R2 methods the object store uses. Adding
+ * `@cloudflare/workers-types` is deferred until the Durable Object and WebSocket code needs
+ * the full surface.
  */
 export interface AssetFetcher {
   /** Serve a static asset or a 404 from the asset layer. */
@@ -29,6 +30,38 @@ export interface DurableObjectNamespace {
   get(id: DurableObjectId): DurableObjectStub;
 }
 
+/** An R2 object's metadata, narrowed to the fields the object store reads. */
+interface R2Object {
+  readonly key: string;
+  readonly size: number;
+}
+
+/** An R2 object's body, narrowed to the one method the object store calls. */
+interface R2ObjectBody {
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+/** How far a listing page goes; the same fields the object store passes through. */
+interface R2ListOptions {
+  readonly prefix?: string | undefined;
+  readonly cursor?: string | undefined;
+}
+
+/** One page of an R2 listing. `cursor` is present exactly when `truncated` is true. */
+interface R2Objects {
+  readonly objects: readonly R2Object[];
+  readonly truncated: boolean;
+  readonly cursor?: string | undefined;
+}
+
+/** An R2 bucket, narrowed to the object store's put / get / head / list. */
+interface R2Bucket {
+  put(key: string, value: Uint8Array): Promise<R2Object | null>;
+  get(key: string): Promise<R2ObjectBody | null>;
+  head(key: string): Promise<R2Object | null>;
+  list(options?: R2ListOptions): Promise<R2Objects>;
+}
+
 /**
  * The bindings a request may read.
  *
@@ -48,6 +81,16 @@ export interface WorkerEnv {
    * crashing the isolate.
    */
   readonly WORKSPACE?: DurableObjectNamespace | undefined;
+  /**
+   * The bucket that holds the workspace's git objects and checkpoint packs.
+   *
+   * @remarks
+   * Keys are git object ids under `objects/`, and each checkpoint is one pack under
+   * `checkpoints/`. Optional, like every binding, so a missing bucket fails closed at the
+   * face that needs it instead of crashing the isolate. The structural shape matches
+   * `@hns/workspace`'s `ObjectBucket`.
+   */
+  readonly OBJECTS?: R2Bucket | undefined;
   /**
    * The control database: projects, tasks, and the conversation index.
    *

@@ -32,6 +32,8 @@ export const workerFor = (deployment: Deployment) => ({
       exportName: "Workspace",
     }),
     DB: bindings.d1({ name: deployment.workerName }),
+    // The workspace objects (git blobs and checkpoint packs); one bucket per environment.
+    OBJECTS: bindings.r2({ name: deployment.workerName + "-objects" }),
     // The harness reaches the model through this binding and holds neither the key nor the URL.
     GATEWAY: bindings.worker({ worker: gatewayWorkerName(deployment.workerName) }),
   },

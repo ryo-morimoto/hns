@@ -73,6 +73,12 @@ test("the worker exports and binds the Workspace Durable Object", () => {
     exportName: "Workspace",
   });
 });
+// Catches: the object store reading env.OBJECTS without a declared R2 bucket binding.
+test("the worker binds the object store bucket", () => {
+  const worker = workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3"));
+  expect(worker.env.OBJECTS).toStrictEqual({ type: "r2", name: "hns-prod-objects" });
+});
+
 // Catches: a provider key added to the harness Worker's env, which would undo the isolation.
 test("the harness worker declares no provider credential", () => {
   const worker = workerFor(deploymentFor("development", undefined, undefined));
