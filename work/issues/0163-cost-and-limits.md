@@ -1,7 +1,7 @@
 # 0163: コストの上限と監視（DO 行・R2・モデル）
 
-status: in-progress
-priority: plan
+status: done
+priority: now
 design: agreed
 design-ref: docs/durability.md §7, docs/limits.md
 depends-on: 0151, 0153
@@ -13,11 +13,11 @@ touches: packages/server/src/cost/, deploy/limits/, packages/store/src/migration
 
 ## Acceptance criteria
 
-- [ ] 1 ターンあたりの DO 行数・リクエスト数・R2 オブジェクト数を記録
-- [ ] token 単位 commit を検出するテスト（行数が閾値を超えたら失敗）
-- [ ] 月次の運用上限（DO / R2 / provider）とアラート
-- [ ] 使いすぎたときの縮退（新しい Run を止める）
-- [ ] 実測値を RESULTS に追記する場所を決める
+- [x] 1 ターンあたりの DO 行数・リクエスト数・R2 オブジェクト数を記録
+- [x] token 単位 commit を検出するテスト（行数が閾値を超えたら失敗）
+- [x] 月次の運用上限（DO / R2 / provider）とアラート
+- [x] 使いすぎたときの縮退（新しい Run を止める）
+- [x] 実測値を RESULTS に追記する場所を決める
 
 ## テスト条件
 
@@ -114,9 +114,20 @@ touches: packages/server/src/cost/, deploy/limits/, packages/store/src/migration
 - provider 側の hard limit / alert の設定（0151 と docs/auth.md が持つ）。
 - 既存 Run の強制停止（縮退は新しい Run を止めるだけ）。
 
+## Result
+
+- verdict: **PASS**（初回 BLOCKED: blocking 1（token 単位 commit の検出テストが既定 faux で検出できない）→ テスト修正 → 再レビュー PASS）
+- reviewer: reviewer-0163（この変更を書いていない別エージェント）
+- HEAD: 564e4c0（main に ff 統合）
+- 受入: 5/5。`npm run check` exit 0（597 tests / 105 files、35.3s。既知の inspector 9229 競合は再実行で green を確認し、隠していない）
+- 確認: cost_turn は (conversation_id, id) PK + INSERT OR IGNORE で再送 1 行。200 語（999 文字）の応答で生の行数差 9 を固定し、delta 単位 commit（62 delta）なら 24 を超えて落ちる。cost_limits 1 行（migration 0003、warn 0.5 / critical 0.8）、当月 SUM は at < 翌月。上限超過は Session DO の送信前 429 limit_exceeded、ゲージ不可読は 503 limit_unavailable。既存 Run（abort / transcript）は不変。実 D1 integration 5。
+- 計上の限界: cost_turn の INSERT 失敗はターン成功のままログのみ（undercount。金額の外側は provider の hard limit）。DB 不在はローカル unit 専用で、配備は必ず DB を bind する。
+- 非 blocking（新規 3・低）: ROW_BUDGET の TSDoc の読み方 / README の「D1 の行数上限」表現 / baseline の実測が添付されていない。
+
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-17: 第2波で now へ（0151 の予算と 0153 の R2、0169 の Journal 行数が揃った）。
 - 2026-11-17: 第2波でレーン lane-0163。設計（計測の置き場・冪等・計上時点・アラート・縮退の面・実測の置き場）とテスト条件 / テスト設計を追加。touches を実装に合わせて更新（store migration 0003、Session DO の配線、実 D1 integration）。
 - 2026-11-17: 実装。`packages/server/src/cost/` に limits（`cost_limits` の 1 行）/ ledger（`cost_turn` の記録と月次 SUM、provider 行の再利用）/ alerts（50% / 80% / 上限の跨ぎ検出）/ meter（DO SQLite の行数）/ gate（admit と turn の編成）を置いた。store に migration 3（`cost_limits` + `cost_turn`、主キーは `(conversation_id, id)`）。Session DO は open 時に `migrateStore` してから gate を作り、messages RPC が `session.send` の前に `admit`、ターンの前後で行数を測って記録する。上限は 429 `limit_exceeded`、ゲージ不可読は 503 `limit_unavailable`。`docs/limits.md` に月次の節、`deploy/limits/README.md` に運用手順、`deploy/limits/RESULTS.md` に実測（1 ターン = 行 9 / リクエスト 1 / R2 0）を置いた。テストは cost の unit 43 + session-rpc 5 + 実ターン 5 + 実 D1 の integration 5。`npm run check` exit 0（597 tests / 105 files、35.7s）。
 - 2026-11-17: 実 D1 の integration は cf dev を 1 つ使う。同じ server-integration プロジェクトには gateway と session-do の cf dev も居り、
@@ -134,3 +145,4 @@ touches: packages/server/src/cost/, deploy/limits/, packages/store/src/migration
   （合計 9 は固定、内訳は観察）、README の数値再掲を削除（1 箇所）、当月 SUM に翌月初の上限を追加、コード / テストの
   コメントから issue 番号を削除、DB 不在時の理由と requestId なし再送の但し書きを docs に追加、`cost_turn` の保持と規模を
   README に追加、README の既定値の出所を修正（DO リクエスト 100万は §7 ではなく運用方針）。
+- 2026-11-17: reviewer-0163 PASS（blocking 0）。main へ ff 統合（564e4c0）。
