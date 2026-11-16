@@ -120,12 +120,15 @@ function parseRequest(
 
 /**
  * True when the engine refused the request itself (variable coercion, unknown operation name)
- * rather than a resolver failing: those carry no path and no original error.
+ * rather than a resolver failing.
  *
  * @internal
+ * @remarks
+ * `path` is the only reliable discriminator: the executor gives every field failure a path,
+ * while variable coercion wraps its inner error in `originalError`, so that field is not.
  */
 function isRequestError(error: GraphQLError): boolean {
-  return error.originalError === undefined && error.path === undefined;
+  return error.path === undefined;
 }
 
 /** Every operation in the document, in declaration order. */
@@ -231,7 +234,7 @@ export function createGraphQLFace(
     if (result.data === undefined || result.data === null) {
       const failures = result.errors ?? [];
       const requestErrors = failures.filter(isRequestError);
-      if (requestErrors.length === failures.length) {
+      if (failures.length > 0 && requestErrors.length === failures.length) {
         return failure(
           requestErrors.map((error) => error.message).join("; "),
           REQUEST_INVALID,

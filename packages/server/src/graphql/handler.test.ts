@@ -225,6 +225,16 @@ test("input errors in variables and operationName are refused with 400", async (
     operationName: "Nope",
   });
   expect(badOperation.status).toBe(400);
+  const notAnInt = await send({
+    query: "query P($n: Int) { projects(first: $n) { __typename } }",
+    variables: { n: "abc" },
+  });
+  expect(notAnInt.status).toBe(400);
+  const fraction = await send({
+    query: "query P($n: Int) { projects(first: $n) { __typename } }",
+    variables: { n: 1.5 },
+  });
+  expect(fraction.status).toBe(400);
 });
 
 // Catches: an oversized body paying for a parse before the byte limit runs.
