@@ -131,6 +131,7 @@ function openSocket(port: number, path: string): Promise<WebSocket> {
 
 let project: string | undefined;
 let running: Running | undefined;
+const projects: string[] = [];
 
 async function freePort(): Promise<number> {
   return await new Promise((resolvePort, reject) => {
@@ -179,6 +180,7 @@ async function writeProject(): Promise<string> {
   await symlink(join("..", "..", "node_modules"), join(dir, "node_modules"));
   await writeFile(join(dir, "cloudflare.config.ts"), CONFIG);
   await writeFile(join(dir, "worker.ts"), WORKER);
+  projects.push(dir);
   return dir;
 }
 
@@ -302,7 +304,7 @@ beforeAll(() => {
 afterAll(async () => {
   await stop(running);
   running = undefined;
-  if (project !== undefined) await rm(project, { recursive: true, force: true });
+  for (const dir of projects) await rm(dir, { recursive: true, force: true });
 });
 
 test.skipIf(!existsSync(CF))(
