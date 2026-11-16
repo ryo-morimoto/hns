@@ -99,7 +99,8 @@ touches: packages/server/src/cost/, deploy/limits/, packages/store/src/migration
 - 行数は「書いた行」ではなく「増えた行」（実行前後の COUNT 差）。更新で書き直された行は差に出ないため、do_rows は下限側の推定値。token 単位 commit のような桁の変化はこれで捕まる（0169 の行数テストと同じ計り方）。
 - 1 ターンの do_requests は現状 1（送信 RPC 1 回）。0157 で Workspace DO への書き込みが増えたら、同じ記録の列に足す。
 - r2_objects は 0 のまま。ターン中の R2 put は 0157 の書き込み経路が入るまで存在せず、列と上限判定だけ先に用意する（同じ概念を作り直さない）。
-- 実測の条件: faux provider（`faux/echo`）、text 1 ターン、ツール無し、Node SQLite 上の pi-durable。
+- 実測の条件: faux provider、text 1 ターン、ツール無し、応答は 200 語（999 文字）、Node SQLite 上の pi-durable。
+  応答は Session の runtime factory に注入する（短い既定応答だと delta ごとの commit を検出できない）。
 
 ## 未確定
 
@@ -119,6 +120,17 @@ touches: packages/server/src/cost/, deploy/limits/, packages/store/src/migration
 - 2026-11-17: 第2波でレーン lane-0163。設計（計測の置き場・冪等・計上時点・アラート・縮退の面・実測の置き場）とテスト条件 / テスト設計を追加。touches を実装に合わせて更新（store migration 0003、Session DO の配線、実 D1 integration）。
 - 2026-11-17: 実装。`packages/server/src/cost/` に limits（`cost_limits` の 1 行）/ ledger（`cost_turn` の記録と月次 SUM、provider 行の再利用）/ alerts（50% / 80% / 上限の跨ぎ検出）/ meter（DO SQLite の行数）/ gate（admit と turn の編成）を置いた。store に migration 3（`cost_limits` + `cost_turn`、主キーは `(conversation_id, id)`）。Session DO は open 時に `migrateStore` してから gate を作り、messages RPC が `session.send` の前に `admit`、ターンの前後で行数を測って記録する。上限は 429 `limit_exceeded`、ゲージ不可読は 503 `limit_unavailable`。`docs/limits.md` に月次の節、`deploy/limits/README.md` に運用手順、`deploy/limits/RESULTS.md` に実測（1 ターン = 行 9 / リクエスト 1 / R2 0）を置いた。テストは cost の unit 43 + session-rpc 5 + 実ターン 5 + 実 D1 の integration 5。`npm run check` exit 0（597 tests / 105 files、35.7s）。
 - 2026-11-17: 実 D1 の integration は cf dev を 1 つ使う。同じ server-integration プロジェクトには gateway と session-do の cf dev も居り、
-  wrangler の inspector が既定で 9229 を共有するため、同時起動でどれかが落ちる（`Address already in use (socket "direct:1:default")`）。
-  これは本変更の前からある flakes で、cost 側は `--` の後ろで `--inspector-port` を自前の範囲に固定して避けている。
-- 2026-11-17: 実ターンの計測は faux（`faux/echo`）の text 1 ターン。9 行の内訳と月 1 万ターンへの外挿は `deploy/limits/RESULTS.md`。`session-cost.test.ts` が同じ値を回帰テストとして固定する（行数上限 24）。
+  wrangler の inspector が全インスタンスで 9229 固定のため、同時起動でどれかが落ちる（`Address already in use (socket "direct:1:default")`）。
+  `--inspector-port` を cf に渡しても inspector は 9229 のままであることを実測で確認した（cost 側だけ避ける手段は無い）。
+  これは本変更の前からある flakes（本レーン無しの baseline でも再現）で、cost 側は開始を 1 回だけ再試行し、
+  両方失敗したら出力を付けて落とす（隠さない）。
+- 2026-11-17: 実ターンの計測は faux の text 1 ターン（応答 200 語 = 999 文字）。合計 9 行・内訳・月 1 万ターンへの外挿は
+  `deploy/limits/RESULTS.md`。`session-cost.test.ts` は runtime factory に 200 語の応答を注入し、合計 9 行と生の行数差の
+  一致を固定する（上限 24 も併せて確認）。短い既定応答では delta ごとの commit を検出できないため。
+- 2026-11-17: reviewer-0163 が BLOCKED（blocking 1 / 低 8）。blocking「token 単位 commit を検出できていない」は、
+  実ターンのテストが既定の短い応答で 1 delta = 1 commit になり、行数が閾値に収まっていたため。runtime factory へ
+  200 語の応答を注入し、合計 9 行を固定 + 生の行数差と一致 + 応答テキストが長文であることを固定した。
+  低も反映: inspector の主張を実測に合わせて訂正（9229 固定、再試行で隠さない）、RESULTS の固定範囲を明確化
+  （合計 9 は固定、内訳は観察）、README の数値再掲を削除（1 箇所）、当月 SUM に翌月初の上限を追加、コード / テストの
+  コメントから issue 番号を削除、DB 不在時の理由と requestId なし再送の但し書きを docs に追加、`cost_turn` の保持と規模を
+  README に追加、README の既定値の出所を修正（DO リクエスト 100万は §7 ではなく運用方針）。
