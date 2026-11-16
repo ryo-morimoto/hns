@@ -9,7 +9,7 @@ import {
 } from "relay-runtime";
 
 /** The fetch shape the network uses; tests pass a function that answers from fixtures. */
-export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /** How to build the Relay environment. */
 export interface EnvironmentOptions {

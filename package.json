@@ -53,13 +53,16 @@
     "ignore": [
       "work/**",
       "tools/**",
-      ".agents/**"
+      ".agents/**",
+      "packages/web/src/__generated__/**"
     ],
     "ignoreDependencies": [
-      "@j178/prek"
+      "@j178/prek",
+      "babel-plugin-relay"
     ]
   },
   "devDependencies": {
+    "relay-compiler": "20.1.1",
     "@j178/prek": "0.5.10",
     "@oxlint/plugins": "1.78.0",
     "@types/node": "24.19.2",
