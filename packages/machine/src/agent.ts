@@ -10,7 +10,7 @@ import type { Limits } from "./limits.ts";
 import { runOperation } from "./operations.ts";
 import { MachineRefusal, refusalStatus } from "./refusal.ts";
 import { RequestVerifier } from "./signature.ts";
-import type { MachineKeyRegistry } from "./keys.ts";
+import type { ControlPlaneKeys } from "./control-plane.ts";
 import { parseOperation, parseSignedHeaders } from "./wire.ts";
 import type { OperationName, RefusalBody, SuccessBody } from "./wire.ts";
 
@@ -26,8 +26,8 @@ export interface MachineAgentOptions {
   readonly root: string;
   /** The machine this agent runs for, as its Machine record names it. */
   readonly machineId: string;
-  /** Where the registered public key comes from (the D1 Machine record). */
-  readonly keys: MachineKeyRegistry;
+  /** Where the enrolled control-plane public keys come from. */
+  readonly controlPlane: ControlPlaneKeys;
   /** The local port; 0 asks the operating system for a free one. */
   readonly port: number;
   /** The clock; tests pass a fixed one. Defaults to `Date.now`. */
@@ -99,7 +99,7 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     limits,
     verifier: new RequestVerifier({
       machineId: options.machineId,
-      keys: options.keys,
+      controlPlane: options.controlPlane,
       now: options.now,
       windowMs: options.windowMs,
     }),

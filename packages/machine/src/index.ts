@@ -1,12 +1,12 @@
+export { readDeviceKey } from "./device-key.ts";
 export { startMachineAgent } from "./agent.ts";
 export type { MachineAgent, MachineAgentOptions } from "./agent.ts";
 export { ConnectionGate } from "./connection.ts";
 export type { Admission } from "./connection.ts";
 export { containInRoot, normalizeRelative } from "./containment.ts";
 export type { ContainedPath } from "./containment.ts";
-export { readDeviceKey } from "./device-key.ts";
-export { ED25519_PUBLIC_KEY_BYTES, verificationKey } from "./keys.ts";
-export type { MachineKeyRegistry } from "./keys.ts";
+export { ED25519_PUBLIC_KEY_BYTES, verificationKey } from "./control-plane.ts";
+export type { ControlPlaneKeys } from "./control-plane.ts";
 export { DEFAULT_LIMITS, InFlight, resolveLimits } from "./limits.ts";
 export type { Limits } from "./limits.ts";
 export { runOperation } from "./operations.ts";
@@ -18,7 +18,6 @@ export {
   DEFAULT_WINDOW_MS,
   NonceCache,
   RequestVerifier,
-  signRequest,
   signatureMessage,
   verifyRequestSignature,
 } from "./signature.ts";

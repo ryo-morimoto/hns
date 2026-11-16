@@ -12,8 +12,8 @@ import {
   parseReadResult,
   parseStatResult,
 } from "../../src/index.ts";
-import type { MachineKeyRegistry, RefusalCode } from "../../src/index.ts";
-import { generateMachineKeys } from "../support/keys.ts";
+import type { ControlPlaneKeys, RefusalCode } from "../../src/index.ts";
+import { controlPlaneKeys, generateControlPlaneKey } from "../support/control-plane.ts";
 import { openSuspendedRequest, readAll, waitFor, withAgent } from "../support/machine.ts";
 import type { MachineAnswer } from "../support/machine.ts";
 
@@ -70,11 +70,11 @@ test("a request without a signature is refused", async () => {
   );
 });
 
-test("a signature from another key is refused", async () => {
+test("a signature from another control-plane key is refused", async () => {
   await withAgent(
     async () => {},
     async (fixture) => {
-      const other = generateMachineKeys("machine-2");
+      const other = generateControlPlaneKey();
       const answer = await fixture.call({ body: health, signingKey: other.privateKey });
 
       expect(answer.status).toBe(401);
@@ -127,9 +127,9 @@ test("a replayed nonce is refused", async () => {
 });
 
 test("a verification that never finishes meets the deadline", async () => {
-  const silent: MachineKeyRegistry = {
-    publicKey: () =>
-      new Promise<Uint8Array | undefined>(() => {
+  const silent: ControlPlaneKeys = {
+    publicKeys: () =>
+      new Promise<readonly Uint8Array[]>(() => {
         // Never settles: only the request deadline can end this request.
       }),
   };
@@ -144,11 +144,11 @@ test("a verification that never finishes meets the deadline", async () => {
       expect(codeOf(second)).toBe("deadline_exceeded");
       expect(fixture.agent.inFlight).toBe(0);
     },
-    { registry: silent, limits: { maxConcurrency: 1, timeoutMs: 100 } },
+    { controlPlane: silent, limits: { maxConcurrency: 1, timeoutMs: 100 } },
   );
 });
 
-test("an unregistered machine is refused", async () => {
+test("an enrollment with no key is refused", async () => {
   await withAgent(
     async () => {},
     async (fixture) => {
@@ -156,7 +156,41 @@ test("an unregistered machine is refused", async () => {
       expect(answer.status).toBe(401);
       expect(codeOf(answer)).toBe("unauthorized");
     },
-    { registry: { publicKey: async () => undefined } },
+    { controlPlane: { publicKeys: async () => [] } },
+  );
+});
+
+test("either key in a rotation is accepted", async () => {
+  const oldKey = generateControlPlaneKey();
+  const newKey = generateControlPlaneKey();
+  const foreign = generateControlPlaneKey();
+  await withAgent(
+    async () => {},
+    async (fixture) => {
+      expect((await fixture.call({ body: health, signingKey: oldKey.privateKey })).status).toBe(
+        200,
+      );
+      expect((await fixture.call({ body: health, signingKey: newKey.privateKey })).status).toBe(
+        200,
+      );
+      const rejected = await fixture.call({ body: health, signingKey: foreign.privateKey });
+      expect(rejected.status).toBe(401);
+      expect(codeOf(rejected)).toBe("unauthorized");
+    },
+    { controlPlane: controlPlaneKeys([oldKey, newKey]), signingKey: newKey.privateKey },
+  );
+});
+
+test("the machine's device key cannot sign an inbound request", async () => {
+  // The device key authenticates machine -> Worker (0148); it is never an inbound credential.
+  const deviceKey = generateControlPlaneKey();
+  await withAgent(
+    async () => {},
+    async (fixture) => {
+      const answer = await fixture.call({ body: health, signingKey: deviceKey.privateKey });
+      expect(answer.status).toBe(401);
+      expect(codeOf(answer)).toBe("unauthorized");
+    },
   );
 });
 

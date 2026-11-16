@@ -1,7 +1,7 @@
-import { createHash, sign, verify } from "node:crypto";
+import { createHash, verify } from "node:crypto";
 import type { KeyObject } from "node:crypto";
-import { verificationKey } from "./keys.ts";
-import type { MachineKeyRegistry } from "./keys.ts";
+import { verificationKey } from "./control-plane.ts";
+import type { ControlPlaneKeys } from "./control-plane.ts";
 import { MachineRefusal } from "./refusal.ts";
 import type { SignedHeaders } from "./wire.ts";
 
@@ -70,21 +70,10 @@ export function signatureMessage(input: RequestSignature): Buffer {
 }
 
 /**
- * Sign one request with the machine's device key.
- *
- * @param input - The fields the signature covers.
- * @param privateKey - The Ed25519 private key loaded from the machine's 0600 file.
- * @returns The signature as base64url, the spelling the header carries.
- */
-export function signRequest(input: RequestSignature, privateKey: KeyObject): string {
-  return sign(null, signatureMessage(input), privateKey).toString("base64url");
-}
-
-/**
- * Check one request signature against the registered public key.
+ * Check one request signature against one control-plane public key.
  *
  * @param input - The fields the signature covers, as received.
- * @param publicKey - The key from the Machine record.
+ * @param publicKey - One enrolled control-plane key.
  * @param signature - The base64url signature from the header.
  * @returns true only for a 64-byte signature that verifies over the message.
  *
@@ -155,8 +144,8 @@ export class NonceCache {
 export interface RequestVerifierOptions {
   /** The machine this agent runs for; a request naming another one is refused. */
   readonly machineId: string;
-  /** Where the registered public key comes from (the D1 Machine record). */
-  readonly keys: MachineKeyRegistry;
+  /** Where the enrolled control-plane public keys come from. */
+  readonly controlPlane: ControlPlaneKeys;
   /** The clock; tests pass a fixed one. Defaults to `Date.now`. */
   readonly now?: (() => number) | undefined;
   /** How far from the clock a timestamp may be. Defaults to 60 seconds. */
@@ -185,14 +174,14 @@ export interface VerifiableRequest {
  */
 export class RequestVerifier {
   readonly #machineId: string;
-  readonly #keys: MachineKeyRegistry;
+  readonly #controlPlane: ControlPlaneKeys;
   readonly #now: () => number;
   readonly #windowMs: number;
   readonly #nonces: NonceCache;
 
   constructor(options: RequestVerifierOptions) {
     this.#machineId = options.machineId;
-    this.#keys = options.keys;
+    this.#controlPlane = options.controlPlane;
     this.#now = options.now ?? Date.now;
     this.#windowMs = options.windowMs ?? DEFAULT_WINDOW_MS;
     this.#nonces = new NonceCache(options.nonceLimit ?? DEFAULT_NONCE_LIMIT);
@@ -203,23 +192,20 @@ export class RequestVerifier {
    *
    * @param request - The method, path, parsed headers, and body bytes.
    * @returns Nothing; a rejection is the answer.
-   * @throws {MachineRefusal} `unauthorized` for another machine, an unregistered
-   * key, a malformed key, or a bad signature; `stale_request` outside the
-   * window; `replayed` for a nonce already accepted.
+   * @throws {MachineRefusal} `unauthorized` for another machine, an empty
+   * enrollment, a malformed key, or a bad signature; `stale_request` outside
+   * the window; `replayed` for a nonce already accepted.
    */
   async verify(request: VerifiableRequest): Promise<void> {
     const { headers } = request;
     if (headers.machineId !== this.#machineId) {
       throw new MachineRefusal("unauthorized", "the request names another machine");
     }
-    const raw = await this.#keys.publicKey(this.#machineId);
-    if (raw === undefined) {
-      throw new MachineRefusal(
-        "unauthorized",
-        "the machine is not registered or its key was revoked",
-      );
+    const enrolled = await this.#controlPlane.publicKeys();
+    if (enrolled.length === 0) {
+      throw new MachineRefusal("unauthorized", "the machine has no enrolled control-plane key");
     }
-    const key = verificationKey(raw);
+    const keys = enrolled.map(verificationKey);
     const now = this.#now();
     const timestamp = Number(headers.timestamp);
     if (Math.abs(now - timestamp) > this.#windowMs) {
@@ -235,8 +221,8 @@ export class RequestVerifier {
       path: request.path,
       bodyHash: bodyHash(request.body),
     };
-    if (!verifyRequestSignature(signed, key, headers.signature)) {
-      throw new MachineRefusal("unauthorized", "the signature does not match the request");
+    if (!keys.some((key) => verifyRequestSignature(signed, key, headers.signature))) {
+      throw new MachineRefusal("unauthorized", "the signature does not match any enrolled key");
     }
     if (!this.#nonces.accept(headers.nonce, now + this.#windowMs, now)) {
       throw new MachineRefusal("replayed", "the nonce was already accepted");

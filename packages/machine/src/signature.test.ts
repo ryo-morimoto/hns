@@ -1,20 +1,18 @@
 import { expect, test } from "vitest";
+import { verificationKey } from "./control-plane.ts";
 import { MachineRefusal } from "./refusal.ts";
-import {
-  NonceCache,
-  RequestVerifier,
-  bodyHash,
-  signRequest,
-  verifyRequestSignature,
-} from "./signature.ts";
+import { NonceCache, RequestVerifier, bodyHash, verifyRequestSignature } from "./signature.ts";
 import type { VerifiableRequest } from "./signature.ts";
-import { verificationKey } from "./keys.ts";
-import type { MachineKeyRegistry } from "./keys.ts";
-import { generateMachineKeys } from "../test/support/keys.ts";
-import type { MachineKeys } from "../test/support/keys.ts";
+import {
+  controlPlaneKeys,
+  generateControlPlaneKey,
+  signRequest,
+} from "../test/support/control-plane.ts";
+import type { ControlPlaneKeyPair } from "../test/support/control-plane.ts";
 
 const NOW = 1_700_000_000_000;
 const WINDOW_MS = 60_000;
+const MACHINE_ID = "machine-1";
 
 interface RequestOptions {
   readonly timestamp?: string;
@@ -25,8 +23,12 @@ interface RequestOptions {
   readonly path?: string;
 }
 
-/** One request, signed the way the caller would sign it. */
-function signed(keys: MachineKeys, body: string, options: RequestOptions = {}): VerifiableRequest {
+/** One request, signed by a control-plane key the way the Worker would sign it. */
+function signed(
+  pair: ControlPlaneKeyPair,
+  body: string,
+  options: RequestOptions = {},
+): VerifiableRequest {
   const bytes = new TextEncoder().encode(body);
   const connection = options.connection ?? "connection-1";
   const seq = options.seq ?? "1";
@@ -39,14 +41,14 @@ function signed(keys: MachineKeys, body: string, options: RequestOptions = {}): 
     path,
     body: bytes,
     headers: {
-      machineId: keys.machineId,
+      machineId: MACHINE_ID,
       connection,
       seq,
       timestamp,
       nonce,
       signature: signRequest(
         {
-          machineId: keys.machineId,
+          machineId: MACHINE_ID,
           connection,
           seq,
           timestamp,
@@ -55,16 +57,16 @@ function signed(keys: MachineKeys, body: string, options: RequestOptions = {}): 
           path,
           bodyHash: bodyHash(bytes),
         },
-        keys.privateKey,
+        pair.privateKey,
       ),
     },
   };
 }
 
-function verifierFor(keys: MachineKeys, registry?: MachineKeyRegistry): RequestVerifier {
+function verifierFor(pairs: readonly ControlPlaneKeyPair[]): RequestVerifier {
   return new RequestVerifier({
-    machineId: keys.machineId,
-    keys: registry ?? keys.registry,
+    machineId: MACHINE_ID,
+    controlPlane: controlPlaneKeys(pairs),
     now: () => NOW,
     windowMs: WINDOW_MS,
   });
@@ -81,42 +83,42 @@ async function refusalOf(promise: Promise<void>): Promise<MachineRefusal> {
 }
 
 test("the window accepts its boundary and refuses beyond it", async () => {
-  const keys = generateMachineKeys();
-  const verifier = verifierFor(keys);
+  const pair = generateControlPlaneKey();
+  const verifier = verifierFor([pair]);
   for (const [index, timestamp] of [NOW - WINDOW_MS, NOW, NOW + WINDOW_MS].entries()) {
     await expect(
       verifier.verify(
-        signed(keys, "{}", { timestamp: String(timestamp), nonce: `accepted-${index}-nonce` }),
+        signed(pair, "{}", { timestamp: String(timestamp), nonce: `accepted-${index}-nonce` }),
       ),
     ).resolves.toBeUndefined();
   }
   const past = await refusalOf(
     verifier.verify(
-      signed(keys, "{}", { timestamp: String(NOW - WINDOW_MS - 1), nonce: "past-request-nonce" }),
+      signed(pair, "{}", { timestamp: String(NOW - WINDOW_MS - 1), nonce: "past-request-nonce" }),
     ),
   );
   expect(past.code).toBe("stale_request");
   const future = await refusalOf(
     verifier.verify(
-      signed(keys, "{}", { timestamp: String(NOW + WINDOW_MS + 1), nonce: "future-request-nonce" }),
+      signed(pair, "{}", { timestamp: String(NOW + WINDOW_MS + 1), nonce: "future-request-nonce" }),
     ),
   );
   expect(future.code).toBe("stale_request");
 });
 
 test("a replayed nonce is refused", async () => {
-  const keys = generateMachineKeys();
-  const verifier = verifierFor(keys);
-  const request = signed(keys, "{}", { nonce: "replay-request-nonce" });
+  const pair = generateControlPlaneKey();
+  const verifier = verifierFor([pair]);
+  const request = signed(pair, "{}", { nonce: "replay-request-nonce" });
   await expect(verifier.verify(request)).resolves.toBeUndefined();
   const refusal = await refusalOf(verifier.verify(request));
   expect(refusal.code).toBe("replayed");
 });
 
 test("a failed signature does not consume the nonce", async () => {
-  const keys = generateMachineKeys();
-  const verifier = verifierFor(keys);
-  const request = signed(keys, "{}", { nonce: "tamper-request-nonce" });
+  const pair = generateControlPlaneKey();
+  const verifier = verifierFor([pair]);
+  const request = signed(pair, "{}", { nonce: "tamper-request-nonce" });
   const tampered: VerifiableRequest = {
     ...request,
     body: new TextEncoder().encode('{"tampered":true}'),
@@ -127,9 +129,9 @@ test("a failed signature does not consume the nonce", async () => {
 });
 
 test("a signature is bound to the connection, the seq, the path, and the method", async () => {
-  const keys = generateMachineKeys();
-  const verifier = verifierFor(keys);
-  const request = signed(keys, "{}");
+  const pair = generateControlPlaneKey();
+  const verifier = verifierFor([pair]);
+  const request = signed(pair, "{}");
   const changes: readonly VerifiableRequest[] = [
     { ...request, headers: { ...request.headers, connection: "connection-2" } },
     { ...request, headers: { ...request.headers, seq: "2" } },
@@ -142,10 +144,10 @@ test("a signature is bound to the connection, the seq, the path, and the method"
   }
 });
 
-test("a signature from another machine is refused", async () => {
-  const keys = generateMachineKeys();
-  const verifier = verifierFor(keys);
-  const request = signed(keys, "{}");
+test("a request that names another machine is refused", async () => {
+  const pair = generateControlPlaneKey();
+  const verifier = verifierFor([pair]);
+  const request = signed(pair, "{}");
   const renamed: VerifiableRequest = {
     ...request,
     headers: { ...request.headers, machineId: "machine-2" },
@@ -154,19 +156,18 @@ test("a signature from another machine is refused", async () => {
   expect(refusal.code).toBe("unauthorized");
 });
 
-test("an unregistered machine or a wrong-length key is refused", async () => {
-  const keys = generateMachineKeys();
-  const request = signed(keys, "{}");
-  const missing = verifierFor(keys, { publicKey: async () => undefined });
-  expect((await refusalOf(missing.verify(request))).code).toBe("unauthorized");
-  const short = verifierFor(keys, { publicKey: async () => new Uint8Array(31) });
-  expect((await refusalOf(short.verify(request))).code).toBe("unauthorized");
+test("an empty enrollment or a malformed key is refused", async () => {
+  const pair = generateControlPlaneKey();
+  const request = signed(pair, "{}");
+  expect((await refusalOf(verifierFor([]).verify(request))).code).toBe("unauthorized");
+  const short: ControlPlaneKeyPair = { ...pair, publicKey: new Uint8Array(31) };
+  expect((await refusalOf(verifierFor([short]).verify(request))).code).toBe("unauthorized");
 });
 
-test("a signature verifies only under the matching key", () => {
-  const keys = generateMachineKeys();
-  const other = generateMachineKeys();
-  const request = signed(keys, "{}");
+test("a signature verifies only under the enrolled control-plane key", () => {
+  const pair = generateControlPlaneKey();
+  const other = generateControlPlaneKey();
+  const request = signed(pair, "{}");
   const input = {
     machineId: request.headers.machineId,
     connection: request.headers.connection,
@@ -178,14 +179,31 @@ test("a signature verifies only under the matching key", () => {
     bodyHash: bodyHash(request.body),
   };
   expect(
-    verifyRequestSignature(input, verificationKey(keys.publicKey), request.headers.signature),
+    verifyRequestSignature(input, verificationKey(pair.publicKey), request.headers.signature),
   ).toBe(true);
   expect(
     verifyRequestSignature(input, verificationKey(other.publicKey), request.headers.signature),
   ).toBe(false);
-  expect(verifyRequestSignature(input, verificationKey(keys.publicKey), "A".repeat(86))).toBe(
+  expect(verifyRequestSignature(input, verificationKey(pair.publicKey), "A".repeat(86))).toBe(
     false,
   );
+});
+
+test("either key in a rotation is accepted", async () => {
+  const oldKey = generateControlPlaneKey();
+  const newKey = generateControlPlaneKey();
+  const foreign = generateControlPlaneKey();
+  const verifier = verifierFor([oldKey, newKey]);
+  await expect(
+    verifier.verify(signed(oldKey, "{}", { nonce: "rotation-old-nonce" })),
+  ).resolves.toBeUndefined();
+  await expect(
+    verifier.verify(signed(newKey, "{}", { nonce: "rotation-new-nonce" })),
+  ).resolves.toBeUndefined();
+  const refusal = await refusalOf(
+    verifier.verify(signed(foreign, "{}", { nonce: "rotation-foreign-nonce" })),
+  );
+  expect(refusal.code).toBe("unauthorized");
 });
 
 test("a nonce is remembered until its window closes", () => {

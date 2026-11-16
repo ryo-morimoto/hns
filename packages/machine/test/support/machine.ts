@@ -5,10 +5,13 @@ import { join } from "node:path";
 import type { KeyObject } from "node:crypto";
 import { connect } from "node:net";
 import type { Socket } from "node:net";
-import { bodyHash, parseResponseBody, signRequest, startMachineAgent } from "../../src/index.ts";
-import type { Limits, MachineAgent, MachineKeyRegistry, ResponseBody } from "../../src/index.ts";
-import { generateMachineKeys } from "./keys.ts";
-import type { MachineKeys } from "./keys.ts";
+import { bodyHash, parseResponseBody, startMachineAgent } from "../../src/index.ts";
+import type { ControlPlaneKeys, Limits, MachineAgent, ResponseBody } from "../../src/index.ts";
+import { controlPlaneKeys, generateControlPlaneKey, signRequest } from "./control-plane.ts";
+import type { ControlPlaneKeyPair } from "./control-plane.ts";
+
+/** The machine id every scenario runs as. */
+const MACHINE_ID = "machine-1";
 
 /** The paths one scenario may use: the served root, and a sibling outside it. */
 export interface AgentPaths {
@@ -30,7 +33,7 @@ interface MachineCall {
   readonly machineId?: string | undefined;
   readonly method?: string | undefined;
   readonly path?: string | undefined;
-  /** The key to sign with, when a scenario presents another machine. */
+  /** The key to sign with, when a scenario presents another signer. */
   readonly signingKey?: KeyObject | undefined;
   /** Send no signature headers at all. */
   readonly unsigned?: boolean | undefined;
@@ -44,13 +47,17 @@ export interface MachineAnswer {
 }
 
 /**
- * Send one request over real HTTP to a running agent.
+ * Send one request over real HTTP to a running agent, signed by a control plane.
  *
- * @param call - The origin, the keys, and the request to sign and send.
- * @returns The status and the parsed body.
+ * @param call - The origin, the machine id, the signing key, and the request.
+ * @returns The status, headers, and parsed body.
  */
 async function callMachine(
-  call: MachineCall & { readonly keys: MachineKeys; readonly origin: string },
+  call: MachineCall & {
+    readonly origin: string;
+    readonly defaultMachineId: string;
+    readonly signingKey: KeyObject;
+  },
 ): Promise<MachineAnswer> {
   const method = call.method ?? "POST";
   const path = call.path ?? "/rpc";
@@ -58,13 +65,13 @@ async function callMachine(
   const seq = call.seq ?? "1";
   const timestamp = String(call.timestamp ?? Date.now());
   const nonce = call.nonce ?? randomUUID();
-  const machineId = call.machineId ?? call.keys.machineId;
+  const machineId = call.machineId ?? call.defaultMachineId;
   const signed = new TextEncoder().encode(call.signedBody ?? call.body);
   const headers = new Headers({ "content-type": "application/json" });
   if (call.unsigned !== true) {
     const signature = signRequest(
       { machineId, connection, seq, timestamp, nonce, method, path, bodyHash: bodyHash(signed) },
-      call.signingKey ?? call.keys.privateKey,
+      call.signingKey,
     );
     headers.set("x-hns-machine", machineId);
     headers.set("x-hns-connection", connection);
@@ -89,7 +96,10 @@ async function callMachine(
 /** A running agent and the ways a test drives it. */
 export interface AgentFixture extends AgentPaths {
   readonly agent: MachineAgent;
-  readonly keys: MachineKeys;
+  readonly machineId: string;
+  /** The control-plane key the fixture signs with unless a call names another. */
+  readonly signingKey: KeyObject;
+  readonly controlPlane: ControlPlaneKeys;
   readonly origin: string;
   readonly port: number;
   call(input: MachineCall): Promise<MachineAnswer>;
@@ -98,7 +108,11 @@ export interface AgentFixture extends AgentPaths {
 /** How to vary the agent a scenario runs against. */
 export interface AgentSetup {
   readonly limits?: Partial<Limits> | undefined;
-  readonly registry?: MachineKeyRegistry | undefined;
+  /** The enrolled keys; defaults to one fresh control-plane key. */
+  readonly controlPlane?: ControlPlaneKeys | undefined;
+  /** The key the fixture signs with by default; defaults to the fresh key. */
+  readonly signingKey?: KeyObject | undefined;
+  readonly machineId?: string | undefined;
 }
 
 /**
@@ -106,7 +120,7 @@ export interface AgentSetup {
  *
  * @param scenario - Creates the files and links the test needs.
  * @param run - The test body.
- * @param setup - Limits or a key registry to substitute.
+ * @param setup - Limits, an enrollment, or a signing key to substitute.
  */
 export async function withAgent(
   scenario: (paths: AgentPaths) => Promise<void>,
@@ -116,24 +130,34 @@ export async function withAgent(
   const base = await mkdtemp(join(tmpdir(), "hns-machine-"));
   const root = join(base, "root");
   await mkdir(root);
-  const keys = generateMachineKeys("machine-1");
+  const pair: ControlPlaneKeyPair = generateControlPlaneKey();
+  const machineId = setup.machineId ?? MACHINE_ID;
   const agent = await startMachineAgent({
     root,
-    machineId: keys.machineId,
-    keys: setup.registry ?? keys.registry,
+    machineId,
+    controlPlane: setup.controlPlane ?? controlPlaneKeys([pair]),
     port: 0,
     limits: setup.limits ?? {},
   });
+  const signingKey = setup.signingKey ?? pair.privateKey;
   try {
     await scenario({ root, base });
     await run({
       root,
       base,
       agent,
-      keys,
+      machineId,
+      signingKey,
+      controlPlane: setup.controlPlane ?? controlPlaneKeys([pair]),
       origin: agent.origin,
       port: agent.port,
-      call: (input: MachineCall) => callMachine({ ...input, keys, origin: agent.origin }),
+      call: (input: MachineCall) =>
+        callMachine({
+          ...input,
+          origin: agent.origin,
+          defaultMachineId: machineId,
+          signingKey: input.signingKey ?? signingKey,
+        }),
     });
   } finally {
     await agent.close();
