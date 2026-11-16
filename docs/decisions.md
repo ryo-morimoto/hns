@@ -1036,7 +1036,7 @@ date: 2026-11-17 · by: user · issue: 0178
 D055 の「Relay を使う」を実装に落とす。react-relay / relay-runtime 20.1.1、relay-compiler 20.1.1、babel-plugin-relay 20.1.1、graphql 16.11.0 を exact pin する（PoC の実測と同じ組）。`@types/react-relay` / `@types/relay-runtime` は型だけ。
 
 - `graphql` タグは babel-plugin-relay でコンパイルする。@vitejs/plugin-react 6 は babel オプションを持たないため、`packages/web/vite.relay.ts` の小さな plugin（@babel/core + babel-plugin-relay）を build と vitest の両方で使う。
-- schema は `npm run codegen` が `@hns/server/graphql` の `buildSchemaSdl()` から `packages/web/schema.graphql` に書き、relay-compiler が `packages/web/src/__generated__/` に artifact を出す。**どちらも commit する**（0180 が drift をゲートで落とす）。
+- schema は `npm run codegen` が `@hns/server/graphql` の `buildSchemaSdl()` から `packages/web/schema.graphql` に書き、relay-compiler が `packages/web/src/__generated__/` に artifact を出す。**どちらも commit する**（0180 が typecheck の前に再生成し、pre-commit は prek の変更検出で stale を止める）。
 - 読みは 1 箇所の environment（network + store）に集め、fetch を注入できる。テストは実 fetch を出さない。
 - TanStack Query は画面状態（ローディング・再取得の契機）に残す。読みの正本は Relay の store。
 
@@ -1055,7 +1055,9 @@ D050 / D051 の層（commit は速い層、push は全部）に合わせ、`code
 - ステージは `web` / `core` / `server` が affected のときだけ走る（無関係な変更で 1 プロセス増やさない）。
 - 毎回 schema と artifact を再生成するので、stale な生成物は typecheck / test / build に届かない。
 - `tools/codegen/verify.ts` がヘッダを検査する。`schema.graphql` は generated ヘッダと再生成コマンド、artifact は `@generated SignedSource`。空の `__generated__` は拒否。
-- 実測: document 2 件で 228ms（schema 生成 + relay-compiler + 検証）。commit ゲートの 3 秒台に収まる。
+- 実測: document 2 件で約 0.3 秒（schema 生成 + relay-compiler + 検証）。commit ゲートの 3 秒台に収まる。
+- pre-commit では prek が「hook がファイルを変更した」ことを検出して commit を止める（fail-closed）。`npm run check` は再生成するだけで drift では落ちない。stale / 手編集の検出は hook 層が担う。
+- relay-compiler 20.1.1 は新規 artifact を `git add` する。commit ゲートでは生成物が stage される。
 
 却下: `git diff` による drift 比較（ローカルの未コミット生成物で誤検知する）、ビルド時だけの生成（型検査が stale を見逃す）、artifact を commit しない（レビューで差分が見えない）。
 

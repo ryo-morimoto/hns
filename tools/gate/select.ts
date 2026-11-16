@@ -43,6 +43,7 @@ const ROOT_TRIGGERS: readonly string[] = [
   "flake.nix",
   "flake.lock",
   "vitest.config.ts",
+  "relay.config.json",
   "oxlint.config.ts",
   ".oxfmtrc.json",
   ".pre-commit-config.yaml",

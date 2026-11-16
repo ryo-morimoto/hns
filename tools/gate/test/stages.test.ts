@@ -57,14 +57,15 @@ test("the deploy stage builds the development config", () => {
 test("codegen runs only when the artifacts can change", () => {
   const stage = stageNamed("codegen");
   assert.ok(stage !== undefined);
-  const store: PackageInfo = { dir: "store", name: "@hns/store", dependsOn: [] };
-  expect(stage.run({ root: "/repo", packages: [store], all: false, tier: "unit" })).toStrictEqual([]);
+  // record has no path to server, so the closure cannot pull codegen in.
+  const record: PackageInfo = { dir: "record", name: "@hns/record", dependsOn: [] };
+  expect(stage.run({ root: "/repo", packages: [record], all: false, tier: "unit" })).toStrictEqual([]);
   const web: PackageInfo = { dir: "web", name: "@hns/web", dependsOn: [] };
   const runs = stage.run({ root: "/repo", packages: [web], all: false, tier: "unit" });
   expect(runs.map((run) => run.argv.join(" "))).toStrictEqual([
     process.execPath + " --conditions=source tools/codegen/graphql.ts",
     "/repo/node_modules/.bin/relay-compiler",
-    process.execPath + " tools/codegen/verify.ts",
+    process.execPath + " --conditions=source tools/codegen/verify.ts",
   ]);
 });
 

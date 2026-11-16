@@ -27,6 +27,10 @@ const alias = [
     replacement: source("./packages/agent/src/session.ts"),
   },
   { find: /^@hns\/server$/, replacement: source("./packages/server/src/index.ts") },
+  {
+    find: /^@hns\/server\/graphql$/,
+    replacement: source("./packages/server/src/graphql/index.ts"),
+  },
 ];
 
 // Two projects per package: the in-process tests a commit runs, and the

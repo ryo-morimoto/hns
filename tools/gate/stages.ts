@@ -81,7 +81,10 @@ export const stages: readonly Stage[] = [
           argv: [process.execPath, "--conditions=source", "tools/codegen/graphql.ts"],
         },
         { cwd: root, argv: [binary(root, "relay-compiler")] },
-        { cwd: root, argv: [process.execPath, "tools/codegen/verify.ts"] },
+        {
+          cwd: root,
+          argv: [process.execPath, "--conditions=source", "tools/codegen/verify.ts"],
+        },
       ];
     },
   },

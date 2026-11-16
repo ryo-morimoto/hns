@@ -1,0 +1,39 @@
+schema: 1
+issue: "0180"
+intent: "生成物の drift を、ローカルのゲートでも push 前でも同じように止める"
+criteria:
+  - id: C1
+    kind: test
+    status: passed
+    evidence: "tools/gate/test/stages.test.ts（stage の順序・選択）と npm run check の出力順"
+  - id: C2
+    kind: test
+    status: passed
+    evidence: "stages.test.ts（record だけでは skip。server へ依存する package では走る）"
+  - id: C3
+    kind: test
+    status: passed
+    evidence: "tools/codegen/check.test.ts（ヘッダ欠落・空ディレクトリ・schema のコマンド欠落）"
+  - id: C4
+    kind: test
+    status: passed
+    evidence: "check.test.ts（正しい生成物は 0）"
+  - id: C5
+    kind: eval
+    status: passed
+    evidence: "gate codegen --all が約 0.3 秒。commit ゲート 2.5 秒"
+  - id: C6
+    kind: eval
+    status: passed
+    evidence: "npm run check と gate pre-push、prek の pre-commit"
+limits:
+  - "verify のヘッダ検査は codegen 直後では空振り。stale 検出は pre-commit の prek が担う"
+  - "stage のコマンド列と npm run codegen は二重管理（verify の有無だけ違う）"
+  - "document 削除で残る orphan artifact は未検出"
+decision:
+  by: "review-0180"
+  at: "2026-11-17T01:45:00.000Z"
+  basis: "blocking 0 の PASS。壊し実験で verify と prek の停止を確認"
+invalidation:
+  - "document が増えて codegen が 1 秒を超えたとき"
+  - "relay-compiler が差分検出を提供したとき"
