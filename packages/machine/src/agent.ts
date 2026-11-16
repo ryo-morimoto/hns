@@ -199,7 +199,9 @@ async function handleRequest(
   context: AgentContext,
 ): Promise<void> {
   if (request.method !== "POST") {
-    sendRefusal(response, new MachineRefusal("method_not_allowed", "the agent answers POST only"));
+    sendRefusal(response, new MachineRefusal("method_not_allowed", "the agent answers POST only"), {
+      allow: "POST",
+    });
     return;
   }
   if (request.url !== RPC_PATH) {
@@ -375,19 +377,25 @@ function sendJson(response: ServerResponse, body: SuccessBody, limits: Limits): 
  *
  * @param response - The response to write.
  * @param refusal - The typed refusal.
+ * @param extra - Headers the refusal needs, such as `allow` on a wrong method.
  *
  * @remarks
  * Every refusal asks for the connection to close: a refusal may be written
  * before the body was read, and keeping such a connection alive would leave the
  * request half-consumed.
  */
-function sendRefusal(response: ServerResponse, refusal: MachineRefusal): void {
+function sendRefusal(
+  response: ServerResponse,
+  refusal: MachineRefusal,
+  extra: Readonly<Record<string, string>> = {},
+): void {
   const body: RefusalBody = { ok: false, code: refusal.code, message: refusal.message };
   const text = JSON.stringify(body);
   response.writeHead(refusalStatus(refusal.code), {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(text, "utf8"),
     connection: "close",
+    ...extra,
   });
   response.end(text);
 }

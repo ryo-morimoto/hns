@@ -39,6 +39,7 @@ interface MachineCall {
 /** What the agent answered, already parsed at the boundary. */
 export interface MachineAnswer {
   readonly status: number;
+  readonly headers: Headers;
   readonly body: ResponseBody;
 }
 
@@ -78,7 +79,11 @@ async function callMachine(
     body: method === "GET" ? null : new TextEncoder().encode(call.body),
     redirect: "error",
   });
-  return { status: response.status, body: parseResponseBody(await response.text()) };
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: parseResponseBody(await response.text()),
+  };
 }
 
 /** A running agent and the ways a test drives it. */

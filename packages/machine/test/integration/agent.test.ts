@@ -522,6 +522,7 @@ test("a wrong method and a wrong route are refused distinctly", async () => {
       const get = await fixture.call({ body: "", method: "GET" });
       expect(get.status).toBe(405);
       expect(codeOf(get)).toBe("method_not_allowed");
+      expect(get.headers.get("allow")).toBe("POST");
       const other = await fixture.call({ body: "{}", path: "/other" });
       expect(other.status).toBe(404);
       expect(codeOf(other)).toBe("not_found");
