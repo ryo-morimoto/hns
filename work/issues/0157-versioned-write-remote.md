@@ -5,7 +5,7 @@ priority: plan
 design: agreed
 design-ref: docs/durability.md §3.1・§3.4
 depends-on: 0033, 0147, 0156
-touches: packages/workspace/src/files.ts, packages/server/src/routes/files.ts, packages/server/test/routes/files.test.ts
+touches: packages/workspace/src/files.ts, packages/server/src/do/workspace.ts, packages/server/src/routes/files.ts, packages/server/test/routes/files.test.ts
 
 ## Goal
 
@@ -28,6 +28,8 @@ TOCTOU の閉じ方（dirfd・同一ディレクトリ temp + rename）はマシ
 
 - ack が DO を通るので、ローカル fsync に依存せずに RPO 0 を満たせる。
 - ただし git / bash 由来の変更はここを通らない（checkpoint 0154）。
+- 0156 の `apply` は intent / outcome を持たず、再送は conflict を返す。ここで intent / outcome に拡張し、再送は記録済みの outcome を返す（INV-04）。
+- 面（REST / GraphQL）は 0182 の棚卸しで決まる。AC の `POST /workspaces/:id/files` は暫定のパスで、実装時に確定する（D059）。
 
 ## やらないこと
 
@@ -36,3 +38,4 @@ TOCTOU の閉じ方（dirfd・同一ディレクトリ temp + rename）はマシ
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-17: 0156 の Result を受けて、intent / outcome への拡張をこの issue の範囲にした（touches に `do/workspace.ts`）。面は 0182 の棚卸しに従う。

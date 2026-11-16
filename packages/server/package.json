@@ -1,7 +1,7 @@
 {
   "name": "@hns/server",
   "version": "0.1.0",
-  "description": "The hns Worker edge and Session Durable Object",
+  "description": "The hns Worker edge and the Session / Workspace Durable Objects",
   "files": [
     "dist",
     "README.md",

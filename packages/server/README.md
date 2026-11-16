@@ -1,6 +1,6 @@
 # @hns/server
 
-Worker の入口と Session Durable Object。公開する面を GraphQL / WS / 静的の3つに絞り、
+Worker の入口と Session / Workspace Durable Object。公開する面を GraphQL / WS / 静的の3つに絞り、
 境界でセッション cookie・相関 ID・上限を扱う。会話と run は Session DO が持つ。
 
 ## Edge
@@ -60,7 +60,7 @@ npm run typecheck -w @hns/server
 npm run build -w @hns/server
 ```
 
-配備の入口は [tools/deploy/worker.ts](../../tools/deploy/worker.ts)。edge と `Session` を re-export する。
+配備の入口は [tools/deploy/worker.ts](../../tools/deploy/worker.ts)。edge と `Session` / `Workspace` を re-export する。
 コマンドは cf だけを使う（wrangler を直接実行しない）。
 
 ```bash

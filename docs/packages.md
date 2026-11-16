@@ -104,7 +104,7 @@ REST は事前に宣言しない（D059）。GraphQL に載せない面（passke
   `./identity`（認証・秘密）。exec を使わないアプリが bubblewrap に依存しないようにする。
 - `@hns/agent`: `.`（Node の Agent）と `./session`（Worker-safe な複数会話 runtime。node: を import しない）。
 - `@hns/machine`: `.`（常駐エージェント。単体で起動する）。
-- `@hns/server`: `.`（Worker の default と Session Durable Object）と `bin`（`hns`）。`./graphql` は codegen 用の SDL（web は読まない）。
+- `@hns/server`: `.`（Worker の default と Session / Workspace Durable Object）と `bin`（`hns`）。`./graphql` は codegen 用の SDL（web は読まない）。
 
 
 ## 今は切らないもの
