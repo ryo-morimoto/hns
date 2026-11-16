@@ -43,9 +43,12 @@ export class Crash extends Error {
  * The environment cannot provide a guarantee that was required.
  *
  * @remarks
- * Raised when `rooted: "required"` is set and the rooted helper cannot run.
- * The default falls back to `mode: "checks"` instead of throwing, because the
- * path-based checks still hold the root, only with a wider race window.
+ * Raised when `rooted: "required"` is set and the rooted helper cannot run,
+ * or when this process already has the same journal path open. The helper
+ * default falls back to `mode: "checks"` instead of throwing, because the
+ * path-based checks still hold the root, only with a wider race window. A
+ * second workspace on one journal has no safe fallback: both would overwrite
+ * each other's saves, so that open is refused.
  */
 export class Unavailable extends Error {
   constructor(message: string) {

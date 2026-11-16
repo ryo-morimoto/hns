@@ -108,6 +108,7 @@ for (const testTarget of targets) {
             operationId: "seed",
           });
           const base = (await first.read("a.txt")).version;
+          await first.close();
 
           const crashing = await openWorkspace(target, name, { crashAt: step });
           await expect(
@@ -118,6 +119,7 @@ for (const testTarget of targets) {
               operationId: "crash",
             }),
           ).rejects.toThrow(Crash);
+          await crashing.close();
 
           const fresh = await openWorkspace(target, name);
           const settled = await fresh.recover();
@@ -153,6 +155,7 @@ for (const testTarget of targets) {
           operationId: "seed",
         });
         const base = (await first.read("a.txt")).version;
+        await first.close();
 
         const crashing = await openWorkspace(target, name, { crashAt: "rename" });
         await expect(
@@ -163,6 +166,7 @@ for (const testTarget of targets) {
             operationId: "lost",
           }),
         ).rejects.toThrow(Crash);
+        await crashing.close();
         await target.env.writeFile(join(target.base, "root-" + name, "a.txt"), "stranger", ctx);
 
         const fresh = await openWorkspace(target, name);
@@ -222,6 +226,7 @@ for (const testTarget of targets) {
       });
       const journalPath = join(target.base, "journal-corrupt.json");
       await target.env.writeFile(journalPath, JSON.stringify({ ops: 5 }), ctx);
+      await workspace.close();
 
       await expect(
         Workspace.open({
@@ -231,7 +236,6 @@ for (const testTarget of targets) {
           context: ctx,
         }),
       ).rejects.toThrow();
-      await workspace.close();
     });
   });
 
@@ -269,6 +273,7 @@ for (const testTarget of targets) {
           operationId: "seed",
         });
         const base = (await workspace.read("d/f.txt")).version;
+        await workspace.close();
         const outside = join(target.base, "outside");
         await mkdir(outside, { recursive: true });
 
@@ -288,7 +293,6 @@ for (const testTarget of targets) {
         expect(result.status).toBe("unknown");
         expect(await readdir(outside)).toStrictEqual([]);
         await trapped.close();
-        await workspace.close();
       });
     },
   );

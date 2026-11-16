@@ -32,6 +32,19 @@ const dec = new TextDecoder();
 const DEFAULT_MAX_SETTLED_OPS = 500;
 
 /**
+ * Journal paths that an open Workspace in this process holds, as absolute paths.
+ *
+ * @remarks
+ * A journal is one workspace's state: two workspaces saving it would each write
+ * their own view over the other. The second open fails closed instead. The claim
+ * is per process because that is what can be checked without a lease file a
+ * crash would strand; sharing a journal across processes is outside the
+ * guarantees in docs/workspace.md, and the per-save temp name keeps two
+ * processes from writing the same temp file.
+ */
+const JOURNAL_CLAIMS = new Set<string>();
+
+/**
  * The version of some bytes: their sha256, in the one spelling the workspace uses.
  *
  * @param bytes - The content to hash.
@@ -179,6 +192,7 @@ export class Workspace {
   #saveChain: Promise<void> = Promise.resolve();
   #watcher: FileWatcher | undefined;
   #rooted: Rooted | undefined;
+  #claimKey = "";
 
   private constructor(options: WorkspaceOptions) {
     this.#env = options.env;
@@ -200,7 +214,9 @@ export class Workspace {
    * @throws {Denied} When the root's marker names another workspace, or the root
    * was replaced since the journal was written.
    * @throws {Unavailable} When `rooted: "required"` is set and the helper
-   * cannot run on this host.
+   * cannot run on this host, or when this process already has the same journal
+   * path open. `close` releases the journal claim; a process that exits
+   * releases it with everything else it held.
    * @throws {FileError} When the root itself cannot be canonicalized, which is
    * how a missing or unreadable root is refused.
    * @throws {Error} When the journal file is readable but its content is not a
@@ -214,8 +230,14 @@ export class Workspace {
    */
   static async open(options: WorkspaceOptions): Promise<Workspace> {
     const workspace = new Workspace(options);
-    await workspace.#initialize();
-    return workspace;
+    await workspace.#claimJournal();
+    try {
+      await workspace.#initialize();
+      return workspace;
+    } catch (error) {
+      workspace.#releaseJournal();
+      throw error;
+    }
   }
 
   /**
@@ -251,6 +273,29 @@ export class Workspace {
     if (this.#rooted === undefined && this.#rootedRequired) {
       throw new Unavailable("the rooted helper is required but cannot run on this host");
     }
+  }
+
+  /**
+   * Take this process's claim on the journal path, or refuse to open.
+   *
+   * @throws {Unavailable} When this process already holds the same absolute
+   * journal path.
+   * @throws {FileError} When the path cannot be made absolute.
+   */
+  async #claimJournal(): Promise<void> {
+    const key = getOrThrow(await this.#env.absolutePath(this.#journalPath, this.#context));
+    if (JOURNAL_CLAIMS.has(key)) {
+      throw new Unavailable("the journal is already open in this process");
+    }
+    JOURNAL_CLAIMS.add(key);
+    this.#claimKey = key;
+  }
+
+  /** Give the claim back; both a failed open and close do this. */
+  #releaseJournal(): void {
+    if (this.#claimKey === "") return;
+    JOURNAL_CLAIMS.delete(this.#claimKey);
+    this.#claimKey = "";
   }
 
   /**
@@ -344,9 +389,13 @@ export class Workspace {
    *
    * @throws {FileFailure} When any of the three steps fails; the old journal is
    * still the last complete one.
+   *
+   * @remarks
+   * The temp name carries a UUID, because a fixed one lets two writers overwrite
+   * the body each is about to rename into place.
    */
   async #writeJournal(): Promise<void> {
-    const temp = this.#journalPath + ".tmp";
+    const temp = this.#journalPath + ".tmp-" + randomUUID();
     const body = JSON.stringify(this.#journal);
     this.#require(await this.#env.writeFile(temp, body, this.#context), "write journal");
     this.#require(await this.#env.flushFile(temp, this.#context), "flush journal");
@@ -1162,11 +1211,16 @@ export class Workspace {
    *
    * @remarks
    * Pending settlements are dropped rather than flushed; the journal and audit
-   * log stay as they are.
+   * log stay as they are. The journal claim is released even when stopping the
+   * watcher fails, so the path can be opened again.
    */
   async close(): Promise<void> {
-    for (const timer of this.#timers.values()) clearTimeout(timer);
-    this.#timers.clear();
-    if (this.#watcher !== undefined) await this.#watcher.stop(this.#context);
+    try {
+      for (const timer of this.#timers.values()) clearTimeout(timer);
+      this.#timers.clear();
+      if (this.#watcher !== undefined) await this.#watcher.stop(this.#context);
+    } finally {
+      this.#releaseJournal();
+    }
   }
 }
