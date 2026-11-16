@@ -1,5 +1,5 @@
-import type { Project } from "@hns/core";
 import type { ReactElement } from "react";
+import type { ProjectLink } from "./viewModel.ts";
 import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Menu } from "../components/Menu.tsx";
@@ -8,14 +8,14 @@ import { THEME_LABELS, THEMES, type Theme } from "./theme.ts";
 
 export interface TopBarProps {
   readonly projectName: string;
-  readonly projects: readonly Project[];
+  readonly projects: readonly ProjectLink[];
   readonly location: string;
   readonly title: string;
   readonly connection: Connection;
   readonly theme: Theme;
   readonly mobile: boolean;
   readonly menuBadge: number;
-  readonly onSelectProject: (project: Project) => void;
+  readonly onSelectProject: (project: ProjectLink) => void;
   readonly onTheme: (theme: Theme) => void;
   readonly onOpenDrawer: () => void;
   readonly onBack: (() => void) | undefined;

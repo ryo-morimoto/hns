@@ -59,46 +59,42 @@ const projectPayload = (project: Project) => ({
   createdAt: project.created_at,
 });
 
-const conversationPayload = (conversation: Conversation) => ({
-  id: toGlobalId("Conversation", conversation.id),
-  projectId: toGlobalId("Project", conversation.project_id),
-  title: conversation.title,
-  createdAt: conversation.created_at,
-  updatedAt: conversation.updated_at,
-  isArchived: conversation.archived,
-  deletedAt: conversation.deleted_at,
-});
-
 const taskPayload = (task: Task) => ({
   id: toGlobalId("Task", task.id),
-  projectId: toGlobalId("Project", task.project_id),
   title: task.title,
   status: task.status.toUpperCase(),
-  createdAt: task.created_at,
-  updatedAt: task.updated_at,
 });
 
 /** The project a workspace call names, decoded from its global id. */
 function projectOf(call: GraphQLCall): string | undefined {
-  const globalId = call.variables["projectId"];
-  if (globalId === undefined) return undefined;
-  const decoded = fromGlobalId(globalId);
+  const parsed = v.safeParse(v.string(), call.variables["projectId"]);
+  if (!parsed.success) return undefined;
+  const decoded = fromGlobalId(parsed.output);
   return decoded.ok ? decoded.value.id : undefined;
 }
 
 /** The fixture responder the shell tests use; it answers the two compiled operations. */
 export const workspaceFixture: Responder = (call) => {
-  if (call.operation === "ProjectsQuery") {
+  if (call.operation === "ShellProjectsQuery") {
     return { projects: { __typename: "ProjectList", projects: projects.map(projectPayload) } };
   }
-  if (call.operation === "WorkspaceQuery") {
+  if (call.operation === "ShellWorkspaceQuery") {
+    if (call.variables["hasProject"] !== true) return {};
     const projectId = projectOf(call);
     if (projectId === undefined) return undefined;
     return {
       conversations: {
         __typename: "ConversationList",
         conversations: conversations.flatMap((conversation) =>
-          conversation.project_id === projectId ? [conversationPayload(conversation)] : [],
+          conversation.project_id === projectId
+            ? [
+                {
+                  id: toGlobalId("Conversation", conversation.id),
+                  projectId: toGlobalId("Project", conversation.project_id),
+                  title: conversation.title,
+                },
+              ]
+            : [],
         ),
       },
       tasks: {

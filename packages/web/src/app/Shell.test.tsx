@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { expect, afterEach, beforeEach, test } from "vitest";
 import { RelayEnvironmentProvider } from "react-relay";
 import { createTestEnvironment } from "../../test/support/relay.ts";
+import type { Environment } from "relay-runtime";
 import { workspaceFixture } from "../../test/support/workspaceFixtures.ts";
 import { fixtureSummarySource } from "./fixtureSummaries.ts";
 import { Shell } from "./Shell.tsx";
@@ -25,6 +26,18 @@ function setMobile(mobile: boolean): void {
   });
 }
 
+/** Render the shell over an environment the test owns, so requests can be counted. */
+function renderShellWith(environment: Environment) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <RelayEnvironmentProvider environment={environment}>
+      <QueryClientProvider client={queryClient}>
+        <Shell />
+      </QueryClientProvider>
+    </RelayEnvironmentProvider>,
+  );
+}
+
 function renderShell(
   onOpenCommand?: () => void,
   panel?: ReactNode,
@@ -40,6 +53,25 @@ function renderShell(
     </RelayEnvironmentProvider>,
   );
 }
+
+// Catches: the sidebar reading something else than its own fragments, or a second open paying
+// for the same read again.
+test("the shell reads through Relay and a second open is answered from the store", async () => {
+  const { environment, calls } = createTestEnvironment(workspaceFixture);
+  const first = renderShellWith(environment);
+  expect(await screen.findByText("デザインシステムのレビュー")).toBeTruthy();
+  expect(calls.map((call) => call.operation)).toStrictEqual([
+    "ShellProjectsQuery",
+    "ShellWorkspaceQuery",
+  ]);
+  const workspaceCalls = calls.filter((call) => call.operation === "ShellWorkspaceQuery");
+  expect(workspaceCalls).toHaveLength(1);
+
+  first.unmount();
+  renderShellWith(environment);
+  expect(await screen.findByText("デザインシステムのレビュー")).toBeTruthy();
+  expect(calls).toHaveLength(2);
+});
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -184,12 +216,14 @@ test("the active workspace stays first even without needs", async () => {
   renderShell(undefined, undefined, fixtureSummarySource);
   await screen.findByRole("heading", { level: 1, name: "Workspace" });
 
-  const labels = screen
-    .getAllByRole("link")
-    .map((link) => link.getAttribute("aria-label"))
-    .filter((label): label is string => label !== null);
-  expect(labels[0] ?? "").toMatch(/^scratch:/u);
-  expect(labels[1] ?? "").toMatch(/^hns:/u);
+  await waitFor(() => {
+    const labels = screen
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("aria-label"))
+      .filter((label): label is string => label !== null);
+    expect(labels[0] ?? "").toMatch(/^scratch:/u);
+    expect(labels[1] ?? "").toMatch(/^hns:/u);
+  });
 });
 
 // Catches: the run section moving inside a workspace body; runs have no GraphQL projection yet.

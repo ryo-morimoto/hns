@@ -3,18 +3,26 @@ import type { JsonValue } from "@hns/core";
 import type { Environment } from "relay-runtime";
 import { createEnvironment } from "../../src/relay/environment.ts";
 
+/** A GraphQL variable value as the request carries it. */
+type VariableValue = string | number | boolean | null;
+
 /** One request the app made, as the fixture responder sees it. */
 export interface GraphQLCall {
   readonly operation: string;
-  readonly variables: { readonly [name: string]: string };
+  readonly variables: { readonly [name: string]: VariableValue };
 }
 
 /** Answers one request with GraphQL `data`, or undefined to fail the request. */
 export type Responder = (call: GraphQLCall) => JsonValue | undefined;
 
+const VariablesSchema = v.record(
+  v.string(),
+  v.union([v.string(), v.number(), v.boolean(), v.null()]),
+);
+
 const BodySchema = v.object({
   query: v.string(),
-  variables: v.optional(v.record(v.string(), v.string()), {}),
+  variables: v.optional(VariablesSchema, {}),
 });
 
 const OPERATION = /\bquery\s+([A-Za-z0-9_]+)/u;

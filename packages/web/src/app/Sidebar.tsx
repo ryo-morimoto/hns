@@ -1,24 +1,59 @@
-import type { Conversation, Project, Task, WorkflowRun } from "@hns/core";
+import type { TaskStatus, WorkflowRun } from "@hns/core";
 import type { ReactElement } from "react";
+import { graphql, useFragment } from "react-relay";
+import type { SidebarConversations$key } from "../__generated__/SidebarConversations.graphql";
+import type { SidebarProjects$key } from "../__generated__/SidebarProjects.graphql";
+import type { SidebarTasks$key } from "../__generated__/SidebarTasks.graphql";
 import { Badge } from "../components/Badge.tsx";
 import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
-import { Skeleton } from "../components/Skeleton.tsx";
 import { formatHash, type Route } from "../routes/route.ts";
+import { Skeleton } from "../components/Skeleton.tsx";
 import { formatRelative } from "./relativeTime.ts";
+import { conversationLinkOf, projectLinkOf, taskLinkOf, type ProjectLink } from "./viewModel.ts";
 import { breakdownOf, totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
 
+/** The sidebar selects the fields it renders; the shell spreads the fragment. */
+export const SidebarProjectsFragment = graphql`
+  fragment SidebarProjects on ProjectList {
+    projects {
+      id
+      name
+    }
+  }
+`;
+
+/** The conversations of the selected workspace. */
+export const SidebarConversationsFragment = graphql`
+  fragment SidebarConversations on ConversationList {
+    conversations {
+      id
+      projectId
+      title
+    }
+  }
+`;
+
+/** The tasks of the selected workspace. */
+export const SidebarTasksFragment = graphql`
+  fragment SidebarTasks on TaskList {
+    tasks {
+      id
+      title
+      status
+    }
+  }
+`;
+
 export interface SidebarProps {
-  readonly projects: readonly Project[];
-  readonly conversations: readonly Conversation[];
-  readonly tasks: readonly Task[];
+  readonly projectsRef: SidebarProjects$key | null;
+  readonly conversationsRef: SidebarConversations$key | null;
+  readonly tasksRef: SidebarTasks$key | null;
   readonly runs: readonly WorkflowRun[];
   readonly summaries: readonly WorkspaceSummary[];
   readonly summariesPending: boolean;
-  readonly projectsPending: boolean;
+  /** True when the shell's project read returned a typed failure. */
   readonly projectsFailed: boolean;
-  readonly runsPending: boolean;
-  readonly runsFailed: boolean;
   readonly route: Route;
   readonly loading: boolean;
   readonly failed: boolean;
@@ -27,7 +62,7 @@ export interface SidebarProps {
 
 type Tone = "neutral" | "accent" | "ok" | "warn" | "danger";
 
-function taskTone(status: Task["status"]): Tone {
+function taskTone(status: TaskStatus): Tone {
   switch (status) {
     case "todo":
       return "neutral";
@@ -71,10 +106,10 @@ function lastTime(summary: WorkspaceSummary | undefined): number {
 }
 
 function sortProjects(
-  projects: readonly Project[],
+  projects: readonly ProjectLink[],
   activeId: string | null,
   summaries: ReadonlyMap<string, WorkspaceSummary>,
-): readonly Project[] {
+): readonly ProjectLink[] {
   return [...projects].sort((a, b) => {
     if ((a.id === activeId) !== (b.id === activeId)) return a.id === activeId ? -1 : 1;
     const left = summaries.get(a.id);
@@ -124,21 +159,25 @@ function SummaryRow({ label, count, breakdown, critical = false }: SummaryRowPro
 }
 
 export function Sidebar({
-  projects,
-  conversations,
-  tasks,
+  projectsRef,
+  conversationsRef,
+  tasksRef,
   runs,
   summaries,
   summariesPending,
-  projectsPending,
   projectsFailed,
-  runsPending,
-  runsFailed,
   route,
   loading,
   failed,
   onClose,
 }: SidebarProps): ReactElement {
+  const projects = (useFragment(SidebarProjectsFragment, projectsRef)?.projects ?? []).map(
+    projectLinkOf,
+  );
+  const conversations = (
+    useFragment(SidebarConversationsFragment, conversationsRef)?.conversations ?? []
+  ).map(conversationLinkOf);
+  const tasks = (useFragment(SidebarTasksFragment, tasksRef)?.tasks ?? []).map(taskLinkOf);
   const projectId = route.projectId;
   const currentConversation = route.kind === "conversation" ? route.conversationId : null;
   const summaryById = new Map<string, WorkspaceSummary>(
@@ -194,9 +233,8 @@ export function Sidebar({
 
       <section className="hns-sidebar__section" aria-label="ワークスペース">
         <h2 className="hns-sidebar__title">ワークスペース</h2>
-        {projectsPending ? <Skeleton width="80%" height={10} /> : null}
         {projectsFailed ? <p className="hns-sidebar__empty">読み込めません</p> : null}
-        {!projectsPending && !projectsFailed && ordered.length === 0 ? (
+        {!projectsFailed && ordered.length === 0 ? (
           <p className="hns-sidebar__empty">ワークスペースがありません</p>
         ) : null}
         <ul className="hns-sidebar__list">
@@ -274,11 +312,7 @@ export function Sidebar({
 
       <section className="hns-sidebar__section" aria-label="実行">
         <h2 className="hns-sidebar__title">実行</h2>
-        {runsPending ? <Skeleton width="80%" height={10} /> : null}
-        {runsFailed ? <p className="hns-sidebar__empty">読み込めません</p> : null}
-        {!runsPending && !runsFailed && runs.length === 0 ? (
-          <p className="hns-sidebar__empty">実行はありません</p>
-        ) : null}
+        {runs.length === 0 ? <p className="hns-sidebar__empty">実行はありません</p> : null}
         <ul className="hns-sidebar__list">
           {runs.map((run) => (
             <li className="hns-sidebar__row" key={run.id}>

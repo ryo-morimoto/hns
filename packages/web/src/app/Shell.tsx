@@ -1,20 +1,33 @@
 import { Drawer } from "@base-ui/react/drawer";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
-import type { Conversation, Project, Task } from "@hns/core";
-import { useRelayEnvironment } from "react-relay";
-import { createRelaySource } from "./relaySource.ts";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import type { ConversationLink, ProjectLink, TaskLink } from "./viewModel.ts";
+import { toGlobalId } from "@hns/core/graphql";
+import { useFragment, useLazyLoadQuery } from "react-relay";
+import type { ShellProjectsQuery as ShellProjectsQueryType } from "../__generated__/ShellProjectsQuery.graphql";
+import type { ShellWorkspaceQuery as ShellWorkspaceQueryType } from "../__generated__/ShellWorkspaceQuery.graphql";
+import type { SidebarConversations$key } from "../__generated__/SidebarConversations.graphql";
+import type { SidebarProjects$key } from "../__generated__/SidebarProjects.graphql";
+import type { SidebarTasks$key } from "../__generated__/SidebarTasks.graphql";
 import { Button } from "../components/Button.tsx";
-import { Skeleton } from "../components/Skeleton.tsx";
 import { projectIdFrom } from "../routes/ids.ts";
 import { formatHash } from "../routes/route.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
-import { Sidebar } from "./Sidebar.tsx";
+import { QueryBoundary } from "./QueryBoundary.tsx";
+import {
+  Sidebar,
+  SidebarConversationsFragment,
+  SidebarProjectsFragment,
+  SidebarTasksFragment,
+} from "./Sidebar.tsx";
 import { THEME_LABELS, THEMES, useTheme } from "./theme.ts";
 import { TopBar } from "./TopBar.tsx";
 import { useMediaQuery } from "./useMediaQuery.ts";
+import { conversationLinkOf, projectLinkOf, taskLinkOf } from "./viewModel.ts";
 import { totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
+import { ShellProjectsQuery } from "./ShellProjects.ts";
+import { ShellWorkspaceQuery } from "./ShellWorkspace.ts";
 import "./shell.css";
 
 export interface ShellProps {
@@ -26,9 +39,90 @@ export interface ShellProps {
   readonly summarySource?: (() => Promise<readonly WorkspaceSummary[]>) | undefined;
 }
 
-export function Shell({ onOpenCommand, panel, summarySource }: ShellProps): ReactElement {
-  const environment = useRelayEnvironment();
-  const source = useMemo(() => createRelaySource(environment), [environment]);
+/**
+ * The app shell.
+ *
+ * @remarks
+ * Reads are Relay's: the shell runs the two queries and the sidebar owns the fragments that
+ * select what it renders. A failed read throws and becomes the boundary's screen, so the shell
+ * never renders half a workspace.
+ */
+export function Shell(props: ShellProps): ReactElement {
+  return (
+    <QueryBoundary>
+      <ShellData {...props} />
+    </QueryBoundary>
+  );
+}
+
+/** Run the shell's two reads and hand the fragment refs to the frame. */
+function ShellData({ onOpenCommand, panel, summarySource }: ShellProps): ReactElement {
+  const route = useRoute();
+  const projectKey = route.projectId === null ? null : projectIdFrom(route.projectId);
+  const hasProject = projectKey !== null;
+
+  const projects = useLazyLoadQuery<ShellProjectsQueryType>(
+    ShellProjectsQuery,
+    {},
+    {
+      fetchPolicy: "store-or-network",
+    },
+  );
+  const workspace = useLazyLoadQuery<ShellWorkspaceQueryType>(
+    ShellWorkspaceQuery,
+    {
+      // The argument is non-null; the field is skipped when no project is selected.
+      projectId: toGlobalId("Project", projectKey ?? "default"),
+      hasProject,
+    },
+    { fetchPolicy: "store-or-network" },
+  );
+
+  const projectsRef = projects.projects.__typename === "ProjectList" ? projects.projects : null;
+  const conversations = workspace.conversations;
+  const conversationsRef =
+    conversations !== undefined && conversations.__typename === "ConversationList"
+      ? conversations
+      : null;
+  const tasks = workspace.tasks;
+  const tasksRef = tasks !== undefined && tasks.__typename === "TaskList" ? tasks : null;
+
+  return (
+    <ShellFrame
+      onOpenCommand={onOpenCommand}
+      panel={panel}
+      summarySource={summarySource}
+      projectsRef={projectsRef}
+      projectsFailed={projectsRef === null}
+      conversationsRef={conversationsRef}
+      conversationsFailed={hasProject && conversationsRef === null}
+      tasksRef={tasksRef}
+      tasksFailed={hasProject && tasksRef === null}
+    />
+  );
+}
+
+interface ShellFrameProps extends ShellProps {
+  readonly projectsRef: SidebarProjects$key | null;
+  readonly projectsFailed: boolean;
+  readonly conversationsRef: SidebarConversations$key | null;
+  readonly conversationsFailed: boolean;
+  readonly tasksRef: SidebarTasks$key | null;
+  readonly tasksFailed: boolean;
+}
+
+/** The presentational shell: top bar, sidebar, main region, and the drawer. */
+function ShellFrame({
+  onOpenCommand,
+  panel,
+  summarySource,
+  projectsRef,
+  projectsFailed,
+  conversationsRef,
+  conversationsFailed,
+  tasksRef,
+  tasksFailed,
+}: ShellFrameProps): ReactElement {
   const route = useRoute();
   const mobile = useMediaQuery("(max-width: 768px)");
   const [theme, chooseTheme] = useTheme();
@@ -37,10 +131,13 @@ export function Shell({ onOpenCommand, panel, summarySource }: ShellProps): Reac
   const rawProjectId = route.projectId;
   const projectKey = rawProjectId === null ? null : projectIdFrom(rawProjectId);
 
-  const projects = useQuery({
-    queryKey: ["projects"],
-    queryFn: () => source.listProjects(),
-  });
+  const projects = (useFragment(SidebarProjectsFragment, projectsRef)?.projects ?? []).map(
+    projectLinkOf,
+  );
+  const conversations = (
+    useFragment(SidebarConversationsFragment, conversationsRef)?.conversations ?? []
+  ).map(conversationLinkOf);
+  const tasks = (useFragment(SidebarTasksFragment, tasksRef)?.tasks ?? []).map(taskLinkOf);
 
   const summaries = useQuery({
     queryKey: ["workspace-summaries"],
@@ -48,69 +145,42 @@ export function Shell({ onOpenCommand, panel, summarySource }: ShellProps): Reac
     queryFn: () => (summarySource === undefined ? Promise.resolve([]) : summarySource()),
   });
 
-  const conversations = useQuery({
-    queryKey: ["conversations", rawProjectId, projectKey],
-    enabled: projectKey !== null,
-    queryFn: () =>
-      projectKey === null ? Promise.resolve([]) : source.listConversations(projectKey),
-  });
-
-  const tasks = useQuery({
-    queryKey: ["tasks", projectKey],
-    enabled: projectKey !== null,
-    queryFn: () => (projectKey === null ? Promise.resolve([]) : source.listTasks(projectKey)),
-  });
-
-  // Runs have no project in the API yet, so they stay a global section (not per workspace).
-  const runs = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => source.listRuns(),
-  });
-
   // The first project is the workspace default; replace so Back does not land on "#/".
   useEffect(() => {
     if (route.kind !== "workspace" || route.projectId !== null) return;
-    const first = projects.data?.[0];
+    const first = projects[0];
     if (first !== undefined) replaceRoute({ kind: "workspace", projectId: first.id });
-  }, [projects.data, route]);
+  }, [projects, route]);
 
   useEffect(() => {
     setDrawerOpen(false);
   }, [route]);
 
   const project =
-    rawProjectId === null ? undefined : projects.data?.find((item) => item.id === rawProjectId);
+    rawProjectId === null ? undefined : projects.find((item) => item.id === rawProjectId);
   const conversationTitle =
     route.kind === "conversation"
-      ? conversations.data?.find((item) => item.id === route.conversationId)?.title
+      ? conversations.find((item) => item.id === route.conversationId)?.title
       : undefined;
   const location = route.kind === "conversation" ? (conversationTitle ?? "会話") : "Workspace";
   const title =
     route.kind === "conversation" ? (conversationTitle ?? "会話") : (project?.name ?? "Workspace");
 
   const totals = totalsOf(summaries.data ?? []);
-  const connection = projects.isPending ? "connecting" : projects.isError ? "offline" : "online";
-  const loading =
-    projects.isPending ||
-    (projectKey !== null && (conversations.isPending || tasks.isPending || runs.isPending));
-  const failed =
-    projects.isError ||
-    (projectKey !== null && (conversations.isError || tasks.isError || runs.isError));
+  const connection = projectsFailed ? "offline" : "online";
+  const failed = conversationsFailed || tasksFailed;
 
   const sidebar = (
     <Sidebar
-      projects={projects.data ?? []}
-      conversations={conversations.data ?? []}
-      tasks={tasks.data ?? []}
-      runs={runs.data ?? []}
+      projectsRef={projectsRef}
+      conversationsRef={conversationsRef}
+      tasksRef={tasksRef}
+      runs={[]}
       summaries={summaries.data ?? []}
       summariesPending={summarySource !== undefined && summaries.isPending}
-      projectsPending={projects.isPending}
-      projectsFailed={projects.isError}
-      runsPending={runs.isPending}
-      runsFailed={runs.isError}
+      projectsFailed={projectsFailed}
       route={route}
-      loading={loading}
+      loading={false}
       failed={failed}
       onClose={mobile ? () => setDrawerOpen(false) : undefined}
     />
@@ -119,8 +189,8 @@ export function Shell({ onOpenCommand, panel, summarySource }: ShellProps): Reac
   return (
     <div className="hns-shell" data-panel={panel === undefined ? "closed" : "open"}>
       <TopBar
-        projectName={project?.name ?? (projects.isPending ? "読み込み中" : "プロジェクト")}
-        projects={projects.data ?? []}
+        projectName={project?.name ?? "プロジェクト"}
+        projects={projects}
         location={location}
         title={title}
         connection={connection}
@@ -146,11 +216,7 @@ export function Shell({ onOpenCommand, panel, summarySource }: ShellProps): Reac
         ) : projectKey === null ? (
           <EmptyState title="プロジェクトが見つかりません" body="URL のプロジェクト ID が不正。" />
         ) : project === undefined ? (
-          projects.isPending ? (
-            <Skeleton width={220} height={18} />
-          ) : (
-            <EmptyState title="プロジェクトが見つかりません" body="サイドバーから選び直す。" />
-          )
+          <EmptyState title="プロジェクトが見つかりません" body="サイドバーから選び直す。" />
         ) : route.kind === "conversation" ? (
           <ConversationView
             project={project}
@@ -158,11 +224,7 @@ export function Shell({ onOpenCommand, panel, summarySource }: ShellProps): Reac
             title={conversationTitle}
           />
         ) : (
-          <WorkspaceView
-            project={project}
-            conversations={conversations.data ?? []}
-            tasks={tasks.data ?? []}
-          />
+          <WorkspaceView project={project} conversations={conversations} tasks={tasks} />
         )}
       </main>
 
@@ -221,9 +283,9 @@ function EmptyState({ title, body }: EmptyStateProps): ReactElement {
 }
 
 interface WorkspaceViewProps {
-  readonly project: Project;
-  readonly conversations: readonly Conversation[];
-  readonly tasks: readonly Task[];
+  readonly project: ProjectLink;
+  readonly conversations: readonly ConversationLink[];
+  readonly tasks: readonly TaskLink[];
 }
 
 function WorkspaceView({ project, conversations, tasks }: WorkspaceViewProps): ReactElement {
@@ -239,7 +301,7 @@ function WorkspaceView({ project, conversations, tasks }: WorkspaceViewProps): R
 }
 
 interface ConversationViewProps {
-  readonly project: Project;
+  readonly project: ProjectLink;
   readonly conversationId: string;
   readonly title: string | undefined;
 }
