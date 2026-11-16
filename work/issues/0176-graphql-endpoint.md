@@ -1,6 +1,6 @@
 # 0176: Worker に /graphql を載せる
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0145, 0146, 0150, 0175, 0188
 touches: packages/core/src/graphql/, packages/server/src/graphql/, packages/server/src/session-name.ts, packages/server/src/edge/worker.ts, packages/server/src/edge/worker.test.ts, packages/server/package.json, package-lock.json, vitest.config.ts, docs/decisions.md, packages/server/test/, work/issues/0176-graphql-endpoint.md, work/BOARD.md, work/LANES.md
@@ -99,6 +99,17 @@ packages/server/src/session-name.ts  # "default"。edge と resolver が同じ�
 | E-01 | query の上限値 | 決定: 8 KiB / 深さ 8 / field 500（Design の表と根拠） | 済み |
 | E-02 | persisted query | 今は入れない。必要になったら | 0179 の後 |
 
+## Result
+
+- verdict: **PASS**（初回 FAIL: blocking 1 / 再レビュー FAIL: blocking 1 → 修正 → 再々レビュー PASS）
+- reviewer: review-0176（この変更を書いていない別エージェント）。HEAD 09ff2f8（最終判定）。
+- 受入: 7/7。`npm run check` は 327 tests、lint / fmt / typecheck / test / build / deploy dry-run / knip がすべて ok。
+- blocking（解消済み）:
+  - 変数 coerce 失敗と未知の operationName が 500 になっていた → 要求エラーを 400 に分類（判別子は `path` の有無）。
+  - 1 回目の修正が scalar coerce（`originalError` に内側エラー）を取りこぼしていた → `path === undefined` に修正し、`"abc"` / `1.5` のテストを追加。
+- 残件（低）: 400 のメッセージは送信された変数値を含む（長さ上限は未設定）。行数予算は page サイズ課金で、store のクエリに LIMIT は無い（0149）。conversations は最新 page を絞る。
+- 記録: [work/records/0176.yaml](../records/0176.yaml)（verified）。
+
 ## やらないこと
 
 - subscriptions（0159）
@@ -112,4 +123,5 @@ packages/server/src/session-name.ts  # "default"。edge と resolver が同じ�
 - 2026-11-11: 0145 の入口を 501 で閉じた。読み先の Session DO（0146）と D1 の store ドライバ（0150）が
   未実装のため、0176 は 0150 / 0146 の後に着手する。
 - 2026-11-16: 実装。`packages/server/src/graphql/`（schema / views / resolvers / queries / context / handler）、`session-name.ts`、`buildSchema` を Query factory にする変更（D073）、worker の配線。query の上限は 8 KiB / 深さ 8 / field 500。`npm run check` 通過。
-- 2026-11-16: 独立レビュー 1回目 FAIL（blocking 1: 変数 coerce 失敗と未知の operationName が 500）。要求エラー（originalError も path も無い）を 400 に分類し、byte 上限を parse の前に移し、行数予算を read の前に消費する形へ修正。契約テストを 15 本に増やした（変数・operationName・DO の 1 RPC・予算前倒し）。
+- 2026-11-16: 独立レビュー 1回目 FAIL（blocking 1: 変数 coerce 失敗と未知の operationName が 500）。byte 上限を parse の前に移し、行数予算を read の前に消費し、契約テストを増やした。
+- 2026-11-17: 再レビュー FAIL（blocking 1: scalar coerce 失敗は `originalError` に内側の GraphQLError を持つため、分類が取りこぼす）。判別子を `path === undefined` に直し（field 失敗は必ず path を持つ）、coerce のケース（"abc" / 1.5）を契約テストに追加。再々レビュー **PASS**（blocking 0）。

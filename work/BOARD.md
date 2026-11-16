@@ -19,19 +19,17 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（9）
+### now（7）
 
 | # | 作業 | 依存の状態 |
 | --- | --- | --- |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
 | [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | 0145 |
-| [0176](issues/0176-graphql-endpoint.md) | Worker に /graphql を載せる | 0145, 0146, 0150, 0175 |
 | [0177](issues/0177-global-id.md) | global id（Relay の store 要件） | 0176 |
 | [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | 0177 |
 | [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む（最初の画面） | 0178, 0102 |
 | [0180](issues/0180-codegen-gate.md) | relay-compiler をゲートに組み込む | 0175, 0178 |
-| [0189](issues/0189-d1-wiring.md) | Worker から D1 の store を開通させる | 0145, 0150 |
 
 
 
@@ -217,7 +215,7 @@
 | [0173](issues/0173-docs-followups.md) | D047〜D053 採用後の docs の残り | open | batch | 0140 |
 | [0174](issues/0174-staged-content-merge.md) | ステージ内容と merge をゲートで覆う | **done** | — | 0170, 0171 |
 | [0175](issues/0175-graphql-relay-foundation.md) | core で SDL を起こす | open | now | 0037 |
-| [0176](issues/0176-graphql-endpoint.md) | Worker に /graphql を載せる | open | now | 0145, 0146, 0150, 0175 |
+| [0176](issues/0176-graphql-endpoint.md) | Worker に /graphql を載せる | **done** | — | 0145, 0146, 0150, 0175 |
 | [0177](issues/0177-global-id.md) | global id（Relay の store 要件） | open | now | 0176 |
 | [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | open | now | 0177 |
 | [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む | open | now | 0178, 0102 |
@@ -230,7 +228,7 @@
 | [0185](issues/0185-tiers-removal.md) | tiers の二重実行を廃止する | **done** | — | 0183 |
 | [0186](issues/0186-test-colocation.md) | テストをコロケートし、issue 参照を削除する | **done** | — | 0184, 0185 |
 | [0187](issues/0187-tsdoc-doctest.md) | TSDoc 契約と doctest を展開する | **done** | — | 0186 |
-| [0189](issues/0189-d1-wiring.md) | Worker から D1 の store を開通させる | open | now | 0145, 0150 |
+| [0189](issues/0189-d1-wiring.md) | Worker から D1 の store を開通させる | **done** | — | 0145, 0150 |
 | [0190](issues/0190-workspace-debt.md) | workspace の低負債を一括で閉じる（0056・0057・0058・0060） | open | plan | 0045 |
 | [0191](issues/0191-workspace-perf.md) | workspace の実行性能を測って固定する（0172） | open | plan | 0190 |
 | [0192](issues/0192-findings-reconcile.md) | findings 13 件を再判定し、直す | open | batch | 0145, 0146 |

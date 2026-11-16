@@ -24,6 +24,19 @@ Relay の正規化 store は、同じ id を 2 つの型に割り当てられな
 - node interface は今は導入しない。必要になったら（再取得を id で行うとき）足す
 - brand（`ConversationId`）は内部のまま。global id は境界の表現
 
+## Design: reference-level
+
+- `@hns/core/graphql` に `toGlobalId(type, id)` / `fromGlobalId(value)` を置く。表現は base64url(`<Type>:<id>`)。
+- `toGlobalId` は型名が GraphQL 名（`[_A-Za-z][_0-9A-Za-z]*`）で、id が空でないことを確かめ、違えば `Error` を投げる（プログラマの誤り）。
+- `fromGlobalId` は失敗を返す（例外にしない）。`{ ok: true, value: { type, id } }` か `{ ok: false, reason: "malformed" | "unsupported_type" }`。base64 の復号失敗・区切り無し・空の型/id・GraphQL 名でない型を `malformed` にする。
+- 境界は server の resolver と view だけ。model の型（`ProjectId` / `ConversationId`）と D1 の行は変えない。
+- view は `id` と参照 id（`projectId`）を global id にし、resolver は引数の global id を復号して model の型へ戻す。型が合わない（例: `Conversation` の id を `projectId` に渡す）のは `invalid_argument`。
+
+| 型 | 例 | 備考 |
+| --- | --- | --- |
+| Project | `toGlobalId("Project", "default")` | 一覧と参照の両方 |
+| Conversation | `toGlobalId("Conversation", "1")` | Task は raw id（型の衝突が無い）が、0177 では全部に付ける |
+
 ## やらないこと
 
 - REST の id 形式の変更

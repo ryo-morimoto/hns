@@ -1,6 +1,6 @@
 # 0189: Worker から D1 の store を開通させる
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0145, 0150
 touches: packages/store/src/migrate.ts, packages/store/src/migrations/, packages/store/test/, packages/store/README.md, packages/server/src/edge/env.ts, packages/server/src/edge/handler.test.ts, packages/server/test/support/edge.ts, packages/server/package.json, packages/server/README.md, package-lock.json, tools/deploy/cloudflare.config.ts, tools/deploy/config.test.ts, ARCH.md, docs/decisions.md
@@ -256,4 +256,7 @@ packages/store/src/migrate.ts  # MIGRATIONS を import。適用ループは変�
 ## Result
 
 - design review: review-0189 / FAIL（blocking 1）→ 修正 → **PASS**（blocking 0、comment 2 / nit 6）→ nit 3 を反映（2026-11-16）。HEAD 4655088（review 時）+ 作業ツリー
-- 実装レビュー: 未実施（実装後に記入）
+- 実装レビュー: review-0189 / **PASS**（blocking 0、低 3）。HEAD 5783a92。低 3 のうち 2 件（末尾改行、現在形の時制）を修正し、1 件（touches に test/support/edge.ts）を追記した。
+- 検証: `npm run check` が ok（23 秒、deploy dry-run が `env.DB (hns-dev) D1 Database` を1件表示）。store integration 92 tests（migrate 6 を含む）。
+- 壊し実験（reviewer）: `assertMigrations` を最初の SQL の後ろへ移す / 削除すると、拒否 5 ケースが落ちる。C5 の「最初の SQL より前」は実効。
+- 記録: [work/records/0189.yaml](../records/0189.yaml)（verified）。

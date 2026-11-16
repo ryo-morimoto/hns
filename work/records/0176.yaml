@@ -1,0 +1,39 @@
+schema: 1
+issue: "0176"
+intent: "GraphQL を唯一の契約として、Worker から model の schema を実行できるようにする"
+criteria:
+  - id: C1
+    kind: test
+    status: passed
+    evidence: "edge の既存テスト（GET 405 / 未認証 401）と worker.test.ts"
+  - id: C2
+    kind: test
+    status: passed
+    evidence: "packages/server/src/graphql/handler.test.ts（projects / 変数 / 上限）"
+  - id: C3
+    kind: test
+    status: passed
+    evidence: "handler.test.ts の conversations（project 絞り・1 RPC・x-request-id）と tasks"
+  - id: C4
+    kind: test
+    status: passed
+    evidence: "handler.test.ts（binding 不在 UNAVAILABLE / 予算 LIMIT_EXCEEDED / 欠陥 500）"
+  - id: C5
+    kind: test
+    status: passed
+    evidence: "handler.test.ts の 'an oversized query is refused before parsing' と queries.test.ts"
+  - id: C6
+    kind: eval
+    status: passed
+    evidence: "npm run check（gate ok、24 秒）と独立レビュー PASS"
+limits:
+  - "実 D1 / DO バインディングでの統合は dry-run と fake のみ"
+  - "conversations は DO の最新 page を絞る。静かな project は 0149 まで欠け得る"
+  - "行数予算は page サイズ課金。store のクエリに LIMIT は無い（0149）"
+decision:
+  by: "review-0176"
+  at: "2026-11-17T00:25:00.000Z"
+  basis: "blocking 0 の PASS（2 回の FAIL 修正後）"
+invalidation:
+  - "0149 が会話の索引を D1 に置き、読み先を変えたとき"
+  - "0159 が WS / subscription を同じ schema に載せたとき"

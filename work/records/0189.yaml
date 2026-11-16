@@ -1,0 +1,47 @@
+schema: 1
+issue: "0189"
+intent: "Worker から D1 の store を開く経路を1回だけ作り、migration の衝突点を閉じる"
+criteria:
+  - id: C1
+    kind: test
+    status: passed
+    evidence: "packages/server/src/edge/handler.test.ts（DB 無しで 21 tests）"
+  - id: C2
+    kind: test
+    status: passed
+    evidence: "tools/deploy/config.test.ts:49-53 と cf deploy --dry-run の env.DB (hns-dev)"
+  - id: C3
+    kind: test
+    status: passed
+    evidence: "handler.test.ts の 'a face receives the D1 binding from env'"
+  - id: C4
+    kind: test
+    status: passed
+    evidence: "packages/store/test/integration/store/migrate.test.ts（v1→v2、版が 2、既存行が残る）"
+  - id: C5
+    kind: test
+    status: passed
+    evidence: "migrate.test.ts（空・2 始まり・重複・飛び・降順の 5 ケース。schema_migrations も作られない）"
+  - id: C6
+    kind: test
+    status: passed
+    evidence: "packages/store/test/integration/store/store.test.ts（既存の新しい DB の拒否）"
+  - id: C7
+    kind: test
+    status: passed
+    evidence: "store.test.ts（既存の再 open の no-op と既定 project の重複なし）"
+  - id: C8
+    kind: eval
+    status: passed
+    evidence: "npm run check（gate ok、24 秒）と独立レビュー PASS"
+limits:
+  - "実 deploy の D1 database 名解決（U-01）は未確認。development の dry-run まで"
+  - "DB を読む face は 0149 まで無い。503 の実挙動は face 実装後に確認する"
+  - "INV-12（migration は加算のみ）は文書とレビューで守る。機械検査は無い"
+decision:
+  by: "review-0189"
+  at: "2026-11-16T14:52:00.000Z"
+  basis: "blocking 0 の PASS。壊し実験で検証の実効性を確認"
+invalidation:
+  - "0149 が open の provider を入れて、open の契機を変えたとき"
+  - "cf が binding 名で database を解決できないと分かったとき"
