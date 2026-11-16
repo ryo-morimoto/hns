@@ -1,6 +1,6 @@
 # 0147: マシンエージェント（cloudflared・署名）
 
-status: open
+status: done
 priority: now
 design: agreed
 design-ref: D047, D053
@@ -14,14 +14,14 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 
 ## Acceptance criteria
 
-- [ ] `cloudflared` の後ろで `127.0.0.1` に待ち受ける（inbound ポートを開けない）
-- [ ] inbound（Worker → マシン）の要求は control-plane の Ed25519 公開鍵（enrollment で配布。ローテーションのため複数可）で検証し、時刻窓・nonce で再生を拒否
-- [ ] device key（秘密鍵はマシン（0600）、公開鍵は D1 の Machine レコード（D049））は machine → Worker（登録・heartbeat・outbound）用で、inbound の検証には使わない（0148 が供給）
-- [ ] パスは ROOT 内に正規化し、symlink の親で外に出ない。失敗は型付きの拒否
-- [ ] 同時実行数・出力サイズ・時間の上限
-- [ ] 二重接続のうち古い方を seq で弾く
-- [ ] 署名検証と ROOT 脱出のテスト（実 HTTP、モックなし）
-- [ ] `npm run check` が通り、独立レビューが PASS する
+- [x] `cloudflared` の後ろで `127.0.0.1` に待ち受ける（inbound ポートを開けない）
+- [x] inbound（Worker → マシン）の要求は control-plane の Ed25519 公開鍵（enrollment で配布。ローテーションのため複数可）で検証し、時刻窓・nonce で再生を拒否
+- [x] device key（秘密鍵はマシン（0600）、公開鍵は D1 の Machine レコード（D049））は machine → Worker（登録・heartbeat・outbound）用で、inbound の検証には使わない（0148 が供給）
+- [x] パスは ROOT 内に正規化し、symlink の親で外に出ない。失敗は型付きの拒否
+- [x] 同時実行数・出力サイズ・時間の上限
+- [x] 二重接続のうち古い方を seq で弾く
+- [x] 署名検証と ROOT 脱出のテスト（実 HTTP、モックなし）
+- [x] `npm run check` が通り、独立レビューが PASS する
 
 ## テスト条件
 
@@ -122,6 +122,15 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 - sandbox（bwrap）・hide・env 純度・実機確認（0194）。
 - Windows / macOS の sandbox（0006 の範囲外）。
 
+## Result
+
+- verdict: **PASS**（初回 BLOCKED: blocking 3 → 修正 → 修正差分 PASS → #2 を A で実装 → 再レビュー PASS）
+- reviewer: reviewer-0147（この変更を書いていない別エージェント）
+- HEAD: b56c6f7（rebase 後。main に ff 統合）
+- 受入: 8/8。`npm run check` exit 0（470 tests / 87 files、33.3s）
+- blocking（初回）: list の最終 symlink 脱出 / FIFO で deadline が fs を止めない / 署名の向き（Worker が machine の device key で署名できない）→ すべて修正済み
+- 非 blocking: body を読んでから認証（未署名の slot 占有）/ C22 は性能依存 smoke / C26 は代理テスト（0148 の device-key fixture で強化）/ CHANGELOG に削除済み readDeviceKey / docs/auth.md の末尾改行 / C20 の文言 / verificationKey の generic throw は 500 になり得る。
+
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
@@ -170,3 +179,4 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
   listen 失敗に error ハンドラを足した（失敗時に 30s ハングしない）。C22 は 64 MiB の read を 2ms の deadline で
   切る smoke にし、64 MiB が 2ms では読めない前提を C22 / T27 に明記した。deadline の決定的な証明は C20
   （verify の race）と C21（slot 保持）が持つ。3 回連続で pass を確認。
+- 2026-11-17: reviewer-0147 PASS（#1/#3 の修正差分 PASS、#2 の A 実装 PASS）。main へ ff 統合（b56c6f7）。

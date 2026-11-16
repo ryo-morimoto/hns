@@ -1,11 +1,11 @@
 # 0159: ライブ更新の WS 化（SSE の置き換え）
 
-status: open
+status: done
 priority: now
 design: agreed
 design-ref: D047
 depends-on: 0146
-touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/server/src/do/session.ts, packages/server/src/do/state.ts, packages/server/src/do/session-rpc.test.ts, packages/server/src/do/session.test.ts, packages/server/test/support/live.ts, packages/server/src/edge/problem.ts, packages/server/test/integration/session-do.test.ts, packages/core/src/stream.ts, packages/core/src/stream.test.ts, packages/agent/src/session.ts, packages/agent/src/session.test.ts, packages/web/src/live/, packages/web/src/app/, packages/web/src/main.tsx, packages/web/test/live/, packages/server/README.md, work/issues/0159-live-ws.md
+touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/server/src/do/session.ts, packages/server/src/do/state.ts, packages/server/src/do/session-rpc.test.ts, packages/server/src/do/session.test.ts, packages/server/test/support/live.ts, packages/server/src/edge/problem.ts, packages/server/test/integration/session-do.test.ts, packages/core/src/stream.ts, packages/core/src/stream.test.ts, packages/core/src/index.ts, packages/agent/src/session.ts, packages/agent/src/session.test.ts, packages/web/src/live/, packages/web/src/app/, packages/web/src/main.tsx, packages/web/test/live/, packages/server/README.md, work/issues/0159-live-ws.md
 
 ## Goal
 
@@ -23,11 +23,11 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 
 | ID | 条件（Given → When → Then） | リスク | 出所 |
 | --- | --- | --- | --- |
-| C1 | 未知の type / protocol / 余分な形の frame → 受信 → 型付き失敗。snapshot / append / delta / pong / error だけが通る | 中 | 受入「閉じた union」 |
+| C1 | 未知の type / protocol / 必須欠落の frame → 受信 → 型付き失敗（未知キーは無視、前方互換）。snapshot / append / delta / pong / error だけが通る | 中 | 受入「閉じた union」 |
 | C2 | 会話を購読 → 接続 → 最初の frame が cursor 付き snapshot で、その後の差分より先に届く | 高 | 受入「snapshot → 差分」 |
 | C3 | 接続中に切断 → その間に entry が増える → 再接続 → snapshot に切断中の entry が入り、取りこぼさない | 高 | 受入「再接続で取りこぼさない」 |
 | C4 | hibernation 可能な socket を accept → attachment に購読と cursor を保存 → DO を起こし直す → 既存 socket が再購読し snapshot を送る | 高 | 受入「acceptWebSocket」 |
-| C5 | token delta を 10ms 間隔で 1 秒、または 64KiB 超を一気に流す → 送信 → frame は 100ms あたり 1 以下、1 frame は 64KiB 以下 | 高 | 受入「delta を間引く」/ 0046 Notes |
+| C5 | token delta を 10ms 間隔で 1 秒、または 64KiB 超を一気に流す → 送信 → frame は 100ms あたり 1 以下、delta の text は 64KiB 以下（JSON envelope の分だけ frame は大きい） | 高 | 受入「delta を間引く」/ 0046 Notes |
 | C6 | 接続が切れる → 再接続中は試行回数と説明、上限超過は未接続と再読み込みの説明を UI が出す。再接続 URL は最後の cursor を持つ | 中 | 受入「切断中の状態を UI が説明」 |
 | C7 | conversationId 欠落 / 不正 → upgrade 前の 400、存在しない ID → 404。ping → pong、未知の client message → error で socket は開いたまま | 中 | 失敗経路 |
 | C8 | socket を閉じる → 購読が止まり、以後の view 更新を送らない | 中 | 資源リーク |
@@ -61,16 +61,21 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。- 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L2。3本が空くまで待機し、`do/session.ts` と `web/src/app/` を touches に足した。
+- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L2。3本が空くまで待機し、`do/session.ts` と `web/src/app/` を touches に足した。
 - 2026-11-17: 実装開始。token delta の実経路のため `packages/agent/src/session.ts`（ConversationView watch）と `do/state.ts`、ws / stream のテストを touches に追加（lead へ報告）。edge の転送は既存のまま 101 を通す想定で触らない。
 - 2026-11-17: 実装（c3c4116）。`core/src/stream.ts` の `LiveFrame` union と `LiveDeltaBatcher`、`server/src/ws.ts` の `acceptWebSocket` + attachment、`do/session.ts` の再購読、agent の `watchConversation`、web の再接続 client と `LiveConnection`。SSE は製品コードに未実装だったため削除対象は無い（0050 / 0118 は superseded のまま）。
 - 2026-11-17: cf dev に production edge 経由の実 WS を追加（署名 cookie を test Worker が注入）。test Worker の DO 名を edge と同じ `default` に揃え、edge → Session DO の 101 転送を実経路で確認。
 - 2026-11-17: UI を Shell の conversation route に接続（`main.tsx` が `browserLiveSocket` を渡す）。テスト用に `liveSocket` を省略した場合は socket を開かない。
+- 2026-11-17: reviewer-0159 PASS（blocking 0）。main へ ff 統合（6d06a04）。低 8 を Result に記録。
 
 ## Result
 
-- 実装: c3c4116 + c52219d / 1baca28 / c4ba479 / 1f666e7（branch `issue/0159-live-ws`）。status は open のまま（独立レビュー前）。
-- ゲート: `npm run check` exit 0。448 tests / 85 files、lint / fmt / typecheck / build / deploy dry-run / knip すべて ok。
+- verdict: **PASS**（reviewer-0159、blocking 0）
+- reviewer: reviewer-0159（この変更を書いていない別エージェント）
+- HEAD: 6d06a04（rebase 後。main に ff 統合）
+- ゲート: `npm run check` exit 0。448 tests / 85 files（レビュー時）、統合後の main は 470 tests / 33.3s。
+- 非 blocking（低 8、follow-up）: 未知キーの strip と TSDoc の不一致 / 64KiB は text の上限で frame は envelope 分だけ大きい / 64KiB 超バーストの frame 上限 / `getConversation` の予期しない例外が 400 / accept 後の setup 失敗で socket・watch が残る / 古い revision を捨てる経路が未テスト / core の index が touches に無い・CHANGELOG 未更新 / error frame が画面に出ない・main.tsx の composition が未テスト。
 - 受入の証拠:
   - 閉じた union: static な `LIVE_FRAME_TYPES` / valibot variant と `core/src/stream.test.ts`（未知 type・別 protocol は拒否）。
   - snapshot → 差分 + cursor: `server/src/ws.ts` が接続ごとに snapshot を先に送り、以後 append / delta。`server/src/ws.test.ts` と cf dev の実 WebSocket（`server/test/integration/session-do.test.ts`）で、接続 → snapshot → send → append、切断中の send → 再接続 snapshot を確認。production edge の `/ws` についても、署名 cookie を注入した test Worker から実 upgrade → 101 → snapshot を確認。
