@@ -5,6 +5,7 @@ import { obj, str } from "@earendil-works/pi-schema";
 import { operationIdFrom } from "@hns/core";
 import type { MutationResult, OperationId } from "@hns/core";
 import type { Workspace } from "@hns/workspace";
+import * as v from "valibot";
 import type { AgentEventSink } from "./events.ts";
 import { failureOf } from "./failure.ts";
 import type { ReadReply, ToolFailure } from "./failure.ts";
@@ -72,6 +73,41 @@ if (import.meta.vitest) {
 }
 
 /**
+ * Whether the model should read a tool result as a failure.
+ *
+ * @param result - The tool's result, before the harness applies output limits.
+ * @returns false when `isError` is true, or when a structured `exitCode` is nonzero.
+ *
+ * @remarks
+ * `isError` is the general signal. bash also reports a nonzero exit as
+ * `structuredOutput.exitCode`; reading both keeps `ok` true only for a command
+ * that actually succeeded.
+ */
+function succeeded(result: ToolExecutionResult): boolean {
+  if (result.isError === true) return false;
+  const exitCode = exitCodeOf(result.structuredOutput);
+  return exitCode === undefined || exitCode === 0;
+}
+
+/** The part of bash's structured output that decides success; other tools have none. */
+const ExitCodeOutput = v.object({ exitCode: v.number() });
+
+/**
+ * The exit code a tool put in its structured output, when it has one.
+ *
+ * @param output - A tool's `structuredOutput`, which crosses the tool boundary as JSON.
+ * @returns The numeric exit code, or undefined for tools that do not report one.
+ *
+ * @remarks
+ * The value is parsed, not asserted: other tools return objects without an exit
+ * code, and a future schema may change.
+ */
+function exitCodeOf(output: ToolExecutionResult["structuredOutput"]): number | undefined {
+  const parsed = v.safeParse(ExitCodeOutput, output);
+  return parsed.success ? parsed.output.exitCode : undefined;
+}
+
+/**
  * Emit tool.call and tool.result around one execution.
  *
  * @param name - The tool name as the model called it.
@@ -80,8 +116,9 @@ if (import.meta.vitest) {
  * @returns The execution's result.
  *
  * @remarks
- * `ms` covers only the awaited execution. A throwing `work` emits no tool.result:
- * tools turn expected refusals into values, so a throw is a defect and propagates.
+ * `ms` covers only the awaited execution. A throwing `work` still emits
+ * tool.result with `ok: false` before the throw propagates: bash reports a
+ * timeout or an exec failure by throwing, and an unpaired call would hide it.
  */
 async function observed(
   name: string,
@@ -90,15 +127,20 @@ async function observed(
 ): Promise<ToolExecutionResult> {
   const started = Date.now();
   sink?.({ event: "tool.call", at: new Date().toISOString(), tool: name });
-  const result = await work();
-  sink?.({
-    event: "tool.result",
-    at: new Date().toISOString(),
-    tool: name,
-    ok: result.isError !== true,
-    ms: Date.now() - started,
-  });
-  return result;
+  let ok = false;
+  try {
+    const result = await work();
+    ok = succeeded(result);
+    return result;
+  } finally {
+    sink?.({
+      event: "tool.result",
+      at: new Date().toISOString(),
+      tool: name,
+      ok,
+      ms: Date.now() - started,
+    });
+  }
 }
 
 /**
@@ -173,7 +215,14 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
         }),
     }),
   ];
-  if (shell.kind === "sandboxed") registrations.push(createBashTool());
+  if (shell.kind === "sandboxed") {
+    const bash = createBashTool();
+    // The harness sees the result through execute(); wrapping it here gives bash
+    // the same call/result pair as the workspace tools.
+    const execute: typeof bash.execute = (args, api, context) =>
+      observed("bash", onEvent, async () => bash.execute(args, api, context));
+    registrations.push({ ...bash, execute });
+  }
   return defineExtension({ name: "hns-workspace", tools: registrations });
 }
 
