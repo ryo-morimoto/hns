@@ -1,6 +1,6 @@
 # 0178: web に Relay environment とテスト harness を置く
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0177
 touches: packages/web/src/, packages/web/test/, packages/web/{package.json,tsconfig.json,vite.config.ts,vite.relay.ts,README.md}, packages/web/schema.graphql, packages/server/src/graphql/, packages/server/{package.json,tsdown.config.ts}, tools/codegen/, tools/gate/stages.ts, relay.config.json, package.json, package-lock.json, .oxfmtrc.json, vitest.config.ts, docs/decisions.md, work/issues/0178-web-relay-environment.md, work/BOARD.md, work/LANES.md
@@ -49,6 +49,18 @@ web から `/graphql` を Relay で読む土台を作る。あわせて、0100 �
 - codegen をゲートに入れるのは 0180
 - テスト管理の新方針（0183）に従う。テストの置き場所は 0186 で移行するため、この issue では現行の `packages/web/test` のまま。
 - 0183 が `vitest.config.ts` を先に触るため、0178 は 0183 の後に rebase する。
+
+## Result
+
+- verdict: **PASS**（初回 FAIL: blocking 2 → 修正 → 再レビュー PASS、低 1 を修正）
+- reviewer: review-0178（この変更を書いていない別エージェント）。最終判定 HEAD 92c4c7a。
+- 受入: 7/7。`npm run check` は ok（24 秒、build / deploy / knip 込み）。web は 44 tests。
+- blocking（解消済み）:
+  - `npm run codegen` の出力が整形済み commit と一致せず、codegen 直後に fmt が落ちた → `__generated__` を oxfmt の対象外にし、raw 出力を commit。schema ヘッダと README に再生成コマンドを明記。
+  - `@hns/server` の `./graphql` が dist に存在しなかった → tsdown の entry に `src/graphql/index.ts` を追加し、default 条件の import を通した。
+- 低の修正: QueryFailure / store 再利用 / 失敗 read の再試行のテスト、issue 番号の除去、`endpoint` option の削除、docs/packages.md の export 追記、README と TSDoc の更新、`oxfmt docs` で混入した整形の revert。
+- 残件（低）: runs は WorkflowRun の GraphQL 投影が無いため空（投影は別 issue）。実サーバとの `/graphql` 往復（E2E）と dev proxy は未確認（0160 以降）。`babel-plugin-relay` は nested の graphql@15 を peer に持つ。
+- 記録: [work/records/0178.yaml](../records/0178.yaml)（verified）。
 
 ## やらないこと
 

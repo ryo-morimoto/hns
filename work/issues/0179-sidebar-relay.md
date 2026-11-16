@@ -25,6 +25,14 @@ touches: packages/web/src/app/Sidebar.tsx, packages/web/src/app/Shell.tsx, packa
 - 鮮度: この時点では network-only で明示的に取り直す。方針は 0181
 - 0115 の overview は 0149 の後に別 issue で通す
 
+## Design: reference-level
+
+- 選択は component が持つ。`Sidebar` が `ProjectsQuery` と `WorkspaceQuery(projectId)` を `useLazyLoadQuery`（`fetchPolicy: "store-or-network"`）で読み、0178 の `createRelaySource` は削除する。Shell は route と選択だけを持つ。
+- 会話・タスクは 1 project = 1 `WorkspaceQuery`。初回の DO RPC は選択中のワークスペース数（1）に固定する。
+- 2 回目の表示は Relay の store から返る（network 0）。テストは harness の `calls` で数える。
+- 遅延・更新中は Suspense の fallback と `useIsFetching` の口を用意し、索引（0149）が入ったら「更新中」を出す。
+- global id は表示に使わず、URL と model の比較は復号した raw id で行う（`fromGlobalId`）。
+
 ## やらないこと
 
 - overview（0115）

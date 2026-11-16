@@ -17,7 +17,8 @@
 | E6 | [0150](issues/0150-store-d1-do-backend.md) store を D1 専用にする | done（bd1fabe, review PASS）・main に統合（cff01f4） | — |
 | E10 | [0176](issues/0176-graphql-endpoint.md) Worker に /graphql を載せる | done（09ff2f8、review PASS）・main に統合 | — |
 | E11 | [0177](issues/0177-global-id.md) global id | done（39e7b54、review PASS）・main に統合 | — |
-| E12 | [0178](issues/0178-web-relay-environment.md) web の Relay environment | 実装中（worktree） | 0177 done |
+| E12 | [0178](issues/0178-web-relay-environment.md) web の Relay environment | done（92c4c7a、review PASS）・main に統合 | — |
+| E13 | [0179](issues/0179-sidebar-relay.md) サイドバーを Relay で読む | 未着手 | 0178 done |
 | E7 | [0146](issues/0146-session-do.md) Session DO（PiHarness・会話・run） | done（024bb03、review PASS）・main に統合 | — |
 | E8 | [0141](issues/0141-durability-contract.md) 耐久の契約 | 実装中（docs / core の型） | 0140 done |
 | E9 | [0189](issues/0189-d1-wiring.md) Worker から D1 の store を開通させる | done（5783a92、review PASS）・main に統合 | 完了 |

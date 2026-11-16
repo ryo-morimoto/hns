@@ -1,0 +1,44 @@
+schema: 1
+issue: "0178"
+intent: "web の読みを Relay に移し、schema と artifact を生成物として固定する"
+criteria:
+  - id: C1
+    kind: test
+    status: passed
+    evidence: "packages/web/src/app/relaySource.test.ts（fetch 注入、実 HTTP なし）"
+  - id: C2
+    kind: test
+    status: passed
+    evidence: "relaySource.test.ts（別 source から同じ project を読んで calls が増えない）"
+  - id: C3
+    kind: test
+    status: passed
+    evidence: "relaySource.test.ts（QueryFailure / 非 2xx / 再試行）"
+  - id: C4
+    kind: test
+    status: passed
+    evidence: "relaySource.test.ts（global id を model の id に復号）"
+  - id: C5
+    kind: test
+    status: passed
+    evidence: "packages/web/src/app/Shell.test.tsx（14 tests）を含む web 44 tests"
+  - id: C6
+    kind: eval
+    status: passed
+    evidence: "npm run codegen を2回で sha256 不変、git status 空。schema ヘッダに再生成コマンド"
+  - id: C7
+    kind: eval
+    status: passed
+    evidence: "npm run check（gate ok、24 秒）と独立レビュー PASS"
+limits:
+  - "runs は WorkflowRun の GraphQL 投影が無いため空"
+  - "実サーバとの /graphql 往復（E2E）と dev proxy は未確認"
+  - "fragment のコロケーションは 0179。createRelaySource は橋"
+decision:
+  by: "review-0178"
+  at: "2026-11-17T01:12:00.000Z"
+  basis: "blocking 0 の PASS（2 回の FAIL 修正後）"
+invalidation:
+  - "0179 が選択を component に移し、createRelaySource を消したとき"
+  - "Relay が babel を不要にしたとき（vite.relay.ts を削る）"
+  - "artifact を commit しない運用に変えたとき（0180 の drift 検査を見直す）"

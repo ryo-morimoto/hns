@@ -6,7 +6,7 @@
 
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 6 |
+| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 5 |
 | Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 63 |
 | Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 7 |
 | Q4 | — | — | `hold` | いまはやらない | 8 |
@@ -19,14 +19,13 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（6）
+### now（5）
 
 | # | 作業 | 依存の状態 |
 | --- | --- | --- |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
 | [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | 0145 |
-| [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | 0177 |
 | [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む（最初の画面） | 0178, 0102 |
 | [0180](issues/0180-codegen-gate.md) | relay-compiler をゲートに組み込む | 0175, 0178 |
 
@@ -216,7 +215,7 @@
 | [0175](issues/0175-graphql-relay-foundation.md) | core で SDL を起こす | open | now | 0037 |
 | [0176](issues/0176-graphql-endpoint.md) | Worker に /graphql を載せる | **done** | — | 0145, 0146, 0150, 0175 |
 | [0177](issues/0177-global-id.md) | global id（Relay の store 要件） | **done** | — | 0176 |
-| [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | open | now | 0177 |
+| [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | **done** | — | 0177 |
 | [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む | open | now | 0178, 0102 |
 | [0180](issues/0180-codegen-gate.md) | relay-compiler をゲートに組み込む | open | now | 0175, 0178 |
 | [0188](issues/0188-graphql-only-contract.md) | GraphQL を唯一の契約にする（REST 契約の撤去） | **done** | — | — |
