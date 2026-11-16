@@ -5,7 +5,7 @@ priority: now
 design: agreed
 design-ref: D047, D053
 depends-on: 0145
-touches: packages/machine/, docs/packages.md, oxlint.config.ts, vitest.config.ts, package.json, package-lock.json, AGENTS.md, work/issues/0147-machine-agent.md
+touches: packages/machine/, docs/packages.md, docs/safety.md, oxlint.config.ts, vitest.config.ts, package.json, package-lock.json, AGENTS.md, work/issues/0147-machine-agent.md
 
 ## Goal
 
@@ -45,6 +45,11 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 | C17 | 未対応 op / JSON でない body → 400 invalid_request                                                                | 中     | AC3        |
 | C18 | POST 以外 → 405 method_not_allowed、`/rpc` 以外 → 404 not_found                                                   | 低     | AC1        |
 | C19 | FIFO への read → 400 invalid_request。thread pool を塞がず、続く通常の read は通る                                 | 高     | AC4        |
+| C20 | 登録鍵の取得が返らない（never-resolving registry）→ 408 deadline_exceeded。slot は解放され、次の要求も 429 ではなく 408 | 高     | AC4        |
+| C21 | 遅い read（16 MiB）の実行中 → 別の要求は 429 busy。read が終わると slot が空き、次の要求は 200           | 中     | AC4        |
+| C22 | deadline を超える read（64 MiB、10ms）→ 408 deadline_exceeded。その後 slot が空き、health は 200         | 中     | AC4        |
+| C23 | socket への read → 400 invalid_request（device は mknod 不可なので対象外）                                   | 中     | AC3        |
+| C24 | 405 の応答に `Allow: POST` が付く                                                                          | 低     | AC1        |
 
 テストしない条件:
 
@@ -52,6 +57,10 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 - D1 への登録・失効（理由: 0148。ここは `MachineKeyRegistry` の interface と fixture で固定する）。
 - exec と書き込み（理由: sandbox が無い環境で exec を出さない（fail closed）。0194 で足す）。
 - Windows / macOS の sandbox（理由: 0006 の範囲外）。
+- 非 abortable な遅い呼び出し（`lstat` / `readdir`）が deadline を過ぎてから settle するまでの slot 保持
+  （理由: 遅延 seam か遅い FS 無しには決定的に作れない。コードは await で settle を待つが、テストでは未確認。
+  readFile の abort と slot 解放は C20 / C22 で固定する。seam を足さないのは実装にテスト専用の分岐を入れないため）。
+- device への read（理由: mknod は権限が要る。FIFO と socket で非 regular の拒否を固定し、device は同じ判定を通る）。
 
 ## テスト設計
 
@@ -81,6 +90,11 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 | T22 | C18  | 同値分割         | integration | 同 "a wrong method and a wrong route are refused distinctly"                           |
 | T23 | C11  | 状態遷移         | unit        | `src/limits.test.ts` "a slot is released once and never below zero"                  |
 | T24 | C19  | 故障注入         | integration | 同 "a FIFO is refused without blocking the pool"                                      |
+| T25 | C20  | 故障注入         | integration | 同 "a verification that never finishes meets the deadline"                            |
+| T26 | C21  | 競合テスト       | integration | 同 "a slow read holds its slot until it finishes"                                     |
+| T27 | C22  | 故障注入         | integration | 同 "a read that outlives the deadline is aborted"                                     |
+| T28 | C23  | 同値分割         | integration | 同 "a socket is refused as a non-regular file"                                        |
+| T29 | C24  | 契約テスト       | integration | 同 "a wrong method and a wrong route are refused distinctly"（`allow` ヘッダ）        |
 
 ## Notes
 
@@ -99,8 +113,9 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
     AC の「署名を検証し」を落とす必要がある。
   - 案3: **0148 へ移す**。0147 は署名メッセージと検証器を interface として置くだけにし、どの鍵を Machine レコードに載せるか・
     どちらが署名するかを 0148 の登録・失効と一緒に決める。
-  - いまの実装は案1の形（`RequestVerifier` が D1 の Machine レコードの公開鍵で受け取った要求を検証する interface と fixture）で、
-    `MachineKeyRegistry` の指す先を差し替えれば案2・案3にも寄せられる。決定はユーザー待ち。
+  - いまの実装は案1ではない。`MachineKeyRegistry`・`keys.ts`・fixture はすべてマシンの device key（公開鍵）のままで、
+    `RequestVerifier` はその鍵で受け取った要求を検証する。案1の control-plane 鍵の分離は決定後に実装する。
+    決定はユーザー待ち。
 
 ## やらないこと
 
@@ -135,3 +150,12 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
   planned・docs/packages.md の末尾改行・vitest.config.ts の整形だけの差分を直した。FIFO のテストは実 `mkfifo` を使うので、
   `package.json` の knip に `packages/machine` の `ignoreBinaries: ["mkfifo"]` を足した（touches に `package.json` を追加）。
   U-02（署名の向き）は未確定。
+
+- 2026-11-17: 再レビュー（修正差分 PASS、0147 は #2 待ちで BLOCKED）の medium 2 件と低を修正。
+  (1) verify の deadline race にテストが無かった: never-resolving な `MachineKeyRegistry` を注入し、
+  408 deadline_exceeded と slot 解放（次の要求が 429 ではなく 408）を固定（C20/T25）。race を外すと落ちることを確認。
+  (2) slot 保持と abort: 16 MiB の遅い read 中は 429、完了後に 200（C21/T26）と、10ms を超える read は 408 で
+  slot を解放（C22/T27）を追加。非 abortable な呼び出しが deadline 後に settle するまでの保持は決定的に作れないため、
+  「テストしない条件」に理由付きで残した。socket への read 400（C23/T28）と 405 の `Allow: POST`（C24/T29）も追加。
+  README と docs/safety.md に machine の残余 TOCTOU（同一ユーザーの親差し替え）を書き、AGENTS.md・
+  vitest.config.ts・issue の末尾改行を直した。U-02 の記述を「現実装は案1ではない」に訂正。
