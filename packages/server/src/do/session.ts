@@ -1,8 +1,19 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createRegistry, type Report, type Wake } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
-import { openSession, type AgentSession } from "@hns/agent/session";
+import { openSession, type AgentLiveWatch, type AgentSession } from "@hns/agent/session";
 import { problem } from "../edge/problem.ts";
+import {
+  defaultLiveUpgradeResponse,
+  defaultWebSocketPair,
+  LiveConnection,
+  openLiveSocket,
+  readLiveAttachment,
+  type LiveSocket,
+  type LiveSocketHost,
+  type LiveSocketPairFactory,
+  type LiveUpgradeResponseFactory,
+} from "../ws.ts";
 import { armWake } from "./alarm.ts";
 import { modelsFor } from "./models.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
@@ -20,6 +31,22 @@ export type SessionRuntimeFactory = (
   env: SessionEnv,
   hooks: SessionHooks,
 ) => Promise<AgentSession>;
+
+/** The host seams the Session takes from the Workers runtime; tests inject these. */
+export interface SessionDependencies {
+  /** Builds the client/server pair for a WebSocket upgrade; defaults to Workers' WebSocketPair. */
+  readonly webSocketPair?: LiveSocketPairFactory | undefined;
+  /** The clock for delta batching; defaults to Date.now. */
+  readonly now?: (() => number) | undefined;
+  /** Builds the 101 response; Node tests inject a factory because its Response refuses 101. */
+  readonly upgradeResponse?: LiveUpgradeResponseFactory | undefined;
+}
+
+/** One accepted live socket and what keeps it fed. */
+interface LiveEntry {
+  readonly connection: LiveConnection;
+  readonly watch: AgentLiveWatch;
+}
 
 /**
  * Open the production runtime: pi-durable on the object's SQLite storage.
@@ -59,7 +86,11 @@ export class Session {
   readonly #state: SessionState;
   readonly #env: SessionEnv;
   readonly #open: SessionRuntimeFactory;
+  readonly #pair: LiveSocketPairFactory;
+  readonly #now: () => number;
+  readonly #upgradeResponse: LiveUpgradeResponseFactory;
   readonly #ready: Promise<void>;
+  readonly #live = new Map<LiveSocket, LiveEntry>();
   #session: AgentSession | undefined;
   #closed = false;
 
@@ -67,10 +98,14 @@ export class Session {
     state: SessionState,
     env: SessionEnv,
     open: SessionRuntimeFactory = openDurableSession,
+    dependencies: SessionDependencies = {},
   ) {
     this.#state = state;
     this.#env = env;
     this.#open = open;
+    this.#pair = dependencies.webSocketPair ?? defaultWebSocketPair;
+    this.#now = dependencies.now ?? Date.now;
+    this.#upgradeResponse = dependencies.upgradeResponse ?? defaultLiveUpgradeResponse;
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -99,6 +134,9 @@ export class Session {
         if (end.kind === "failed") this.#state.abort("harness failed");
       });
       await armWake(this.#state.storage, session.wake(), Date.now());
+      // Reattach accepted sockets before resume() so a run that starts after hibernation
+      // cannot advance a view that no listener observes.
+      await this.#attachSockets();
       session.resume();
     } catch (error) {
       console.error("session open failed", error instanceof Error ? error.name : "unknown");
@@ -111,7 +149,7 @@ export class Session {
    * Handle an internal RPC request.
    *
    * @param request - A request forwarded by the Worker through the `SESSION` binding.
-   * @returns The RPC response, 501 for `/ws`, or a problem response when the Session is not open.
+   * @returns The RPC response, the 101 upgrade for `/ws`, or a problem response when the Session is not open.
    *
    * @remarks
    * The edge owns authentication. These routes are unreachable from the public Worker, so
@@ -133,9 +171,109 @@ export class Session {
     }
     const path = new URL(request.url).pathname;
     if (path === "/ws") {
-      return problem("not_implemented", "The WebSocket face is not implemented yet.", path);
+      return this.#openLive(request, session);
     }
     return handleSessionRpc(request, session);
+  }
+
+  /** Accept a live socket for one conversation, or return the typed refusal. */
+  async #openLive(request: Request, session: AgentSession): Promise<Response> {
+    const host = this.#socketHost();
+    if (host === undefined) {
+      return problem("unavailable", "The live face is unavailable.", new URL(request.url).pathname);
+    }
+    const opened = await openLiveSocket({
+      request,
+      host,
+      pair: this.#pair,
+      session,
+      now: this.#now,
+      upgradeResponse: this.#upgradeResponse,
+    });
+    if (!opened.ok) return opened.error;
+    this.#live.set(opened.value.socket, {
+      connection: opened.value.connection,
+      watch: opened.value.watch,
+    });
+    return opened.value.response;
+  }
+
+  /** The DO socket methods, bound to the state they came from. */
+  #socketHost(): LiveSocketHost | undefined {
+    const accept = this.#state.acceptWebSocket;
+    if (accept === undefined) return undefined;
+    return {
+      acceptWebSocket: (socket, tags) => {
+        accept.call(this.#state, socket, tags);
+      },
+      getWebSockets: (tag) => this.#state.getWebSockets?.call(this.#state, tag) ?? [],
+    };
+  }
+
+  /** Reattach every socket that outlived an eviction; each gets a fresh snapshot. */
+  async #attachSockets(): Promise<void> {
+    const sockets = this.#state.getWebSockets?.() ?? [];
+    for (const socket of sockets) await this.#attachSocket(socket);
+  }
+
+  /** Attach one socket from its serialized subscription, or close it when it is unusable. */
+  async #attachSocket(socket: LiveSocket): Promise<LiveEntry | undefined> {
+    const existing = this.#live.get(socket);
+    if (existing !== undefined) return existing;
+    const session = this.#session;
+    if (session === undefined) return undefined;
+    const attachment = readLiveAttachment(socket);
+    if (attachment === undefined) {
+      socket.close?.(1008, "missing live attachment");
+      return undefined;
+    }
+    try {
+      const watch = await session.watchConversation(attachment.conversationId);
+      const connection = new LiveConnection(socket, attachment.conversationId, {
+        now: this.#now,
+      });
+      const entry: LiveEntry = { connection, watch };
+      connection.start(watch.initial);
+      watch.start((view) => {
+        connection.advance(view);
+      });
+      this.#live.set(socket, entry);
+      return entry;
+    } catch {
+      socket.close?.(1011, "live watch failed");
+      return undefined;
+    }
+  }
+
+  /**
+   * Handle a message on a hibernated or live socket.
+   *
+   * @remarks
+   * This handler is what wakes the object; after the wake it reattaches the socket from its
+   * attachment before dispatching, so ping/resync work across eviction.
+   */
+  async webSocketMessage(socket: LiveSocket, message: string | ArrayBuffer): Promise<void> {
+    try {
+      await this.#ready;
+    } catch {
+      return;
+    }
+    const entry = await this.#attachSocket(socket);
+    entry?.connection.handleMessage(message);
+  }
+
+  /** Drop the subscription when the client closes the socket. */
+  async webSocketClose(socket: LiveSocket): Promise<void> {
+    const entry = this.#live.get(socket);
+    this.#live.delete(socket);
+    if (entry === undefined) return;
+    entry.connection.close();
+    await entry.watch.stop();
+  }
+
+  /** Drop the subscription on a socket error. */
+  async webSocketError(socket: LiveSocket): Promise<void> {
+    await this.webSocketClose(socket);
   }
 
   /**

@@ -42,6 +42,9 @@ function fakeSession(overrides: Partial<AgentSession> = {}): Fake {
       throw new ModelUnavailableError("no model");
     },
     transcript: async () => [],
+    watchConversation: async (id: string) => {
+      throw new InvalidConversationIdError(id);
+    },
     abort: async () => false,
     wake: (): Wake => ({ active: false }),
     resume: () => undefined,

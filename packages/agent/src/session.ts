@@ -3,6 +3,7 @@ import type { Models } from "@earendil-works/pi-ai/models";
 import { configure, defineDoc, Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import type {
   ConversationId,
+  ConversationView,
   EntryRecord,
   HarnessOptions,
   HarnessSettings,
@@ -53,6 +54,36 @@ export interface SessionOptions {
   readonly newRequestId?: (() => string) | undefined;
 }
 
+/**
+ * One revision of a conversation's live view.
+ *
+ * @remarks
+ * `draft` is the text of the in-flight assistant answer from `pi.live`; it is not durable and
+ * is replaced by the committed assistant entry when the run ends. The entries are the watched
+ * window in entry-id order.
+ */
+export interface AgentLiveView {
+  readonly conversation: Conversation;
+  readonly entries: readonly EntryRecord[];
+  /** Text generated so far; empty when no answer is in flight. */
+  readonly draft: string;
+}
+
+/**
+ * A conversation subscription.
+ *
+ * @remarks
+ * `initial` is the acquisition revision. Changes between acquiring and {@link AgentLiveWatch.start}
+ * are queued by the watch, so a caller that sends the initial snapshot first loses nothing.
+ */
+export interface AgentLiveWatch {
+  readonly initial: AgentLiveView;
+  /** Install the listener; call once. Revisions arrive asynchronously and are folded while busy. */
+  start(listener: (view: AgentLiveView) => void): void;
+  /** Stop the watch; idempotent. */
+  stop(): Promise<void>;
+}
+
 /** One workspace's live, multi-conversation Session. */
 export interface AgentSession {
   /** Settles when the Harness closes; `failed` means the host must reopen from storage. */
@@ -67,6 +98,13 @@ export interface AgentSession {
   send(id: string, text: string, requestId?: string): Promise<Turn>;
   /** Newest transcript entries first. */
   transcript(id: string, limit?: number): Promise<readonly EntryRecord[]>;
+  /**
+   * Subscribe to one conversation's structural view.
+   *
+   * @throws InvalidConversationIdError when the id is not decimal.
+   * @throws ConversationNotFoundError when no conversation has that id.
+   */
+  watchConversation(id: string): Promise<AgentLiveWatch>;
   /** Abort the conversation's ordinary run; false when the conversation is absent. */
   abort(id: string): Promise<boolean>;
   /** What the next host wakeup is for, if anything. */
@@ -180,6 +218,39 @@ function toConversation(id: ConversationId, meta: ConversationMetadata): Convers
 async function readIndex(harness: Harness, context: Context): Promise<Readonly<ConversationIndex>> {
   const snapshot = await harness.snapshot(ConversationIndexDoc, context);
   return snapshot ?? { items: {} };
+}
+
+const LiveDocSchema = v.object({
+  generation: v.optional(
+    v.object({
+      message: v.optional(
+        v.object({
+          content: v.array(v.object({ type: v.string(), text: v.optional(v.string()) })),
+        }),
+      ),
+    }),
+  ),
+});
+
+/**
+ * The text of the in-flight assistant answer, from the conversation's `pi.live` document.
+ *
+ * @internal
+ * @returns The concatenated text parts, or "" when nothing is being generated or the live
+ * document does not have the expected shape.
+ *
+ * @remarks
+ * Live progress is presentation, not durable state; a document the schema does not recognize is
+ * reported by omission rather than failing the watch. The committed assistant entry remains the
+ * source of truth.
+ */
+function draftText(docs: Readonly<Record<string, JsonObject>>): string {
+  const live = docs["pi.live"];
+  if (live === undefined) return "";
+  const parsed = v.safeParse(LiveDocSchema, live);
+  if (!parsed.success) return "";
+  const content = parsed.output.generation?.message?.content ?? [];
+  return content.map((part) => (part.type === "text" ? (part.text ?? "") : "")).join("");
 }
 
 /**
@@ -337,6 +408,35 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
         options.context,
       );
       return page.items;
+    },
+    async watchConversation(id: string): Promise<AgentLiveWatch> {
+      const conversation = await harness.conversation(conversationId(id), options.context);
+      if (conversation === undefined) throw new ConversationNotFoundError(id);
+      const metadata = await metadataOf(conversation.id);
+      const watch = await conversation.watch(options.context, {
+        min: DEFAULT_TRANSCRIPT_PAGE,
+        max: MAX_TRANSCRIPT_PAGE,
+      });
+      const project = (view: ConversationView): AgentLiveView => ({
+        conversation: toConversation(view.conversation.id, metadata),
+        entries: view.entries,
+        draft: draftText(view.docs),
+      });
+      let started = false;
+      return {
+        initial: project(watch.value),
+        start(listener: (view: AgentLiveView) => void): void {
+          if (started) throw new Error("a conversation watch starts once");
+          started = true;
+          watch.start((call) => {
+            if (call.kind === "value") listener(project(call.value));
+            return Promise.resolve();
+          });
+        },
+        async stop(): Promise<void> {
+          await watch.stop();
+        },
+      };
     },
     async abort(id: string): Promise<boolean> {
       const conversation = await harness.conversation(conversationId(id), options.context);

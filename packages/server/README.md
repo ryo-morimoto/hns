@@ -5,7 +5,7 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
 
 ## Edge
 
-- `src/edge/worker.ts` — 本番の組み立て。`/graphql` は 501、`/ws` は Session DO へ転送する。
+- `src/edge/worker.ts` — 本番の組み立て。`/graphql` は GraphQL face、`/ws` は Session DO へ転送する。
 - `src/edge/handler.ts` — `createEdge(deps, limits)`。ルーティング、認証、相関 ID、時間制限。
 - `src/edge/session.ts` — `hns_session` の署名・検証。値は `<base64url(payload)>.<base64url(HMAC-SHA256(payload))>`。
 - `src/edge/correlation.ts` — `x-request-id`。受信値は形式を検査して引き継ぎ、不正なら生成する。
@@ -16,12 +16,12 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
 
 ## 面
 
-| パス       | メソッド       | 認証              | 動作                                     |
-| ---------- | -------------- | ----------------- | ---------------------------------------- |
-| `/graphql` | `POST`         | セッション cookie | 0145 では 501。schema / resolver は 0176 |
-| `/ws`      | `GET`          | セッション cookie | Session DO へ転送。メッセージは 0159     |
-| それ以外   | `GET` / `HEAD` | 不要              | `ASSETS` へ委譲。配信設定は 0160         |
-| `/api/*`   | すべて         | —                 | 404                                      |
+| パス       | メソッド       | 認証              | 動作                                                   |
+| ---------- | -------------- | ----------------- | ------------------------------------------------------ |
+| `/graphql` | `POST`         | セッション cookie | 0145 では 501。schema / resolver は 0176               |
+| `/ws`      | `GET`          | セッション cookie | Session DO へ転送。ライブ frame は core の `LiveFrame` |
+| それ以外   | `GET` / `HEAD` | 不要              | `ASSETS` へ委譲。配信設定は 0160                       |
+| `/api/*`   | すべて         | —                 | 404                                                    |
 
 `OPTIONS` は 405 で、CORS ヘッダは返さない。デバッグ用の口は作らない。
 `ASSETS` の `notFoundHandling` は SPA fallback にしない（画面は hash router）。未知のパスを 200 にしない設定は 0160 が持つ。
@@ -42,6 +42,8 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
 - `src/do/session-rpc.ts` — 内部 RPC。create / list / get / transcript / messages / abort。
   edge には公開しない。0176 の resolver が binding から呼ぶ。
 - `src/do/models.ts` — 0146 は development の `faux/<id>` だけ。staging / production は 503（0152 まで）。
+- `src/ws.ts` — ライブ face。`WebSocketPair` を `acceptWebSocket` し、conversation ごとに
+  snapshot → append / 間引いた delta を送る。購読は socket attachment に残すので hibernation を越える。
 - `src/do/alarm.ts` — `armWake`。idempotent で、二重 alarm でも run を二重に作らない。
 - 会話の title / project / timestamps は session document（`hns.conversation.index`）に残る。
   pi-durable の conversation record は transcript と ID を持ち、一覧は `scanConversations` で引く。

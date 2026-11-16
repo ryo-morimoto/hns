@@ -1,7 +1,9 @@
 /** The closed set of HTTP failures the edge can return on purpose. */
 export type EdgeErrorCode =
   | "unauthorized"
+  | "invalid_request"
   | "not_found"
+  | "upgrade_required"
   | "method_not_allowed"
   | "payload_too_large"
   | "unsupported_media_type"
@@ -12,7 +14,9 @@ export type EdgeErrorCode =
 
 const STATUS: Record<EdgeErrorCode, number> = {
   unauthorized: 401,
+  invalid_request: 400,
   not_found: 404,
+  upgrade_required: 426,
   method_not_allowed: 405,
   payload_too_large: 413,
   unsupported_media_type: 415,
@@ -24,7 +28,9 @@ const STATUS: Record<EdgeErrorCode, number> = {
 
 const TITLE: Record<EdgeErrorCode, string> = {
   unauthorized: "Unauthorized",
+  invalid_request: "Bad Request",
   not_found: "Not Found",
+  upgrade_required: "Upgrade Required",
   method_not_allowed: "Method Not Allowed",
   payload_too_large: "Payload Too Large",
   unsupported_media_type: "Unsupported Media Type",

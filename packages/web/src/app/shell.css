@@ -109,6 +109,23 @@ body,
   background: var(--danger);
 }
 
+.hns-connection[data-state="reconnecting"] .hns-connection__dot {
+  background: var(--warn);
+}
+
+.hns-live {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.hns-live__detail {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
 .hns-sidebar {
   display: flex;
   flex-direction: column;

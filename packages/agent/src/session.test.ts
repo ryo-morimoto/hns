@@ -5,7 +5,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
 import { openSession } from "./session.ts";
-import type { AgentSession } from "./session.ts";
+import type { AgentLiveView, AgentSession } from "./session.ts";
 
 interface Fixture {
   readonly session: AgentSession;
@@ -121,4 +121,68 @@ test("abort of an idle conversation succeeds", async () => {
     const conversation = await session.createConversation({ title: "Abort" });
     expect(await session.abort(conversation.id)).toBe(true);
   });
+});
+
+// Catches: the live face having no source, so a connected client only sees the final answer.
+test("a conversation watch delivers the first view and later revisions", async () => {
+  await withSession(async ({ session, faux }) => {
+    const conversation = await session.createConversation({ title: "Watch" });
+    const views: AgentLiveView[] = [];
+    const watch = await session.watchConversation(conversation.id);
+    expect(watch.initial.conversation.title).toBe("Watch");
+    expect(watch.initial.entries).toStrictEqual([]);
+    expect(watch.initial.draft).toBe("");
+    watch.start((view) => views.push(view));
+
+    faux.setResponses([fauxAssistantMessage("watched answer")]);
+    await session.send(conversation.id, "hi");
+
+    await expect
+      .poll(() => views.some((view) => view.entries.some((entry) => entry.kind === "pi.assistant")))
+      .toBe(true);
+    const final = views.findLast((view) =>
+      view.entries.some((entry) => entry.kind === "pi.assistant"),
+    );
+    assert.ok(final !== undefined);
+    expect(final.conversation.title).toBe("Watch");
+    expect(final.entries.map((entry) => entry.kind)).toContain("pi.user");
+    expect(final.draft).toBe("");
+    await watch.stop();
+  });
+});
+
+test("watching an absent conversation is not found", async () => {
+  await withSession(async ({ session }) => {
+    await expect(session.watchConversation("999999")).rejects.toThrow(/not found/u);
+  });
+});
+
+// Catches: a watch that only sees committed entries, so the live face never gets a token delta.
+test("the watch carries the in-flight draft", async () => {
+  const faux = fauxProvider({ tokensPerSecond: 400, tokenSize: { min: 1, max: 1 } });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const session = await openSession({
+    storage: new MemoryStorage(),
+    models,
+    registry: createRegistry(),
+    model: MODEL,
+    context: BACKGROUND_CONTEXT,
+    now: () => START,
+    settings: { progress: { partialIntervalMs: 0 } },
+  });
+  try {
+    const conversation = await session.createConversation({ title: "Draft" });
+    const views: AgentLiveView[] = [];
+    const watch = await session.watchConversation(conversation.id);
+    watch.start((view) => views.push(view));
+    faux.setResponses([fauxAssistantMessage("x".repeat(80))]);
+
+    await session.send(conversation.id, "hi");
+
+    expect(views.some((view) => view.draft.length > 0 && view.draft.length < 80)).toBe(true);
+    await watch.stop();
+  } finally {
+    await session.close();
+  }
 });

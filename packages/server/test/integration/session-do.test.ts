@@ -62,6 +62,63 @@ interface Running {
   readonly output: () => string;
 }
 
+const HAS_WEBSOCKET = "WebSocket" in globalThis;
+
+/** Reads WebSocket text frames in order, buffering ones that arrive before next() is called. */
+interface FrameReader {
+  next(): Promise<JsonValue>;
+}
+
+function frameReader(socket: WebSocket): FrameReader {
+  const buffered: JsonValue[] = [];
+  const waiting: ((value: JsonValue) => void)[] = [];
+  socket.addEventListener("message", (event) => {
+    // SAFETY: the live protocol is text frames; the Session sends no binary frame.
+    const value: JsonValue = JSON.parse(event.data as string);
+    const resolve = waiting.shift();
+    if (resolve === undefined) buffered.push(value);
+    else resolve(value);
+  });
+  return {
+    next: () => {
+      const next = buffered.shift();
+      if (next !== undefined) return Promise.resolve(next);
+      return new Promise((resolveFrame) => {
+        waiting.push(resolveFrame);
+      });
+    },
+  };
+}
+
+/** Reject when a frame does not arrive; a hung socket is a failure, not a long test. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for " + label)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: Error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function openSocket(port: number, path: string): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket("ws://127.0.0.1:" + String(port) + path);
+    socket.addEventListener("open", () => resolve(socket), { once: true });
+    socket.addEventListener(
+      "error",
+      () => reject(new Error("the WebSocket did not open: " + path)),
+      { once: true },
+    );
+  });
+}
+
 let project: string | undefined;
 let running: Running | undefined;
 
@@ -220,6 +277,13 @@ const Transcript = v.object({
   ok: v.literal(true),
   entries: v.array(v.object({ kind: v.string() })),
 });
+const Snapshot = v.object({
+  type: v.literal("snapshot"),
+  protocol: v.literal(1),
+  cursor: v.string(),
+  conversationId: v.string(),
+  entries: v.array(v.object({ id: v.string(), kind: v.string(), text: v.string() })),
+});
 
 beforeAll(() => {
   build();
@@ -281,6 +345,78 @@ test.skipIf(!existsSync(CF))(
         Transcript,
       );
       expect(transcript.entries.map((entry) => entry.kind)).toContain("pi.assistant");
+    } finally {
+      await stop(running);
+      running = undefined;
+    }
+  },
+  TIMEOUT_MS,
+);
+test.skipIf(!existsSync(CF) || !HAS_WEBSOCKET)(
+  "the Session DO upgrades /ws and keeps a conversation live across reconnect",
+  async () => {
+    project = await writeProject();
+    const port = await freePort();
+    running = await start(project, port);
+    try {
+      const created = await call(port, "POST", "/t/rpc/conversations", Create, { title: "WS" });
+      const id = created.conversation.id;
+
+      const socket = await openSocket(port, "/t/ws?conversationId=" + id);
+      const frames = frameReader(socket);
+      const first = v.parse(
+        Snapshot,
+        await withTimeout(frames.next(), 10_000, "the first snapshot"),
+      );
+      expect(first.cursor).toBe("0");
+      expect(first.conversationId).toBe(id);
+      expect(first.entries).toStrictEqual([]);
+
+      socket.send(JSON.stringify({ type: "ping" }));
+      expect(await withTimeout(frames.next(), 10_000, "pong")).toStrictEqual({
+        type: "pong",
+        protocol: 1,
+      });
+
+      const sent = await call(port, "POST", "/t/rpc/conversations/" + id + "/messages", Send, {
+        text: "hi",
+      });
+      expect(sent.status).toBe("done");
+
+      let assistantAppended = false;
+      for (let index = 0; index < 100; index += 1) {
+        const frame = v.parse(
+          v.object({
+            type: v.string(),
+            entries: v.optional(v.array(v.object({ kind: v.string() }))),
+          }),
+          await withTimeout(frames.next(), 10_000, "a frame after send"),
+        );
+        if (
+          frame.type === "append" &&
+          (frame.entries ?? []).some((entry) => entry.kind === "pi.assistant")
+        ) {
+          assistantAppended = true;
+          break;
+        }
+      }
+      expect(assistantAppended).toBe(true);
+      socket.close();
+
+      // Commit while disconnected; the reconnect snapshot must include it.
+      const again = await call(port, "POST", "/t/rpc/conversations/" + id + "/messages", Send, {
+        text: "again",
+      });
+      expect(again.status).toBe("done");
+
+      const reconnect = await openSocket(port, "/t/ws?conversationId=" + id + "&cursor=0");
+      const reopened = v.parse(
+        Snapshot,
+        await withTimeout(frameReader(reconnect).next(), 10_000, "the reconnect snapshot"),
+      );
+      expect(reopened.cursor).not.toBe("0");
+      expect(reopened.entries.filter((entry) => entry.kind === "pi.assistant")).toHaveLength(2);
+      reconnect.close();
     } finally {
       await stop(running);
       running = undefined;

@@ -1,4 +1,5 @@
 import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
+import type { LiveSocket } from "../ws.ts";
 
 /** The alarm methods the Session uses; a subset of `DurableObjectStorage`. */
 export interface AlarmStorage {
@@ -18,6 +19,16 @@ export interface SessionState {
   readonly storage: DurableObjectSqliteStorage & AlarmStorage;
   blockConcurrencyWhile<T>(run: () => Promise<T>): Promise<T>;
   abort(reason?: string): void;
+  /**
+   * Accept a hibernatable WebSocket and tag it with its conversation.
+   *
+   * @remarks
+   * Optional so Node tests provide a fake without the Workers surface; the live face fails
+   * closed when it is absent.
+   */
+  acceptWebSocket?(socket: LiveSocket, tags?: readonly string[]): void;
+  /** The sockets this object accepted, including ones that outlived an eviction. */
+  getWebSockets?(tag?: string): readonly LiveSocket[];
 }
 
 /** The bindings the Session reads. It never reads a secret. */
