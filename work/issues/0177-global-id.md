@@ -47,7 +47,7 @@ Relay の正規化 store は、同じ id を 2 つの型に割り当てられな
 
 - `@hns/core/graphql` に `toGlobalId(type, id)` / `fromGlobalId(value)` を置く。表現は base64url(`<Type>:<id>`)。
 - `toGlobalId` は型名が GraphQL 名（`[_A-Za-z][_0-9A-Za-z]*`）で、id が空でないことを確かめ、違えば `Error` を投げる（プログラマの誤り）。
-- `fromGlobalId` は失敗を返す（例外にしない）。`{ ok: true, value: { type, id } }` か `{ ok: false, reason: "malformed" | "unsupported_type" }`。base64 の復号失敗・区切り無し・空の型/id・GraphQL 名でない型を `malformed` にする。
+- `fromGlobalId` は失敗を返す（例外にしない）。`{ ok: true, value: { type, id } }` か `{ ok: false, reason: "malformed" }`。base64 の復号失敗（不正 UTF-8 を含む）・区切り無し・空の型/id・GraphQL 名でない型を `malformed` にする。型の不一致（Conversation の id を projectId に渡す等）は resolver が `invalid_argument` にする。
 - 境界は server の resolver と view だけ。model の型（`ProjectId` / `ConversationId`）と D1 の行は変えない。
 - view は `id` と参照 id（`projectId`）を global id にし、resolver は引数の global id を復号して model の型へ戻す。型が合わない（例: `Conversation` の id を `projectId` に渡す）のは `invalid_argument`。
 
@@ -65,4 +65,4 @@ Relay の正規化 store は、同じ id を 2 つの型に割り当てられな
 
 - 2026-11-10: 作成（user。D055）。
 - 2026-11-10: core の graphql サブパスに置く（0188。core のルートはモデルだけ）。
-- 2026-11-17: 実装。`@hns/core/graphql` の `toGlobalId` / `fromGlobalId`（base64url(`<Type>:<id>`)）、view の id を global 化、resolver で `projectId` を復号（型違い・生 id は `invalid_argument`）。core 4 tests、server の契約テスト 3 追加。
+- 2026-11-17: 実装。`@hns/core/graphql` の `toGlobalId` / `fromGlobalId`（base64url(`<Type>:<id>`)）、view の id を global 化、resolver で `projectId` を復号（型違い・生 id は `invalid_argument`）。core 5 tests、server の契約テスト 3 追加。

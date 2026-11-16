@@ -92,7 +92,7 @@ function pageSize(first: number | null | undefined, maximum: number): number {
  * id, or names a type other than `Project`.
  *
  * @remarks
- * The argument is a global id (0177). A raw id is refused rather than guessed, so a client
+ * The argument is a global id. A raw id is refused rather than guessed, so a client
  * cannot address a conversation id as a project id by accident.
  */
 function requiredProjectId(value: string | null | undefined): ProjectId {

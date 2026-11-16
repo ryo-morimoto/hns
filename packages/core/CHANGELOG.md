@@ -7,3 +7,4 @@
 - `IsoTimestamp` / `OperationId` codecs.
 - Durability contract vocabulary: failure classes, authorities, `CheckpointRef`, `DurableUnit`.
 - `validateWorkflowGraph()` refuses duplicate nodes, dangling edges, and cycles.
+- `toGlobalId()` / `fromGlobalId()` (`./graphql`) keep ids unique across GraphQL types.

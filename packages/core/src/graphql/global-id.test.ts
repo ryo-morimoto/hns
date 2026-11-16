@@ -18,7 +18,17 @@ test("the same raw id under two types yields different global ids", () => {
 
 // Catches: a malformed id that throws instead of returning a typed failure.
 test("a malformed global id fails without throwing", () => {
-  for (const value of ["", "!!!", "not-base64", "T25seVR5cGU", "OnByb2plY3Q6", "On0"]) {
+  const emptyId = btoa("Project:").replaceAll("=", "");
+  for (const value of [
+    "",
+    "!!!",
+    "not-base64",
+    "T25seVR5cGU",
+    "OnByb2plY3Q6",
+    "On0",
+    emptyId,
+    btoa("1Project:x").replaceAll("=", ""),
+  ]) {
     expect(fromGlobalId(value)).toStrictEqual({ ok: false, reason: "malformed" });
   }
 });
