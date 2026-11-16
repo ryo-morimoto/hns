@@ -69,7 +69,7 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 
 ## Result
 
-- 実装: c3c4116（branch `issue/0159-live-ws`）。status は open のまま（独立レビュー前）。
+- 実装: c3c4116 + c52219d / 1baca28 / c4ba479 / 1f666e7（branch `issue/0159-live-ws`）。status は open のまま（独立レビュー前）。
 - ゲート: `npm run check` exit 0。448 tests / 85 files、lint / fmt / typecheck / build / deploy dry-run / knip すべて ok。
 - 受入の証拠:
   - 閉じた union: static な `LIVE_FRAME_TYPES` / valibot variant と `core/src/stream.test.ts`（未知 type・別 protocol は拒否）。
