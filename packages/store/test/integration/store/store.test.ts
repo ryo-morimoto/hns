@@ -29,7 +29,7 @@ test("opening a store migrates and seeds the default project", async () => {
     expect(projects[0]?.id).toBe("default");
     expect(projects[0]?.name).toBe("default");
   });
-  expect(await version()).toBe(1);
+  expect(await version()).toBe(2);
 });
 
 test("reopening keeps the data and does not duplicate the default project", async () => {
@@ -46,15 +46,15 @@ test("reopening keeps the data and does not duplicate the default project", asyn
   } finally {
     await second.close();
   }
-  expect(await version()).toBe(1);
+  expect(await version()).toBe(2);
 });
 
 test("migrateStore applies the schema without opening the repositories", async () => {
   await harness.reset();
   await migrateStore(harness.db);
-  expect(await version()).toBe(1);
+  expect(await version()).toBe(2);
   await migrateStore(harness.db);
-  expect(await version()).toBe(1);
+  expect(await version()).toBe(2);
 });
 
 test("a failing migration leaves no table or version row behind", async () => {
