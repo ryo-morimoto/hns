@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
@@ -331,6 +332,33 @@ test("a response over the output limit is refused", async () => {
       expect(codeOf(listing)).toBe("too_large");
     },
     { limits: { maxResponseBytes: 200 } },
+  );
+});
+
+test("a FIFO is refused without blocking the pool", async () => {
+  await withAgent(
+    async ({ root }) => {
+      await writeFile(join(root, "a.txt"), "hello");
+      for (let index = 0; index < 8; index += 1) {
+        execFileSync("mkfifo", [join(root, `pipe-${index}`)]);
+      }
+    },
+    async (fixture) => {
+      const reads = Array.from({ length: 8 }, (_, index) =>
+        fixture.call({ body: JSON.stringify({ op: "read", path: `pipe-${index}` }) }),
+      );
+      const answers = await Promise.all(reads);
+      for (const answer of answers) {
+        expect(answer.status).toBe(400);
+        expect(codeOf(answer)).toBe("invalid_request");
+      }
+      const after = await fixture.call({ body: JSON.stringify({ op: "read", path: "a.txt" }) });
+      expect(after.status).toBe(200);
+      const content = parseReadResult(resultOf(after));
+      expect(Buffer.from(content.content, "base64").toString("utf8")).toBe("hello");
+      await waitFor(() => fixture.agent.inFlight === 0, "the slots to be released");
+    },
+    { limits: { timeoutMs: 2_000 } },
   );
 });
 

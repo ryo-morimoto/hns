@@ -26,7 +26,7 @@ export interface MachineAgentOptions {
   readonly root: string;
   /** The machine this agent runs for, as its Machine record names it. */
   readonly machineId: string;
-  /** Where the registered public key comes from (D1 in 0148). */
+  /** Where the registered public key comes from (the D1 Machine record). */
   readonly keys: MachineKeyRegistry;
   /** The local port; 0 asks the operating system for a free one. */
   readonly port: number;
@@ -66,6 +66,15 @@ const BoundAddressSchema: v.GenericSchema<unknown, AddressInfo> = v.object({
 });
 
 /**
+ * The refusal a passed deadline answers with.
+ *
+ * @returns The same refusal the abort reason carries, when one was given.
+ */
+function deadlineRefusal(): MachineRefusal {
+  return new MachineRefusal("deadline_exceeded", "the request passed its deadline");
+}
+
+/**
  * Start the machine agent.
  *
  * @param options - The root, the machine identity, the key registry, and the bounds.
@@ -76,8 +85,9 @@ const BoundAddressSchema: v.GenericSchema<unknown, AddressInfo> = v.object({
  * @remarks
  * The listener is loopback-only, so the process opens no inbound port: the only
  * way in is the outbound cloudflared tunnel. A request is read only after a
- * concurrency slot is taken, and its body read is inside the same deadline as
- * the operation, so a slow or endless body cannot hold a slot forever.
+ * concurrency slot is taken, its body read and the operation share one deadline,
+ * and the operation is awaited to its settlement, so a slow or endless body or
+ * file cannot leave work running behind a released slot.
  */
 export async function startMachineAgent(options: MachineAgentOptions): Promise<MachineAgent> {
   const limits = resolveLimits(options.limits);
@@ -107,10 +117,9 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     server.close();
     throw new Error("the machine agent did not obtain a TCP address");
   }
-  const port = address.output.port;
   return {
-    origin: `http://${HOST}:${port}`,
-    port,
+    origin: `http://${HOST}:${address.output.port}`,
+    port: address.output.port,
     get inFlight(): number {
       return context.inFlight.count;
     },
@@ -173,11 +182,13 @@ function listen(server: Server, port: number): Promise<void> {
  * @param context - The root, bounds, verifier, and gate.
  *
  * @remarks
- * The order is deliberate: the route is checked first, a slot is taken next, and
- * every later step can refuse. Authentication happens before the body is parsed,
- * and the connection seq is checked after the signature so a forged seq cannot
- * evict the current connection. One deadline covers the body read and the
- * operation, and the slot is returned in `finally` on every path.
+ * The order is deliberate: the method and route are answered first, a slot is
+ * taken next, and every later step can refuse. Authentication happens before the
+ * body is parsed, and the connection seq is checked after the signature so a
+ * forged seq cannot evict the current connection. The body read and the
+ * verification race the deadline because neither can be stopped once started;
+ * the operation itself is awaited with the deadline signal, so its slot is
+ * returned only after it settles.
  */
 async function handleRequest(
   request: IncomingMessage,
@@ -193,17 +204,15 @@ async function handleRequest(
     return;
   }
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), context.limits.timeoutMs);
+  const timer = setTimeout(() => deadline.abort(deadlineRefusal()), context.limits.timeoutMs);
   const expired = deadlineExceeded(deadline.signal);
   try {
     const body = await Promise.race([readBody(request, context.limits.maxRequestBytes), expired]);
     const headers = parseSignedHeaders(request.headers);
-    await context.verifier.verify({
-      method: request.method,
-      path: request.url,
-      headers,
-      body,
-    });
+    await Promise.race([
+      context.verifier.verify({ method: request.method, path: request.url, headers, body }),
+      expired,
+    ]);
     const admission = context.gate.admit(headers.connection, Number(headers.seq));
     if (admission.kind === "stale") {
       throw new MachineRefusal(
@@ -212,10 +221,7 @@ async function handleRequest(
       );
     }
     const operation = parseOperation(body);
-    const result = await Promise.race([
-      runOperation(operation, context.root, context.limits),
-      expired,
-    ]);
+    const result = await runOperation(operation, context.root, context.limits, deadline.signal);
     const op: OperationName = operation.op;
     sendJson(response, { ok: true, op, result }, context.limits);
   } catch (error) {
@@ -272,12 +278,14 @@ function readBody(request: IncomingMessage, maxBytes: number): Promise<Uint8Arra
  * A promise that rejects when the deadline passes.
  *
  * @param signal - The request's deadline signal.
- * @returns A promise that never resolves; the rejection is a refusal.
+ * @returns A promise that never resolves; the rejection is the abort reason, or
+ * `deadline_exceeded` when the signal carries none.
  */
 function deadlineExceeded(signal: AbortSignal): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
     const refuse = (): void => {
-      reject(new MachineRefusal("deadline_exceeded", "the request passed its deadline"));
+      const reason = signal.reason;
+      reject(reason instanceof MachineRefusal ? reason : deadlineRefusal());
     };
     if (signal.aborted) {
       refuse();

@@ -41,7 +41,7 @@ cloudflared は外向きの接続を保ち、この agent へは `127.0.0.1` で
 `signRequest()` / `verifyRequestSignature()` が同じ定義を使う。
 
 拒否は閉じた `RefusalCode` で返る。主なもの: `unauthorized` (401)、`stale_request` (401)、
-`replayed` (409)、`stale_connection` (409)、`path_denied` (400)、`forbidden` (403)、
+`replayed` (409)、`stale_connection` (409)、`invalid_request` (400)、`path_denied` (400)、`forbidden` (403)、
 `not_found` (404)、`busy` (429)、`too_large` (413)、`deadline_exceeded` (408)。
 
 ## 不変条件
@@ -50,8 +50,10 @@ cloudflared は外向きの接続を保ち、この agent へは `127.0.0.1` で
 - 要求は「登録された鍵」「±60 秒の時刻窓」「未使用の nonce」「現在の接続 seq」をすべて満たすときだけ通る。
   nonce は署名が通ってから記録する（未認証の要求で nonce を焼けない）。
 - パスは ROOT 相対に正規化する。`/` 始まりは ROOT 相対で、`..` は拒否する。親は canonical 化し、ROOT の外を指す
-  symlink の親は拒否する。最終要素の symlink は追わない（`O_NOFOLLOW`）。
+  symlink の親は拒否する。最終要素の symlink は read も list も拒否する（read は `O_NOFOLLOW`、list は `lstat`）。
+  `stat` は追わず `kind: "symlink"` を返す。
 - 上限: 同時実行数（超えたら 429）、要求 body（413）、応答（413。切り詰めない）、1 要求の時間（408）。
+  FIFO・device・socket は read しない（`O_NONBLOCK` の open と非 regular の拒否で thread pool を塞がない）。
 - exec と書き込みは出さない。sandbox が無い環境で exec を出さない（fail closed）。0194 で足す。
 - 秘密鍵・cloudflared token をログにも応答にも出さない。
 

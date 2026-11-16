@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir } from "node:fs/promises";
-import type { Dirent, Stats } from "node:fs";
+import type { Stats } from "node:fs";
+import type { Dirent } from "node:fs";
 import { FileFailure } from "@hns/workspace";
 import { containInRoot } from "./containment.ts";
 import type { Limits } from "./limits.ts";
@@ -24,11 +25,14 @@ export type OperationResult = HealthResult | StatResult | ReadResult | ListResul
  * @param operation - The parsed operation from the request.
  * @param root - The canonical root; every path is resolved below it.
  * @param limits - The response bound, so a large file is refused before it is read.
+ * @param signal - The request's deadline. The operation settles when it fires:
+ * reads are aborted, and every other step checks the signal before and after.
  * @returns The operation's result, ready to serialize.
  * @throws {Denied} When the path cannot stay inside ROOT.
  * @throws {MachineRefusal} `not_found` for a missing parent, `too_large` for a
  * file over the response bound, `forbidden` for a symbolic link as the final
- * component of a read.
+ * component, `invalid_request` for a non-regular file, `deadline_exceeded`
+ * once the deadline passes.
  * @throws {FileFailure} With pi-durable's codes for any other file failure, so
  * the caller branches on a code instead of a message.
  */
@@ -36,19 +40,46 @@ export async function runOperation(
   operation: Operation,
   root: string,
   limits: Limits,
+  signal: AbortSignal,
 ): Promise<OperationResult> {
   switch (operation.op) {
     case "health":
+      signal.throwIfAborted();
       return { root, pid: process.pid };
     case "stat":
-      return await statPath(root, operation.path);
+      return await statPath(root, operation.path, signal);
     case "read":
-      return await readPath(root, operation.path, limits);
+      return await readPath(root, operation.path, limits, signal);
     case "list":
-      return await listPath(root, operation.path);
+      return await listPath(root, operation.path, signal);
   }
   const unreachable: never = operation;
   return unreachable;
+}
+
+/**
+ * Await one file system call, turning a passed deadline into the refusal.
+ *
+ * @param signal - The request's deadline.
+ * @param work - The call to await.
+ * @returns The call's value, once it settled and the deadline had not passed.
+ * @throws {MachineRefusal} `deadline_exceeded` when the signal fired, either
+ * before the call settled or because the call itself was aborted.
+ *
+ * @remarks
+ * The promise is awaited, never abandoned: the caller keeps its concurrency slot
+ * until the call settles, so a timed-out request cannot leave work running
+ * behind a slot another request takes.
+ */
+async function bounded<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
+  try {
+    const value = await work;
+    signal.throwIfAborted();
+    return value;
+  } catch (error) {
+    signal.throwIfAborted();
+    throw error;
+  }
 }
 
 /**
@@ -82,10 +113,35 @@ function fileFailure(error: Error, path: string): FileFailure {
       return new FileFailure("is_directory", `${path}: is a directory`);
     case "ENOTDIR":
       return new FileFailure("not_directory", `${path}: not a directory`);
+    case "ENXIO":
+      return new FileFailure("invalid", `${path}: is not a regular file`);
     case "ELOOP":
       return new FileFailure("invalid", `${path}: symbolic link`);
   }
   return new FileFailure("unknown", `${path}: ${error.message}`);
+}
+
+/**
+ * List one path's metadata without following a final symbolic link.
+ *
+ * @param absolute - The canonical absolute path.
+ * @param relativePath - The path as the request named it, for the message.
+ * @param signal - The request's deadline.
+ * @returns The entry's metadata.
+ * @throws {FileFailure} With the translated Node error.
+ */
+async function lstatPath(
+  absolute: string,
+  relativePath: string,
+  signal: AbortSignal,
+): Promise<Stats> {
+  try {
+    return await bounded(signal, lstat(absolute));
+  } catch (error) {
+    if (error instanceof MachineRefusal) throw error;
+    if (!(error instanceof Error)) throw error;
+    throw fileFailure(error, relativePath);
+  }
 }
 
 /** The kind of one entry, from the metadata the call already holds. */
@@ -109,17 +165,28 @@ function kindOfEntry(entry: Dirent): MachineFileKind {
  *
  * @param root - The canonical root.
  * @param relativePath - The path from the request.
+ * @param signal - The request's deadline.
  * @returns `{exists: false}` for a missing entry; otherwise its kind, size, and
- * modification time.
+ * modification time. A symbolic link is reported as `kind: "symlink"`, not
+ * followed.
  * @throws {Denied} When the path cannot stay inside ROOT.
  * @throws {FileFailure} For any failure other than an absent entry.
  */
-async function statPath(root: string, relativePath: string): Promise<StatResult> {
+async function statPath(
+  root: string,
+  relativePath: string,
+  signal: AbortSignal,
+): Promise<StatResult> {
   const contained = await containInRoot(root, relativePath);
-  const info = await lstat(contained.absolute).catch((error: Error) => {
-    if (errnoOf(error) === "ENOENT") return undefined;
-    throw fileFailure(error, relativePath);
-  });
+  signal.throwIfAborted();
+  let info: Stats | undefined = undefined;
+  try {
+    info = await bounded(signal, lstat(contained.absolute));
+  } catch (error) {
+    if (error instanceof MachineRefusal) throw error;
+    if (!(error instanceof Error)) throw error;
+    if (errnoOf(error) !== "ENOENT") throw fileFailure(error, relativePath);
+  }
   if (info === undefined) return { exists: false };
   return { exists: true, kind: kindOf(info), size: info.size, mtimeMs: info.mtimeMs };
 }
@@ -130,39 +197,60 @@ async function statPath(root: string, relativePath: string): Promise<StatResult>
  * @param root - The canonical root.
  * @param relativePath - The path from the request.
  * @param limits - The response bound; a larger file is refused before it is read.
+ * @param signal - The request's deadline; the read itself is aborted by it.
  * @returns The normalized path, byte size, sha256 version, and base64 content.
  * @throws {Denied} When the path cannot stay inside ROOT.
  * @throws {MachineRefusal} `too_large` over the response bound, `forbidden`
- * when the final component is a symbolic link, `not_found` for a missing parent.
+ * for a symbolic link, `invalid_request` for a FIFO, device, or socket,
+ * `not_found` for a missing parent, `deadline_exceeded` after the deadline.
  * @throws {FileFailure} For any other file failure.
  *
  * @remarks
- * The open refuses a final symbolic link, so a link cannot serve bytes from
- * outside ROOT even when its parent is inside. The version is the sha256 of the
- * bytes that were read, the same `sha256:<hex>` spelling the workspace uses.
+ * A non-regular file is refused before it is opened: opening a FIFO would block
+ * a thread-pool thread, and the deadline could not reclaim it. The open also
+ * refuses a final symbolic link and is non-blocking, so a swap after the check
+ * still cannot wedge the read. The version is the sha256 of the bytes that were
+ * read, the same `sha256:<hex>` spelling the workspace uses.
  */
-async function readPath(root: string, relativePath: string, limits: Limits): Promise<ReadResult> {
+async function readPath(
+  root: string,
+  relativePath: string,
+  limits: Limits,
+  signal: AbortSignal,
+): Promise<ReadResult> {
   const contained = await containInRoot(root, relativePath);
-  const handle = await open(contained.absolute, constants.O_RDONLY | constants.O_NOFOLLOW).catch(
-    (error: Error) => {
-      if (errnoOf(error) === "ELOOP") {
-        throw new MachineRefusal("forbidden", `${relativePath}: the path is a symbolic link`);
-      }
-      throw fileFailure(error, relativePath);
-    },
-  );
+  signal.throwIfAborted();
+  const before = await lstatPath(contained.absolute, relativePath, signal);
+  if (before.isSymbolicLink()) {
+    throw new MachineRefusal("forbidden", `${relativePath}: the path is a symbolic link`);
+  }
+  if (!before.isFile()) {
+    throw new MachineRefusal("invalid_request", `${relativePath}: is not a regular file`);
+  }
+  const handle = await open(
+    contained.absolute,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  ).catch((error: Error) => {
+    if (errnoOf(error) === "ELOOP") {
+      throw new MachineRefusal("forbidden", `${relativePath}: the path is a symbolic link`);
+    }
+    if (errnoOf(error) === "ENXIO") {
+      throw new MachineRefusal("invalid_request", `${relativePath}: is not a regular file`);
+    }
+    throw fileFailure(error, relativePath);
+  });
   try {
-    const info = await handle.stat();
-    if (info.isDirectory())
-      throw new FileFailure("is_directory", `${relativePath}: is a directory`);
-    if (!info.isFile()) throw new FileFailure("invalid", `${relativePath}: is not a regular file`);
-    if (info.size > limits.maxResponseBytes) {
+    const opened = await bounded(signal, handle.stat());
+    if (!opened.isFile()) {
+      throw new MachineRefusal("invalid_request", `${relativePath}: is not a regular file`);
+    }
+    if (opened.size > limits.maxResponseBytes) {
       throw new MachineRefusal(
         "too_large",
         `${relativePath}: the file is larger than the response limit`,
       );
     }
-    const bytes = await handle.readFile();
+    const bytes = await bounded(signal, handle.readFile({ signal }));
     return {
       path: contained.relative,
       size: bytes.byteLength,
@@ -183,6 +271,7 @@ async function readPath(root: string, relativePath: string, limits: Limits): Pro
  *
  * @param root - The canonical root.
  * @param relativePath - The path from the request.
+ * @param signal - The request's deadline.
  * @returns The entries, in the order the file system returned them.
  * @throws {Denied} When the path cannot stay inside ROOT.
  * @throws {MachineRefusal} `forbidden` for a symbolic link, `invalid_request`
@@ -195,21 +284,27 @@ async function readPath(root: string, relativePath: string, limits: Limits): Pro
  * between that check and the listing is the same residual race the parent check
  * has; the dirfd helper the workspace needs closes both.
  */
-async function listPath(root: string, relativePath: string): Promise<ListResult> {
+async function listPath(
+  root: string,
+  relativePath: string,
+  signal: AbortSignal,
+): Promise<ListResult> {
   const contained = await containInRoot(root, relativePath);
-  const info = await lstat(contained.absolute).catch((error: Error) => {
-    throw fileFailure(error, relativePath);
-  });
+  signal.throwIfAborted();
+  const info = await lstatPath(contained.absolute, relativePath, signal);
   if (info.isSymbolicLink()) {
     throw new MachineRefusal("forbidden", `${relativePath}: the path is a symbolic link`);
   }
   if (!info.isDirectory()) {
     throw new MachineRefusal("invalid_request", `${relativePath}: is not a directory`);
   }
-  const entries = await readdir(contained.absolute, { withFileTypes: true }).catch(
-    (error: Error) => {
-      throw fileFailure(error, relativePath);
-    },
-  );
+  let entries: Dirent[];
+  try {
+    entries = await bounded(signal, readdir(contained.absolute, { withFileTypes: true }));
+  } catch (error) {
+    if (error instanceof MachineRefusal) throw error;
+    if (!(error instanceof Error)) throw error;
+    throw fileFailure(error, relativePath);
+  }
   return { entries: entries.map((entry) => ({ name: entry.name, kind: kindOfEntry(entry) })) };
 }
