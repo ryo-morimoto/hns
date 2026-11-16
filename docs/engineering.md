@@ -4,19 +4,19 @@
 
 ## 1. 技術スタック
 
-| 層            | 選定                                                                                        | 理由                                                                                                       | 捨てたもの                                         |
-| ------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 言語          | TypeScript strict（`noUncheckedIndexedAccess`）                                             | 境界が多い。型で守る                                                                                       | JS（PoC のまま）                                   |
-| 実行          | Worker は workerd / DO。マシンとテストは Node.js 26（`flake.nix` + nixpkgs-unstable、D035） | 既存の pi-durable と同一。マシンにツールチェーンがある                                                     | Bun（DB と sandbox の相性が未検証）                |
-| HTTP          | Workers（`cf`）                                                                             | DO・WS・D1 に揃う。実行はマシンに置く                                                                      | Fastify / Hono は使わない（D047）                  |
-| DB            | 制御データは D1、実行中の状態は DO SQLite、ローカルも D1（cf dev / miniflare）              | 引く用途は SQL、調整は DO に向く（D049）                                                                   | Postgres（今は不要）                               |
-| UI            | React 19 + Vite 8（Rolldown）+ Relay（GraphQL）+ TanStack Query 5 + Base UI（D055）         | 最終段の UX を詰めやすい。Relay の colocated fragment と正規化 store で画面単位の要求を 0 にできる         | 素の DOM（UI が育たない）                          |
-| 型検査        | tsrs 0.22（D044）                                                                           | tsc 互換の Rust 実装。型検査を速く保つ。emit は tsdown                                                     | tsc だけ（遅い）                                   |
-| ビルド        | **tsdown 0.23.7**（Rolldown。core / store / workspace / agent で採用）                      | ESM + d.ts。`import.meta.vitest` を define で落とせる                                                      | tsc だけ（DCE なし）                               |
-| エディタ      | CodeMirror 6                                                                                | 軽い。diff は自前で持っている                                                                              | Monaco（重い）                                     |
+| 層            | 選定                                                                                        | 理由                                                                                 | 捨てたもの                                         |
+| ------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| 言語          | TypeScript strict（`noUncheckedIndexedAccess`）                                             | 境界が多い。型で守る                                                                 | JS（PoC のまま）                                   |
+| 実行          | Worker は workerd / DO。マシンとテストは Node.js 26（`flake.nix` + nixpkgs-unstable、D035） | 既存の pi-durable と同一。マシンにツールチェーンがある                               | Bun（DB と sandbox の相性が未検証）                |
+| HTTP          | Workers（`cf`）                                                                             | DO・WS・D1 に揃う。実行はマシンに置く                                                | Fastify / Hono は使わない（D047）                  |
+| DB            | 制御データは D1、実行中の状態は DO SQLite、ローカルも D1（cf dev / miniflare）               | 引く用途は SQL、調整は DO に向く（D049）                                             | Postgres（今は不要）                               |
+| UI            | React 19 + Vite 8（Rolldown）+ Relay（GraphQL）+ TanStack Query 5 + Base UI（D055）          | 最終段の UX を詰めやすい。Relay の colocated fragment と正規化 store で画面単位の要求を 0 にできる | 素の DOM（UI が育たない）                          |
+| 型検査        | tsrs 0.22（D044）                                                                           | tsc 互換の Rust 実装。型検査を速く保つ。emit は tsdown                               | tsc だけ（遅い）                                   |
+| ビルド        | **tsdown 0.23.7**（Rolldown。core / store / workspace / agent で採用）                                              | ESM + d.ts。`import.meta.vitest` を define で落とせる                                 | tsc だけ（DCE なし）                               |
+| エディタ      | CodeMirror 6                                                                                | 軽い。diff は自前で持っている                                                        | Monaco（重い）                                     |
 | テスト        | Vitest 5（unit / contract / integration / component）+ Playwright E2E（0043）               | 1 runner で backend と React を同じ規律に。通常は `expect`、絞り込みは `assert` も可。層はプロセスで分ける | Jest（重い）、node:test（UI で二重化）             |
-| Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored）         | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる                                               | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
-| パッケージ    | **npm workspaces**（`packages/*` + `apps/*`）                                               | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直                                | pnpm（今のところ利点より設定が増える）             |
+| Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored）         | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる                         | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
+| パッケージ    | **npm workspaces**（`packages/*` + `apps/*`）                                               | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直          | pnpm（今のところ利点より設定が増える）             |
 
 テストの分析・設計・配置・TSDoc / doctest は [testing.md](testing.md)。設計・型・API の規律は [design.md](design.md)。
 
@@ -97,11 +97,11 @@ Worker は cf で配備する。設定は tools/deploy/cloudflare.config.ts、�
 （[Cloudflare CLI projects](https://developers.cloudflare.com/cf/projects/)）。
 cf は npm workspace の root では project を特定できないため、コマンドは tools/deploy で実行する。
 
-| mode        | Worker   | HNS_AGENT_URL              | HNS_MODEL      | 秘密                                          |
-| ----------- | -------- | -------------------------- | -------------- | --------------------------------------------- |
-| development | hns-dev  | 既定 http://127.0.0.1:8788 | 既定 faux/echo | ローカルの .dev.vars（gitignore）             |
-| staging     | hns-stg  | 必須（https）              | 必須           | ~/.config/hns/staging.secrets.json（0600）    |
-| production  | hns-prod | 必須（https）              | 必須           | ~/.config/hns/production.secrets.json（0600） |
+| mode | Worker | HNS_AGENT_URL | HNS_MODEL | 秘密 |
+| --- | --- | --- | --- | --- |
+| development | hns-dev | 既定 http://127.0.0.1:8788 | 既定 faux/echo | ローカルの .dev.vars（gitignore） |
+| staging | hns-stg | 必須（https） | 必須 | ~/.config/hns/staging.secrets.json（0600） |
+| production | hns-prod | 必須（https） | 必須 | ~/.config/hns/production.secrets.json（0600） |
 
 - development: `cd tools/deploy && XDG_CONFIG_HOME=$PWD/../../.work/cf/config XDG_CACHE_HOME=$PWD/../../.cache cf dev --mode development`
   （state は `XDG_CONFIG_HOME` 配下。`--persist-to` は cf dev が受け付けない）

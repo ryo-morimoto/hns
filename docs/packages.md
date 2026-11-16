@@ -24,16 +24,16 @@
 
 ## パッケージ
 
-| パッケージ       | 責任（公開するもの）                                                                                                                           | 依存                                                             |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `@hns/core`      | モデル（`types.ts`・`codecs.ts`）と、その射影。`./graphql` で SDL を起こす                                                                     | —（id の検証に valibot、`./graphql` に graphql）                 |
-| `@hns/record`    | 仕事の記録の schema・done level の導出・YAML・CLI                                                                                              | core, valibot, yaml                                              |
-| `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離                                                                              | core, pi-durable/env                                             |
-| `@hns/agent`     | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode）。`./session` は Worker-safe な複数会話 runtime | core, workspace, pi-durable, pi-ai                               |
-| `@hns/store`     | D1、migration、リポジトリ。`./identity` で token・passkey・セッション・秘密                                                                    | D1                                                               |
-| `@hns/server`    | Worker（edge）・Durable Object（Session / Workspace）・GraphQL の resolver・認証・WS・Workflow / Automation の組み立て                         | core, agent, store, workspace（0145 の edge は core を使わない） |
-| `@hns/web`       | React UI（D043 で前倒し）。Relay で `/graphql` を読む（D055）                                                                                  | core（モデル・SDL）                                              |
-| `@hns/machine`   | マシン側の常駐エージェント。`ExecutionEnv` の実装、署名検証、ROOT 封じ込め、sandbox（0147）                                                    | core, workspace                                                  |
+| パッケージ       | 責任（公開するもの）                                                                              | 依存                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `@hns/core`      | モデル（`types.ts`・`codecs.ts`）と、その射影。`./graphql` で SDL を起こす                   | —（id の検証に valibot、`./graphql` に graphql） |
+| `@hns/record`    | 仕事の記録の schema・done level の導出・YAML・CLI                                          | core, valibot, yaml                   |
+| `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離                                 | core, pi-durable/env                  |
+| `@hns/agent`     | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode）。`./session` は Worker-safe な複数会話 runtime | core, workspace, pi-durable, pi-ai    |
+| `@hns/store`     | D1、migration、リポジトリ。`./identity` で token・passkey・セッション・秘密                     | D1                                    |
+| `@hns/server`    | Worker（edge）・Durable Object（Session / Workspace）・GraphQL の resolver・認証・WS・Workflow / Automation の組み立て。`./graphql` は codegen 用の SDL | core, agent, store, workspace（0145 の edge は core を使わない） |
+| `@hns/web`       | React UI（D043 で前倒し）。Relay で `/graphql` を読む（D055）                                      | core（モデル・SDL）                    |
+| `@hns/machine`   | マシン側の常駐エージェント。`ExecutionEnv` の実装、署名検証、ROOT 封じ込め、sandbox（0147）       | core, workspace                       |
 
 ## 依存グラフ
 
@@ -67,14 +67,14 @@ record ──► core
 
 **型は、その不変条件を持つパッケージに置く。** 全部を `core` に集めない。
 
-| どこ             | 何を置くか                                                                                          |
-| ---------------- | --------------------------------------------------------------------------------------------------- |
-| `@hns/core`      | 永続するモデルと、2つ以上のパッケージが使う型（ID・日時・状態・Workflow / Automation）              |
-| `@hns/store`     | Row 型（DB の形）と、Row → 公開型の変換。JSON 列に入るモデル（graph / trigger / action）の検証      |
-| `@hns/agent`     | 実行中の内部状態（Durable の検査結果など）                                                          |
-| `@hns/workspace` | ファイル操作の内部型（`FileRead` / `MutationResult` は core）                                       |
-| `@hns/record`    | 仕事の記録の型・schema・done level（製品の WorkItem とは別の語彙）                                  |
-| `@hns/server`    | 要求・応答の封筒、GraphQL の resolver が使う入力型、運用 view の型。`./graphql` は codegen 用の SDL |
+| どこ             | 何を置くか                                                                              |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `@hns/core`      | 永続するモデルと、2つ以上のパッケージが使う型（ID・日時・状態・Workflow / Automation） |
+| `@hns/store`     | Row 型（DB の形）と、Row → 公開型の変換。JSON 列に入るモデル（graph / trigger / action）の検証 |
+| `@hns/agent`     | 実行中の内部状態（Durable の検査結果など）                                              |
+| `@hns/workspace` | ファイル操作の内部型（`FileRead` / `MutationResult` は core）                        |
+| `@hns/record`    | 仕事の記録の型・schema・done level（製品の WorkItem とは別の語彙）                    |
+| `@hns/server`    | 要求・応答の封筒、GraphQL の resolver が使う入力型、運用 view の型                      |
 
 判断のしかた:
 
@@ -104,7 +104,8 @@ REST は事前に宣言しない（D059）。GraphQL に載せない面（passke
   `./identity`（認証・秘密）。exec を使わないアプリが bubblewrap に依存しないようにする。
 - `@hns/agent`: `.`（Node の Agent）と `./session`（Worker-safe な複数会話 runtime。node: を import しない）。
 - `@hns/machine`: `.`（常駐エージェント。単体で起動する）。
-- `@hns/server`: `.`（Worker の default と Session Durable Object）と `bin`（`hns`）。
+- `@hns/server`: `.`（Worker の default と Session Durable Object）と `bin`（`hns`）。`./graphql` は codegen 用の SDL（web は読まない）。
+
 
 ## 今は切らないもの
 
