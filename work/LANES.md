@@ -13,9 +13,10 @@
 | E15 | [0190](issues/0190-workspace-debt.md) workspace の低負債 | `packages/workspace/` | lane-0190 / reviewer-0190 | 作業中 | 1（小さい・依存なし） |
 | E16 | [0151](issues/0151-provider-gateway.md) provider gateway | `server/src/gateway/`, `server/test/gateway/`, `store/src/migrations/`, `tools/deploy/` | lane-0151 / reviewer-0151 | 作業中 | 2（store migration の枠を持つ） |
 | E17 | [0147](issues/0147-machine-agent.md) マシンエージェント | `packages/machine/`, `docs/packages.md`, `oxlint.config.ts`, `vitest.config.ts`, lock | lane-0147 / reviewer-0147 | 作業中（lock owner） | 3（依存なし・新パッケージ） |
-| L | [0142](issues/0142-lease-fencing.md) lease と fencing | `core/src/lease.ts`, `core/src/index.ts`, `core/{README,CHANGELOG}.md`, `docs/durability.md`, `docs/workspace.md` | lead / reviewer-0142 | 先行して閉じる | 0（0156 を開ける） |
+| L | [0142](issues/0142-lease-fencing.md) lease と fencing | `core/src/lease.ts`, `core/src/index.ts`, `core/{README,CHANGELOG}.md`, `docs/durability.md`, `docs/workspace.md`, `ARCH.md` | lead / reviewer-0142 | レビュー待ち（aa4249b、main に直接） | 0（0156 を開ける） |
 
 - E15 / E16 / E17 の `touches` は交わらない。共有ファイルは E17 が lock、E16 が store migration と `tools/deploy/` を持つ。
+- 0142 は他レーンとファイルが交わらないため main に直接 commit した（aa4249b）。独立レビュー後に 0156 を now へ。
 - E16 が `tools/deploy/` を持つあいだ、0160 / 0161 は開かない（直列化点）。
 - `server/src/index.ts` / `edge/handler.ts` / `edge/worker.ts` は 0145 の所有のまま。0159 は 0151 の統合後に開く。
 - 待機: [0159](issues/0159-live-ws.md)（3 本のどれかが空いたら E18）。
