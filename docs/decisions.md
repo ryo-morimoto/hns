@@ -1426,3 +1426,21 @@ date: 2026-11-17 · by: user · issue: 0147
 - 0148 が両方を供給する。手順と置き場は [docs/auth.md](auth.md)。
 
 前提が変わる条件: per-machine の inbound 鍵が必要になったとき、または cloudflared / Access で inbound を認証できるようになったとき。
+
+## D101: E2E のブラウザ行列に Firefox と mobile Firefox を足す
+
+date: 2026-11-17 · by: user · issue: 0043
+
+D099 の Chromium 前提（ブラウザは Chromium だけ、認証は CDP + shared storageState）と性能目標（PR 60 秒 / nightly 8 分）を置き換える。E2E のブラウザ範囲を 3 構成、認証を per-test context.credentials にする。
+
+- **project**: `chromium`（Desktop Chrome）、`firefox`（Desktop Firefox）、`firefox-mobile`（Firefox + 390×844 / DPR 3 / isMobile / hasTouch）。Playwright に mobile Firefox の device descriptor は無いので、Firefox の viewport / RDM emulation を使う。実機の Firefox Android ではない。
+- **範囲**: PR はスモーク 3 本 × 3 構成（9 実行）。nightly は全ジャーニー × 3 構成を shard 2→4。PR p50 < 90 秒、nightly < 12 分は暫定で、Phase 1 の実測を 0043 に残す。全ジャーニー × 全ブラウザを PR で回さない。
+- **認証**: 全ブラウザで Playwright 1.61+ の `context.credentials` を使い、per-test の一意ユーザーでログインする（shared storageState を既定にしない）。PRF だけは CDP の `WebAuthn.addVirtualAuthenticator`（hasPrf: true）に残す。`@chromium-cdp` はタグだけでは除外されないので、テスト内で `test.skip(({ browserName }) => browserName !== 'chromium', 'PRF needs CDP')` を書く。PRF なしは Firefox / mobile Firefox の PR と Chromium の nightly（0043 の C18）で、ログイン成立 + secret locked（423）を確認する。seed は passkey の公開鍵だけを受ける。
+- **CI**: workers=1（D099）、retry 1、trace は on-first-retry、video は off、失敗時のみ project 名つきの trace / screenshot / サーバログ / state ダンプ。quarantine は file + project + tag + owner + 14 日 SLA。smoke は quarantine しない。nightly は failOnFlakyTests。
+- **対象外**: Safari / WebKit / 実機 iOS・Android / pixel diff。Playwright WebKit は Safari ではない。Safari / iOS Safari / 実機 Android の手動確認は 0113 / 0114 のどちらに置くか未確定（現時点では未検証）。NFR の対応ブラウザ全てを E2E が持つとは書かない。
+
+**代替案**: Firefox の softtoken prefs で PRF も Firefox に寄せる（Playwright の PRF API が無く、実機と違う）、WebKit を足す（Safari の代替にならない）、PR を Chromium だけにする（Firefox の回帰を merge 前に見逃す）。
+
+**調査**: [work/research/e2e-browser-matrix.md](../work/research/e2e-browser-matrix.md)。**履歴**: [work/research/e2e-testing.md](../work/research/e2e-testing.md) の PR 60 秒 / nightly 8 分は D099 時点のもの。D101 が 90 秒 / 12 分に置き換える。
+
+前提が変わる条件: Playwright が PRF を cross-browser API に出す、Firefox の mobile emulation が実機と乖離しすぎる、PR p50 が 90 秒を超える、または Firefox の flake 率が許容できないとき。

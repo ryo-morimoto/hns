@@ -32,8 +32,8 @@
 ## アクセシビリティ / モバイル / 対応環境
 
 - **WCAG 2.2 AA**: キーボードだけで主要フロー、focus 管理、ラベル、コントラスト、reduced motion。
-- **モバイル**: タッチ対象 ≥44px、hover 前提なし、iOS Safari の safe area / 仮想キーボード。
-- **ブラウザ**: Chrome / Safari / Firefox の現行、iOS Safari。IE は対象外。
+- **モバイル**: タッチ対象 ≥44px、hover 前提なし、iOS Safari の safe area / 仮想キーボード、Firefox のモバイル表示。
+- **ブラウザ**: Chrome / Safari / Firefox の現行（desktop）、Firefox のモバイル表示、iOS Safari。IE は対象外。E2E は Chromium / Firefox / mobile Firefox までで、Safari / iOS Safari / 実機 Android は E2E の対象外。手動確認は 0113 / 0114 のどちらに置くか未確定（現時点では未検証）。
 
 ## セキュリティ / 観測
 
@@ -44,7 +44,7 @@
 
 ## 検証
 
-- 性能は CI の合否にしない（flaky）。issue に before / after を残し、0114 の実測と 0043 の E2E で固定する。
+- 性能は CI の合否にしない（flaky）。issue に before / after を残し、0114 の実測と 0043 の E2E で固定する。E2E のブラウザ行列は [testing.md](testing.md)（D101）を単一の出所にする。
 - a11y は 0113 のキーボード / SR 確認と component test。
 - 予算を超えたら、その issue で理由と代替を記録する（黙って超えない）。
 
@@ -52,3 +52,4 @@
 
 - editor 固有: 0106 の NFR（lazy 350KB、open 500ms、保存 1s、a11y、モバイル）。
 - スタック: D043（React 19 / Vite / TanStack / Base UI）。型: D044。
+- テストのブラウザ行列: [testing.md](testing.md)（D101）。

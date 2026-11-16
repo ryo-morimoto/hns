@@ -82,6 +82,22 @@ issue の `## テスト設計` に書く。
 - store の DB テストは miniflare の実 D1 SQLite（workerd）を使う。workerd は子プロセスなので integration 層に置く（D064）。
 - サーバ実装後は、Workers の runtime テストを integration に置く。
 
+### E2E のブラウザ / 端末
+
+E2E の既定は 3 構成（D101）。
+
+| project | engine | 設定 | PR | nightly |
+| --- | --- | --- | --- | --- |
+| `chromium` | Chromium | Desktop Chrome（1280×720） | 全スモーク | 全ジャーニー |
+| `firefox` | Firefox | Desktop Firefox（1280×720） | 全スモーク | 全ジャーニー |
+| `firefox-mobile` | Firefox | 390×844 / DPR 3 / isMobile / hasTouch | 全スモーク | 全ジャーニー |
+
+- 全ジャーニー × 全ブラウザを PR で回さない。PR は `@smoke`、nightly は全部を 3 構成で回す。PRF のテストは PR では Chromium の 1 回だけ。nightly も Chromium のみ。
+- 認証は `context.credentials`（cross-browser）。PRF だけ CDP の Chromium に限定し、`@chromium-cdp` とテスト内の `test.skip` を併用する。PRF なしは Firefox / mobile Firefox の PR と Chromium の nightly で、セッション成立 + secret locked（423）を確認する。
+- `firefox-mobile` は Playwright の device descriptor ではない。Firefox の viewport / `isMobile` / `hasTouch` の emulation で、実機の Firefox Android ではない。実機確認の置き場は未確定（0113 / 0114 のどちらか。現時点では未検証）。
+- Safari / WebKit / 実機 iOS・Android は E2E の対象外。Playwright WebKit を Safari と呼べない。Safari / iOS Safari / 実機 Android の手動確認は 0113 / 0114 のどちらに置くか未確定（現時点では未検証）。
+- ブラウザ差は E2E で見る。unit / component をブラウザごとに回さない。この節の project 行列を正とし、0043 などの写しと食い違ったらこの節を直す。
+
 ### ケースとレビュー
 
 - ケースは「前提 / 操作 / 期待 / 事後」で書く。期待結果が言えない条件は設計に戻す。
@@ -97,7 +113,7 @@ packages/<pkg>/src/<module>.test.ts      # コロケートした unit
 packages/<pkg>/src/<module>.ts           # 小さな純粋関数は if (import.meta.vitest)
 packages/<pkg>/test/integration/         # DB・process・daemon・sandbox
 packages/<pkg>/test/support/             # fixture / builder。ビルドから除外
-e2e/                                      # Playwright。pages / fixtures / journeys
+e2e/                                      # Playwright。pages / fixtures / journeys。projects は chromium / firefox / firefox-mobile
 ```
 
 - 共有 fixture パッケージは作らない。2パッケージ以上で重複が証明できたときだけ検討する。
@@ -153,7 +169,7 @@ e2e/                                      # Playwright。pages / fixtures / jour
 - コミット時は `npm run gate` が、ステージ済みのパスから選んだパッケージに lint → fmt → typecheck → **unit テスト**を回す。
 - push 時は `npm run gate pre-push` が全パッケージに全段階（integration・build・knip を含む）を回す。定義は [tools/gate/stages.ts](../tools/gate/stages.ts)、選別は [tools/gate/select.ts](../tools/gate/select.ts)。
 - CI も同じコマンド。テストのためだけの別ランナー・別設定を作らない。
-- E2E は `npm run check` に入れない。`npm run test:e2e` と CI の別ジョブにする（0043）。
+- E2E は `npm run check` に入れない。`npm run test:e2e` で 3 構成を回し、CI は 0041 の後に別ジョブ（PR はスモーク × 3 構成、nightly は全部 × 3 構成）にする（0043 / D101）。
 
 ## 移行（2026-11-10）
 
