@@ -43,11 +43,23 @@ export default defineConfig({
       },
     },
     {
-      files: [
-        "packages/store/**/*.ts",
-        "packages/workspace/**/*.ts",
-        "packages/web/**/*.{ts,tsx}",
-      ],
+      files: ["packages/record/**/*.ts"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["@hns/*", "!@hns/core"],
+                message: "record may import core only (docs/packages.md)",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      files: ["packages/store/**/*.ts", "packages/workspace/**/*.ts", "packages/web/**/*.{ts,tsx}"],
       rules: {
         "no-restricted-imports": [
           "error",
@@ -87,7 +99,8 @@ export default defineConfig({
             patterns: [
               {
                 group: ["@hns/*", "!@hns/core", "!@hns/agent", "!@hns/store", "!@hns/workspace"],
-                message: "server may import core, agent, store, and workspace only (docs/packages.md)",
+                message:
+                  "server may import core, agent, store, and workspace only (docs/packages.md)",
               },
             ],
           },

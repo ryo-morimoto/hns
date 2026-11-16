@@ -16,6 +16,7 @@
     "deploy:check": "cd tools/deploy && cf deploy --dry-run --mode development",
     "postinstall": "npm install --prefix tools/deploy --no-audit --no-fund",
     "fmt:check": "node tools/gate/main.ts fmt --all",
+    "record": "node packages/record/src/cli.ts",
     "typecheck": "node tools/gate/main.ts typecheck --all",
     "test": "node tools/gate/main.ts test --all",
     "build": "node tools/gate/main.ts build --all",
@@ -50,7 +51,8 @@
     },
     "ignore": [
       "work/**",
-      "tools/**"
+      "tools/**",
+      ".agents/**"
     ],
     "ignoreDependencies": [
       "@j178/prek"

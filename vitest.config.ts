@@ -9,6 +9,7 @@ const source = (path: string): string => fileURLToPath(new URL(path, import.meta
 // Tests import packages by name; resolve them to src so a test run never needs a build first.
 const alias = [
   { find: /^@hns\/core$/, replacement: source("./packages/core/src/index.ts") },
+  { find: /^@hns\/record$/, replacement: source("./packages/record/src/index.ts") },
   { find: /^@hns\/store$/, replacement: source("./packages/store/src/index.ts") },
   { find: /^@hns\/workspace$/, replacement: source("./packages/workspace/src/index.ts") },
   {
@@ -63,6 +64,7 @@ export default defineConfig({
     hookTimeout: 30_000,
     projects: [
       ...packageProjects("core"),
+      ...packageProjects("record"),
       ...packageProjects("store"),
       ...packageProjects("workspace"),
       ...packageProjects("agent"),
