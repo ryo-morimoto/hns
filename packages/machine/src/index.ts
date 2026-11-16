@@ -1,4 +1,3 @@
-export { readDeviceKey } from "./device-key.ts";
 export { startMachineAgent } from "./agent.ts";
 export type { MachineAgent, MachineAgentOptions } from "./agent.ts";
 export { ConnectionGate } from "./connection.ts";
