@@ -1,0 +1,36 @@
+{
+  "name": "@hns/machine",
+  "version": "0.1.0",
+  "description": "Machine-side agent: signed requests, ROOT containment, and limits",
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsdown && node ../../tools/gate/dist-check.ts",
+    "typecheck": "tsrs --noEmit",
+    "test": "vitest run --root ../.. --project 'machine*'"
+  },
+  "dependencies": {
+    "@hns/core": "0.1.0",
+    "@hns/workspace": "0.1.0",
+    "valibot": "^1.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

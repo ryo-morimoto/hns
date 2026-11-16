@@ -19,7 +19,7 @@
 | ファイルの版・Journal・認可・イベント・exec 隔離                      | `workspace`                              |
 | Project / Task / Conversation / Workflow / Automation / Usage / Event | `store`                                  |
 | 利用者・セッション・秘密（passkey・token）                            | `store/identity`                         |
-| マシン側の実行（fs・exec・署名の検証）                                | `machine`                                |
+| マシン側の実行（fs・署名の検証。exec は 0194）                        | `machine`                                |
 | UI の一時状態                                                         | `web`                                    |
 
 ## パッケージ
@@ -33,7 +33,7 @@
 | `@hns/store`     | D1、migration、リポジトリ。`./identity` で token・passkey・セッション・秘密                     | D1                                    |
 | `@hns/server`    | Worker（edge）・Durable Object（Session / Workspace）・GraphQL の resolver・認証・WS・Workflow / Automation の組み立て。`./graphql` は codegen 用の SDL | core, agent, store, workspace（0145 の edge は core を使わない） |
 | `@hns/web`       | React UI（D043 で前倒し）。Relay で `/graphql` を読む（D055）                                      | core（モデル・SDL）                    |
-| `@hns/machine`   | マシン側の常駐エージェント。`ExecutionEnv` の実装、署名検証、ROOT 封じ込め、sandbox（0147）       | core, workspace                       |
+| `@hns/machine`   | マシン側の常駐エージェント。署名検証、ROOT 封じ込め、上限。`ExecutionEnv` と sandbox は 0194 | core, workspace, valibot              |
 
 ## 依存グラフ
 
@@ -61,7 +61,7 @@ record ──► core
 
 未使用の export・依存・ファイルの検出は knip を使う（[0042](../work/issues/0042-boundaries-knip.md) で導入）。
 
-パッケージを足すときは、この表と `oxlint.config.ts` の該当ブロックを同時に更新する。`machine` を足すのは 0147 で、そのとき `oxlint.config.ts` も更新する。`record` は 0196 で足した（D071）。
+パッケージを足すときは、この表と `oxlint.config.ts` の該当ブロックを同時に更新する。`machine` は 0147 で足した（`oxlint.config.ts`・`vitest.config.ts` も同じ変更）。`record` は 0196 で足した（D071）。
 
 ## 型の置き場所
 
@@ -103,7 +103,7 @@ REST は事前に宣言しない（D059）。GraphQL に載せない面（passke
 - `@hns/store`: `.`（D1 のリポジトリ。Worker はこれをそのまま import する。`node:sqlite` を持たない）、
   `./identity`（認証・秘密）。exec を使わないアプリが bubblewrap に依存しないようにする。
 - `@hns/agent`: `.`（Node の Agent）と `./session`（Worker-safe な複数会話 runtime。node: を import しない）。
-- `@hns/machine`: `.`（常駐エージェント。単体で起動する）。
+- `@hns/machine`: `.`（常駐エージェント。署名検証・ROOT 封じ込め・上限。プロセスの起動は 0148 の registry と合わせる）。
 - `@hns/server`: `.`（Worker の default と Session / Workspace Durable Object）と `bin`（`hns`）。`./graphql` は codegen 用の SDL（web は読まない）。
 
 

@@ -91,6 +91,22 @@ export default defineConfig({
       },
     },
     {
+      files: ["packages/machine/**/*.ts"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["@hns/*", "!@hns/core", "!@hns/workspace"],
+                message: "machine may import core and workspace only (docs/packages.md)",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
       files: ["packages/server/**/*.ts"],
       rules: {
         "no-restricted-imports": [

@@ -26,6 +26,7 @@ const alias = [
     find: /^@hns\/agent\/session$/,
     replacement: source("./packages/agent/src/session.ts"),
   },
+  { find: /^@hns\/machine$/, replacement: source("./packages/machine/src/index.ts") },
   { find: /^@hns\/server$/, replacement: source("./packages/server/src/index.ts") },
   {
     find: /^@hns\/server\/graphql$/,
@@ -41,10 +42,7 @@ const packageProjects = (name: string, extra: Record<string, unknown> = {}) => [
     extends: true,
     test: {
       name,
-      include: [
-        `packages/${name}/src/**/*.test.ts`,
-        `packages/${name}/src/**/*.test.tsx`,
-      ],
+      include: [`packages/${name}/src/**/*.test.ts`, `packages/${name}/src/**/*.test.tsx`],
       includeSource: [`packages/${name}/src/**/*.{ts,tsx}`],
       exclude: ["**/integration/**"],
       ...extra,
@@ -77,6 +75,7 @@ export default defineConfig({
       ...packageProjects("store"),
       ...packageProjects("workspace"),
       ...packageProjects("agent"),
+      ...packageProjects("machine"),
       ...packageProjects("server"),
       ...packageProjects("web", {
         environment: "jsdom",
