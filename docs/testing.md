@@ -34,9 +34,9 @@ issue の受入条件を、そのままテストにしない。次の4つに分�
 issue の `## テスト条件` に書く。
 
 ```md
-| ID | 条件（Given → When → Then） | リスク | 出所 |
-| --- | --- | --- | --- |
-| C1 | a.txt が v1、別の書き込みで v2 → v1 で書く → conflict、内容は v2 | 高 | docs/workspace.md#version |
+| ID  | 条件（Given → When → Then）                                      | リスク | 出所                      |
+| --- | ---------------------------------------------------------------- | ------ | ------------------------- |
+| C1  | a.txt が v1、別の書き込みで v2 → v1 で書く → conflict、内容は v2 | 高     | docs/workspace.md#version |
 ```
 
 - リスクは **高 / 中 / 低**。高は失敗系・境界・並行を最低1つ持つ。
@@ -48,34 +48,34 @@ issue の `## テスト条件` に書く。
 issue の `## テスト設計` に書く。
 
 ```md
-| ID | 条件 | 技法 | 層 | テスト |
-| --- | --- | --- | --- | --- |
-| T1 | C1 | 状態遷移 | integration | src/version.test.ts "a stale version conflicts" |
+| ID  | 条件 | 技法     | 層          | テスト                                          |
+| --- | ---- | -------- | ----------- | ----------------------------------------------- |
+| T1  | C1   | 状態遷移 | integration | src/version.test.ts "a stale version conflicts" |
 ```
 
 ### 技法
 
-| 条件の形 | 使う技法 |
-| --- | --- |
-| 入力範囲・境界 | 同値分割 + 境界値分析 |
-| 条件の組合せ | デシジョンテーブル / ペアワイズ |
-| 状態・遷移 | 状態遷移テスト |
-| 業務シナリオ | ユースケース / シナリオテスト |
-| 故障・並行・再送 | 故障注入 / 競合テスト |
-| 外部インターフェース | 契約テスト |
-| 重要ロジックの網羅 | ブランチカバレッジ（必要な箇所だけ） |
+| 条件の形             | 使う技法                             |
+| -------------------- | ------------------------------------ |
+| 入力範囲・境界       | 同値分割 + 境界値分析                |
+| 条件の組合せ         | デシジョンテーブル / ペアワイズ      |
+| 状態・遷移           | 状態遷移テスト                       |
+| 業務シナリオ         | ユースケース / シナリオテスト        |
+| 故障・並行・再送     | 故障注入 / 競合テスト                |
+| 外部インターフェース | 契約テスト                           |
+| 重要ロジックの網羅   | ブランチカバレッジ（必要な箇所だけ） |
 
 ### 層
 
-| 層 | 何を証明するか | 実行 | 置き場所 |
-| --- | --- | --- | --- |
-| static | 型・lint・schema の整合 | tsc / oxlint / tsrs | — |
-| unit | ロジック・schema・遷移 | 単一プロセス | `packages/<pkg>/src/**/*.test.ts` または in-source |
-| contract | wire / schema の往復 | 単一プロセス | `packages/core/src/**/*.test.ts` |
-| integration | DB・process・daemon・sandbox | 実 SQLite / temp dir | `packages/<pkg>/test/integration/` |
-| component | UI の状態・操作 | jsdom | `packages/web/src/**/*.test.tsx` |
-| E2E | 主要ユーザージャーニー | 実ブラウザ + 実サーバ | `e2e/` |
-| manual | 未知のリスク・UX | 人 | — |
+| 層          | 何を証明するか               | 実行                  | 置き場所                                           |
+| ----------- | ---------------------------- | --------------------- | -------------------------------------------------- |
+| static      | 型・lint・schema の整合      | tsc / oxlint / tsrs   | —                                                  |
+| unit        | ロジック・schema・遷移       | 単一プロセス          | `packages/<pkg>/src/**/*.test.ts` または in-source |
+| contract    | wire / schema の往復         | 単一プロセス          | `packages/core/src/**/*.test.ts`                   |
+| integration | DB・process・daemon・sandbox | 実 SQLite / temp dir  | `packages/<pkg>/test/integration/`                 |
+| component   | UI の状態・操作              | jsdom                 | `packages/web/src/**/*.test.tsx`                   |
+| E2E         | 主要ユーザージャーニー       | 実ブラウザ + 実サーバ | `e2e/`                                             |
+| manual      | 未知のリスク・UX             | 人                    | —                                                  |
 
 - **unit が既定。** 1プロセスで終わらないものだけ integration に上げる。「遅い」は層の理由にしない。
 - **同じシナリオを複数の層で回さない。** シナリオは一度だけ、最も低い層で実行する。
@@ -157,13 +157,13 @@ e2e/                                      # Playwright。pages / fixtures / jour
 
 ## 移行（2026-11-10）
 
-| issue | 内容 | 状態 |
-| --- | --- | --- |
-| 0183 | 方針・tsdown / doctest のスパイク | done |
-| 0185 | tiers の二重実行を廃止 | done |
-| 0184 | アサーション方針（expect + assert） | done |
-| 0186 | コロケーションと issue 参照の削除 | done |
-| 0187 | TSDoc 契約と doctest の全パッケージ展開 | done |
+| issue | 内容                                    | 状態 |
+| ----- | --------------------------------------- | ---- |
+| 0183  | 方針・tsdown / doctest のスパイク       | done |
+| 0185  | tiers の二重実行を廃止                  | done |
+| 0184  | アサーション方針（expect + assert）     | done |
+| 0186  | コロケーションと issue 参照の削除       | done |
+| 0187  | TSDoc 契約と doctest の全パッケージ展開 | done |
 
 unit テストは各パッケージの `src` にコロケートされ、doctest と in-source テストは core / store / workspace / agent の4パッケージで動いている。
 

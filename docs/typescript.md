@@ -150,13 +150,13 @@ Trigger.dev は **testcontainers** で PostgreSQL と Redis を立て、engine �
 
 参照元を実際に取得して確かめたパスは上の表のとおり。ここまでの実装に落としたもの:
 
-| 原則                                        | hns の実装                                                                                                                                                       |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 原則                                        | hns の実装                                                                                                                                                                   |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 境界で parse（Payload / Effect）            | `Result` は `packages/core/src/result.ts`、DB は `packages/store/src/parse.ts`。GraphQL の入力は resolver で parse し、REST の面は実装するパッケージが schema を持つ（D059） |
-| 失敗を型で（Effect / Trigger）              | `packages/core/src/result.ts` の `Result<T, E>`。面ごとの失敗は、その面の union で返す                                                             |
-| 状態を型で・遷移は1箇所（Medusa / Trigger） | `packages/core/src/workflow.ts` の遷移表。`WORKFLOW_RUN_STATUSES` 等は const array 由来                                                                          |
-| 3層テスト（Payload）                        | unit は各パッケージの `test/`。store は実 SQLite。統合 / E2E は server（0035）と 0043 で足す                                                                     |
-| 依存は端で組み立てる（Effect Layer）        | まだ server が無いので未適用。0035 の composition root で行う                                                                                                    |
+| 失敗を型で（Effect / Trigger）              | `packages/core/src/result.ts` の `Result<T, E>`。面ごとの失敗は、その面の union で返す                                                                                       |
+| 状態を型で・遷移は1箇所（Medusa / Trigger） | `packages/core/src/workflow.ts` の遷移表。`WORKFLOW_RUN_STATUSES` 等は const array 由来                                                                                      |
+| 3層テスト（Payload）                        | unit は各パッケージの `test/`。store は実 SQLite。統合 / E2E は server（0035）と 0043 で足す                                                                                 |
+| 依存は端で組み立てる（Effect Layer）        | まだ server が無いので未適用。0035 の composition root で行う                                                                                                                |
 
 意図的に合わせないもの:
 

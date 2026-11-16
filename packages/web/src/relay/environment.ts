@@ -15,15 +15,12 @@ type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 export interface EnvironmentOptions {
   /** The fetch to send through; tests inject one so no request leaves the process. */
   readonly fetch?: FetchLike | undefined;
-  /** The GraphQL path; the Worker serves it. */
-  readonly endpoint?: string | undefined;
 }
 
 /**
  * Create the one Relay environment the app uses.
  *
- * @param options - An optional fetch and endpoint; production uses the browser's fetch and
- * `/graphql`.
+ * @param options - An optional fetch; production uses the browser's fetch on `/graphql`.
  * @returns An environment with an in-memory store and a network that posts the compiled query.
  *
  * @remarks
@@ -33,7 +30,7 @@ export interface EnvironmentOptions {
  */
 export function createEnvironment(options: EnvironmentOptions = {}): Environment {
   const fetchImpl: FetchLike = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
-  const endpoint = options.endpoint ?? "/graphql";
+  const endpoint = "/graphql";
 
   const network = Network.create(
     async (params: RequestParameters, variables: Variables): Promise<GraphQLResponse> => {

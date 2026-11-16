@@ -4,6 +4,7 @@
     "node_modules/**",
     "work/**",
     "tools/oxlint/anti-slop/**",
+    "packages/web/src/__generated__/**",
     ".work/**"
   ]
 }

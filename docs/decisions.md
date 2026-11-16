@@ -582,6 +582,7 @@ rooted を切ると open 2.7ms / write 2.5ms。遅さの正体は rooted ヘル�
 見直す条件: integration が 30 秒を超える、または push 前が重すぎて迂回されるようになったとき（そのときは `git diff @{push}` で push 範囲に絞る）。
 
 ## D052: フックは prek に通し、ステージ内容と merge をゲートで覆う
+
 date: 2026-11-07 · by: agent · issue: 0174
 
 D051 で残した「部分ステージの内容一致」と「merge の素通り」を埋める。worktree の退避・復元を自作するのは
@@ -589,12 +590,12 @@ D051 で残した「部分ステージの内容一致」と「merge の素通り
 
 実測（prek 0.5.10）:
 
-| 確認 | 結果 |
-| --- | --- |
-| staged=B / worktree=C の pre-commit | フックは **B** を見て、終了後に worktree を C に戻す |
-| `prek run --stage pre-commit` を .githooks から | 同じ（shim のインストールは不要） |
-| pre-merge-commit ステージ | 非 fast-forward の merge でフックが走る |
-| 出力 | 既定では成功時に隠れるので `verbose: true` を付けた（段階ごとの時間が消えない） |
+| 確認                                            | 結果                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------- |
+| staged=B / worktree=C の pre-commit             | フックは **B** を見て、終了後に worktree を C に戻す                            |
+| `prek run --stage pre-commit` を .githooks から | 同じ（shim のインストールは不要）                                               |
+| pre-merge-commit ステージ                       | 非 fast-forward の merge でフックが走る                                         |
+| 出力                                            | 既定では成功時に隠れるので `verbose: true` を付けた（段階ごとの時間が消えない） |
 
 構成: `.pre-commit-config.yaml` に3フック（commit / merge / push）。`.githooks/*` は
 `prek run --stage <stage>` を呼ぶだけで、`core.hooksPath=.githooks` は変えない。
@@ -630,8 +631,8 @@ hns: 決定は追記で直す。D047〜D049 の本文は履歴として残す。
 
 前提が変わる条件: WS 以外の輸送に変える、または Cloudflare 上でワークロードを動かす決定をしたとき。
 
-
 ## D054: 優先度は now / plan / batch / hold の4つで表し、agent は now だけを着手する
+
 date: 2026-11-07 · by: user · issue: -
 
 open の issue が 87 件フラットに並び、どれを拾うかが agent の判断に委ねられていた。重要でないもの・
@@ -639,12 +640,12 @@ open の issue が 87 件フラットに並び、どれを拾うかが agent の
 
 重要度 × 緊急度で4つに分ける。issue の front matter に `priority:`、[BOARD](../work/BOARD.md) の先頭にマトリクスを置く。
 
-| priority | 重要度 | 緊急度 | 意味 |
-| --- | --- | --- | --- |
-| `now` | 高 | 高 | いまの波。依存が満たされていて、すぐ着手してよい |
-| `plan` | 高 | 低 | 重要だが、いまの波の後。レーン順に上げる |
-| `batch` | 低 | 中 | 安い・隣接するときだけ。単独では着手しない |
-| `hold` | — | — | いまはやらない（Want・保留・新しい設計に吸収） |
+| priority | 重要度 | 緊急度 | 意味                                             |
+| -------- | ------ | ------ | ------------------------------------------------ |
+| `now`    | 高     | 高     | いまの波。依存が満たされていて、すぐ着手してよい |
+| `plan`   | 高     | 低     | 重要だが、いまの波の後。レーン順に上げる         |
+| `batch`  | 低     | 中     | 安い・隣接するときだけ。単独では着手しない       |
+| `hold`   | —      | —      | いまはやらない（Want・保留・新しい設計に吸収）   |
 
 **agent が着手してよいのは `now` だけ。** `now` が空なら止まって人に聞く。`plan` を `now` に上げるのは人の判断で、
 agent は自分で昇格しない。`batch` は同じファイル・同じレーンを触るついでだけ。`hold` はユーザーが明示したときだけ。
@@ -755,7 +756,6 @@ date: 2026-11-10 · by: user · issue: 0185
 - checks モード（rooted: false）の重複は落とす。dirfd の保護は integration で確認する。
 
 前提が変わる条件: ローカル daemon と node で dirfd の挙動が分かれ、片方だけでは回帰を説明できなくなったとき。
-
 
 ## D059: core は「系が合意する語彙」とし、REST は面ごとに実装する
 
@@ -953,12 +953,12 @@ date: 2026-11-16 · by: user · issue: 0195
 
 レビューを意図・設計・実装・結果の4層に分ける。既存 [review.md](review.md) は実装層の規程として維持する。
 
-| 層 | 主担当 | 成果物 |
-| --- | --- | --- |
-| 意図 | 人間 | レコードの intent |
-| 設計 | reviewer | 設計節 / ADR |
-| 実装 | reviewer | diff・テスト |
-| 結果 | 人間 | デモ・指標・判断ログ |
+| 層   | 主担当   | 成果物               |
+| ---- | -------- | -------------------- |
+| 意図 | 人間     | レコードの intent    |
+| 設計 | reviewer | 設計節 / ADR         |
+| 実装 | reviewer | diff・テスト         |
+| 結果 | 人間     | デモ・指標・判断ログ |
 
 - レビュー予算は既存のまま（reviewer は同時に1レーン、待ちはリードタイムの半分以下）。
 - AI 一次レビューは、先に自チームのゴールデンセットで precision を測る。
@@ -1043,6 +1043,3 @@ D055 の「Relay を使う」を実装に落とす。react-relay / relay-runtime
 却下: schema を手で持つ（SDL が正本に反する）、graphql-codegen で web の型を作る（型は core のモデル）、vite-plugin-relay を足す（20 行の plugin で足り、依存を増やさない）、artifact を commit しない（ビルド時生成だけでは型検査が stale を見逃す）。
 
 前提が変わる条件: Relay が babel を不要にしたとき、artifact の量がレビューを圧迫したとき、または subscriptions（0159）で同じ plugin が使えなくなったとき。
-
-
-

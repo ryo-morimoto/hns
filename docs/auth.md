@@ -54,16 +54,16 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
 原則: **エージェントループのコードと同じ信頼領域に鍵を置かない。** 鍵ごとに「置く場所」「使う主体」「置かない場所」を決め、
 信頼領域を跨ぐときは最小権限と短い寿命で渡す。
 
-| 秘密 | 置く場所 | 使う主体 | 置かない場所 | 失効・ローテーション |
-| --- | --- | --- | --- | --- |
-| provider 鍵（Ollama / OpenCode 等） | gateway Worker の secret（0151）。provider ごとに1つ | gateway だけ | harness の isolate / Session DO / マシン / repo / ログ | 漏洩: 止める → 旧鍵を失効 → 新鍵 → 確認 → 再開。定期: 新鍵 → 確認 → 旧鍵を失効 |
-| git・gh の資格情報 | マシンの git credential helper / OS keyring（`~/.config/hns` の外）。Cloudflare には渡さない | マシン上の git / gh | Cloudflare / DO / repo / エージェントの env | fine-grained / 短期の token。漏洩時は provider で revoke → 再発行 |
-| webhook token | D1 に暗号文（service 鍵で暗号化）。平文は発行・再表示の応答だけ | Worker の webhook 受付 / 所有者の再表示 | DO / machine / ログ / repo | automation ごとに rotate。archive 後も URL を保持し、物理削除しない |
-| service 秘密の暗号化鍵 | Worker の secret | Worker（service 秘密の暗号化・復号） | repo / ログ / マシン / エージェント | rotate は service 秘密と webhook token の再暗号化。失効は全 service 秘密と webhook の停止 |
-| DEK | DO に **包んだ DEK** だけ（PRF 包み・復旧コード包み）。平文は unlocked 中のブラウザとサーバセッションのメモリだけ | ブラウザ（PRF unwrap）/ サーバセッション（unlocked） | DO の永続ストレージ（平文） / ログ / マシン | パスキー追加・復旧コード再発行で包み直す。紛失端末の包みは削除。漏洩時は作り直す |
-| マシンのデバイス鍵 | 秘密鍵はマシン（0600）。公開鍵は D1 の Machine レコード（D049） | machine agent / Worker | Cloudflare に秘密鍵を置かない | D1 の公開鍵を無効化 → 再登録 |
-| cloudflared tunnel token | マシンの secret（0600、`~/.config/hns/cloudflared`）。agent の bash からは hide | cloudflared だけ | Cloudflare / repo / ログ / エージェントの env | tunnel を再作成して token を入れ替える |
-| セッション cookie の署名鍵 | Worker の secret | Worker | repo / クライアント | rotate すると全セッションが切れる（許容） |
+| 秘密                                | 置く場所                                                                                                          | 使う主体                                             | 置かない場所                                           | 失効・ローテーション                                                                      |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| provider 鍵（Ollama / OpenCode 等） | gateway Worker の secret（0151）。provider ごとに1つ                                                              | gateway だけ                                         | harness の isolate / Session DO / マシン / repo / ログ | 漏洩: 止める → 旧鍵を失効 → 新鍵 → 確認 → 再開。定期: 新鍵 → 確認 → 旧鍵を失効            |
+| git・gh の資格情報                  | マシンの git credential helper / OS keyring（`~/.config/hns` の外）。Cloudflare には渡さない                      | マシン上の git / gh                                  | Cloudflare / DO / repo / エージェントの env            | fine-grained / 短期の token。漏洩時は provider で revoke → 再発行                         |
+| webhook token                       | D1 に暗号文（service 鍵で暗号化）。平文は発行・再表示の応答だけ                                                   | Worker の webhook 受付 / 所有者の再表示              | DO / machine / ログ / repo                             | automation ごとに rotate。archive 後も URL を保持し、物理削除しない                       |
+| service 秘密の暗号化鍵              | Worker の secret                                                                                                  | Worker（service 秘密の暗号化・復号）                 | repo / ログ / マシン / エージェント                    | rotate は service 秘密と webhook token の再暗号化。失効は全 service 秘密と webhook の停止 |
+| DEK                                 | DO に **包んだ DEK** だけ（PRF 包み・復旧コード包み）。平文は unlocked 中のブラウザとサーバセッションのメモリだけ | ブラウザ（PRF unwrap）/ サーバセッション（unlocked） | DO の永続ストレージ（平文） / ログ / マシン            | パスキー追加・復旧コード再発行で包み直す。紛失端末の包みは削除。漏洩時は作り直す          |
+| マシンのデバイス鍵                  | 秘密鍵はマシン（0600）。公開鍵は D1 の Machine レコード（D049）                                                   | machine agent / Worker                               | Cloudflare に秘密鍵を置かない                          | D1 の公開鍵を無効化 → 再登録                                                              |
+| cloudflared tunnel token            | マシンの secret（0600、`~/.config/hns/cloudflared`）。agent の bash からは hide                                   | cloudflared だけ                                     | Cloudflare / repo / ログ / エージェントの env          | tunnel を再作成して token を入れ替える                                                    |
+| セッション cookie の署名鍵          | Worker の secret                                                                                                  | Worker                                               | repo / クライアント                                    | rotate すると全セッションが切れる（許容）                                                 |
 
 ### gateway（provider 鍵）
 

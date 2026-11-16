@@ -43,6 +43,29 @@ test("conversations and tasks of one project share one request", async () => {
   expect(tasks.map((task) => task.status)).toStrictEqual(["doing"]);
 });
 
+// Catches: a QueryFailure turned into an empty list instead of an error.
+test("a query failure rejects", async () => {
+  const { environment } = createTestEnvironment(() => ({
+    projects: { __typename: "QueryFailure", code: "UNAVAILABLE", message: "offline" },
+  }));
+  await expect(createRelaySource(environment).listProjects()).rejects.toThrow(/UNAVAILABLE/u);
+});
+
+// Catches: a second open paying for the same read again; the Relay store answers it.
+test("a second read of the same project does not hit the network", async () => {
+  const calls: string[] = [];
+  const { environment } = createTestEnvironment((call) => {
+    calls.push(call.operation);
+    return workspaceFixture(call);
+  });
+  const projectId = v.parse(ProjectIdSchema, "project-hns");
+  const first = createRelaySource(environment);
+  await first.listConversations(projectId);
+  const second = createRelaySource(environment);
+  await second.listConversations(projectId);
+  expect(calls).toStrictEqual(["WorkspaceQuery"]);
+});
+
 // Catches: a failed read rendered as an empty workspace.
 test("a failed read rejects instead of returning nothing", async () => {
   const { environment } = createTestEnvironment(() => undefined);

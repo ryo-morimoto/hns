@@ -63,7 +63,7 @@ function failureOf(operation: string, code: string, message: string): never {
  * @returns The shell's read surface, backed by the two compiled queries.
  *
  * @remarks
- * The shell still consumes model types while selection moves into the components (0179); this
+ * The shell still consumes model types while selection moves into the components; this
  * file is the bridge, and it disappears when the fragments own the reads. The conversations and
  * tasks of one project share one read, so the two hooks do not race two requests.
  */
@@ -117,6 +117,11 @@ export function createRelaySource(environment: Environment): WorkspaceSource {
       };
     })();
     reads.set(key, read);
+    // A failed read must be retryable: TanStack Query retries, and a cached rejection would
+    // answer every retry with the same failure.
+    void read.catch(() => {
+      reads.delete(key);
+    });
     return read;
   };
 
