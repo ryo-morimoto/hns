@@ -1,6 +1,6 @@
 # 0190: workspace の低負債を一括で閉じる（0056・0057・0058・0060）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: 設計を変えない（0056–0060 の欠陥返済）
@@ -17,14 +17,14 @@ touches: packages/workspace/, work/issues/0190-workspace-debt.md
 
 ## Acceptance criteria
 
-- [ ] 0056: conflict / unknown で終わる write の temp を残さない。`#removeTemp` の失敗を audit に残す
-- [ ] 0056: 起動時に root 直下の `.hns-tmp-*` を掃除する。Journal の pending intent が指す temp は消さない
-- [ ] 0057: journal の temp 名に `randomUUID()` を付ける
-- [ ] 0057: 同じ journalPath の二重 open は `Unavailable` で拒否する（fail closed）
-- [ ] 0058: `auditLog` は写し（または凍結）を返し、呼び出し側の変更が次の読みに出ない
-- [ ] 0058: 同じ扱いが要る他の getter を確認する（`mode` を除く）
-- [ ] 0060: helper の `read` 応答に `size` を足し、復号後の長さを照合する。違えば `failed("io")`
-- [ ] 上記それぞれに回帰テストを足す
+- [x] 0056: conflict / unknown で終わる write の temp を残さない。`#removeTemp` の失敗を audit に残す
+- [x] 0056: 起動時に root 直下の `.hns-tmp-*` を掃除する。Journal の pending intent が指す temp は消さない
+- [x] 0057: journal の temp 名に `randomUUID()` を付ける
+- [x] 0057: 同じ journalPath の二重 open は `Unavailable` で拒否する（fail closed）
+- [x] 0058: `auditLog` は写し（または凍結）を返し、呼び出し側の変更が次の読みに出ない
+- [x] 0058: 同じ扱いが要る他の getter を確認する（`mode` を除く）
+- [x] 0060: helper の `read` 応答に `size` を足し、復号後の長さを照合する。違えば `failed("io")`
+- [x] 上記それぞれに回帰テストを足す
 - [ ] `npm run check`（workspace の全層）が通り、独立レビューが PASS する
 
 ## テスト条件
@@ -55,6 +55,8 @@ touches: packages/workspace/, work/issues/0190-workspace-debt.md
 - 順序は 0057 → 0056 → 0058 → 0060。0057 と 0056 は同じ temp / journal を触るので、0057 を先にすると 0056 の掃除条件が1つに決まる。
 - `docs/workspace.md` は 0141 が持つ。必要なら 0141 の統合後に1行足す（この issue では触らない）。
 - 0056 の「置き場所を制御用ディレクトリへ逃がす」案は別の判断。ここでは採らない。
+- 0057 の二重 open は同一プロセス内の claim（絶対 journalPath の Set）で拒否する。別プロセス間の検出は `docs/workspace.md` の「保証しない」に含まれるため行わない。保存 temp の UUID で衝突だけを消す。
+- 0056 の起動時掃除は root 直下の通常ファイル `.hns-tmp-*` だけを対象にする。一覧が取れない場合は開くのを止めず、削除の失敗は audit に残す。
 
 ## やらないこと
 
@@ -67,3 +69,5 @@ touches: packages/workspace/, work/issues/0190-workspace-debt.md
 
 - 2026-11-11: 作成。0056・0057・0058・0060 を吸収（L4 が workspace を書く前の窓）。
 - 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L4。3本のうちの1本で、workspace の窓を閉じる。
+- 2026-11-17: 実装。0057（journal の claim と保存 temp）→ 0056（temp の掃除と audit）→ 0058（auditLog の写し）→ 0060（helper read の size 照合）。回帰は設計どおり T1–T4: `temp.test.ts`（C1–C3）、`journal.test.ts`（C4–C5）、`workspace.test.ts`（C6）、`protocol.test.ts`（C7）。
+- 2026-11-17: `npm run check` exit 0（28.5s、system node 24.22.2）。独立レビュー待ち。
