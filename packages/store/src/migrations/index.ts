@@ -1,5 +1,6 @@
 import { migration0001 } from "./0001-initial.ts";
 import { migration0002 } from "./0002-gateway.ts";
+import { migration0003 } from "./0003-cost.ts";
 import type { Migration } from "./migration.ts";
 
 /**
@@ -9,4 +10,4 @@ import type { Migration } from "./migration.ts";
  * Adding a table is one new file plus one entry here. The runner checks that the versions are
  * 1..n with no gap or duplicate before it executes any SQL.
  */
-export const MIGRATIONS: readonly Migration[] = [migration0001, migration0002];
+export const MIGRATIONS: readonly Migration[] = [migration0001, migration0002, migration0003];

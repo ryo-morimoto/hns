@@ -7,12 +7,52 @@ import {
   MAX_TRANSCRIPT_PAGE,
   type AgentSession,
 } from "@hns/agent/session";
+import {
+  CostGaugeUnavailableError,
+  CostLimitError,
+  type CostBudget,
+  type CostGate,
+} from "../cost/index.ts";
 import { readBody } from "../edge/body.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { ModelUnavailableError } from "./models.ts";
 
 /** The closed failure codes of the internal Session RPC. */
-type SessionRpcCode = "invalid_request" | "not_found" | "unavailable" | "internal";
+type SessionRpcCode =
+  | "invalid_request"
+  | "not_found"
+  | "unavailable"
+  | "limit_exceeded"
+  | "limit_unavailable"
+  | "internal";
+
+/** The injections the Session's transport gives the RPC; production passes its cost gate. */
+export interface SessionRpcDependencies {
+  /** The monthly cost gate; absent when the deployment binds no control database. */
+  readonly cost?: CostGate | undefined;
+}
+
+/**
+ * The message a refused run carries.
+ *
+ * @internal
+ */
+function refusalMessage(budget: CostBudget): string {
+  switch (budget) {
+    case "doRows":
+      return "The monthly DO row limit is used up.";
+    case "doRequests":
+      return "The monthly DO request limit is used up.";
+    case "r2Objects":
+      return "The monthly R2 object limit is used up.";
+    case "provider":
+      return "The monthly provider budget is used up.";
+    default: {
+      const unhandled: never = budget;
+      throw new Error("unknown cost budget: " + String(unhandled));
+    }
+  }
+}
 
 interface SessionRpcFailure {
   readonly ok: false;
@@ -131,14 +171,21 @@ function failureOf(error: Error): Response | undefined {
  *
  * @param request - A request forwarded by the Worker through the `SESSION` binding.
  * @param session - The open Session runtime.
+ * @param dependencies - The monthly cost gate, if the deployment has a control database.
  * @returns A JSON response; expected failures carry `{ok:false, code}`.
  *
  * @remarks
  * These routes are not public Worker routes. The edge only forwards `/ws`, and the GraphQL
  * resolver will call this module through the binding. Bodies are parsed here even though the
  * caller is trusted, so an internal mistake fails as a 400 instead of corrupting the Session.
+ * A new run is admitted against the monthly cost gate before `session.send`; a refused run is
+ * a 429 with a closed code and leaves every existing run alone.
  */
-export async function handleSessionRpc(request: Request, session: AgentSession): Promise<Response> {
+export async function handleSessionRpc(
+  request: Request,
+  session: AgentSession,
+  dependencies: SessionRpcDependencies = {},
+): Promise<Response> {
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter((segment) => segment !== "");
   if (segments[0] !== "rpc" || segments[1] !== "conversations") {
@@ -195,7 +242,34 @@ export async function handleSessionRpc(request: Request, session: AgentSession):
       if (!body.ok) return body.response;
       const parsed = v.safeParse(SendSchema, body.value);
       if (!parsed.success) return failure("invalid_request", "Invalid message input.", 400);
-      const turn = await session.send(id, parsed.output.text, parsed.output.requestId);
+      const cost = dependencies.cost;
+      if (cost !== undefined) {
+        try {
+          await cost.admit(new Date());
+        } catch (error) {
+          if (error instanceof CostLimitError) {
+            return failure("limit_exceeded", refusalMessage(error.budget), 429);
+          }
+          if (error instanceof CostGaugeUnavailableError) {
+            return failure("limit_unavailable", "The monthly cost limits could not be read.", 503);
+          }
+          throw error;
+        }
+      }
+      const requestId = parsed.output.requestId;
+      const run = (): ReturnType<AgentSession["send"]> =>
+        session.send(id, parsed.output.text, requestId);
+      const turn =
+        cost === undefined
+          ? await run()
+          : await cost.turn(
+              {
+                id: requestId ?? crypto.randomUUID(),
+                conversationId: id,
+                requests: 1,
+              },
+              run,
+            );
       return json({
         ok: true,
         submissionId: String(turn.settlement.id),

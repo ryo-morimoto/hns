@@ -1,4 +1,5 @@
 import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
+import type { D1Binding } from "@hns/store";
 import type { LiveSocket } from "../ws.ts";
 
 /** The alarm methods the Session uses; a subset of `DurableObjectStorage`. */
@@ -31,8 +32,16 @@ export interface SessionState {
   getWebSockets?(tag?: string): readonly LiveSocket[];
 }
 
-/** The bindings the Session reads. It never reads a secret. */
+/**
+ * The bindings the Session reads. It never reads a secret.
+ *
+ * @remarks
+ * `DB` is the control database: the cost limit row and the per-turn ledger live there
+ * (migration 3). It is optional so a Node test can open a Session without one; a deployment
+ * always binds it, and then the monthly cost gate is on.
+ */
 export interface SessionEnv {
   readonly HNS_ENV?: string | undefined;
   readonly HNS_MODEL?: string | undefined;
+  readonly DB?: D1Binding | undefined;
 }

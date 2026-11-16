@@ -2,6 +2,8 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createRegistry, type Report, type Wake } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { openSession, type AgentLiveWatch, type AgentSession } from "@hns/agent/session";
+import { migrateStore } from "@hns/store";
+import { createCostGate, type CostGate } from "../cost/index.ts";
 import { problem } from "../edge/problem.ts";
 import {
   defaultLiveUpgradeResponse,
@@ -77,10 +79,11 @@ async function openDurableSession(
  * One workspace's Session Durable Object.
  *
  * @remarks
- * The object owns the Harness lifecycle only: opening on SQLite, arming the recovery alarm,
- * resuming work, and forwarding internal RPC. Conversation semantics live in
- * `@hns/agent/session`. The class is plain (not a `DurableObject` subclass) so tests and
- * the Worker share one structural `SessionState`.
+ * The object owns the Harness lifecycle and the monthly cost gate: opening on SQLite, arming
+ * the recovery alarm, resuming work, refusing a new run when a monthly limit is used up, and
+ * forwarding internal RPC. Conversation semantics live in `@hns/agent/session`. The class is
+ * plain (not a `DurableObject` subclass) so tests and the Worker share one structural
+ * `SessionState`.
  */
 export class Session {
   readonly #state: SessionState;
@@ -91,6 +94,7 @@ export class Session {
   readonly #upgradeResponse: LiveUpgradeResponseFactory;
   readonly #ready: Promise<void>;
   readonly #live = new Map<LiveSocket, LiveEntry>();
+  #cost: CostGate | undefined;
   #session: AgentSession | undefined;
   #closed = false;
 
@@ -111,6 +115,25 @@ export class Session {
 
   async #initialize(): Promise<void> {
     try {
+      // A deployment migrates the control database here as well as at the edge, so the first
+      // send after a deploy cannot fail closed on a missing limit row. A failed migration is
+      // not a failed open: conversation reads do not need D1, and the gate still refuses a new
+      // run while the limits are unreadable.
+      if (this.#env.DB !== undefined) {
+        try {
+          await migrateStore(this.#env.DB);
+        } catch (error) {
+          console.error(
+            "session cost migration failed",
+            error instanceof Error ? error.name : "unknown",
+          );
+        }
+        this.#cost = createCostGate({
+          db: this.#env.DB,
+          storage: this.#state.storage,
+          now: () => new Date(this.#now()),
+        });
+      }
       const session = await this.#open(this.#state, this.#env, {
         onWake: (wake) => {
           void armWake(this.#state.storage, wake, Date.now()).catch((error) => {
@@ -173,7 +196,7 @@ export class Session {
     if (path === "/ws") {
       return this.#openLive(request, session);
     }
-    return handleSessionRpc(request, session);
+    return handleSessionRpc(request, session, { cost: this.#cost });
   }
 
   /** Accept a live socket for one conversation, or return the typed refusal. */

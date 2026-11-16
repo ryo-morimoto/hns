@@ -1,9 +1,21 @@
 import type { JsonValue } from "@earendil-works/chord";
-import type { SessionEnd, Wake } from "@earendil-works/pi-durable";
+import type {
+  ConversationId,
+  EntryId,
+  SessionEnd,
+  SubmissionId,
+  Wake,
+} from "@earendil-works/pi-durable";
 import { InvalidConversationIdError, type AgentSession } from "@hns/agent/session";
 import { ConversationIdSchema, isoTimestamp, ProjectIdSchema, type Conversation } from "@hns/core";
 import { expect, test, vi } from "vitest";
 import * as v from "valibot";
+import {
+  CostGaugeUnavailableError,
+  CostLimitError,
+  type CostGate,
+  type TurnActivity,
+} from "../cost/index.ts";
 import { ModelUnavailableError } from "./models.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
 
@@ -19,6 +31,7 @@ const CONVERSATION: Conversation = {
 
 interface Counters {
   readonly lists: (number | undefined)[];
+  sends: number;
 }
 
 interface Fake {
@@ -27,7 +40,7 @@ interface Fake {
 }
 
 function fakeSession(overrides: Partial<AgentSession> = {}): Fake {
-  const counters: Counters = { lists: [] };
+  const counters: Counters = { lists: [], sends: 0 };
   const base: AgentSession = {
     closed: new Promise<SessionEnd>(() => undefined),
     createConversation: async () => CONVERSATION,
@@ -39,6 +52,7 @@ function fakeSession(overrides: Partial<AgentSession> = {}): Fake {
       throw new InvalidConversationIdError(id);
     },
     send: async () => {
+      counters.sends += 1;
       throw new ModelUnavailableError("no model");
     },
     transcript: async () => [],
@@ -151,4 +165,126 @@ test("an oversized body is refused", async () => {
     fake.session,
   );
   expect(response.status).toBe(413);
+});
+/** One settled input answer the RPC can read. */
+type SendResult = Awaited<ReturnType<AgentSession["send"]>>;
+
+/**
+ * A settled answer, for the routes that succeed.
+ *
+ * @remarks
+ * Only `settlement.id` and `settlement.status` are read by the RPC; the numeric brands have no
+ * runtime representation.
+ */
+function answer(): SendResult {
+  // SAFETY: pi-durable allocates these ids as positive integers and the RPC reads only the
+  // settlement's id and status; the brands are compile-time only.
+  const settlement = {
+    id: 7 as SubmissionId,
+    conversationId: 2 as ConversationId,
+    type: "input",
+    status: "done",
+    entry: 3 as EntryId,
+    answer: 4 as EntryId,
+  } as const;
+  return { settlement, text: "answered" };
+}
+
+/** A cost gate and the activity it was asked to measure. */
+interface FakeCost {
+  readonly gate: CostGate;
+  readonly measured: TurnActivity[];
+}
+
+/** A cost gate that lets a run through and records what it was asked to measure. */
+function fakeCost(actions: Partial<CostGate> = {}): FakeCost {
+  const measured: TurnActivity[] = [];
+  const base: CostGate = {
+    admit: async () => undefined,
+    turn: async (activity, run) => {
+      measured.push(activity);
+      return await run();
+    },
+  };
+  return { gate: Object.assign(base, actions), measured };
+}
+
+const SEND = (requestId?: string): Request =>
+  post(
+    "/rpc/conversations/2/messages",
+    requestId === undefined ? { text: "hi" } : { text: "hi", requestId },
+  );
+
+// Catches: a used-up month still starting a run, or the refusal taxing the existing runs.
+test("a used-up month refuses a new run and leaves the existing ones alone", async () => {
+  const fake = fakeSession({
+    send: async () => answer(),
+    abort: async () => true,
+  });
+  const { gate } = fakeCost({
+    admit: async () => {
+      throw new CostLimitError("doRows");
+    },
+  });
+  const refused = await handleSessionRpc(SEND(), fake.session, { cost: gate });
+  expect(refused.status).toBe(429);
+  expect(await refused.json()).toMatchObject({ ok: false, code: "limit_exceeded" });
+  expect(fake.counters.sends).toBe(0);
+  const transcript = await handleSessionRpc(get("/rpc/conversations/2/transcript"), fake.session, {
+    cost: gate,
+  });
+  expect(transcript.status).toBe(200);
+  const aborted = await handleSessionRpc(post("/rpc/conversations/2/abort", {}), fake.session, {
+    cost: gate,
+  });
+  expect(aborted.status).toBe(200);
+});
+
+// Catches: an unreadable gauge being treated as permission to start a run.
+test("a gauge that cannot be read refuses a new run", async () => {
+  const fake = fakeSession({ send: async () => answer() });
+  const { gate } = fakeCost({
+    admit: async () => {
+      throw new CostGaugeUnavailableError(new Error("d1 is down"));
+    },
+  });
+  const response = await handleSessionRpc(SEND(), fake.session, { cost: gate });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ ok: false, code: "limit_unavailable" });
+  expect(fake.counters.sends).toBe(0);
+});
+
+// Catches: a turn that runs without being recorded, or a body request id not reaching the ledger.
+test("a turn is measured with the request id the caller gave", async () => {
+  const fake = fakeSession({ send: async () => answer() });
+  const { gate, measured } = fakeCost();
+  const response = await handleSessionRpc(SEND("turn-1"), fake.session, { cost: gate });
+  expect(response.status).toBe(200);
+  expect(measured).toStrictEqual([{ id: "turn-1", conversationId: "2", requests: 1 }]);
+});
+
+test("a turn without a request id gets a generated one", async () => {
+  const fake = fakeSession({ send: async () => answer() });
+  const { gate, measured } = fakeCost();
+  await handleSessionRpc(SEND(), fake.session, { cost: gate });
+  expect(measured).toHaveLength(1);
+  expect(measured[0]?.id).toMatch(/^[0-9a-f-]{36}$/u);
+});
+
+// Catches: an unexpected gate failure being reported as a limit refusal.
+test("an unexpected gate failure is a generic 500", async () => {
+  const fake = fakeSession({ send: async () => answer() });
+  const { gate } = fakeCost({
+    admit: async () => {
+      throw new Error("boom");
+    },
+  });
+  const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  try {
+    const response = await handleSessionRpc(SEND(), fake.session, { cost: gate });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ ok: false, code: "internal" });
+  } finally {
+    spy.mockRestore();
+  }
 });
