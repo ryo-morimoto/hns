@@ -185,6 +185,35 @@ test("a symbolic link as a parent does not escape the root", async () => {
   );
 });
 
+test("a list does not follow a symbolic link", async () => {
+  await withAgent(
+    async ({ root, base }) => {
+      const outside = join(base, "outside");
+      await mkdir(outside);
+      await writeFile(join(outside, "secret.txt"), "secret");
+      await symlink(outside, join(root, "link"));
+    },
+    async (fixture) => {
+      const answer = await fixture.call({ body: JSON.stringify({ op: "list", path: "link" }) });
+      expect(answer.status).toBe(403);
+      expect(codeOf(answer)).toBe("forbidden");
+      const followed = await fixture.call({
+        body: JSON.stringify({ op: "list", path: "link/" }),
+      });
+      expect(followed.status).toBe(403);
+      const stat = parseStatResult(
+        resultOf(await fixture.call({ body: JSON.stringify({ op: "stat", path: "link" }) })),
+      );
+      expect(stat).toStrictEqual({
+        exists: true,
+        kind: "symlink",
+        size: expect.any(Number),
+        mtimeMs: expect.any(Number),
+      });
+    },
+  );
+});
+
 test("a symbolic link as the final component is not followed", async () => {
   await withAgent(
     async ({ root, base }) => {

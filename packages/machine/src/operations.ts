@@ -179,17 +179,33 @@ async function readPath(root: string, relativePath: string, limits: Limits): Pro
 }
 
 /**
- * List one directory below ROOT.
+ * List one directory below ROOT, without following a final symbolic link.
  *
  * @param root - The canonical root.
  * @param relativePath - The path from the request.
  * @returns The entries, in the order the file system returned them.
  * @throws {Denied} When the path cannot stay inside ROOT.
- * @throws {FileFailure} `not_directory` when the path is not a directory, or any
- * other file failure.
+ * @throws {MachineRefusal} `forbidden` for a symbolic link, `invalid_request`
+ * for an entry that is not a directory.
+ * @throws {FileFailure} For any other file failure.
+ *
+ * @remarks
+ * The final component is checked with `lstat` first, so a link is refused
+ * instead of followed and directories outside ROOT stay unlisted. The window
+ * between that check and the listing is the same residual race the parent check
+ * has; the dirfd helper the workspace needs closes both.
  */
 async function listPath(root: string, relativePath: string): Promise<ListResult> {
   const contained = await containInRoot(root, relativePath);
+  const info = await lstat(contained.absolute).catch((error: Error) => {
+    throw fileFailure(error, relativePath);
+  });
+  if (info.isSymbolicLink()) {
+    throw new MachineRefusal("forbidden", `${relativePath}: the path is a symbolic link`);
+  }
+  if (!info.isDirectory()) {
+    throw new MachineRefusal("invalid_request", `${relativePath}: is not a directory`);
+  }
   const entries = await readdir(contained.absolute, { withFileTypes: true }).catch(
     (error: Error) => {
       throw fileFailure(error, relativePath);
