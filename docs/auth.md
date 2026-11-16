@@ -88,7 +88,7 @@ REST の面（passkey・files・hooks・運用・machine）は、それを実装
 - 再開: `UPDATE provider_gateway SET stopped = 0 WHERE id = 'gateway';`
 - 単価: deployment の `HNS_GATEWAY_CALL_PRICE_USD`（既定 0.01 USD）。許可するモデルの 1 回あたり最大費用に合わせる。
   予算が抑えるのは「回数 × 単価」なので、実際の請求額の天井は provider 側に置く（次節）。
-- gateway は route を持たない（service binding だけ）。0160 で route を付けるなら、呼び出し元の認証を同時に足す。
+- gateway は route を持たない（service binding だけ）。workers.dev の公開は無効にする（`workersDev: false` / `previewUrls: false`）。0160 で route を付けるなら、呼び出し元の認証を同時に足す。
 
 #### provider 側の支出上限とアラート
 

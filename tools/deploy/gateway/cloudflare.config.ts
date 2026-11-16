@@ -44,6 +44,8 @@ export const gatewayWorkerFor = (
     ] as const;
   return {
     name: gatewayWorkerName(deployment.workerName),
+    workersDev: false,
+    previewUrls: false,
     compatibilityDate: "2026-10-30",
     compatibilityFlags: ["nodejs_compat"],
     entrypoint: "worker.ts",

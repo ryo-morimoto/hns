@@ -43,6 +43,13 @@ test("the upstream defaults to the provider endpoint and can be overridden per d
   });
 });
 
+// Catches: a gateway published on its public workers.dev subdomain, which has no caller auth.
+test("the gateway is not published on the public subdomain", () => {
+  const worker = gatewayWorkerFor(development(), {});
+  expect(worker.workersDev).toBe(false);
+  expect(worker.previewUrls).toBe(false);
+});
+
 test("the call price is configured and validated at deploy time", () => {
   expect(gatewayWorkerFor(development(), {}).env.HNS_GATEWAY_CALL_PRICE_USD).toStrictEqual({
     type: "text",

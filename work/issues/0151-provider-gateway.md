@@ -69,9 +69,9 @@ gateway は **素の Worker**。予算のカウンタは D1 の 1 文で持つ�
 
 ## 未確定
 
-- U-01: gateway をサービスバインディング以外から到達できないようにする（workers.dev の公開）。仮説: 当面は
-  予算で金額を有界にし、route を付けない。影響: 認証なしで呼べると予算を先に使い切られる（鍵は漏れない）。
-  責任者: lead。トリガー: 0160 で route を付けるとき。
+- U-01: 解決済み（レビュー指摘で修正）。cf の config は route が無いと workers.dev を既定で有効にするため、
+  gateway の Worker に `workersDev: false` / `previewUrls: false` を明示した。テストで固定。
+  0160 で route を付けるときは、呼び出し元の認証を同時に足す。
 
 ## やらないこと
 
