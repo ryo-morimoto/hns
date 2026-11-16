@@ -1,6 +1,6 @@
 # 0059: agent の bash も観測する
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: 設計を変えない（0034 の観測の揃え）
@@ -14,9 +14,9 @@ touches: packages/agent/src/tools.ts, packages/agent/test/integration/bash.test.
 
 ## Acceptance criteria
 
-- [ ] bash の実行でも `tool.call` / `tool.result`（ok・ms）が出る
-- [ ] 失敗（非ゼロ終了・sandbox 拒否）も `tool.result` に載る
-- [ ] 3 ツールすべてで観測が出ることを回帰テストで固定する
+- [x] bash の実行でも `tool.call` / `tool.result`（ok・ms）が出る
+- [x] 失敗（非ゼロ終了・sandbox 拒否）も `tool.result` に載る
+- [x] 3 ツールすべてで観測が出ることを回帰テストで固定する
 
 ## テスト条件
 
@@ -52,6 +52,15 @@ touches: packages/agent/src/tools.ts, packages/agent/test/integration/bash.test.
 - pi-durable の `wrapTool` で包むか、`GenerationHooks.afterTools` で拾うかのどちらか。
 - `tool.result` の `ok` は `isError` に合わせる（bash は exit code でも判定する）。
 
+## Result
+
+- verdict: **PASS**（reviewer-0059、blocking 0）
+- reviewer: reviewer-0059（この変更を書いていない別エージェント）
+- HEAD: 33331db（rebase 後。main に ff 統合）
+- 受入: 3/3。`npm run check` exit 0（agent 33 tests、全体 33.2s）
+- 確認: bash も read_file / write_file と同じ tool.call / tool.result（ok / ms）。非ゼロ終了・sandbox 拒否・timeout（throw）の 3 経路を integration で固定し、修正前の実装では 4/4 落ちることを確認。イベント型の追加なし。
+- 非 blocking（低 6）: exitCode 判定は現行 pi-durable では isError と二重で単独テスト不能 / events.ts の ok の説明が throw 経路に未追随 / CHANGELOG が bash だけに読める（workspace ツールにも及ぶ）/ bash の integration は bwrap 必須で無い環境では skip / throw 経路は bash の timeout でしか固定していない / 統合時の issue 衝突（priority は now を保持して解消）。
+
 ## Log
 
 - 2026-11-07: 作成（コードレビューで bash だけ観測が無いのを見つけた）。
@@ -61,3 +70,4 @@ touches: packages/agent/src/tools.ts, packages/agent/test/integration/bash.test.
   （timeout・exec 失敗）も tool.result を出してから伝播する。3 ツールの回帰を integration に置いた。
   `wrapTool` は使わず、登録する `execute` を `observed()` で包んだ。registry にラッパー拡張を足さず、
   既存の観測を 1 か所で共有するため。
+- 2026-11-17: reviewer-0059 PASS（blocking 0）。main へ ff 統合（33331db）。
