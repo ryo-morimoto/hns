@@ -195,8 +195,12 @@ async function handleRequest(
   response: ServerResponse,
   context: AgentContext,
 ): Promise<void> {
-  if (request.method !== "POST" || request.url !== RPC_PATH) {
-    sendRefusal(response, new MachineRefusal("not_found", "the agent answers POST /rpc only"));
+  if (request.method !== "POST") {
+    sendRefusal(response, new MachineRefusal("method_not_allowed", "the agent answers POST only"));
+    return;
+  }
+  if (request.url !== RPC_PATH) {
+    sendRefusal(response, new MachineRefusal("not_found", "the agent answers /rpc only"));
     return;
   }
   if (!context.inFlight.enter()) {

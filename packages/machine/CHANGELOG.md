@@ -10,4 +10,5 @@
   following it. FIFOs, devices, and sockets are refused before they are opened.
 - Limits: concurrency, request and response bytes, and one deadline covering the body read and the
   operation; the operation is awaited to settlement so its slot is not released early.
+- A wrong method answers 405 and a wrong route answers 404.
 - Device key loader that refuses a key readable by group or other, a symbolic link, or a non-Ed25519 key.

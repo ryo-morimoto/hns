@@ -396,13 +396,13 @@ test("the agent listens on loopback only", async () => {
   );
 });
 
-test("a request that is not POST /rpc is not found", async () => {
+test("a wrong method and a wrong route are refused distinctly", async () => {
   await withAgent(
     async () => {},
     async (fixture) => {
       const get = await fixture.call({ body: "", method: "GET" });
-      expect(get.status).toBe(404);
-      expect(codeOf(get)).toBe("not_found");
+      expect(get.status).toBe(405);
+      expect(codeOf(get)).toBe("method_not_allowed");
       const other = await fixture.call({ body: "{}", path: "/other" });
       expect(other.status).toBe(404);
       expect(codeOf(other)).toBe("not_found");

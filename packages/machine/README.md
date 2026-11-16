@@ -42,7 +42,7 @@ cloudflared は外向きの接続を保ち、この agent へは `127.0.0.1` で
 
 拒否は閉じた `RefusalCode` で返る。主なもの: `unauthorized` (401)、`stale_request` (401)、
 `replayed` (409)、`stale_connection` (409)、`invalid_request` (400)、`path_denied` (400)、`forbidden` (403)、
-`not_found` (404)、`busy` (429)、`too_large` (413)、`deadline_exceeded` (408)。
+`not_found` (404)、`method_not_allowed` (405)、`busy` (429)、`too_large` (413)、`deadline_exceeded` (408)。
 
 ## 不変条件
 
