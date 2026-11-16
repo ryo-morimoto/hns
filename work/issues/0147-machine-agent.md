@@ -5,7 +5,7 @@ priority: now
 design: agreed
 design-ref: D047, D053
 depends-on: 0145
-touches: packages/machine/, docs/packages.md, oxlint.config.ts, vitest.config.ts, package-lock.json, work/issues/0147-machine-agent.md
+touches: packages/machine/, docs/packages.md, oxlint.config.ts, vitest.config.ts, package.json, package-lock.json, AGENTS.md, work/issues/0147-machine-agent.md
 
 ## Goal
 
@@ -34,16 +34,17 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 | C6  | 古い接続の seq → 409 stale_connection。より大きい seq の接続は通り、以後古い接続は通らない。同じ seq の別接続も拒否 | 高     | AC5        |
 | C7  | `..` を含むパス → 400 path_denied。`/` 始まりは ROOT 相対に正規化され、ROOT の外は指さない                     | 高     | AC3        |
 | C8  | 親が ROOT 外を指す symlink（`link/secret.txt`）→ 400 path_denied。内容は応答に出ない                            | 高     | AC3        |
-| C9  | 最終要素が ROOT 外を指す symlink → 403。内容は応答に出ない                                                        | 中     | AC3        |
+| C9  | 最終要素が ROOT 外を指す symlink → read と list は 403 forbidden、stat は追わず kind: symlink を返す。内容は応答に出ない | 中     | AC3        |
 | C10 | ROOT 内の通常ファイルの read / stat / list → 内容・サイズ・sha256 を返す                                          | 中     | AC3        |
 | C11 | 同時実行数が上限に達した状態でもう 1 本 → 429 busy。空いたら次の要求は通る                                       | 中     | AC4        |
 | C12 | body が上限を超える → 413 too_large                                                                              | 中     | AC4        |
 | C13 | 応答（read/list）が上限を超える → 413 too_large。内容は返さない                                                   | 中     | AC4        |
 | C14 | body を送り切らない要求 → 時間上限で 408 deadline_exceeded。待ち続けない                                          | 中     | AC4        |
-| C15 | 待受は 127.0.0.1 のみ。ループバック以外の interface からは接続できない                                            | 高     | AC1        |
+| C15 | 待受アドレスは 127.0.0.1（bind を直接検証）。ループバック以外の interface からは接続できない。外部 IPv4 が無いホストは理由付きで skip | 高     | AC1        |
 | C16 | デバイス鍵: 0600 は読め、0644 は拒否、symlink は拒否                                                              | 高     | AC2        |
 | C17 | 未対応 op / JSON でない body → 400 invalid_request                                                                | 中     | AC3        |
-| C18 | POST 以外 / `/rpc` 以外 → 405 / 404                                                                               | 低     | AC1        |
+| C18 | POST 以外 → 405 method_not_allowed、`/rpc` 以外 → 404 not_found                                                   | 低     | AC1        |
+| C19 | FIFO への read → 400 invalid_request。thread pool を塞がず、続く通常の read は通る                                 | 高     | AC4        |
 
 テストしない条件:
 
@@ -68,23 +69,38 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 | T10 | C7   | 同値分割         | unit        | `src/containment.test.ts` "normalization names stay inside the root"                 |
 | T11 | C7   | 故障注入         | integration | 同 "a parent segment and an absolute path never leave the root"                       |
 | T12 | C8   | 故障注入         | integration | 同 "a symbolic link as a parent does not escape the root"                             |
-| T13 | C9   | 故障注入         | integration | 同 "a symbolic link as the final component is not followed"                           |
+| T13 | C9   | 故障注入         | integration | 同 "a symbolic link as the final component is not followed" / "a list does not follow a symbolic link" |
 | T14 | C10  | ユースケース     | integration | 同 "reading and listing inside the root returns the bytes and their version"          |
 | T15 | C11  | 競合テスト       | integration | 同 "a request beyond the concurrency limit is refused"                                |
 | T16 | C12  | 境界値分析       | integration | 同 "a body over the request limit is refused"                                         |
 | T17 | C13  | 境界値分析       | integration | 同 "a response over the output limit is refused"                                      |
 | T18 | C14  | 故障注入         | integration | 同 "a request that never finishes its body meets the deadline"                        |
-| T19 | C15  | 契約テスト       | integration | 同 "the agent listens on loopback only"                                               |
+| T19 | C15  | 契約テスト       | integration | 同 "the agent binds to loopback only" / "a non-loopback interface cannot reach the agent"（外部 IPv4 が無いホストは理由付き skip） |
 | T20 | C16  | 同値分割         | unit        | `src/device-key.test.ts` "a key readable by group or other is refused"               |
 | T21 | C17  | 同値分割         | unit        | `src/wire.test.ts` "an unknown operation or a non-JSON body is refused"              |
-| T22 | C18  | 同値分割         | integration | 同 "a request that is not POST /rpc is not found"                                     |
+| T22 | C18  | 同値分割         | integration | 同 "a wrong method and a wrong route are refused distinctly"                           |
 | T23 | C11  | 状態遷移         | unit        | `src/limits.test.ts` "a slot is released once and never below zero"                  |
+| T24 | C19  | 故障注入         | integration | 同 "a FIFO is refused without blocking the pool"                                      |
 
 ## Notes
 
 - PoC: `work/poc/cf-harness/agent/server.mjs`（HMAC・ROOT 封じ込め・上限）。sandbox は無い。
 - HMAC は共有秘密なので製品では Ed25519 にする。PoC の結論は「署名検証は 1 か所に集まる」。
 - エージェントは配布物になる（nix / 単体バイナリ / npm）。配布は 0040 に含める。
+
+## 未確定
+
+- U-02: 署名の向きが AC と実装で一致しない。
+  - 現状の矛盾: AC は「秘密鍵はマシン（0600）、公開鍵は D1 の Machine レコード」としつつ、machine が要求を検証する形を求めている。
+    秘密鍵がマシンにあるなら、Worker は machine の device key で署名できない（machine が検証する側に回れない）。
+  - 案1: **control-plane 鍵を分ける**。Worker（harness）が自分の鍵で要求に署名し、machine はその公開鍵で検証する。
+    device key（秘密はマシン / 公開は D1）は machine → Worker の署名にだけ使う。AC の parenthetical と D049 はこのまま生きる。
+  - 案2: **向きを反転**。machine を呼び出し側にし、machine が device key で署名して Worker の endpoint を叩く（machine は検証しない）。
+    AC の「署名を検証し」を落とす必要がある。
+  - 案3: **0148 へ移す**。0147 は署名メッセージと検証器を interface として置くだけにし、どの鍵を Machine レコードに載せるか・
+    どちらが署名するかを 0148 の登録・失効と一緒に決める。
+  - いまの実装は案1の形（`RequestVerifier` が D1 の Machine レコードの公開鍵で受け取った要求を検証する interface と fixture）で、
+    `MachineKeyRegistry` の指す先を差し替えれば案2・案3にも寄せられる。決定はユーザー待ち。
 
 ## やらないこと
 
@@ -109,3 +125,13 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 - 2026-11-17: 署名の向きを1か所に集めた。0147 が持つのは「受け取った要求を登録済み公開鍵で検証する」
   `RequestVerifier` で、秘密鍵（0600）がマシン・公開鍵が D1 という配置（D049）は変えない。Worker 側がどこで署名し、
   どの鍵を Machine レコードに載せるかは 0148 の registry と auth の面で確定する（この issue は interface と拒否だけを固定）。
+- 2026-11-17: reviewer の BLOCKED（blocking 2）を受けて修正。(1) `list` が最終要素の symlink を追っていた:
+  `lstat` で最終要素の symlink を拒否し、ディレクトリでなければ 400、symlink なら 403。C9/T13 を read と list と
+  stat の差に合わせた。(2) deadline が fs を止められず、FIFO 8 本で thread pool と slot が詰まった: read は
+  `lstat` で非 regular（FIFO / device / socket）を開く前に 400 で拒否し、open に `O_NONBLOCK` を付けた。
+  `runOperation` は `AbortSignal` を受け取り、read は abort で中断、他の段は前後で signal を確認し、
+  操作が settle するまで slot を返さない（body read と verify は deadline と race）。C19/T24 を追加。
+  ついでに C18/T22 を 405 / 404 に揃え、コードとテストから issue 番号を外し、limits の文言・AGENTS.md の
+  planned・docs/packages.md の末尾改行・vitest.config.ts の整形だけの差分を直した。FIFO のテストは実 `mkfifo` を使うので、
+  `package.json` の knip に `packages/machine` の `ignoreBinaries: ["mkfifo"]` を足した（touches に `package.json` を追加）。
+  U-02（署名の向き）は未確定。
