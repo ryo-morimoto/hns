@@ -1,9 +1,9 @@
 # 0151: provider gateway（鍵の分離・予算・緊急停止）
 
 status: open
-priority: plan
+priority: now
 depends-on: 0143, 0144
-touches: packages/server/src/gateway/, packages/server/test/gateway/, packages/store/src/migrations/d1/
+touches: packages/server/src/gateway/, packages/server/test/gateway/, packages/store/src/migrations/, tools/deploy/, work/issues/0151-provider-gateway.md
 
 ## Goal
 
@@ -35,3 +35,4 @@ gateway は **素の Worker**。予算のカウンタは D1 の 1 文で持つ�
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
 - 2026-11-07: 予算カウンタを D1 に変更（D049）。
+- 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L9。touches を実パス（`store/src/migrations/`）に直し、gateway Worker の配線として `tools/deploy/` を足した。store migration の枠を持つ。

@@ -6,9 +6,9 @@
 
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 3 |
-| Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 63 |
-| Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 7 |
+| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 5 |
+| Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 60 |
+| Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 5 |
 | Q4 | — | — | `hold` | いまはやらない | 8 |
 
 ### 着手の規則
@@ -19,31 +19,48 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（3）
+### now（5）
 
-| # | 作業 | 依存の状態 |
-| --- | --- | --- |
-| [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
-| [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
-| [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | 0145 |
+| # | 作業 | 依存の状態 | 設計レーン |
+| --- | --- | --- | --- |
+| [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 done | L0 |
+| [0190](issues/0190-workspace-debt.md) | workspace の低負債（0056・0057・0058・0060） | 0045 done | L4 |
+| [0151](issues/0151-provider-gateway.md) | provider gateway（鍵の分離・予算・緊急停止） | 0143 / 0144 done | L9 |
+| [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名） | 0145 done | L3 |
+| [0159](issues/0159-live-ws.md) | ライブ更新の WS 化（SSE の置き換え） | 0146 done | L2 |
+
+同時に流すのは3本（[LANES.md](LANES.md)）。いまは **0190 / 0151 / 0147** で、0142 は lead が先に閉じる。0159 は空いた枠に入れる。
+0142 は 0156 を、0190 は 0191 と 0153 を、0151 は 0152 を、0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を開ける。
+
+### 次の昇格（依存が解けたら now にする）
+
+| 昇格 | 前提 | レーン | 備考 |
+| --- | --- | --- | --- |
+| [0156](issues/0156-journal-in-do.md) | 0142 done | L4 | Workspace DO の骨格。0142 の直後に開く |
+| [0191](issues/0191-workspace-perf.md) | 0190 done | L4 | workspace の性能。0153 より先（窓を閉じる） |
+| [0152](issues/0152-real-provider.md) | 0151 done | L9 | 実プロバイダ。0151 と同じレーンで続ける |
+| [0153](issues/0153-r2-object-store.md) | 0191 done | L4 | R2。workspace の窓が閉じてから |
+| [0048](issues/0048-store-identity.md) | 0151 done（store migration の枠） | L1 / L6 | identity の土台。0069 / 0070 が続く |
+| [0194](issues/0194-machine-sandbox.md) / [0148](issues/0148-machine-registry.md) / [0165](issues/0165-safety-reeval.md) | 0147 done | L3 | 0147 の後続。0194 と 0165 を 0148 より先に置いてよい |
+| [0160](issues/0160-ui-delivery.md) | 0159 done | L7 | UI 配信。0105 / 0103 の順序は 0182 で決める |
+| [0149](issues/0149-d1-projection.md) | 0151 done（store migration の枠）+ 一覧を GraphQL に直す rescope | L5 | 0115 / 0121 の前提 |
 
 
 
 
-### plan（64）
+### plan（60）
 
-- **L2 会話**: 0159
-- **L3 マシン**: 0147, 0148, 0165, 0194
-- **L4 耐久**: 0153, 0154, 0155, 0156, 0157, 0167, 0168, 0169, 0190, 0191
+- **L3 マシン**: 0148, 0165, 0194
+- **L4 耐久**: 0153, 0154, 0155, 0156, 0157, 0167, 0168, 0169, 0191
 - **L5 索引**: 0149
 - **L6 認証**: 0158
 - **L7 Web**: 0160
 - **L8 運用**: 0161, 0162, 0163, 0164, 0166
-- **L9 ゲートウェイ**: 0151, 0152
+- **L9 ゲートウェイ**: 0152
 - **L10 GraphQL**: 0181, 0182
 - **基盤・移植**: 0032, 0036, 0038, 0039, 0040, 0043, 0048, 0049, 0059, 0069, 0070, 0071
 - **UI 画面**: 0103, 0104, 0105, 0106, 0107, 0108, 0109, 0110, 0111, 0112, 0113, 0114
-- **API / data**: 0116, 0117, 0122, 0123, 0124, 0125, 0126, 0127, 0128, 0129, 0130, 0131, 0195, 0197
+- **API / data**: 0116, 0117, 0122, 0123, 0124, 0125, 0126, 0127, 0128, 0129, 0130, 0131, 0197
 
 ### batch（5）
 
@@ -92,7 +109,7 @@
 | [0018](issues/0018-automations.md) | Automations（Schedule / Webhook） | **done** | — | 0017 |
 | [0019](issues/0019-auth.md) | 認証と公開範囲（要件13） | **done** | — | 0014 |
 | [0020](issues/0020-backup.md) | バックアップと復元（要件16） | **done** | — | 0014 |
-| [0021](issues/0021-tailscale-auth.md) | tailnet の ID で認証する（要件13） | **done**（0158 で置換） | — | 0019 |
+| [0021](issues/0021-tailscale-auth.md) | tailnet の ID で認証する（要件13） | **置換**（0158） | — | 0019 |
 | [0022](issues/0022-passkey.md) | passkey の登録・ログイン（要件13） | **done** | — | 0158 |
 | [0023](issues/0023-prf-encryption.md) | PRF で秘密を暗号化（要件14） | **done** | — | 0022, 0024 |
 | [0024](issues/0024-secret-scopes.md) | 秘密のスコープ分離（要件14） | **done** | — | 0019 |
@@ -176,17 +193,17 @@
 | [0130](issues/0130-api-workflow-archive.md) | Workflow の archive / delete | open | plan | 0038, 0145, 0146 |
 | [0131](issues/0131-api-automation-archive.md) | Automation の archive / delete | open | plan | 0038, 0145, 0146 |
 | [0140](issues/0140-cf-adoption-docs.md) | 正本を Cloudflare に置く決定と docs の書き換え | **done** | — | — |
-| [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | in-progress | now | 0140 |
+| [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | **done** | — | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | open | now | 0141 |
 | [0143](issues/0143-secret-placement.md) | 秘密の配置（gateway・git はマシン・DEK） | **done** | — | 0140 |
 | [0144](issues/0144-cf-deploy-env.md) | 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | **done** | — | 0140 |
 | [0145](issues/0145-worker-edge.md) | Worker の入口（認証境界・ルーティング・相関 ID） | **done** | — | 0144 |
-| [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | in-progress | now | 0145 |
-| [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名） | open | plan | 0145 |
+| [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | **done** | — | 0145 |
+| [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名） | open | now | 0145 |
 | [0148](issues/0148-machine-registry.md) | Machine レジストリ（D1 + fetch） | open | plan | 0147 |
 | [0149](issues/0149-d1-projection.md) | 会話・run の索引（D1） | open | plan | 0146, 0150 |
 | [0150](issues/0150-store-d1-do-backend.md) | store を D1 専用にする（node:sqlite の削除） | **done** | — | 0144 |
-| [0151](issues/0151-provider-gateway.md) | provider gateway（鍵の分離・予算・緊急停止） | open | plan | 0143, 0144 |
+| [0151](issues/0151-provider-gateway.md) | provider gateway（鍵の分離・予算・緊急停止） | open | now | 0143, 0144 |
 | [0152](issues/0152-real-provider.md) | 実プロバイダ（faux → 実・ストリーミング・usage） | open | plan | 0146, 0151 |
 | [0153](issues/0153-r2-object-store.md) | R2 オブジェクトストア（git object 互換・pack アップロード） | open | plan | 0141, 0144 |
 | [0154](issues/0154-checkpoint-commit.md) | checkpoint commit（refs/hns・Run 境界） | open | plan | 0153, 0156 |
@@ -194,7 +211,7 @@
 | [0156](issues/0156-journal-in-do.md) | Workspace DO の骨格（lease・版・所有） | open | plan | 0142, 0145 |
 | [0157](issues/0157-versioned-write-remote.md) | 版付き書き込みのリモート化（ack が DO を通る） | open | plan | 0033, 0147, 0156 |
 | [0158](issues/0158-auth-edge.md) | 認証の再編（passkey / PRF / デバイス鍵） | open | plan | 0048, 0069, 0070, 0071, 0147 |
-| [0159](issues/0159-live-ws.md) | ライブ更新の WS 化（SSE の置き換え） | open | plan | 0146 |
+| [0159](issues/0159-live-ws.md) | ライブ更新の WS 化（SSE の置き換え） | open | now | 0146 |
 | [0160](issues/0160-ui-delivery.md) | UI の配信（Workers Assets・typed client） | open | plan | 0037, 0159 |
 | [0161](issues/0161-automation-target.md) | automations の実行先（マシン必須の明示） | open | plan | 0038, 0148 |
 | [0162](issues/0162-observability-hops.md) | 観測（相関 ID を全ホップに通す） | open | plan | 0145, 0147 |
@@ -210,11 +227,11 @@
 | [0172](issues/0172-rooted-helper-spawn.md) | rooted ヘルパーの起動を操作ごとにしない | **置換**（0191） | — | - |
 | [0173](issues/0173-docs-followups.md) | D047〜D053 採用後の docs の残り | open | batch | 0140 |
 | [0174](issues/0174-staged-content-merge.md) | ステージ内容と merge をゲートで覆う | **done** | — | 0170, 0171 |
-| [0175](issues/0175-graphql-relay-foundation.md) | core で SDL を起こす | open | now | 0037 |
+| [0175](issues/0175-graphql-relay-foundation.md) | core で SDL を起こす | **done** | — | 0037 |
 | [0176](issues/0176-graphql-endpoint.md) | Worker に /graphql を載せる | **done** | — | 0145, 0146, 0150, 0175 |
 | [0177](issues/0177-global-id.md) | global id（Relay の store 要件） | **done** | — | 0176 |
 | [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | **done** | — | 0177 |
-| [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む | open | now | 0178, 0102 |
+| [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む | **done** | — | 0178, 0102 |
 | [0180](issues/0180-codegen-gate.md) | relay-compiler をゲートに組み込む | **done** | — | 0175, 0178 |
 | [0188](issues/0188-graphql-only-contract.md) | GraphQL を唯一の契約にする（REST 契約の撤去） | **done** | — | — |
 | [0181](issues/0181-store-freshness.md) | store の鮮度方針 | open | plan | 0159, 0179 |
@@ -225,7 +242,7 @@
 | [0186](issues/0186-test-colocation.md) | テストをコロケートし、issue 参照を削除する | **done** | — | 0184, 0185 |
 | [0187](issues/0187-tsdoc-doctest.md) | TSDoc 契約と doctest を展開する | **done** | — | 0186 |
 | [0189](issues/0189-d1-wiring.md) | Worker から D1 の store を開通させる | **done** | — | 0145, 0150 |
-| [0190](issues/0190-workspace-debt.md) | workspace の低負債を一括で閉じる（0056・0057・0058・0060） | open | plan | 0045 |
+| [0190](issues/0190-workspace-debt.md) | workspace の低負債を一括で閉じる（0056・0057・0058・0060） | open | now | 0045 |
 | [0191](issues/0191-workspace-perf.md) | workspace の実行性能を測って固定する（0172） | open | plan | 0190 |
 | [0192](issues/0192-findings-reconcile.md) | findings 13 件を再判定し、直す | open | batch | 0145, 0146 |
 | [0193](issues/0193-backlog-metadata.md) | backlog のメタデータを現在に合わせる | open | batch | 0141, 0146 |

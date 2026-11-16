@@ -1,9 +1,9 @@
 # 0190: workspace の低負債を一括で閉じる（0056・0057・0058・0060）
 
 status: open
-priority: plan
+priority: now
 depends-on: 0045
-touches: packages/workspace/
+touches: packages/workspace/, work/issues/0190-workspace-debt.md
 
 後継: 0056・0057・0058・0060 を吸収する。
 
@@ -64,3 +64,4 @@ touches: packages/workspace/
 ## Log
 
 - 2026-11-11: 作成。0056・0057・0058・0060 を吸収（L4 が workspace を書く前の窓）。
+- 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L4。3本のうちの1本で、workspace の窓を閉じる。

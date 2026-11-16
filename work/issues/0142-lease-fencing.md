@@ -3,7 +3,7 @@
 status: open
 priority: now
 depends-on: 0141
-touches: packages/core/src/lease.ts
+touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/core/src/index.ts, packages/core/README.md, packages/core/CHANGELOG.md, docs/durability.md, docs/workspace.md, work/issues/0142-lease-fencing.md
 
 ## Goal
 
@@ -31,3 +31,4 @@ touches: packages/core/src/lease.ts
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-17: ユーザーの判断で `now` のまま最初に閉じる。touches を 0141 の形（test・index・README・CHANGELOG・docs）に合わせた。3本の同時実行（0190 / 0151 / 0147）とはファイルが交わらない。

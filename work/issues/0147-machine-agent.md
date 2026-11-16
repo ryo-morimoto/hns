@@ -1,9 +1,9 @@
 # 0147: マシンエージェント（cloudflared・署名）
 
 status: open
-priority: plan
+priority: now
 depends-on: 0145
-touches: packages/machine/
+touches: packages/machine/, docs/packages.md, oxlint.config.ts, vitest.config.ts, package-lock.json, work/issues/0147-machine-agent.md
 
 ## Goal
 
@@ -38,5 +38,6 @@ sandbox・hide・env 純度は環境依存なので 0194 に分け、この issu
 - 2026-11-11: 0143 の review を受けて、デバイス鍵を「秘密鍵はマシン / 公開鍵は D1」に直し、hide の読み取りと
   「隠した場所から鍵が読めない」実機テストを AC に追加した。
 - 2026-11-11: 再レビューを受けて、machine の env / process に provider 鍵・provider URL が無いことのテストを AC に追加した。
+- 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L3。パッケージ追加に伴う `docs/packages.md`・`oxlint.config.ts`・`vitest.config.ts`・lock を touches に足した。lock owner。
 - 2026-11-11: 0147 / 0146 の並行中に、環境依存の受入条件（bwrap・hide・env 純度・実機確認）を 0194 へ分割。
   0147 は署名・パス封じ込め・上限に絞り、fixture と実 HTTP で先に統合する。

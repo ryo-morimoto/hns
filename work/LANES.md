@@ -1,56 +1,44 @@
 # 実行レーン（変更レーン）
 
 [parallel-change.md](../docs/parallel-change.md) の運用。設計の所有単位（D049 の L0〜L9）は [BOARD.md](BOARD.md)。
-ここには**同時に流している変更だけ**を書く。2026-11-11 時点。
+ここには**同時に流している変更だけ**を書く。2026-11-17 時点。
 
 ## 現在
 
-0141（E8）と 0146（E7）が実装中。0145 は done（b67262e）、E6（0150）は review PASS で main に統合済み（cff01f4）。0188 / 0144 / 0143 / 0183 / 0185 / 0186 / 0187 も main に統合済み。3本目は 0189（E9、D1 の開通）で、統合後に同じレーンで 0151 を開く。
+`now` は 5 件。同時に流すのは 3 本で、いまは 0190 / 0151 / 0147。0142 は lead が 3 本と交わらないうちに閉じる。
+完了したレーンは BOARD の履歴に残る（E1〜E14 は main に統合済み）。
 
-| レーン | issue | 状態 | 次の統合 |
-| --- | --- | --- | --- |
-| E1 | [0188](issues/0188-graphql-only-contract.md) GraphQL を唯一の契約にする | done（66fc2ea）・統合済み | — |
-| E2 | [0144](issues/0144-cf-deploy-env.md) 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | done（648730a, PASS）・統合済み | — |
-| E3 | [0143](issues/0143-secret-placement.md) 秘密の配置（gateway・git はマシン・DEK） | done（4073bc0, PASS）・統合済み | — |
-| E4 | 統合・テスト基盤（このセッション） | 0187 と store test 分割を統合（b883f3f / 689f4c1） | — |
-| E5 | [0145](issues/0145-worker-edge.md) Worker の入口（認証境界・ルーティング・相関 ID） | done（b67262e, PASS）・main に commit | — |
-| E6 | [0150](issues/0150-store-d1-do-backend.md) store を D1 専用にする | done（bd1fabe, review PASS）・main に統合（cff01f4） | — |
-| E10 | [0176](issues/0176-graphql-endpoint.md) Worker に /graphql を載せる | done（09ff2f8、review PASS）・main に統合 | — |
-| E11 | [0177](issues/0177-global-id.md) global id | done（39e7b54、review PASS）・main に統合 | — |
-| E12 | [0178](issues/0178-web-relay-environment.md) web の Relay environment | done（92c4c7a、review PASS）・main に統合 | — |
-| E13 | [0179](issues/0179-sidebar-relay.md) サイドバーを Relay で読む | done（31a8276、review PASS）・main に統合 | — |
-| E14 | [0180](issues/0180-codegen-gate.md) codegen をゲートに組み込む | done（HEAD、review PASS）・main に統合 | — |
-| E7 | [0146](issues/0146-session-do.md) Session DO（PiHarness・会話・run） | done（024bb03、review PASS）・main に統合 | — |
-| E8 | [0141](issues/0141-durability-contract.md) 耐久の契約 | 実装中（docs / core の型） | 0140 done |
-| E9 | [0189](issues/0189-d1-wiring.md) Worker から D1 の store を開通させる | done（5783a92、review PASS）・main に統合 | 完了 |
+| レーン | issue | 所有するパス | owner / reviewer | 状態 | 次の統合 |
+| --- | --- | --- | --- | --- | --- |
+| E15 | [0190](issues/0190-workspace-debt.md) workspace の低負債 | `packages/workspace/` | lane-0190 / reviewer-0190 | 作業中 | 1（小さい・依存なし） |
+| E16 | [0151](issues/0151-provider-gateway.md) provider gateway | `server/src/gateway/`, `server/test/gateway/`, `store/src/migrations/`, `tools/deploy/` | lane-0151 / reviewer-0151 | 作業中 | 2（store migration の枠を持つ） |
+| E17 | [0147](issues/0147-machine-agent.md) マシンエージェント | `packages/machine/`, `docs/packages.md`, `oxlint.config.ts`, `vitest.config.ts`, lock | lane-0147 / reviewer-0147 | 作業中（lock owner） | 3（依存なし・新パッケージ） |
+| L | [0142](issues/0142-lease-fencing.md) lease と fencing | `core/src/lease.ts`, `core/src/index.ts`, `core/{README,CHANGELOG}.md`, `docs/durability.md`, `docs/workspace.md` | lead / reviewer-0142 | 先行して閉じる | 0（0156 を開ける） |
 
-- 0187 は TSDoc / doctest / tsdown / TypeDoc を 7 commit（be0fbb1..b883f3f）で統合し、store.test の機能分割を 689f4c1 で追加した。現在の main は 0144 の rebase 後（aa1ac20 以降）。
-- 0144 は `tools/deploy/`、gate の deploy stage、`package.json` / lock を統合した。root lock owner の変更は完了している。
-- 0031 は done（CI 接続は受入条件ごと 0041 へ移管）。0141 は `in-progress` のまま、次の変更レーン候補。0037 は 0188 が superseded した。
-- 0150 は `node:sqlite` を削除し、D1 専用の store と miniflare の実 SQLite のテストに移した（D064）。0145 の上に rebase して main に統合済み（cff01f4）。
+- E15 / E16 / E17 の `touches` は交わらない。共有ファイルは E17 が lock、E16 が store migration と `tools/deploy/` を持つ。
+- E16 が `tools/deploy/` を持つあいだ、0160 / 0161 は開かない（直列化点）。
+- `server/src/index.ts` / `edge/handler.ts` / `edge/worker.ts` は 0145 の所有のまま。0159 は 0151 の統合後に開く。
+- 待機: [0159](issues/0159-live-ws.md)（3 本のどれかが空いたら E18）。
+- lead は 3 本の review と統合、BOARD / LANES の更新を持つ。実装は 0142 だけ。
 
 ## 統合待ち
 
-なし。0175 / 0183 / 0185 / 0188 / 0144 / 0143 / 0145 / 0150 / 0186 / 0187 は main に統合済み。
-0187 の統合時は `npm run check`（193 tests、build、knip）、store test 分割後は 194 tests、0144 統合後は 201 tests、0150 統合後は 249 tests で通過した。
+なし。
 
 ## 次の変更レーン候補
 
-| 候補 | 依存 | touches | 判定 |
-| --- | --- | --- | --- |
-| [0141](issues/0141-durability-contract.md) 耐久の契約 | 0140 done | `docs/durability.md`, `docs/workspace.md`, `packages/core/src/durability.ts` | **E8 で実装中** |
-| [0146](issues/0146-session-do.md) Session DO | 0145 done | `packages/server/src/do/`, `packages/agent/` | **E7 で実装中** |
-| [0189](issues/0189-d1-wiring.md) D1 の開通 | 0145 / 0150 done | `store/src/migrations/`, `server/src/edge/env.ts`, `server/package.json`, `package-lock.json`（空き）, `tools/deploy/cloudflare.config.ts`, `ARCH.md` | **E9（3本目、design review PASS）** |
-| [0151](issues/0151-provider-gateway.md) provider gateway | 0143 / 0144 done | `server/src/gateway/`, store の migration | 0189 の後、同じレーン |
-| [0190](issues/0190-workspace-debt.md) → [0191](issues/0191-workspace-perf.md) | 0141 未マージ | `packages/workspace/` | 0141 の統合後。L4 が開く前 |
-| [0142](issues/0142-lease-fencing.md) lease と fencing | 0141 未マージ | `packages/core/src/lease.ts` | 0190 / 0191 の後 |
-| [0153](issues/0153-r2-object-store.md) ∥ [0156](issues/0156-journal-in-do.md) | 0141 / 0142 | `workspace/src/objects.ts`, `server/src/do/workspace.ts` | 0142 の後 |
-| [0147](issues/0147-machine-agent.md) → [0194](issues/0194-machine-sandbox.md) | 0145 done | `packages/machine/` | 0189 か 0151 の後 |
-| [0176](issues/0176-graphql-endpoint.md) /graphql → 0177〜0180 | 0146 未マージ | `packages/server/src/graphql/` | 0146 の統合後 |
-| 0184 / 0186 / 0187 / 0188 | — | — | done。候補から外す |
+昇格の条件と順序は [BOARD.md](BOARD.md) の「次の昇格」に置く。依存が解けたら lead が `now` に上げ、ここに1行足す。
 
-0141 の統合後は 0190 → 0191 を先に置く（workspace の窓が L4 で閉じるため）。0142 → 0153 ∥ 0156 が続く。
-0189 の統合後は同じレーンで 0151、その後に 0147。0176 以降は 0146 の統合直後。
+| 候補 | 前提 | レーン | 判定 |
+| --- | --- | --- | --- |
+| [0156](issues/0156-journal-in-do.md) Workspace DO の骨格 | 0142 done | L4 | 0142 の直後 |
+| [0191](issues/0191-workspace-perf.md) workspace の性能 | 0190 done | L4 | 0190 と同じレーンで続ける |
+| [0152](issues/0152-real-provider.md) 実プロバイダ | 0151 done | L9 | 0151 と同じレーンで続ける |
+| [0153](issues/0153-r2-object-store.md) R2 | 0191 done | L4 | workspace の窓が閉じてから |
+| [0048](issues/0048-store-identity.md) store/identity | 0151 done（migration の枠） | L1 / L6 | 0069 / 0070 が続く |
+| [0194](issues/0194-machine-sandbox.md) / [0148](issues/0148-machine-registry.md) / [0165](issues/0165-safety-reeval.md) | 0147 done | L3 | 0148 より 0194 / 0165 を先に置いてよい |
+| [0160](issues/0160-ui-delivery.md) UI の配信 | 0159 done | L7 | 0105 / 0103 の順序は 0182 |
+| [0149](issues/0149-d1-projection.md) 索引 | 0151 done + GraphQL rescope | L5 | 0115 / 0121 の前提 |
 
 ## 更新の規則
 

@@ -1,9 +1,9 @@
 # 0159: ライブ更新の WS 化（SSE の置き換え）
 
 status: open
-priority: plan
+priority: now
 depends-on: 0146
-touches: packages/server/src/ws.ts, packages/core/src/stream.ts, packages/web/src/live/
+touches: packages/server/src/ws.ts, packages/core/src/stream.ts, packages/server/src/do/session.ts, packages/server/test/do/, packages/web/src/live/, packages/web/src/app/, packages/web/test/live/, work/issues/0159-live-ws.md
 
 ## Goal
 
@@ -28,4 +28,4 @@ touches: packages/server/src/ws.ts, packages/core/src/stream.ts, packages/web/sr
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。- 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L2。3本が空くまで待機し、`do/session.ts` と `web/src/app/` を touches に足した。
