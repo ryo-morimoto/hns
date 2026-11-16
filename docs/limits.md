@@ -33,8 +33,12 @@ Durable Object と R2 は、金額ではなく**行数とリクエスト数**で
 | R2 オブジェクト | `cost_limits.r2_objects_limit` | `cost_turn.r2_objects` の当月 SUM | 同上 |
 | provider（USD） | `provider_gateway.month_limit`（0151） | 同じ行の `month_spent`（当月キーのとき） | 同上（gateway の 429 と二段） |
 
-- **記録**: 1 ターン = `cost_turn` の 1 行（`id` は送信の requestId。再送は同じ行で、二重計上しない）。行は D1
+- **記録**: 1 ターン = `cost_turn` の 1 行（キーは `(conversation_id, id)`、`id` は送信の requestId）。行は D1
   （確定した記録は D1、実行中の状態は DO = D049）。月次は列の集計で、カウンタ行を持たない。
+  - requestId を付けない送信は、再送でもクライアントから見て別の依頼なので**別の行**になる（harness 側も
+    別の submission になる）。再送で二重計上を避けるには requestId を付ける。
+  - 記録は消さない。月次の上限の根拠そのもので、消すと判定が過去に戻る。規模は 1 ターン 1 行
+    （月 1 万ターンで 1 万行）で、集約して置き換える場合も先に合計を残す。
 - **計上**: 失敗したターンも 1 行（行はもう書かれている）。`outcome` は `completed` / `failed` の 2 値で、
   上限判定はどちらも合計する。abort は別値にしない（settlement の理由は自由文で、閉じた語彙ではない）。
 - **アラート**: `warn_ratio` / `critical_ratio`（既定 0.5 / 0.8）を跨いだターンで、`cost: alert <metric> <level> <used> <limit>`
@@ -44,4 +48,7 @@ Durable Object と R2 は、金額ではなく**行数とリクエスト数**で
   503 `limit_unavailable`（fail closed）。
 - **値**: コードに直書きしない。`cost_limits` の seed（無料枠の桁）を運用の `UPDATE` で変える。既定値・手順・
   アラートの受け取り方は [deploy/limits/README.md](../deploy/limits/README.md)。
+- **DB binding が無い環境**: コスト面を配線しない（上限が掛からない）。これはローカルの unit テスト専用で、
+  配備の Worker は必ず `DB` を bind する（無い環境で黙って上限なしにしないための区別）。
+  binding はあるが上限・当月合計・provider 行が読めない場合は 503 `limit_unavailable` で止める。
 - **実測**: 1 ターンの行・リクエスト・R2 の実測と月 1 万ターンへの外挿は [RESULTS](../deploy/limits/RESULTS.md)。

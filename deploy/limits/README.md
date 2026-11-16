@@ -16,8 +16,9 @@
 | R2 オブジェクト | 同上 | `r2_objects_limit` | `cost_turn.r2_objects` の当月 SUM |
 | provider（USD） | `provider_gateway`（migration 2 / 0151） | `month_limit` | `month_spent`（`month_key` が当月のとき） |
 
-`cost_limits` は 1 行（`id = 'cost'`）。既定は無料枠の桁（行 5,000万 / リクエスト 100万 / オブジェクト 100万、
-docs/durability.md §7）。provider の既定は日 5 / 月 50 USD（0151）。
+`cost_limits` は 1 行（`id = 'cost'`）。既定は行 5,000万・R2 オブジェクト 100万（[docs/durability.md](../../docs/durability.md) §7 の
+無料枠の桁）と、同じ桁に置いた DO リクエスト 100万（§7 の数字ではなく、この配備の運用方針）。provider の既定は
+日 5 / 月 50 USD（[docs/auth.md](../../docs/auth.md)）。
 
 ## 見る（D1 に 1 文ずつ）
 
@@ -25,9 +26,11 @@ docs/durability.md §7）。provider の既定は日 5 / 月 50 USD（0151）。
 -- 上限とアラート閾値
 SELECT * FROM cost_limits;
 
--- 当月の使用量（UTC の月初で範囲を切る）
+-- 当月の使用量（UTC の月初から翌月初まで。製品の readMonthlyTotal と同じ境界）
 SELECT SUM(do_rows) AS do_rows, SUM(do_requests) AS do_requests, SUM(r2_objects) AS r2_objects
-FROM cost_turn WHERE at >= date('now', 'start of month');
+FROM cost_turn
+WHERE at >= date('now', 'start of month')
+  AND at < date('now', 'start of month', '+1 month');
 ```
 
 provider の当月支出は [docs/auth.md](../../docs/auth.md) の運用（`provider_gateway` の 1 行）を見る。
@@ -77,6 +80,15 @@ cost: alert doRows critical 41000000 50000000
 - 記録（`cost_turn` の INSERT）が失敗してもターンは成功のまま。ログだけ残す。金額の外側の天井は
   provider 側の hard limit（[docs/auth.md](../../docs/auth.md) §gateway）。
 
+## 記録と保持
+
+- 1 ターン = `cost_turn` の 1 行。キーは `(conversation_id, id)` で、`id` は送信の requestId。requestId を
+  付けない送信は別の行になる（再送で二重計上しないため、クライアントは requestId を付ける）。
+- `cost_turn` は消さない。月次の上限の根拠で、消すと判定が過去に戻る。規模は 1 ターン 1 行（月 1 万ターンで
+  1 万行、年 12 万行）。将来 GC するなら、先に月次合計を別に残してから行う。
+- D1 の行数上限はこの規模より十分大きい。増え方が想定を超えたら、まず `cost_limits` の上限ではなく
+  token 単位 commit のような書き込みの設計を疑う。
+
 ## 実測
 
-1 ターンの実測（DO 行 9 / リクエスト 1 / R2 0）と月 1 万ターンへの外挿は [RESULTS.md](RESULTS.md)。
+1 ターンの実測と月 1 万ターンへの外挿は [RESULTS.md](RESULTS.md)（数値はここに置かない）。
