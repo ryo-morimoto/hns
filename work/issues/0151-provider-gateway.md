@@ -1,6 +1,6 @@
 # 0151: provider gateway（鍵の分離・予算・緊急停止）
 
-status: open
+status: done
 priority: now
 design: agreed
 design-ref: D047, D048
@@ -14,12 +14,12 @@ gateway は **素の Worker**。予算のカウンタは D1 の 1 文で持つ�
 
 ## Acceptance criteria
 
-- [ ] gateway は「モデル呼び出し」だけを受ける（任意 URL の proxy にしない）
-- [ ] 鍵は gateway の secret のみ。harness 側の env に鍵が無いことをテストで固定
-- [ ] 日次・月次の上限を D1 の行に持ち、`UPDATE ... WHERE spent < limit` で原子に判定する
-- [ ] 超えたら 429。緊急停止フラグは即時 503
-- [ ] 鍵のローテーション手順（停止 → 入れ替え → 再開）
-- [ ] provider 側の支出上限とアラートの設定手順
+- [x] gateway は「モデル呼び出し」だけを受ける（任意 URL の proxy にしない）
+- [x] 鍵は gateway の secret のみ。harness 側の env に鍵が無いことをテストで固定
+- [x] 日次・月次の上限を D1 の行に持ち、`UPDATE ... WHERE spent < limit` で原子に判定する
+- [x] 超えたら 429。緊急停止フラグは即時 503
+- [x] 鍵のローテーション手順（停止 → 入れ替え → 再開）
+- [x] provider 側の支出上限とアラートの設定手順
 
 ## テスト条件
 
@@ -73,6 +73,15 @@ gateway は **素の Worker**。予算のカウンタは D1 の 1 文で持つ�
   gateway の Worker に `workersDev: false` / `previewUrls: false` を明示した。テストで固定。
   0160 で route を付けるときは、呼び出し元の認証を同時に足す。
 
+## Result
+
+- verdict: **PASS**（初回 PASS blocking 0 → 中 1（workers.dev 公開）を bbc2631 で修正 → 再レビュー PASS）
+- reviewer: reviewer-0151（この変更を書いていない別エージェント）
+- HEAD: 624052c（rebase 後。main に ff 統合）
+- 受入: 6/6。`npm run check` exit 0（405 tests / 79 files、26.0s）
+- blocking: なし。修正した中 1 件: route の無い Worker は workers.dev に既定公開されるため、`workersDev` / `previewUrls` を false に固定（bbc2631、回帰テスト + docs + U-01）。
+- 非 blocking（低 8、follow-up）: refund の予約時刻 / auth.md の失敗時課金の絶対表現 / docs/engineering.md の古い記述 / 鍵名の型ガード / テスト名と層 / wrangler 二重導入の decisions / config→wrangler 写像の gate 固定。
+
 ## やらないこと
 
 - OAuth の更新（0128）。
@@ -95,3 +104,4 @@ gateway は **素の Worker**。予算のカウンタは D1 の 1 文で持つ�
   `deploy.sh` は gateway → main の順に配備し gateway 用 secrets ファイルを検査する。gate の deploy stage は
   2 つの dry-run を回す。手順は `docs/auth.md` の「gateway（provider 鍵）」に追記（運用 SQL・provider 側上限・ローテーション）。
   `npm run check` の結果はレビュー時に追記する。
+- 2026-11-17: reviewer-0151 PASS（初回 blocking 0）。workers.dev の公開を bbc2631 で修正し再レビュー PASS。rebase 後 main へ ff 統合（624052c）。`npm run check` は main でも exit 0。
