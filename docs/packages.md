@@ -99,7 +99,7 @@ REST は事前に宣言しない（D059）。GraphQL に載せない面（passke
 ## exports の切り方
 
 - `@hns/core`: `.`（モデルと検証）、`./graphql`（モデルから起こした SDL。web の bundle には入れない）。
-- `@hns/workspace`: `.`（Workspace）、`./sandbox`（ExecutionEnv デコレータ）。
+- `@hns/workspace`: `.`（Workspace）、`./sandbox`（ExecutionEnv デコレータ）、`./objects`（git object 互換の R2 ストア）。
 - `@hns/store`: `.`（D1 のリポジトリ。Worker はこれをそのまま import する。`node:sqlite` を持たない）、
   `./identity`（認証・秘密）。exec を使わないアプリが bubblewrap に依存しないようにする。
 - `@hns/agent`: `.`（Node の Agent）と `./session`（Worker-safe な複数会話 runtime。node: を import しない）。

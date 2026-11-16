@@ -1,6 +1,6 @@
 # 0153: R2 オブジェクトストア（git object 互換・pack アップロード）
 
-status: open
+status: done
 priority: now
 design: agreed
 design-ref: D048, docs/durability.md §1・§5
@@ -13,12 +13,12 @@ touches: packages/workspace/src/objects.ts, packages/workspace/src/objects.test.
 
 ## Acceptance criteria
 
-- [ ] ファイル内容は blob として content-addressed に保存（key = object id）
-- [ ] checkpoint は pack 1個のアップロードにまとめる（1 Run = 1 Class A を目標）
-- [ ] ack 済み保存は content を R2 に置いてから返す（0141 の ack 定義）
-- [ ] 復元に必要な object の一覧を commit から辿れる
-- [ ] 重複排除（同じ content は 1 回だけ）
-- [ ] object lock（bucket lock）の設定を手順化する。R2 に bucket versioning が無いことを踏まえ、上書きは key の設計（content-addressed・既存 key は書かない）で防ぐ
+- [x] ファイル内容は blob として content-addressed に保存（key = object id）
+- [x] checkpoint は pack 1個のアップロードにまとめる（1 Run = 1 Class A を目標）
+- [x] ack 済み保存は content を R2 に置いてから返す（0141 の ack 定義）
+- [x] 復元に必要な object の一覧を commit から辿れる
+- [x] 重複排除（同じ content は 1 回だけ）
+- [x] object lock（bucket lock）の設定を手順化する。R2 に bucket versioning が無いことを踏まえ、上書きは key の設計（content-addressed・既存 key は書かない）で防ぐ
 
 ## テスト条件
 
@@ -76,9 +76,19 @@ R2 の書き込み回数（Class A）そのものはテストで数えない。�
 - .git 全体の同期（必要になったら別 issue）。
 - R2 の bucket versioning の有効化。R2 にまだ無い（2026-11 時点）。上書きは key の設計で防ぎ、消させないのは bucket lock。
 
+## Result
+
+- verdict: **PASS**（reviewer-0153、blocking 0）
+- reviewer: reviewer-0153（この変更を書いていない別エージェント）
+- HEAD: 85c3511（rebase 後。main に ff 統合）
+- 受入: 6/6。`npm run check` exit 0（527 tests / 95 files、33.3s）
+- 確認: object id は実 git の hash-object と一致（空 / hello / 非 UTF-8 / 1MB / commit / tree）。pack は実リポジトリの object から作り、空リポジトリで `git index-pack` → `cat-file` / `rev-list --objects` で commit→tree→blob を取得。境界 size 0〜70000 も一致。実 R2 binding の integration は skip していない。
+- 非 blocking（低 8、follow-up）: docs の exports に ./objects を追記（本 commit で対応）/ unit の pack 検査が entry header を見ない（検出は integration）/ R2 型と ObjectBucket の型結びつきが無い（0157 で satisfies）/ head の存在だけの dedupe は同キー別内容を黙って通す / head→put の TOCTOU / 製品経路から未接続の明記 / 不完全 closure の restore 文言が強い / pack のメモリ上限が未記載。
+
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
 - 2026-11-17: 第2波で now へ（0154 の checkpoint と 0169 の 256KB 超の本文を開ける）。BOARD は別セッションの編集が落ち着いてから lead が反映。
 - 2026-11-17: テスト条件（C1–C14）とテスト設計（T1–T10）、Design を追加。`touches` に実装に必要なファイル（index / package exports / tsdown / integration / deploy 配線 / docs/durability.md）を追加。受入6を「versioning と object lock」から「object lock + key 設計」に修正した（R2 に bucket versioning が無いため。理由は Design と docs/durability.md §5）。
 - 2026-11-17: 実装。`packages/workspace/src/objects.ts` に object id（crypto.subtle）・git v2 pack・put / get / head / list・重複排除・checkpoint pack を置き、`@hns/workspace/objects` として公開。unit（11）と、`cf dev` の実 R2 binding で pack を `git index-pack` / `cat-file` / `rev-list` に通す integration（2）を追加。`OBJECTS` binding を `tools/deploy/cloudflare.config.ts` と `packages/server/src/edge/env.ts` に配線。`docs/durability.md` §5 に key の形と bucket lock の手順を追加。`npm run check` exit 0（lint / fmt / typecheck / 527 tests / build / deploy dry-run / knip）。独立レビューは未実施。
+- 2026-11-17: reviewer-0153 PASS（blocking 0）。main へ ff 統合（85c3511）。低 8 を Result に記録（1 は本 commit で docs を追記）。

@@ -7,3 +7,4 @@
 - Journal: atomic saves, a bounded set of settled operations (`maxSettledOps`), and one content per `operationId`.
 - `contains()` for cwd containment, and `rooted: "required"` to refuse opening without the helper.
 - Sandbox: bubblewrap detection, \`createSandboxEnv\`, and \`createNoExecEnv\`.
+- `./objects`: git-compatible object ids and v2 packs over R2, with dedupe and checkpoint packs.
