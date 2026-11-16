@@ -72,6 +72,20 @@ test("a failed read rejects instead of returning nothing", async () => {
   await expect(createRelaySource(environment).listProjects()).rejects.toThrow(/failed/u);
 });
 
+// Catches: a cached rejection that makes every retry fail without asking again.
+test("a failed read is retried on the next call", async () => {
+  let attempts = 0;
+  const { environment } = createTestEnvironment((call) => {
+    attempts += 1;
+    return attempts === 1 ? undefined : workspaceFixture(call);
+  });
+  const source = createRelaySource(environment);
+  await expect(source.listProjects()).rejects.toThrow(/failed/u);
+  const projects = await source.listProjects();
+  expect(projects.length).toBe(3);
+  expect(attempts).toBe(2);
+});
+
 // Catches: a non-2xx answer treated as a GraphQL response.
 test("a non-2xx response is a network failure", async () => {
   const { environment } = createTestEnvironment(() => undefined);

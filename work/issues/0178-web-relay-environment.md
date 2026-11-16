@@ -3,7 +3,7 @@
 status: in-progress
 priority: now
 depends-on: 0177
-touches: packages/web/src/, packages/web/test/, packages/web/{package.json,tsconfig.json,vite.config.ts,vite.relay.ts}, packages/web/schema.graphql, packages/server/src/graphql/, packages/server/package.json, tools/codegen/, tools/gate/stages.ts, relay.config.json, package.json, package-lock.json, vitest.config.ts, docs/decisions.md, work/issues/0178-web-relay-environment.md, work/BOARD.md, work/LANES.md
+touches: packages/web/src/, packages/web/test/, packages/web/{package.json,tsconfig.json,vite.config.ts,vite.relay.ts,README.md}, packages/web/schema.graphql, packages/server/src/graphql/, packages/server/{package.json,tsdown.config.ts}, tools/codegen/, tools/gate/stages.ts, relay.config.json, package.json, package-lock.json, .oxfmtrc.json, vitest.config.ts, docs/decisions.md, work/issues/0178-web-relay-environment.md, work/BOARD.md, work/LANES.md
 
 ## Goal
 
@@ -61,3 +61,6 @@ web から `/graphql` を Relay で読む土台を作る。あわせて、0100 �
 - 2026-11-10: 0188 で typed client と網羅 fixture map を削除した。置き換え対象は `WorkspaceSource`。
 - 2026-11-17: 実装。`createEnvironment`（network + store、fetch 注入可）、`ProjectsQuery` / `WorkspaceQuery` の artifact、`createRelaySource`（global id を model の id に復号、1 project 1 read を共有）、fixture を GraphQL payload に置き換え、Shell は environment から source を作る。schema は `buildSchemaSdl()` から `npm run codegen` で生成（D074）。web 41 tests / `npm run check` 通過。
 - 2026-11-17: fragment のコロケーション（component が選択を持つ）は [0179](0179-sidebar-relay.md)。この issue の `createRelaySource` は shell の読みを Relay に移す橋で、0179 で消える。
+- 2026-11-17: 独立レビュー 1回目 FAIL（blocking 2: codegen の再現性（整形済み artifact と raw 出力の不一致）と、server の `./graphql` が dist に無い）。artifact を oxfmt の対象外にして raw を commit、schema ヘッダと README に再生成を明記、tsdown の entry に `src/graphql/index.ts` を追加。C2 / C3 のテストを追加（store 再利用、QueryFailure）。再レビュー **PASS**（blocking 0、低 8）。
+- 2026-11-17: 再レビューの低を反映。`oxfmt docs` で混入させた docs の整形（約 400 行）を戻し、`docs/packages.md` の2行だけ残した。web README の古い記述（fixture 前提）を更新、失敗 read の再試行テストを追加、artifact ヘッダに再生成コマンドを書かない判断を D074 に追記。
+- 2026-11-17: 残件（低）: runs は WorkflowRun の GraphQL 投影が無いため空（投影は別 issue）。実サーバとの `/graphql` 往復（E2E）は未確認。`babel-plugin-relay` は nested の graphql@15 を peer として持つ（直接依存は 16.11.0 で固定）。

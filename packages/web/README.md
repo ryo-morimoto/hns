@@ -6,8 +6,11 @@
 `packages/web/src/__generated__/`（relay-compiler の artifact）を書く。どちらも commit し、手で編集しない。
 `__generated__` は oxfmt の対象外（codegen の出力をそのまま commit する）。
 
-hns の React UI。読み取りは `WorkspaceSource`（モデルを返す口）を通し、response 型をここで手書きしない。
-今は fixture 実装だけで、0178 が Relay に置き換える。
+## 読み
 
-- `npm run dev -w @hns/web`: Vite。server はまだ無い（0145 が `/graphql` の口を作る）
+読みは Relay の environment（`src/relay/environment.ts`）から行う。shell は `createRelaySource` を
+経由して `ProjectsQuery` / `WorkspaceQuery` を読み、選択を component へ移すのは 0179。
+
+- `npm run dev -w @hns/web`: Vite。`/graphql` へは同じ origin で送る（配信は 0160）
 - `npm run typecheck / build / test -w @hns/web`
+- `npm run codegen`: schema と artifact の再生成（リポジトリのルートで実行）
