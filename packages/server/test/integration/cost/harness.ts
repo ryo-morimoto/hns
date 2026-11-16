@@ -352,36 +352,23 @@ export async function startCost(): Promise<CostHarness> {
   await symlink(join("..", "..", "node_modules"), join(directory, "node_modules"));
   await writeFile(join(directory, "cloudflare.config.ts"), CONFIG);
   await writeFile(join(directory, "worker.ts"), WORKER);
-  // A free port is taken between the probe and cf dev's bind, so another suite (this file runs
-  // beside the gateway and session suites) can win the race. That is a lost random resource,
-  // not a product failure: start again on a new port, and report the output if both lose.
+  // Two shared addresses can make cf dev exit during startup: the HTTP port taken between the
+  // probe and the bind, and the debug inspector, which wrangler fixes at 9229 for every instance
+  // (a forwarded --inspector-port is ignored). The other integration suites run their own dev
+  // servers beside this one, so either can be lost. That is a lost shared resource, not a
+  // product failure: start again on a fresh HTTP port and report the output if both lose.
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const port = await freePort();
-    // The inspector proxy defaults to 9229, which the gateway and session dev servers already
-    // claim; give this one an address of its own. Everything after "--" is forwarded as-is.
-    const child = spawn(
-      CF,
-      [
-        "dev",
-        "--mode",
-        "development",
-        "--port",
-        String(port),
-        "--",
-        "--inspector-port",
-        String(port + 500),
-      ],
-      {
-        cwd: directory,
-        detached: true,
-        env: {
-          ...process.env,
-          XDG_CONFIG_HOME: join(directory, "config"),
-          XDG_CACHE_HOME: join(directory, "cache"),
-        },
-        stdio: ["ignore", "pipe", "pipe"],
+    const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
+      cwd: directory,
+      detached: true,
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: join(directory, "config"),
+        XDG_CACHE_HOME: join(directory, "cache"),
       },
-    );
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     const running = collect(child);
     const deadline = Date.now() + READY_TIMEOUT_MS;
     let ready = false;
