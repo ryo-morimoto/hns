@@ -306,7 +306,8 @@ test("a socket is refused as a non-regular file", async () => {
     async (fixture) => {
       const server = createServer();
       const socketPath = join(fixture.root, "agent.sock");
-      await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
         server.listen(socketPath, resolve);
       });
       try {
