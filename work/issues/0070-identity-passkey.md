@@ -1,7 +1,7 @@
 # 0070: passkey の登録・ログインとセッション
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0048
 touches: packages/store/src/identity/passkey.ts, packages/store/test, packages/store/package.json, package-lock.json

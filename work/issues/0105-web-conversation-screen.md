@@ -1,10 +1,10 @@
 # 0105: Conversation 画面（transcript / streaming / abort）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0049, 0102, 0119, 0145, 0146, 0159
-touches: packages/web/src/screens/conversation, packages/web/src/components/Transcript.tsx, packages/web/src/components/Composer.tsx, packages/web/src/components/Progress.tsx, packages/web/test/conversation
+touches: packages/web/src/screens/conversation, packages/web/src/components/Transcript.tsx, packages/web/src/components/Composer.tsx, packages/web/src/components/Progress.tsx, packages/web/test/conversation, packages/core/src/stream.ts, packages/server/src/ws.ts
 
 ## Goal
 
@@ -28,6 +28,14 @@ touches: packages/web/src/screens/conversation, packages/web/src/components/Tran
 - PoC の「会話は詳細」を守る。ヘッダーからワークスペースへ戻れる
 - streaming の delta は 0050 のイベント型。まだ無い場合は state の再取得で動かし、TODO(0050) として残す
 - tool result は折りたたみ。code fence / inline code / URL だけを安全に描画する
+
+## 追記（D077 の chat 送信、2026-11-17）
+
+- 0159 は done だが、**client → server の send は未実装**（server → client の delta だけ）。D077 の chat 送信はこの issue が残りを実装する。
+- フレーム: `send` { conversationId, clientMessageId, text } / `accepted` { clientMessageId, messageId } / `rejected` { clientMessageId, code }。REST POST は作らない。
+- 同じ `clientMessageId` の再送は二重に送らない（DO で dedupe）。切断・再接続で未 ack の send を再送できる。
+- 0146 の send RPC を使う。認証は upgrade の session（既存）。
+- テスト: 2 回送信 / 切断中の再送 / 未知 conversation / 空 text / 64KiB 超。
 
 ## やらないこと
 

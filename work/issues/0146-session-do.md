@@ -145,13 +145,13 @@ DO はこの runtime を 1 つ持ち、内部 RPC（`/rpc/conversations...`）�
 
 ## 未確定
 
-| ID | 論点 | 仮説 / 決定 | 責任者・トリガー |
+| ID | 論点 | 決定 | 再判定 |
 | --- | --- | --- | --- |
-| U-01 | wrangler パッケージ自体も禁止か | cf の内部 bundler 依存として残す。直接実行しない | user。依存自体を拒否したとき |
-| U-02 | send を wait のままにするか | 0146 は wait。0152 / 0159 で admit + stream | author。実モデルで 10s を超えたとき |
-| U-03 | metadata index が育ちすぎる | 1 session document。0149 で D1 へ | 0149。会話数 1,000 超 |
-| U-04 | title の rename / archive / delete | 0029 / 0130 | 0029。UI が rename を必要としたとき |
-| U-05 | staging / production の model | 0152 まで 503 | 0152 |
+| U-01 | wrangler パッケージ自体も禁止か | 決定（2026-11-17 user）: cf の内部 bundler 依存として残す。直接実行しない | 依存自体を拒否したとき |
+| U-02 | send を wait のままにするか | 決定（2026-11-17 user）: 0146 は wait。0152 / 0159 で admit + stream | 実モデルで 10s を超えたとき |
+| U-03 | metadata index が育ちすぎる | 決定（2026-11-17 user）: 1 session document。0149 で D1 へ | 会話数 1,000 超 |
+| U-04 | title の rename / archive / delete | 決定（2026-11-17 user）: 0029 / 0130 | 0130 の着手時 |
+| U-05 | staging / production の model | 決定（2026-11-17 user）: 0152 まで 503 | 0152 |
 
 ## やらないこと
 
@@ -177,6 +177,7 @@ DO はこの runtime を 1 つ持ち、内部 RPC（`/rpc/conversations...`）�
   token 単位 commit を検出できない、alarm 経路が未テスト。limit を valibot で検証して 400 にし、RPC の
   400/404/413/415/503/500 を unit で固定。row テストを長い応答 + assistant entry 1 件に強化。
   `Session` に runtime factory を注入し、fake DO state + 実 Harness で alarm を二重に呼ぶ integration を追加。
+- 2026-11-17: 未確定 U-01〜U-05 をユーザーが確認（仮説のまま確定）。U-04 の再判定トリガーを 0130 に直した。
 
 ## Result
 

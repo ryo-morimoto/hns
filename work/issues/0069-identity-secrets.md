@@ -1,7 +1,7 @@
 # 0069: 秘密の暗号化（スコープと DEK）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0048
 touches: packages/store/src/identity/secrets.ts, packages/store/test

@@ -1,8 +1,8 @@
 # 0032: 6パッケージへの移植
 
-status: open
-priority: plan
-design: pending
+後継: 0033 / 0034 / 0047 / 0100 / 0145 / 0146（server は 0035 経由）。machine は 0147。
+
+status: superseded
 depends-on: 0031
 touches: packages/, work/poc/
 
@@ -25,3 +25,4 @@ PoC（`work/poc`）を、決めた 6 パッケージに移植する。順序と�
 - 2026-11-07: `@hns/store` を作成。Row 型と公開型への変換（9/9）。
 - 2026-11-07: valibot で境界 parse。ErrorCode、Workflow 状態遷移。store 12/12・core 8/8。
 - 2026-11-07: store の残りを 0047（SQLite / repositories）と 0048（identity）に分割。server の前提を 0035 に追記。
+- 2026-11-17: 0033 / 0034 / 0047 / 0100 / 0145 / 0146（server は 0035 経由）で実質完了し、machine は 0147 に残るため superseded にした（0193）。

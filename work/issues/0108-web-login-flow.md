@@ -1,14 +1,14 @@
 # 0108: Login / passkey / recovery 画面
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0070, 0071, 0102
 touches: packages/web/src/screens/auth, packages/web/src/api/passkey.ts, packages/web/test/auth
 
 ## Goal
 
-passkey の登録・ログイン・復旧コード・2台目の追加・tailnet を、ブラウザで完結させる。
+passkey の登録・ログイン・復旧コード・2台目の追加を、ブラウザで完結させる。
 PRF が無い認証器でも、ロック状態を明示してログインできる。
 
 ## Acceptance criteria
@@ -18,7 +18,7 @@ PRF が無い認証器でも、ロック状態を明示してログインでき�
 - [ ] PRF がある場合だけ DEK を包む。無い場合は「秘密はロック」と明示
 - [ ] 復旧コードは表示一度きり。コピーと「書き留めた」確認
 - [ ] 423 / 429 / 401 / ネットワーク失敗を区別して表示
-- [ ] tailnet モードではログイン画面を出さず、/api/me で状態を出す
+
 - [ ] テスト: 状態遷移、PRF 無し、復旧、ロック、エラー
 
 ## Notes
@@ -29,5 +29,5 @@ PRF が無い認証器でも、ロック状態を明示してログインでき�
 
 ## やらないこと
 
-- tailscale のサーバ側検証（0021 / 0035）
+- tailscale のサーバ側検証（0021 / 0035）。D079 で tailnet は廃止
 - 複数ユーザー / RBAC

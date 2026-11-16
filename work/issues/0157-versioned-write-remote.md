@@ -1,11 +1,11 @@
 # 0157: 版付き書き込みのリモート化（ack が DO を通る）
 
 status: open
-priority: plan
+priority: next
 design: agreed
 design-ref: docs/durability.md §3.1・§3.4
 depends-on: 0033, 0147, 0156
-touches: packages/workspace/src/files.ts, packages/server/src/do/workspace.ts, packages/server/src/routes/files.ts, packages/server/test/routes/files.test.ts
+touches: packages/workspace/src/files.ts, packages/server/src/do/workspace.ts, packages/server/src/files/content.ts, packages/server/test/files/
 
 ## Goal
 
@@ -30,6 +30,14 @@ TOCTOU の閉じ方（dirfd・同一ディレクトリ temp + rename）はマシ
 - ただし git / bash 由来の変更はここを通らない（checkpoint 0154）。
 - 0156 の `apply` は intent / outcome を持たず、再送は conflict を返す。ここで intent / outcome に拡張し、再送は記録済みの outcome を返す（INV-04）。
 - 面（REST / GraphQL）は 0182 の棚卸しで決まる。AC の `POST /workspaces/:id/files` は暫定のパスで、実装時に確定する（D059）。
+
+## 追記（0127 の sandbox 調査、2026-11-17）
+
+- machine の op は health / stat / read / list のみ。**write は 0157 が足す**。
+- パスは `projectRoot` と `path` を**別々に**受け、machine が ROOT を dirfd で開いて `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)` か component walk で解決する。`O_NOFOLLOW` は最終要素にしか効かない。
+- `expectedVersion` の再計算は、この解決の後に行う。
+- テスト: 中間 symlink / `..` / 兄弟 project を拒否する。
+- 出典: [agent-sandbox-designs.md](../research/agent-sandbox-designs.md) の R3 / F3。
 
 ## やらないこと
 

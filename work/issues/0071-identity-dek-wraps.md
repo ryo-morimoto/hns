@@ -1,7 +1,7 @@
 # 0071: 復旧コードと2台目のパスキー（DEK の包み）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0069, 0070
 touches: packages/store/src/identity/wraps.ts, packages/store/test

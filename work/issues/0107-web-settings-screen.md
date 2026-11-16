@@ -1,9 +1,9 @@
 # 0107: Settings 画面（provider / 秘密 / 制限 / backup / 観測）
 
 status: open
-priority: plan
+priority: next
 design: pending
-depends-on: 0039, 0102, 0122, 0123, 0124
+depends-on: 0162, 0102, 0122, 0123, 0124
 touches: packages/web/src/screens/settings, packages/web/test/settings
 
 ## Goal
@@ -25,7 +25,7 @@ touches: packages/web/src/screens/settings, packages/web/test/settings
 ## Notes
 
 - 1画面にセクションを並べるが、各セクションは独立した component にする
-- provider の鍵は「保存済み / 未設定」だけを出し、値を返さない
+- provider の鍵入力は無い（D085）。`validateProvider` の結果だけを出し、値を返さない
 - 変更は optimistic にしない。保存結果を待って表示する
 - 0039 の観測画面と重複する部分は、Settings は要約だけにし、詳細は 0039 に委ねる
 

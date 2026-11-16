@@ -3,9 +3,9 @@
 > 前提変更: 「セルフホスト」の意味は 0140 で限定された（UI は自前、脳は Cloudflare）。
 
 status: open
-priority: plan
+priority: next
 design: pending
-depends-on: 0036, 0145, 0146
+depends-on: 0160, 0145, 0146
 touches: packages/server, docs
 
 ## Goal

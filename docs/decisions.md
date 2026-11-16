@@ -1079,3 +1079,338 @@ BOARD の plan は理由（設計待ち / 順番待ち / 依存待ち）で分�
 
 hns: 優先度は「いつ」、design は「合意できているか」。1つの軸で両方を表さない。
 open 77 件には 2026-11-17 に一度だけ agreed / pending を入れた（agreed 20 / pending 57）。done は遡及しない。
+
+## D077: GraphQL 以外の面を、実装する issue が1つの表で宣言する
+
+date: 2026-11-17 · by: user · issue: 0182
+
+0188 で REST 契約を消したあと、GraphQL に載らない面（passkey / files / hooks / 運用 / machine / me / secrets）と chat の送信面が未割り当てだった。D059 の「実装する issue が schema・認証・handler を同じ変更で足す」を、担当と置き場まで決める。
+
+- **面の割り当て**: passkey と me は 0158（`server/src/auth/`）。secrets は 0107 が GraphQL mutation として持つ（0069 / 0071 の store を使い、ロックは union で返す）。files は 0125（tree / search）と 0157（content）。hooks は 0038。運用（metrics / events / usage）は 0039。machine は 0148（登録は session、疎通はデバイス鍵）。
+- **chat の送信は WS のメッセージ**（`send` / `accepted` / `rejected`、`clientMessageId`）。REST POST は作らない。0159 が型を持つ。
+- **初回 passkey**: `HNS_ENROLL_TOKEN`（32文字以上、Worker secret）を要求する。users が居れば session + 再認証。users 0 で token 未設定なら登録を閉じる（fail closed）。
+- **認証の入口は edge の1つの表**。行は path / method / auth / handler で、auth は session / public / enroll / hook / device の閉じた union。表は最初に landing する REST 面が導入する。
+- **TanStack Query は REST 面のサーバ状態だけ**。GraphQL は Relay、画面の一時状態は React。同じデータを2つのキャッシュに置かない。
+- **GraphQL の書き込み面（Mutation root）は新規 0198**。`buildSchema` に Mutation を足し、feature ごとに `mutations/<name>.ts`。0176 は Query だけで、この面が無いと 0104 / 0105 / 0117 / 0123 / 0126 / 0127 / 0131 が着手できない。
+- `/api/health` は作らない（0145 の3面を維持）。生存は配備と `/api/metrics`、sandbox は 0148 の署名付き health。
+- GraphQL に寄せる（AC の `/api/*` を読み替える）: 0115, 0117, 0121, 0122, 0123, 0124, 0126, 0127, 0131。
+- 0182 の実装で docs/auth.md・docs/observability.md・docs/limits.md・0036・0100・0188 を更新する。
+
+D076 の件数（open 77 / agreed 20）は 0193 以降の増減でずれていた。2026-11-17 の実測は open 74 / agreed 17 / pending 57。
+
+前提が変わる条件: REST 面が2つ以上で同じ封筒・認証の実装を繰り返すとき（共通化を core に戻す）、または chat の送信に request/response の相関が要るようになったとき（WS の ack をやめる）。
+
+## D078: 会話の索引は D1 の conversations を使い、DO の dirtyAt から再送する
+
+date: 2026-11-17 · by: user · issue: 0149
+
+0146 の会話メタデータは Session DO の1 doc。GraphQL の会話一覧は DO の最新 page を読んで project で絞るため、静かな project が欠ける。D1 の `conversations` は 0047 の PoC 由来で、いま誰も書いていない。
+
+- **索引は既存の D1 `conversations`** に `indexed_at` を足して使う（並行テーブルを作らない）。列は Conversation モデル + `indexed_at`。`status` / `machineId` は 0115 / 0116 / 0127 に送る。
+- **書き手は Session DO**。メタデータに内部 `dirtyAt` を持たせ、commit と同じ tx で書く。drain は `pendingIndex` → D1 upsert（単調）→ `markIndexed(ids, version)` を CAS で消す。D1 障害でチャットは止めない。
+- metadata doc は `checkpointWhen: deltasSinceBase >= 32` で checkpoint し、revision を有界にする（実測: 120 turn で revision 121、read 0.01ms。storage の単調増加だけが負債）。
+- **読みは D1 だけ**。`Query.conversations(projectId, first, after, q)` + `nextCursor`。keyset `(updated_at, id)`。DO RPC を使わない。
+- 0145 の「DO から D1 を触らない」に**索引だけの例外**を作る。DO は `@hns/store/conversation-index` の狭い writer だけを使う（root は import しない）。
+- **観測は3層**: 失敗時の構造化ログ（requestId / workspace / conversationId / attempt / error code / pending、本文・秘密なし）→ D1 の `index_state`（1行/workspace、遷移時だけ書く）→ GraphQL `Query.indexState` と 0039 の metrics（`hns_index_pending` / `hns_index_stale_seconds`）。UI は「索引が遅れています」。
+- 再構築は DO の内部 RPC `reindex`。公開トリガーは 0039 / 0198 の後。
+- 鮮度: 索引はその turn で書く。cold load では遅れを検出できないので、「更新中」は live の delta が索引より新しいことを観測したときだけ出す（0159 / 0181）。
+
+前提が変わる条件: D1 の書き込みがボトルネックになったとき（batched / Queues）、または会話数が 1,000 を超えて索引の再構築が分単位になったとき。
+## D079: 入口の認証を A Native（passkey + PRF + デバイス鍵）にし、Access と tailnet を既定にしない
+
+date: 2026-11-17 · by: user · issue: 0048
+
+比較は [work/research/auth-access-options.md](../work/research/auth-access-options.md)。入口を4層（到達性 / ブラウザの身元 / DEK / マシン）に分け、A Native / B Access-only / C Hybrid / D Tailnet / E 共有 token を比べた。
+
+- **A Native**: 公開 Worker + passkey + hns の session（`sid` で端末失効）+ ブラウザの PRF で DEK + マシンはデバイス鍵。
+- **Cloudflare Access は既定にしない**。Worker destination の Access は WebSocket upgrade を 403 にする報告があり（docs issue #31885。custom hostname は未確認）、Access は DEK を守らない（PRF が別に要る）、0040 のセルフホストに持ち込めず、単一ユーザーには二重の儀式になる。
+- **tailnet は製品から外す**（0021 は superseded のまま。0040 の transport として再検討する余地は残す）。
+- Access を前段に置きたい運用は **C（Hybrid）** として後から足せる。依存にはしない。
+- 影響: 0048 は表・リポジトリ・公開面（users / credentials / sessions / user_keys / secrets）。passkey は 0070、暗号は 0069、包みは 0071。0108 の tailnet モードは削除。0158 は passkey + `sid`。
+- 前提が変わる条件: Access の WS が custom hostname で通ることを実測でき、SSO / 端末 posture を製品要求にするとき。または、サーバ鍵で秘密を復号してよいと決めたとき（B）。
+## D080: Project を信頼境界にし、会話の同一性を (project_id, id) にする
+
+date: 2026-11-17 · by: user · issue: 0127
+
+0127 の U-01: 将来 untrusted な project を持つため、**project を信頼境界**にする。1 project = 1 Session DO + 1 Workspace DO（名前 = projectId）。D049 の「1 workspace = 1 Session」を project に広げる。
+
+- 会話の同一性は **(project_id, id)**。pi-durable の id は DO ローカルなので、D1 の `conversations` の PK を `(project_id, id)` にし、global id は `Conversation:<projectId>:<localId>`（0177 の写像）。model の `Conversation.id` はローカルのまま。
+- **A2 は暫定**。実装時に D1 の migration / global id の split が痛い、または 0149 / 0176 の実装で問題が出たら、その時点で再判断する（A1 の composite id へ切り替える余地を残す）。
+- root はマシン ROOT からの相対 POSIX パス。結合と実体検査はマシン（`openat2` / component walk、R3）。
+- root は作成時に固定。移動は「新 project + 新 DO + コピー」。
+- `Project.egress`（`inherit` / `deny` / `allowlist`）を 0127 で足す。既定 `inherit`、untrusted は `deny`。執行は 0147 / 0194。
+
+前提が変わる条件: A2 の migration / split が実装コストに見合わないと分かったとき（A1 へ）、または project を信頼境界とみなさなくなったとき（B へ）。
+## D081: Web の umbrella 0036 を 0103–0114 + 0160 に吸収する
+
+date: 2026-11-17 · by: user · issue: 0036
+
+0036 の AC（会話・進捗・Editor・Project/Task・Workflow/Automation・設定・ログイン・キーボード）は、0103–0114 の個別 issue と 0160（配信）が持つ。0100 / 0101 / 0102 は done。
+
+- D067 の完了は 1 issue 1 レコード。umbrella は完了を持てず、同じ AC が二重化する。0036 を superseded にし、後継を 0103–0114 + 0160 とする。
+- 0040 の `depends-on` の 0036 を 0160 に替える。
+- 「Web の最終受入」は個別 issue の Result と 0043（E2E）で見る。
+
+前提が変わる条件: Web 全体の受入を1つの issue で追う必要が出たとき（リリースのゲート）。
+
+## D082: 0039 を 0162（events / metrics）と 0163（usage）に吸収する
+
+date: 2026-11-17 · by: user · issue: 0039
+
+0162 の Notes が「0039 の製品化はここに含める」と明記し、docs/observability.md（0162 の design-ref）が events の語彙・`/api/events`・`/api/metrics`・保持を定義している。
+
+- 面は **0162**（`server/src/obs/`）。usage は **0163**。保持期間の設定は **0123**。
+- 0123 / 0107 の `depends-on` の 0039 を 0162 に替える。
+- 0162 の AC に「`/api/events`・`/api/metrics` を提供する」を足す。
+- D077 の運用面の owner を 0039 → **0162 + 0163** に更新する。
+
+前提が変わる条件: 観測の UI（0107）が 0162 で足りず、専用の API issue が要るとき。
+
+## D083: 0049 は usage / inspect と server の pi-durable 除去に絞る
+
+date: 2026-11-17 · by: user · issue: 0049
+
+0146 の `openSession`（`@hns/agent/session`）が、複数会話の create / list / get / send / transcript / abort、ownerless、Worker-safe を提供済み。0049 の二重受入を落とす。
+
+- 残す: `AgentSession` の `usage()`（会話ごと / 合計のトークン・コスト）と `inspect()`（tasks / queued / scheduling の snapshot）。型は `@hns/agent/session`（実行中の状態。D030）。
+- server の `do/session.ts` の pi-durable import（storage / registry）を、agent の薄いファクトリに移す。server は agent の subpath だけを使う。
+- 0152 とは独立（faux の usage で契約をテストする。実値は 0152）。
+
+前提が変わる条件: usage が実プロバイダの値でしか検証できないとき（0152）。
+## D084: Command palette は registry を1つ持ち、画面に無い command は help にだけ出す
+
+date: 2026-11-17 · by: user · issue: 0103
+
+- ⌘K / Ctrl+K は、**パレットが開ける画面では preventDefault** し、開けない画面ではブラウザに任せる（handler はシェルが持ち、画面の可用性を返す）。
+- 画面に無い command は **palette に出さない**。ヘルプには「画面による」と出す。どちらも同じ registry を読む。
+- `?` でヘルプのダイアログを開く。palette と同じ registry。
+- モバイルは**全画面**。sheet は低優先度。
+
+前提が変わる条件: パレットを開けない画面が増えたとき、またはヘルプを独立した画面にするとき。
+## D085: provider 鍵は gateway の deploy secret のまま、カタログは agent の静的表、検証は gateway の chat を 1 token
+
+date: 2026-11-17 · by: user · issue: 0122
+
+- **鍵は gateway の deploy secret**（0143 / 0151）。アプリ / UI は provider 鍵を保存せず、鍵入力を出さない。**将来 UI から設定する可能性は残す**（そのときは 0143 を改訂し、鍵の保存先と gateway の読み出しを決める）。
+- **カタログは `@hns/agent` の静的表**（provider / model / tools / vision / context / cost）。アダプタが同じ表を使う。cost は推定値で、0152 / 0163 の実測で更新する。
+- **検証は Mutation**（0198）で、gateway の chat route を 1 token ping する。health route は作らない。結果は `ok` / `invalid_key` / `unreachable` / `unsupported` / `rate_limited`。
+- 0107 は鍵入力を削除し、検証結果だけを出す。
+
+前提が変わる条件: UI から provider 鍵を設定する要求が出たとき（0143 の改訂）、または provider の `/models` を動的に引く必要が出たとき。
+## D086: Workflow の run は Session DO が実行し、D1 は索引にする
+
+date: 2026-11-17 · by: user · issue: 0038
+
+- **run の正本は Session DO**（SQLite）。D1 の `workflow_runs` / `workflow_nodes` は索引で、0149 と同じ outbox + 狭い writer（0145 の索引例外を workflow に広げる）で書く。
+- **trigger（Cron / webhook）は 0161**。0038 は起動された後の run の実行だけを持つ。0161 は 0038 に依存する（逆向きにしない）。
+- 層内の並列は上限 2。最初は逐次でもよい。**再試行は 2 回（1s → 4s）**、human ノードは期限なし。
+- tool ノードは 0157 の後に含める。agent / human を先に通す。
+- 遷移は `core/workflow.ts` の表だけ。起動は `startRun(firingId, ...)` で、同じ firingId は既存 run を返す。
+
+前提が変わる条件: 0161 が Cloudflare Workflows を採用するとき、または DO の実行で CPU / 行の上限に当たるとき。
+## D087: Machine は D1 のレコードと2方向の鍵で登録し、疎通は Worker→machine の probe
+
+date: 2026-11-17 · by: user · issue: 0148
+
+- **登録**: machine が `hns machine enroll` で device key（0600）を作り、公開鍵 + fingerprint + hostname + agent version を表示する。browser は session で `Mutation.registerMachine` に貼る（秘密は渡さない）。
+- **鍵は2方向**: machine → Worker は device key（公開鍵は `machines.public_key`）、Worker → machine は control-plane key（秘密は Worker の secret、公開鍵は `GET /api/machines/keys` で配る）。失効は `status = revoked` で即時。
+- **reimage**: 同じ name + 新しい公開鍵は鍵を差し替え、古い鍵を即時に無効化し、イベントを1行残す。`revoked` の name は再登録できない。
+- **疎通**: 一覧読み取り時に throttle して `https://<hostname>/health` を control-plane 署名で叩く。成功で online / lastSeen（30 秒に1回までの遅延書き込み）、失敗で offline。定期 probe は 0161。
+- **heartbeat は持たない**。machine からの要求は device key で検証する（0147 の registry）。
+
+前提が変わる条件: machine→Worker の push が必要になったとき、または control-plane 鍵の自動ローテーションを運用に載せるとき。
+## D088: 実プロバイダは gateway を service binding で呼び、streaming は既存の live に載せる
+
+date: 2026-11-17 · by: user · issue: 0152
+
+- **gateway は service binding** で呼ぶ。pi-ai の `baseUrl` は `https://gateway.internal/v1/<provider>`、`fetch` は binding に差し替える。harness は placeholder key だけを持ち、provider 鍵は gateway の deploy secret のまま。
+- **streaming は harness の live → 0159 の WS delta**。新しい中継を作らない。間引きは 100ms / 64KB。
+- **usage は DO に記録**。対話の send は応答に載せて Worker が `usage_log`（D1）へ、背景 turn は DO の狭い usage writer で flush する（0145 の索引例外）。
+- **失敗は typed**: 429 → `rate_limited`、5xx / timeout → `unavailable`、abort → `aborted`。再試行は harness に任せ、二重課金しない。
+- モデル選択は `HNS_MODEL`。catalog（0122）は実装後に接続する（v1 は既存の provider 定義で動かす）。
+
+前提が変わる条件: gateway の WS が使えない構成になったとき、または usage の突き合わせが DO の行上限に当たるとき。
+## D089: file tree / search は GraphQL、content は REST。除外は metadata + 既定セット + .gitignore
+
+date: 2026-11-17 · by: user · issue: 0125
+
+- **tree / search は GraphQL**（`Query.files` / `Query.fileSearch`）。**content は 0157 の REST** に残す。D077 の files を分割する（大きな本文・バイナリ・ETag を GraphQL に載せない）。
+- tree は **lazy**（1 dir / call、limit + nextCursor）。search は **machine の新しい op**（bounded walk、path の部分一致、limit 1–200）。
+- **除外**: metadata（`.git` / `.hns` / `.svn` / `.hg` / `.jj` / `.sl`）は常に隠す。既定セット（`node_modules` / `dist` / `build` / `target` / `.venv` / `__pycache__` 等）+ `.gitignore`（入れ子と `.git/info/exclude`。global は使わない）を尊重する。dotfiles は gitignored でなければ出す。`includeIgnored`（既定 false）で既定除外と gitignored を表示する。
+- symlink は追わない（`kind: "symlink"`）。失敗は GraphQL の union。
+- 調査: `work/research/file-tree-filtering.md`（VS Code / Claude Code / ripgrep / JetBrains / `ignore`）。
+
+前提が変わる条件: GraphQL の複雑度・深さの上限に当たるとき、または `.gitignore` の判定に新しい依存を入れたくないとき。
+
+## D090: OpenShell 由来の5つの機構を採らない
+
+date: 2026-11-17 · by: user · issue: -
+
+[調査](../work/research/tool-call-fastpath-security.md) の分類のうち、次の5つを**今は採らない**。実装はまだない。決定するのはこの5つで、調査の採用側（canonical call、capability lease など）は実装 issue で個別に決める。
+
+- seccomp user notification によるネットワーク仲介
+- TLS MITM による資格情報注入
+- Z3 による形式検証
+- Kubernetes / マルチランタイム対応
+- middleware による呼び出し書き換え
+
+**判断の前提**（ここを固定しない）:
+
+- Machine Agent の言語は TS に固定しない。開発速度を優先して今は TS。仕様が明確でテストが使えるなら Rust / Zig / C への全面刷新はコストではなく選択肢。したがって「Node だからできない」を不採用の理由にしない。
+- hns の能力集合（ツールとポリシーの語彙）が小さいのは現時点の性質。将来も小さい保証はない。Z3 を採らないのは「今の語彙と変更頻度では集合包含で足りる」からで、語彙が育ったら再評価する。
+
+**理由と代替**:
+
+1. **seccomp-notify**: 今の egress 要件は `bwrap --unshare-net` + UDS proxy で満たせる。broker はカーネル ABI・pidfd・fd 注入・TOCTOU の複雑さを抱え、OpenShell 自身も外側の fence を backstop にしている。言語を変えても複雑さは消えない。代わりに netns + proxy、危険 syscall の BPF 遮断、ツール境界の capability 判定を使う。
+2. **TLS MITM**: provider 鍵は gateway Worker にあり、マシンに実鍵が無い（D047 / 0143）。CA 配布・trust store・mTLS・HTTP/2/3・非 HTTP の互換 matrix と、1 リクエスト 2 回の TLS が重い。代わりに Worker で短命 token を mint し、bash の egress は CONNECT の host:port allowlist（復号しない）から始める。
+3. **Z3**: 現時点の能力集合は `(tool, path, host, port, method, command class)` の集合包含で正確に決まる。OpenShell の prover も 5 領域のみで、GraphQL / MCP などは unsupported、1,024 ルール / 4,096 endpoint 超は inconclusive。bash は証明できない。代わりに TS の差分検証 + 拡大承認。能力が cross-product / 条件属性を持つようになったら CI に Z3 / Cedar を置く。
+4. **K8s / マルチ runtime**: hns は Cloudflare + 各マシンの Machine Agent で、クラスタが無い。単一 runtime（bwrap）+ fail closed が強みで、driver 抽象は 2 実装が揃ってから。境界 matrix（Docker / CNI / vsock / MXC）と運用コストが大きい。代わりに 1 runtime を厳格な probe で固定し、セッション単位で再利用する。
+5. **middleware 書換**: 認可後の書換は R2（呼び出しの同一性）を壊す。hot path に trusted component が増え、外部 gRPC は 28ms/op に合わない。代わりに固定の in-process pipeline（normalize → authorize → execute → redact → audit）にし、変換は canonical call のハッシュ前に限る。
+
+**再評価する条件**:
+
+| 不採用 | 再評価トリガー |
+| --- | --- |
+| seccomp-notify | 任意のサードパーティバイナリに per-binary egress を課す。proxy を迂回する経路が実測で見つかる。共有マシンでプロセス単位の分離が要る |
+| TLS MITM | 任意のユーザーコードが credentialed API を呼ぶ。bash egress に method/path の L7 が要る。CA 運用なしの managed proxy が使える |
+| Z3 | ポリシーが cross-product / 条件属性を持つ。形式証明が監査要件になる。マルチテナント RBAC/ABAC が複雑化する |
+| K8s / マルチ runtime | 顧客 K8s での提供。共有マシンのマルチテナント。macOS / Windows backend。VM 級の隔離が要件になる |
+| middleware 書換 | in-process で実装できない DLP。第三者ツールの署名・変換。MCP 応答の正規化 |
+
+**OpenShell 自体**は、今の配備前提（Rust の control plane、Docker/VM、PostgreSQL/Helm）では導入しない。設計要素だけを参照する。これは「hns の配備が変わらない限り」の判断で、採用側の要素は別途実装 issue で決める。
+
+前提が変わる条件: Machine Agent の言語刷新、能力集合の拡大、配備モデルの変更（K8s / マルチテナント）、または上記の再評価トリガー。
+
+## D091: ツール呼び出しの capability 契約を Phase 0/1 で実装する
+
+date: 2026-11-17 · by: user · issue: -
+
+[調査](../work/research/tool-call-fastpath-security.md) の適用案と検証計画を採用し、[契約](capability.md) を先に固定してから issue を分ける。D090 の 5 つは引き続き採らない。
+
+**決定**:
+
+- **契約は `@hns/core/capability`**（新しいパッケージを作らない）。型・valibot schema・JCS・ハッシュ・grant 検証・能力集合の代数・denial code をここに置く。web は import しない。署名の実装は server、検証は core、鍵の保存は server。
+- **Phase 0（呼び出しの同一性と監査）**: 0220 契約、0221 agent の manifest / callHash、0222 Session DO の監査と hash chain。
+- **Phase 1（capability grant）**: 0223 ポリシー改訂・提案・review token・CAS、0224 Session DO の grant 発行（Worker が policy snapshot を渡す）、0225 machine の検証とローカル判定、0226 agent / workspace / machine の統合。
+- **承認面**: 0228 GraphQL、0229 Web。Phase 1 は全件人承認で、自動承認はしない。agent の tool token は承認 API を呼べない。
+- **保存**: ポリシーは D1（migration 0003、加算のみ）。監査は Session DO の SQLite に hash chain で置く。grant は Session DO が発行し、epoch（= policy revision）で失効させる。Session DO は D1 を読まず、Worker が send 時に snapshot を渡す。
+- **bash は意味解析しない**。grant は `network` / `writable` の封筒だけを制御し、危険な 1 回は `exact` の callHash 承認で縛る。コマンド文字列の検査を安全保証と呼ばない。
+- **署名 alg**: 契約は `Ed25519` と `ECDSA-P256` の両方を持ち、0224 が Workers の WebCrypto で実測して既定を決める。alg と鍵の不一致は拒否する。
+- **Phase 2（egress / 資格情報 / exact 承認 / middleware）は 0227 の結果で別 issue にする**。今は issue を作らない。
+
+**代替案**: `@hns/policy` を新設（lock と oxlint の変更が増える）、per-call grant（28ms の DO 往復が戻る）、REST の承認面（GraphQL がアプリ契約）、Z3（D090）を却下。
+
+**結果**: 0220〜0229 を作った。0220 と 0227 は依存なし。2026-11-17、ユーザー判断でこの 2 件を `now` にした。0220 の後は 0221 / 0223 / 0225 が並列、0222 は 0221 の後、0224 は 0223 / 0148 の後、0225 は 0148 の control-plane 鍵と 0194 の hide も待つ。0226 は収束点（0147 / 0157 も待つ）。0228/0229 は 0223 と 0198/0160 の後。ファイル所有は [capability.md](capability.md) §11。
+
+前提が変わる条件: Machine Agent の言語刷新、能力集合の拡大、Workers の Ed25519 対応が変わる、0147 / 0157 の RPC 形が変わる、または 0227 の結果が sandbox の設計を変える。
+
+## D094: 優先度の語彙を now / next / later / parked にする
+
+date: 2026-11-17 · by: user · issue: -
+
+D045 の `now / plan / batch / hold` を置き換える。`plan` が「次の波」「設計待ち」「依存待ち」を兼ね、`batch` が作業の大きさ、`hold` が決定状態で、名前が体を表していなかった。軸の分離（design / depends-on / status）は今のまま、**値の改名だけ**にする。
+
+| 旧 | 新 | 意味 |
+| --- | --- | --- |
+| `now` | `now` | いまの波。design agreed かつ依存充足 |
+| `plan` | `next` | 重要だが、いまの波の後 |
+| `batch` | `later` | 安い・隣接するときだけ |
+| `hold` | `parked` | いまはやらない |
+
+BOARD の「設計待ち / 順番待ち / 依存待ち」は `next` の内訳として残す。issue のヘッダ、work/README、BOARD、LANES を同時に更新した。
+
+前提が変わる条件: 優先度と readiness を別のフィールドに分けたくなったとき、または `next` の内訳が 3 つで足りなくなったとき。
+## D092: Editor は CodeMirror 6（暫定）で、content は REST・tree は GraphQL
+
+date: 2026-11-17 · by: user · issue: 0106
+
+- **content は 0157 の REST**（版付き保存）。**tree / search は 0125 の GraphQL**。0106 は content のパスを決めない。
+- `unknown` は再読込してハッシュを照合し、**成功扱いにしない**。上書きは最新の version を取得してから保存し、force しない。
+- binary は編集しない。長いファイルは read-only の preview。URL は `?file=<path>`。
+- **エディタは CodeMirror 6（暫定）**。Monaco はモバイル非対応・約2.9MB、自作は IME / a11y / 長いファイルを自前で持つため却下。NFR は `work/reviews/2026-11-17-design-review.md` と 0106 の NFR 表（lazy ≤350KB gzip、open p95 ≤500ms、保存 p95 ≤1s、入力 p95 ≤16ms、WCAG 2.2 AA、44px、CSP）。
+
+前提が変わる条件: lazy chunk が 350KB を超える、モバイル IME / a11y が実機で不足する、または CM6 を上回る OSS が出たとき（Monaco / 自作を再検討）。
+## D093: workspace の helper は常駐 child にして、NDJSON で hash / read / commit を多重化する
+
+date: 2026-11-17 · by: user · issue: 0191
+
+- **1 root = 1 常駐 child process**（A）。現行 write は hash + commit の2 spawn で p50 150.7ms。常駐では同じ2操作が p50 0.22ms / p95 0.45ms。B（1往復）は 74ms、D（コンパイル済み）は 43.5ms で <10ms に届かない。worker は起動 9.8ms だが、初回 write が境界・`ExecutionEnv` の seam を外れる・TS worker の build・native crash の隔離が弱いので次点。
+- **`HelperPort`** を `RootedInput` に足す（`ExecutionEnv` は変えない）。起動時に `hello`（root / id / dev / ino）を1回、以降は **NDJSON + request id** で hash / read / commit。直列処理、1行 16MiB 上限、chunk 単位の framing、背圧は drain、timeout は kill。
+- **crash**: pending は `helper_unavailable`。次の操作で1回だけ再起動し、hello で root / marker を再検証。60秒に3回で fail closed。timeout も同じカウンタ。**checks へ落とさない**。故障注入はテスト用 HelperPort。
+- **idle**: 60秒（timer は unref）。`Rooted.close()` を足し、`Workspace.close` から呼ぶ。close は「新規拒否 → pending を最大1秒 → stdin end → SIGTERM → 1秒で SIGKILL」。helper は stdin end で exit（orphan 防止）。
+- **テスト**: 本番は Workspace ごとに1 helper（root を跨がない）。テストも同じ形で測り、integration が 3s を超えたときだけ test/support に root キーの pool を足す（本番コードには入れない）。
+- **計測**: write p95 < 10ms、integration < 3s。ゲートは `gate: test <pkg> ok (Nms)` の run 単位を足す。before / after を issue に残す。
+
+前提が変わる条件: worker thread の隔離が十分になり seam を保てる、native helper（openat2 / renameat2）を配る、または helper の RSS が問題になるとき。
+## D094: UI は Workers Assets + 手動 SPA fallback で配り、typed client は Relay の codegen にする
+
+date: 2026-11-17 · by: user · issue: 0160
+
+- **custom domain を既定**にする。`workers.dev` は dev / CI だけ。passkey の RP ID はその origin（D079）。
+- **SPA fallback は edge で手動**。`GET`/`HEAD` + `Accept: text/html` + `/assets`・`/api`・`/graphql`・`/ws` 以外 + ASSETS 404 のときだけ index。`/api/*` の未知は **404 のまま**（face を足す 0125 / 0148 / 0157 まで）、`/assets/*` の未知は 404。`not_found_handling: single-page-application` は使わない。
+- **キャッシュ**: hashed assets は `public, max-age=31536000, immutable`。`index.html` は `no-cache`。
+- **typed client は Relay の codegen（0180）**。0037 の REST は撤去済みなので、AC の「0037 の契約から生成」を読み替える。WS は 0159 の別の口で、Relay の subscription にしない。
+- **未認証**: `/graphql` は 401。画面は配信し、クライアントが `/login` にルーティングして元の deep link に戻す。edge で画面を redirect しない。
+- **ヘッダ**: CSP（`script-src 'self'`、inline script なし）、`X-Content-Type-Options: nosniff`、`Referrer-Policy: same-origin`。本文はテキスト描画。production の source map は配らない。
+- **dev**: Vite の proxy で `/graphql` / `/api` / `/ws` を localhost:8787 へ（`ws: true`）。
+
+前提が変わる条件: custom domain の運用が重い、または passkey の RP ID を変える必要が出たとき。
+## D095: machine の sandbox は egress deny / `.git` 読み取り専用 / 固定 hide / HOME=root で合意する
+
+date: 2026-11-17 · by: user · issue: 0194
+
+- **egress**: `deny` は `--unshare-net`、`inherit` はホストの network。**`allowlist` は v1 では deny に倒す**（proxy は別 issue）。private range / `169.254.169.254` の遮断は `inherit` ではホスト依存の残リスク。
+- **`.git` は読み取りのみ**（docs/safety.md / docs/workspace.md）。`--bind <projectRoot>` の後に `--ro-bind <projectRoot>/.git` を重ね、commit は agent の sandbox ではしない（checkpoint / commit は 0154 / 0156 の特権経路）。
+- **hide は 0127（D080）の固定リスト**: `~/.config/hns`、`~/.ssh`、`~/.aws`、`~/.config/gh`、`~/.git-credentials`、`~/.netrc`、マシン鍵、cloudflared token。呼び出し側から足せない（既存の `options.hide` を廃止）。
+- **HOME は root**（0045 H-1 の既存決定）。0052 が残した「エージェント用 home を分ける」は採らない（dotfile 汚染は許容）。`TMPDIR=/tmp`（tmpfs）を足す。
+- `--new-session` / `--die-with-parent` の対応版を実装時に `bwrap --version` で確認する。
+
+前提が変わる条件: egress の allowlist を実装する、HOME の分離が必要になる、または bwrap の版がフラグを欠くとき。
+## D096: 安全の再評価は CSRF を SameSite + JSON + WS Origin で守り、事故の封じ込めを docs とテストで固定する
+
+date: 2026-11-17 · by: user · issue: 0165
+
+- **CSRF**: `SameSite=Lax` + JSON POST + **WS upgrade の `Origin` 検証**（現行の `ws.ts` は未実装）。CSRF token は足さない。
+- **DO の egress**: コードの定数 / binding（gateway と tunnel host）で固定する。runtime の URL allowlist を装わない。
+- **事故の封じ込め**: 失効・control-plane 鍵のローテーション・停止の手順を docs に書く。テストは**執行・ローテーション・失効・401** まで（停止の手順は docs）。
+- **依存監査**: ゲートで lock / exact pin を見る。CVE の自動監視は別 issue。
+
+前提が変わる条件: CSRF token が必要になる構成（Cookie を cross-site で使う）、または egress の動的 allowlist を製品要求にするとき。
+## D097: Relay の既定は store-or-network で、画面ごとに購読 / TTL / network を選ぶ
+
+date: 2026-11-17 · by: user · issue: 0181
+
+- 既定は **store-or-network**。画面ごとに `network-only` / `store-and-network` を上書きできる。
+- **購読する**: 会話の transcript、会話一覧 / ホーム / Needs you。**購読しない**: Settings / providers / machines（30 秒 TTL + focus で revalidate）。Editor 本文・file tree は network（版 / 展開ごと）。
+- **再接続**: `resync` を送り、開いている画面を refetch する。store の差分だけで取りこぼしを埋めない。
+- **古さの表示**: 「再接続中（古い可能性）」と「更新中（索引の遅れ）」を**別々**に出す。黙って古い値を出さない。
+- ポーリングしない。画面を離れたら購読 / in-flight を abort する。
+
+前提が変わる条件: Relay の fetchPolicy を画面単位で切り替えられない、または `resync` の実挙動が変わるとき。
+## D098: code mode の profile は ConversationMetadata に置き、subagent を独立軸にし、UI は Direct / Code / Delegate
+
+date: 2026-11-17 · by: user · issue: 0199
+
+- **profile の保存先は `ConversationMetadata`**（session index）。D1 の `Conversation` 行は増やさない。既存 entry は `DEFAULT_AGENT_PROFILE`。
+- **`maxTreeTokens: null` は会話の日次予算に委ねる**（`docs/limits.md`）。gateway の USD 予算とは混ぜない。
+- **subagent は独立軸**。`toolSurface: "direct"` でも `subagents: true` を使える。2 値の mode にしない。
+- **UI のプリセットは Direct / Code / Delegate**。保存するのは `AgentProfile`（toolSurface / subagents / limits）で、プリセット名は UI の表現。
+- **profile 変更の履歴は `pi.agent` の `pi.system` に残る**。専用 entry は作らない。
+
+前提が変わる条件: subagent を direct で使えないモデルが主流になる、または profile の履歴を検索する必要が出たとき。
+## D099: 製品 E2E は `cf dev` + 別 Vite で回し、テスト専用 seed と workers=1 / shard で運用する
+
+date: 2026-11-17 · by: user · issue: 0043
+
+- **実行環境**: `cf dev --mode development`（D065）+ **別プロセスの Vite**。E2E の cf プロジェクトに Vite を同居させない（`cf dev` は Vite を検出すると `npx vite` に委譲し、`--port` も拒否する）。readiness は `/ws` 401 か stdout の `Ready on`。
+- **state**: `<project>/.wrangler/state/v3` が local state。XDG はログ / registry にしか効かない。**1 サーバ + 一意な `runId` / `testId`** を既定にし、完全分離が要るテストだけ一時プロジェクト + 別ポートで `cf dev` を立てる。`--persist-to` / `cf d1 --local` は使わない。
+- **seed**: テスト専用 Worker の `/__e2e/seed`。**製品 Worker の route は増やさない**。1 テスト 1 回。
+- **認証**: CDP の仮想 authenticator + `storageState`。
+- **ファイル編集**: 0157 の後に有効化。それまでは editor を開くところまで。
+- **flake**: retry 1、trace は `on-first-retry`、video は off、失敗時のみ screenshot / サーバログ / state。quarantine はファイル + タグ + owner + 14 日 SLA。smoke は quarantine しない。
+- **管理**: Phase 1 は workers=1。nightly は shard 2→4 で blob + junit を merge。artifact は失敗時のみ。
+- **性能**: 起動 1 回・seed 1 回・prebuild 共有。PR smoke p50 < 60 秒、nightly < 8 分。
+
+前提が変わる条件: `cf dev` が Vite plugin を採用する、複数 Worker の同時起動や per-test reset が必要になる、または flaky 率 / CI 時間が Playwright 標準の運用に耐えなくなるとき。
+
+

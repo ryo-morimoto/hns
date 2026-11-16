@@ -1,7 +1,7 @@
 # 0162: 観測（相関 ID を全ホップに通す）
 
 status: open
-priority: plan
+priority: next
 design: agreed
 design-ref: docs/observability.md
 depends-on: 0145, 0147
@@ -14,6 +14,7 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
 ## Acceptance criteria
 
 - [ ] 相関 ID を browser → Worker → DO → agent → fs まで通す
+- [ ] `/api/events`・`/api/metrics` を提供する（docs/observability.md）
 - [ ] イベントの語彙を core に閉じた union で置く
 - [ ] 本文・ヘッダ・トークンをログに残さない（パスと status だけ）
 - [ ] DO のログと agent のログを同じ形で読める
@@ -22,7 +23,7 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
 
 ## Notes
 
-- 0028 の events 集約を引き継ぐ。0039 の製品化はここに含める。
+- 0028 の events 集約を引き継ぐ。**0039 を吸収（D082）**。面（`server/src/obs/`）はこの issue が持つ。
 
 ## やらないこと
 

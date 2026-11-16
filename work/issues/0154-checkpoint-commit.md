@@ -1,7 +1,7 @@
 # 0154: checkpoint commit（refs/hns・Run 境界）
 
 status: open
-priority: plan
+priority: next
 design: agreed
 design-ref: docs/durability.md §5
 depends-on: 0153, 0156
@@ -25,6 +25,10 @@ Run の終わりに、作業ツリーを commit にして `refs/hns/checkpoints/
 
 - git の object model を CAS として使う。差分転送と dedup が無料でついてくる。
 - 0153 の R2 key はこの commit から辿れる object。
+
+## 追記（0127 の sandbox 調査、2026-11-17）
+
+- checkpoint から `.hns`・secret・`.env` を除外する。root を丸ごと保存すると、hide していても資格情報が snapshot に乗る（[agent-sandbox-designs.md](../research/agent-sandbox-designs.md) R8）。
 
 ## やらないこと
 

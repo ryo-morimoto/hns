@@ -1,10 +1,10 @@
 # 0123: Runtime settings API（limits / default model / retention）
 
 status: open
-priority: plan
+priority: next
 design: pending
-depends-on: 0027, 0039, 0145, 0146
-touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test, packages/store/src, packages/store/test, packages/server/src, packages/server/test
+depends-on: 0027, 0162, 0145, 0146
+touches: packages/core/src/graphql/, packages/core/test/graphql/, packages/store/src, packages/store/test, packages/server/src, packages/server/test
 
 ## Goal
 
