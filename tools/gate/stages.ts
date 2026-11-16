@@ -35,6 +35,9 @@ const binary = (root: string, name: string): string => join(root, "node_modules"
 
 const dirs = (packages: PackageInfo[]): string[] => packages.map((pkg) => `packages/${pkg.dir}`);
 
+/** Packages whose documents or model the GraphQL artifacts derive from. */
+const CODEGEN_PACKAGES = ["web", "core", "server"];
+
 // Order matters: cheap checks fail first. Build and knip only run before a push,
 // because a commit should be fast and declaration emit is not proof of correctness.
 export const stages: readonly Stage[] = [
@@ -64,6 +67,23 @@ export const stages: readonly Stage[] = [
         ],
       },
     ],
+  },
+  {
+    name: "codegen",
+    hooks: ["pre-commit", "pre-push"],
+    // Regenerate before the code that reads the artifacts is checked, so a stale artifact cannot
+    // pass. The work is skipped when the change cannot affect the schema or a document.
+    run: ({ root, packages, all }) => {
+      if (!all && !packages.some((pkg) => CODEGEN_PACKAGES.includes(pkg.dir))) return [];
+      return [
+        {
+          cwd: root,
+          argv: [process.execPath, "--conditions=source", "tools/codegen/graphql.ts"],
+        },
+        { cwd: root, argv: [binary(root, "relay-compiler")] },
+        { cwd: root, argv: [process.execPath, "tools/codegen/verify.ts"] },
+      ];
+    },
   },
   {
     name: "typecheck",

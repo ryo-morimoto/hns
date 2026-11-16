@@ -5,10 +5,17 @@ import { stageNamed, stagesFor } from "../stages.ts";
 
 // Catches: build or knip sneaking back into the commit hook.
 test("build and knip only run before a push", () => {
-  expect(stagesFor("pre-commit").map((stage) => stage.name)).toStrictEqual(["lint", "fmt", "typecheck", "test"]);
+  expect(stagesFor("pre-commit").map((stage) => stage.name)).toStrictEqual([
+    "lint",
+    "fmt",
+    "codegen",
+    "typecheck",
+    "test",
+  ]);
   expect(stagesFor("pre-push").map((stage) => stage.name)).toStrictEqual([
     "lint",
     "fmt",
+    "codegen",
     "typecheck",
     "test",
     "build",
@@ -19,7 +26,7 @@ test("build and knip only run before a push", () => {
 
 // Catches: a hook running a stage that no hook owns.
 test("every stage belongs to at least one hook", () => {
-  for (const name of ["lint", "fmt", "typecheck", "test", "build", "deploy", "knip"]) {
+  for (const name of ["lint", "fmt", "codegen", "typecheck", "test", "build", "deploy", "knip"]) {
     const stage = stageNamed(name);
     assert.ok(stage !== undefined, name);
     expect(stage.hooks.length, name).toBeGreaterThan(0);
@@ -42,6 +49,22 @@ test("the deploy stage builds the development config", () => {
         XDG_CACHE_HOME: "/repo/.cache",
       },
     },
+  ]);
+});
+
+// Catches: codegen running for a change that cannot affect the schema or a document, or
+// skipping the regeneration when it can.
+test("codegen runs only when the artifacts can change", () => {
+  const stage = stageNamed("codegen");
+  assert.ok(stage !== undefined);
+  const store: PackageInfo = { dir: "store", name: "@hns/store", dependsOn: [] };
+  expect(stage.run({ root: "/repo", packages: [store], all: false, tier: "unit" })).toStrictEqual([]);
+  const web: PackageInfo = { dir: "web", name: "@hns/web", dependsOn: [] };
+  const runs = stage.run({ root: "/repo", packages: [web], all: false, tier: "unit" });
+  expect(runs.map((run) => run.argv.join(" "))).toStrictEqual([
+    process.execPath + " --conditions=source tools/codegen/graphql.ts",
+    "/repo/node_modules/.bin/relay-compiler",
+    process.execPath + " tools/codegen/verify.ts",
   ]);
 });
 

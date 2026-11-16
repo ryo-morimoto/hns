@@ -1046,5 +1046,21 @@ relay-compiler の artifact ヘッダは生成器が書く（`@generated` のみ
 
 前提が変わる条件: Relay が babel を不要にしたとき、artifact の量がレビューを圧迫したとき、または subscriptions（0159）で同じ plugin が使えなくなったとき。
 
+## D075: codegen をゲートの前段に入れ、生成物のヘッダを検査する
+
+date: 2026-11-17 · by: user · issue: 0180
+
+D050 / D051 の層（commit は速い層、push は全部）に合わせ、`codegen` を lint / fmt の後、typecheck の前に置く。
+
+- ステージは `web` / `core` / `server` が affected のときだけ走る（無関係な変更で 1 プロセス増やさない）。
+- 毎回 schema と artifact を再生成するので、stale な生成物は typecheck / test / build に届かない。
+- `tools/codegen/verify.ts` がヘッダを検査する。`schema.graphql` は generated ヘッダと再生成コマンド、artifact は `@generated SignedSource`。空の `__generated__` は拒否。
+- 実測: document 2 件で 228ms（schema 生成 + relay-compiler + 検証）。commit ゲートの 3 秒台に収まる。
+
+却下: `git diff` による drift 比較（ローカルの未コミット生成物で誤検知する）、ビルド時だけの生成（型検査が stale を見逃す）、artifact を commit しない（レビューで差分が見えない）。
+
+前提が変わる条件: document が増えて codegen が 1 秒を超えたとき、または relay-compiler が差分検出を提供したとき。
+
+
 
 
