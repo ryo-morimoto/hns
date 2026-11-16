@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0102, 0115, 0117
 touches: packages/web/src/screens/workspace, packages/web/src/components/WorkCard.tsx, packages/web/src/components/StatCard.tsx, packages/web/test/workspace
 

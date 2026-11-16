@@ -2,6 +2,8 @@
 
 status: open
 priority: batch
+design: agreed
+design-ref: 設計を変えない（CI）
 depends-on: 0046
 touches: work/issues/0004, .github
 

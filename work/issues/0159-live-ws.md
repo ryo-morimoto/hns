@@ -2,6 +2,8 @@
 
 status: open
 priority: now
+design: agreed
+design-ref: D047
 depends-on: 0146
 touches: packages/server/src/ws.ts, packages/core/src/stream.ts, packages/server/src/do/session.ts, packages/server/test/do/, packages/web/src/live/, packages/web/src/app/, packages/web/test/live/, work/issues/0159-live-ws.md
 

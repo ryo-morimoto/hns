@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0048
 touches: packages/store/src/identity/secrets.ts, packages/store/test
 

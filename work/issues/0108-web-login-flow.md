@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0070, 0071, 0102
 touches: packages/web/src/screens/auth, packages/web/src/api/passkey.ts, packages/web/test/auth
 

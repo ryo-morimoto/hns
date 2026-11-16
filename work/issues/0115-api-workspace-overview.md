@@ -6,6 +6,7 @@
 
 status: open
 priority: hold
+design: pending
 depends-on: 0049, 0145, 0146
 touches: packages/core/src/graphql, packages/server/src, packages/server/test
 

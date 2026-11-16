@@ -2,6 +2,7 @@
 
 status: open
 priority: hold
+design: pending
 depends-on: 0045
 touches: packages/workspace
 

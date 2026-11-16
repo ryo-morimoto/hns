@@ -2,6 +2,7 @@
 
 status: open
 priority: batch
+design: pending
 depends-on: 0033, 0039, 0145, 0146
 touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test/http.test.ts, packages/workspace/src, packages/server/src, packages/server/test
 

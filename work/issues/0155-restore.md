@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: docs/durability.md §6
 depends-on: 0154
 touches: packages/workspace/src/restore.ts, packages/workspace/test/restore.test.ts
 

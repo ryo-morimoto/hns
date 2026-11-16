@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0116, 0120, 0196
 touches: packages/core/src/types.ts, packages/store/src, packages/server/src, packages/web/src
 

@@ -2,7 +2,8 @@
 
 status: open
 priority: plan
-depends-on: 0150
+design: pending
+depends-on: 0146, 0150
 touches: packages/server/src/routes/lists.ts, packages/store/src/index/
 
 ## Goal

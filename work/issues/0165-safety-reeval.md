@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0147
 touches: docs/safety.md, packages/machine/test/security/
 

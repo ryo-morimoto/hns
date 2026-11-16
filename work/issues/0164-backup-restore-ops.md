@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0154
 touches: docs/backup.md, deploy/backup/
 

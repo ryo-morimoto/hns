@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: docs/durability.md §3.1
 depends-on: 0157, 0169
 touches: packages/workspace/test/fault/, packages/server/test/fault/
 

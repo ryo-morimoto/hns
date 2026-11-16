@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0113
 touches: packages/web/test/visual, work/issues/0036-web-ui.md
 

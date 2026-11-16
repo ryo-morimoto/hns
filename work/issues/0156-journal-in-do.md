@@ -1,7 +1,9 @@
 # 0156: Workspace DO の骨格（lease・版・所有）
 
 status: open
-priority: plan
+priority: now
+design: agreed
+design-ref: D048, docs/durability.md §3.4
 depends-on: 0142, 0145
 touches: packages/server/src/do/workspace.ts, packages/server/test/do/workspace.test.ts
 

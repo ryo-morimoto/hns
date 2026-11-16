@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0147
 touches: packages/server/src/machines/, packages/core/src/machine.ts, packages/store/src/migrations/d1/
 

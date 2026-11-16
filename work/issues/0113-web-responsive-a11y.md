@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0104, 0105, 0106, 0107, 0108, 0109, 0110, 0111, 0112
 touches: packages/web/src/app, packages/web/src/styles, packages/web/test/a11y
 

@@ -2,6 +2,8 @@
 
 status: open
 priority: batch
+design: agreed
+design-ref: 設計を変えない（メタデータ整合）
 depends-on: 0141, 0146
 touches: work/, docs/, AGENTS.md
 

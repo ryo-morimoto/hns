@@ -2,6 +2,8 @@
 
 status: open
 priority: now
+design: agreed
+design-ref: D047, D053
 depends-on: 0145
 touches: packages/machine/, docs/packages.md, oxlint.config.ts, vitest.config.ts, package-lock.json, work/issues/0147-machine-agent.md
 

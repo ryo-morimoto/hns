@@ -1,7 +1,8 @@
 # 0044: マルチマシン（保留）
 
-status: **保留**
+status: open
 priority: hold
+design: pending
 depends-on: 0040
 touches: packages/worker, packages/server
 

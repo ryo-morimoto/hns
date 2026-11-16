@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0069, 0070
 touches: packages/store/src/identity/wraps.ts, packages/store/test
 

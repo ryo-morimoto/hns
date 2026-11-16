@@ -2,6 +2,8 @@
 
 status: open
 priority: now
+design: agreed
+design-ref: 設計を変えない（0056–0060 の欠陥返済）
 depends-on: 0045
 touches: packages/workspace/, work/issues/0190-workspace-debt.md
 

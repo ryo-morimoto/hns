@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0159
 touches: packages/web/, deploy/assets/
 

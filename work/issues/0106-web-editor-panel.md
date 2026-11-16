@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0102
 touches: packages/web/src/components/Editor, packages/web/src/screens/editor, packages/web/src/styles/editor.css, packages/web/test/editor, packages/web/package.json, package-lock.json
 

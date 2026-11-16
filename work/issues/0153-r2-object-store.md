@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: D048, docs/durability.md §1・§5
 depends-on: 0141, 0144
 touches: packages/workspace/src/objects.ts, packages/workspace/test/objects.test.ts
 

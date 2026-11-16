@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: docs/durability.md §3.1・§3.4
 depends-on: 0033, 0147, 0156
 touches: packages/workspace/src/files.ts, packages/server/src/routes/files.ts, packages/server/test/routes/files.test.ts
 

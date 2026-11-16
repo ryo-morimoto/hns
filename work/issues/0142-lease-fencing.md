@@ -1,6 +1,6 @@
 # 0142: lease と fencing（版チェックの委譲）
 
-status: open
+status: done
 priority: now
 depends-on: 0141
 touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/core/src/index.ts, packages/core/README.md, packages/core/CHANGELOG.md, docs/durability.md, docs/workspace.md, ARCH.md, work/issues/0142-lease-fencing.md
@@ -12,11 +12,11 @@ touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/c
 
 ## Acceptance criteria
 
-- [ ] lease の型（workspaceId / machineId / epoch / expiresAt）を core に置く
-- [ ] lease 保持中は今のローカル版チェック（dirfd + hash）をそのまま使うと明記
-- [ ] 期限切れ・未取得では書き込みを拒否（既存の `Workspace.mode === "checks"` を雛形にする）
-- [ ] 別マシンからの書き込みを epoch で拒否する条件を書く
-- [ ] 同一 workspace を2台から同時編集できないことを、要件2の読み方として明記
+- [x] lease の型（workspaceId / machineId / epoch / expiresAt）を core に置く
+- [x] lease 保持中は今のローカル版チェック（dirfd + hash）をそのまま使うと明記
+- [x] 期限切れ・未取得では書き込みを拒否（既存の `Workspace.mode === "checks"` を雛形にする）
+- [x] 別マシンからの書き込みを epoch で拒否する条件を書く
+- [x] 同一 workspace を2台から同時編集できないことを、要件2の読み方として明記
 
 ## テスト条件
 
@@ -44,6 +44,15 @@ touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/c
 - lease が切れたら「書けない」で止める。ローカルに2つ目の正本を作らない。
 - 読み取りは lease 不要。
 
+## Result
+
+- verdict: **PASS**（初回 BLOCKED: blocking 1 / 低 8 → 修正 460c00b → 再レビュー PASS）
+- reviewer: reviewer-0142（この変更を書いていない別エージェント）
+- HEAD: 460c00b（初回判定 aa4249b）
+- blocking: 1 件（§3.4 が古い epoch を「拒否」と「unknown」の両方に書き、ack が DO を通るかも曖昧だった）→ 修正済み
+- 受入: 5/5。`npm run check` exit 0（351 tests / 70 files、28.7s）
+- 非 blocking（低 8。0156 / 0157 の実装時に解釈を確定する）: 取得と更新の区別、更新で epoch を増やすか、期限切れ時の shell、stale lease の対象を ack 付き書き込みに限定、C4 の文言、DO の表がキャッシュであること、要件2 の相互参照、本 Result の記録。
+
 ## やらないこと
 
 - lease の実装（0156 / 0157）。
@@ -55,3 +64,4 @@ touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/c
 - 2026-11-17: ユーザーの判断で `now` のまま最初に閉じる。touches を 0141 の形（test・index・README・CHANGELOG・docs）に合わせた。3本の同時実行（0190 / 0151 / 0147）とはファイルが交わらない。
 - 2026-11-17: 実装。core に `WorkspaceLease` / `LEASE_REFUSALS`（+ index / README / CHANGELOG）、docs/durability.md §3.4、ARCH の INV-13 と要件2の読み方、workspace.md の未決を更新。
 - 2026-11-17: 独立レビュー BLOCKED（blocking 1・低 8）。blocking: §3.4 が「古い epoch は拒否」と「unknown」を併記し、ack が DO を通ることも曖昧。§3.4 を「委譲は版チェックだけ、ack は §3.1 のまま」「古い epoch は `lease_epoch_stale`、`unknown` は outcome 欠落だけ」に修正。低も反映: issue 番号の除去、`expectTypeOf` で brand を固定、Notes の統合、要件2 の重複を 2 箇所に、取得競合と接続断の規則を追加。
+- 2026-11-17: 再レビュー PASS（HEAD 460c00b、blocking 0）。受入 5/5 で done。`npm run check` exit 0（351 tests）。

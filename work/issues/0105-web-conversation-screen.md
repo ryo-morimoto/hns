@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0049, 0102, 0119, 0145, 0146, 0159
 touches: packages/web/src/screens/conversation, packages/web/src/components/Transcript.tsx, packages/web/src/components/Composer.tsx, packages/web/src/components/Progress.tsx, packages/web/test/conversation
 

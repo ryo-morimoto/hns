@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: docs/durability.md §5
 depends-on: 0153, 0156
 touches: packages/workspace/src/checkpoint.ts, packages/workspace/test/checkpoint.test.ts
 

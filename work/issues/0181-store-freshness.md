@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0159, 0179
 touches: packages/web/src/live/, packages/web/src/app/, packages/web/test/
 

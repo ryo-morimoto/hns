@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0190
 touches: packages/workspace/src/rooted.ts, packages/workspace/src/workspace.ts, packages/workspace/src/protocol.ts, packages/workspace/test/, tools/gate/
 

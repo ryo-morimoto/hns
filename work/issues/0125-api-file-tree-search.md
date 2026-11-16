@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0033, 0145, 0146
 touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test, packages/workspace/src, packages/server/src, packages/server/test
 

@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: docs/durability.md §5
 depends-on: 0141, 0156
 touches: packages/server/src/do/journal.ts, packages/store/src/journal/, packages/server/test/do/journal.test.ts
 

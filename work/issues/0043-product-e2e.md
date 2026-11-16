@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0102, 0145, 0146, 0159, 0178
 touches: e2e/, docs/test/e2e.md, docs/testing.md, package.json, package-lock.json, .github
 

@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0034, 0145, 0146
 touches: packages/core/src/graphql, packages/agent/src/providers, packages/agent/test, packages/server/src, packages/server/test
 

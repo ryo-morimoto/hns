@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: docs/durability.md §7, docs/limits.md
 depends-on: 0151, 0153
 touches: packages/server/src/cost/, deploy/limits/
 

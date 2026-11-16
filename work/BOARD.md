@@ -7,9 +7,16 @@
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
 | Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 5 |
-| Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 60 |
+| Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 59 |
 | Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 5 |
 | Q4 | — | — | `hold` | いまはやらない | 8 |
+
+### 設計の合意（design）
+
+| design | 件数 | 意味 |
+| --- | --- | --- |
+| `agreed` | 20 | 合意済み（`now` の必要条件）。根拠は issue の `design-ref` |
+| `pending` | 57 | 設計待ち。設計レビューで `agreed` にする |
 
 ### 着手の規則
 
@@ -18,49 +25,49 @@
 - `batch` は `now` / `plan` の作業に隣接するときだけ（同じファイル・同じレーン）。単独で着手しない。
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
+- `now` は `design: agreed` かつ `depends-on` 充足のときだけ（[README](README.md) の「設計の合意」）。`design: pending` は設計レビューを先に通す。
 
 ### now（5）
 
 | # | 作業 | 依存の状態 | 設計レーン |
 | --- | --- | --- | --- |
-| [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 done | L0 |
 | [0190](issues/0190-workspace-debt.md) | workspace の低負債（0056・0057・0058・0060） | 0045 done | L4 |
+| [0156](issues/0156-journal-in-do.md) | Workspace DO の骨格（lease・版・所有） | 0142 / 0145 done | L4 |
 | [0151](issues/0151-provider-gateway.md) | provider gateway（鍵の分離・予算・緊急停止） | 0143 / 0144 done | L9 |
 | [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名） | 0145 done | L3 |
 | [0159](issues/0159-live-ws.md) | ライブ更新の WS 化（SSE の置き換え） | 0146 done | L2 |
 
-同時に流すのは3本（[LANES.md](LANES.md)）。いまは **0190 / 0151 / 0147** で、0142 は lead が先に閉じる。0159 は空いた枠に入れる。
-0142 は 0156 を、0190 は 0191 と 0153 を、0151 は 0152 を、0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を開ける。
+同時に流すのは3本（[LANES.md](LANES.md)）。いまは **0190 / 0151 / 0147**。0190 の統合後に 0156、枠が空いたら 0159。0153 / 0059 は順番待ち。
+0190 は 0191 と 0153 を、0156 は 0169 / 0157 を、0151 は 0152 を、0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を開ける。
 
-### 次の昇格（依存が解けたら now にする）
+### 次の昇格
 
-| 昇格 | 前提 | レーン | 備考 |
-| --- | --- | --- | --- |
-| [0156](issues/0156-journal-in-do.md) | 0142 done | L4 | Workspace DO の骨格。0142 の直後に開く |
-| [0191](issues/0191-workspace-perf.md) | 0190 done | L4 | workspace の性能。0153 より先（窓を閉じる） |
-| [0152](issues/0152-real-provider.md) | 0151 done | L9 | 実プロバイダ。0151 と同じレーンで続ける |
-| [0153](issues/0153-r2-object-store.md) | 0191 done | L4 | R2。workspace の窓が閉じてから |
-| [0048](issues/0048-store-identity.md) | 0151 done（store migration の枠） | L1 / L6 | identity の土台。0069 / 0070 が続く |
-| [0194](issues/0194-machine-sandbox.md) / [0148](issues/0148-machine-registry.md) / [0165](issues/0165-safety-reeval.md) | 0147 done | L3 | 0147 の後続。0194 と 0165 を 0148 より先に置いてよい |
-| [0160](issues/0160-ui-delivery.md) | 0159 done | L7 | UI 配信。0105 / 0103 の順序は 0182 で決める |
-| [0149](issues/0149-d1-projection.md) | 0151 done（store migration の枠）+ 一覧を GraphQL に直す rescope | L5 | 0115 / 0121 の前提 |
+`now` の条件は `design: agreed` かつ `depends-on` 充足。lead がレーン順に選ぶ（agent は昇格しない）。
+
+- 順番待ち（0059 / 0153）は、枠が空いたら `now` へ。0153 は 0190 → 0191 の後（workspace の窓）。
+- 設計待ちの 13 件は、設計レビュー（D069 の設計層）で `design-ref` を書いて `agreed` にしてから。
+- 依存待ちの agreed 9 件（0154, 0155, 0157, 0162, 0163, 0166, 0167, 0168, 0169）は、依存が解けたら `now` の候補。
 
 
 
 
-### plan（60）
+### plan（59）
 
-- **L3 マシン**: 0148, 0165, 0194
-- **L4 耐久**: 0153, 0154, 0155, 0156, 0157, 0167, 0168, 0169, 0191
-- **L5 索引**: 0149
-- **L6 認証**: 0158
-- **L7 Web**: 0160
-- **L8 運用**: 0161, 0162, 0163, 0164, 0166
-- **L9 ゲートウェイ**: 0152
-- **L10 GraphQL**: 0181, 0182
-- **基盤・移植**: 0032, 0036, 0038, 0039, 0040, 0043, 0048, 0049, 0059, 0069, 0070, 0071
-- **UI 画面**: 0103, 0104, 0105, 0106, 0107, 0108, 0109, 0110, 0111, 0112, 0113, 0114
-- **API / data**: 0116, 0117, 0122, 0123, 0124, 0125, 0126, 0127, 0128, 0129, 0130, 0131, 0197
+`now` の条件は `design: agreed` かつ `depends-on` 充足。plan は欠けている理由で分ける。
+
+- **設計待ち（design: pending・依存充足、13）**: 0032, 0036, 0038, 0039, 0048, 0049, 0103, 0106, 0122, 0125, 0127, 0149, 0182
+- **順番待ち（design: agreed・依存充足、2）**: 0059, 0153
+- **依存待ち（44、* は design: agreed）**:
+  - **L3 マシン**: 0148, 0165, 0194
+  - **L4 耐久**: 0154*, 0155*, 0157*, 0167*, 0168*, 0169*, 0191
+  - **L6 認証**: 0158
+  - **L7 Web**: 0160
+  - **L8 運用**: 0161, 0162*, 0163*, 0164, 0166*
+  - **L9 ゲートウェイ**: 0152
+  - **L10 GraphQL**: 0181
+  - **基盤・移植**: 0040, 0043, 0069, 0070, 0071
+  - **UI 画面**: 0104, 0105, 0107, 0108, 0109, 0110, 0111, 0112, 0113, 0114
+  - **API / data**: 0116, 0117, 0123, 0124, 0126, 0128, 0129, 0130, 0131, 0197
 
 ### batch（5）
 
@@ -194,7 +201,7 @@
 | [0131](issues/0131-api-automation-archive.md) | Automation の archive / delete | open | plan | 0038, 0145, 0146 |
 | [0140](issues/0140-cf-adoption-docs.md) | 正本を Cloudflare に置く決定と docs の書き換え | **done** | — | — |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | **done** | — | 0140 |
-| [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | open | now | 0141 |
+| [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | **done** | — | 0141 |
 | [0143](issues/0143-secret-placement.md) | 秘密の配置（gateway・git はマシン・DEK） | **done** | — | 0140 |
 | [0144](issues/0144-cf-deploy-env.md) | 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | **done** | — | 0140 |
 | [0145](issues/0145-worker-edge.md) | Worker の入口（認証境界・ルーティング・相関 ID） | **done** | — | 0144 |
@@ -208,7 +215,7 @@
 | [0153](issues/0153-r2-object-store.md) | R2 オブジェクトストア（git object 互換・pack アップロード） | open | plan | 0141, 0144 |
 | [0154](issues/0154-checkpoint-commit.md) | checkpoint commit（refs/hns・Run 境界） | open | plan | 0153, 0156 |
 | [0155](issues/0155-restore.md) | restore（base + Journal の再生） | open | plan | 0154 |
-| [0156](issues/0156-journal-in-do.md) | Workspace DO の骨格（lease・版・所有） | open | plan | 0142, 0145 |
+| [0156](issues/0156-journal-in-do.md) | Workspace DO の骨格（lease・版・所有） | open | now | 0142, 0145 |
 | [0157](issues/0157-versioned-write-remote.md) | 版付き書き込みのリモート化（ack が DO を通る） | open | plan | 0033, 0147, 0156 |
 | [0158](issues/0158-auth-edge.md) | 認証の再編（passkey / PRF / デバイス鍵） | open | plan | 0048, 0069, 0070, 0071, 0147 |
 | [0159](issues/0159-live-ws.md) | ライブ更新の WS 化（SSE の置き換え） | open | now | 0146 |

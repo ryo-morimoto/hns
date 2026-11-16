@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0102
 touches: packages/web/src/components/CommandPalette, packages/web/src/app/keyboard.ts, packages/web/test/command-palette
 

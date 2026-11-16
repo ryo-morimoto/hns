@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0034, 0046
 touches: packages/agent/src, packages/agent/test
 

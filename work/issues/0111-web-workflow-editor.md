@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0110, 0130
 touches: packages/web/src/components/WorkflowGraph, packages/web/src/screens/workflows/edit, packages/web/test/workflow-graph
 

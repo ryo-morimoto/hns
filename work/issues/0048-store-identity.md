@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0047
 touches: packages/store/src/identity, packages/store/package.json, packages/store/test, package-lock.json
 

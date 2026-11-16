@@ -2,6 +2,8 @@
 
 status: open
 priority: now
+design: agreed
+design-ref: D047, D048
 depends-on: 0143, 0144
 touches: packages/server/src/gateway/, packages/server/test/gateway/, packages/store/src/migrations/, tools/deploy/, work/issues/0151-provider-gateway.md
 

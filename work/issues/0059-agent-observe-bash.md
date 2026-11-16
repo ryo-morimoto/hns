@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: 設計を変えない（0034 の観測の揃え）
 depends-on: 0034
 touches: packages/agent
 

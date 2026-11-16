@@ -21,6 +21,21 @@
 - `plan` を `now` に上げるのは人の判断。agent が自分で昇格しない。
 - 一覧と件数は [BOARD.md](BOARD.md) の「優先度マトリクス」。変えるときは issue と BOARD を同時に直す。
 
+## 設計の合意（design）
+
+`priority` は**いつやるか**、`design` は**設計が人間と合意できているか**。別の軸として持つ。
+`plan` は「この波の後」と「設計が未合意」を兼ねない。
+
+| design | 意味 | now にできるか |
+| --- | --- | --- |
+| `agreed` | 設計が人間、または記録済みの決定（DNNN / docs の節）と合意している | できる（依存と枠が満たされれば） |
+| `pending` | 重要だが設計が未合意（未判定・rescope 待ちを含む） | できない。設計レビューで `agreed` にする |
+
+- `design: pending` は、設計レビュー（D069 の設計層）で `design-ref` に根拠（DNNN / docs の節）を書いて `agreed` にする。レビューは実装前に行う。
+- `now` の条件は **`design: agreed` かつ `depends-on` 充足**。`plan` はどちらかが欠けている状態で、BOARD は理由（設計待ち / 順番待ち / 依存待ち）で分ける。
+- 設計を変えない issue（欠陥の返済・docs・メタデータ）は `agreed` とし、`design-ref: 設計を変えない（理由）` と書く。
+- 完了した issue は `design` を持たない。既存の done は遡及しない。新規 issue は `design: pending` で作り、設計レビューで `agreed` にする。
+
 ## Issue 形式
 
 `superseded` は置換済み。後継の issue 番号を本文の先頭に書き、状態は変えない。
@@ -30,6 +45,8 @@
 
 status: open | in-progress | blocked | done | superseded
 priority: now | plan | batch | hold
+design: agreed | pending
+design-ref: DNNN / docs の節（agreed のとき）
 depends-on: NNNN, NNNN
 touches: 触るパス
 

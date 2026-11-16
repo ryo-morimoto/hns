@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0039, 0102, 0122, 0123, 0124
 touches: packages/web/src/screens/settings, packages/web/test/settings
 

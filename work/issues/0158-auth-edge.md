@@ -2,7 +2,8 @@
 
 status: open
 priority: plan
-depends-on: 0022, 0023, 0025, 0026, 0145
+design: pending
+depends-on: 0048, 0069, 0070, 0071, 0147
 touches: packages/server/src/auth/, packages/core/src/auth.ts
 
 ## Goal

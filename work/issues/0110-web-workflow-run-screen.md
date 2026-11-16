@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0038, 0102, 0129, 0159
 touches: packages/web/src/screens/workflows, packages/web/src/screens/runs, packages/web/test/workflows, packages/web/test/runs
 

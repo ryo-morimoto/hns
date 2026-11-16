@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: D047, docs/durability.md §11
 depends-on: 0150, 0157
 touches: packages/server/src/runtime/, packages/store/src/
 

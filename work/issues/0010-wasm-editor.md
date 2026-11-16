@@ -2,6 +2,7 @@
 
 status: open
 priority: hold
+design: pending
 depends-on: —
 touches: work/poc/wasm-editor, work/research/wasm-editor.md
 

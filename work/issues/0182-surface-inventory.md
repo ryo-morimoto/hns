@@ -2,6 +2,7 @@
 
 status: open
 priority: plan
+design: pending
 depends-on: 0179
 touches: docs/, work/issues/, packages/web/, packages/server/
 

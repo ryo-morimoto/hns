@@ -2,6 +2,8 @@
 
 status: open
 priority: batch
+design: agreed
+design-ref: 設計を変えない（findings の再判定）
 depends-on: 0145, 0146
 touches: work/findings/, packages/server/src/edge/, packages/store/src/, packages/core/src/types.ts, packages/core/test/, packages/workspace/src/workspace.ts, packages/workspace/test/
 

@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: docs/observability.md
 depends-on: 0145, 0147
 touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/machine/src/log.ts
 

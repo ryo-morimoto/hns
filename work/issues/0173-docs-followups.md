@@ -2,6 +2,8 @@
 
 status: open
 priority: batch
+design: agreed
+design-ref: 設計を変えない（docs の整合）
 depends-on: 0140
 touches: AGENTS.md, docs/packages.md, docs/engineering.md, docs/decisions.md, work/issues/0032-migrate-packages.md, work/issues/0035-server-package.md, work/issues/0046-test-discipline.md, work/issues/0056-workspace-temp-cleanup.md
 

@@ -2,6 +2,8 @@
 
 status: open
 priority: plan
+design: agreed
+design-ref: docs/durability.md §5
 depends-on: 0154, 0155
 touches: packages/workspace/src/retention.ts, packages/workspace/test/retention.test.ts
 
