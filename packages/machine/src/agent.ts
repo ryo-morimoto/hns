@@ -42,6 +42,8 @@ export interface MachineAgentOptions {
 export interface MachineAgent {
   /** `http://127.0.0.1:<port>`, the address cloudflared proxies to. */
   readonly origin: string;
+  /** The address the listener is bound to; always `127.0.0.1`. */
+  readonly address: string;
   readonly port: number;
   /** Requests holding a concurrency slot now. */
   readonly inFlight: number;
@@ -119,6 +121,7 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
   }
   return {
     origin: `http://${HOST}:${address.output.port}`,
+    address: address.output.address,
     port: address.output.port,
     get inFlight(): number {
       return context.inFlight.count;

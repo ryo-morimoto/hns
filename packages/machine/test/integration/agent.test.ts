@@ -28,6 +28,16 @@ function resultOf(answer: MachineAnswer): JsonValue {
   return answer.body.result;
 }
 
+/** The host's first non-loopback IPv4 address, when it has one. */
+function externalIpv4(): string | undefined {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const info of list ?? []) {
+      if (info.family === "IPv4" && !info.internal) return info.address;
+    }
+  }
+  return undefined;
+}
+
 const health = JSON.stringify({ op: "health" });
 
 test("a signed health call is answered", async () => {
@@ -379,18 +389,28 @@ test("a request that never finishes its body meets the deadline", async () => {
   );
 });
 
-test("the agent listens on loopback only", async () => {
+test("the agent binds to loopback only", async () => {
   await withAgent(
     async () => {},
     async (fixture) => {
+      expect(fixture.agent.address).toBe("127.0.0.1");
       expect(fixture.origin).toBe(`http://127.0.0.1:${fixture.port}`);
       expect(fixture.port).toBeGreaterThan(0);
-      const external = Object.values(networkInterfaces())
-        .flat()
-        .find((info) => info !== undefined && info.family === "IPv4" && !info.internal);
-      if (external === undefined) return;
+    },
+  );
+});
+
+test("a non-loopback interface cannot reach the agent", async (context) => {
+  const external = externalIpv4();
+  if (external === undefined) {
+    context.skip("this host has no non-loopback IPv4 interface to try");
+    return;
+  }
+  await withAgent(
+    async () => {},
+    async (fixture) => {
       await expect(
-        fetch(`http://${external.address}:${fixture.port}/rpc`, { method: "POST", body: "{}" }),
+        fetch(`http://${external}:${fixture.port}/rpc`, { method: "POST", body: "{}" }),
       ).rejects.toThrow();
     },
   );
