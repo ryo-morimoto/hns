@@ -59,6 +59,20 @@ test("the worker declares the session secret binding", () => {
   expect(worker.env).toHaveProperty("HNS_SESSION_SECRET");
   expect(worker.env).toHaveProperty("SESSION");
 });
+
+// Catches: a Workspace export the WORKSPACE binding cannot address, or vice versa.
+test("the worker exports and binds the Workspace Durable Object", () => {
+  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  expect(worker.exports.Workspace).toStrictEqual({
+    type: "durable-object",
+    storage: "sqlite",
+  });
+  expect(worker.env.WORKSPACE).toStrictEqual({
+    type: "durable-object",
+    worker: "hns-dev",
+    exportName: "Workspace",
+  });
+});
 // Catches: a provider key added to the harness Worker's env, which would undo the isolation.
 test("the harness worker declares no provider credential", () => {
   const worker = workerFor(deploymentFor("development", undefined, undefined));

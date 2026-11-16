@@ -16,6 +16,7 @@ export const workerFor = (deployment: Deployment) => ({
   entrypoint: "worker.ts",
   exports: {
     Session: exports.durableObject({ storage: "sqlite" }),
+    Workspace: exports.durableObject({ storage: "sqlite" }),
   },
   env: {
     HNS_ENV: bindings.text(deployment.env),
@@ -25,6 +26,10 @@ export const workerFor = (deployment: Deployment) => ({
     SESSION: bindings.durableObject({
       worker: deployment.workerName,
       exportName: "Session",
+    }),
+    WORKSPACE: bindings.durableObject({
+      worker: deployment.workerName,
+      exportName: "Workspace",
     }),
     DB: bindings.d1({ name: deployment.workerName }),
     // The harness reaches the model through this binding and holds neither the key nor the URL.

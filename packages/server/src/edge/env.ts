@@ -40,6 +40,15 @@ export interface WorkerEnv {
   readonly ASSETS?: AssetFetcher | undefined;
   readonly SESSION?: DurableObjectNamespace | undefined;
   /**
+   * The per-workspace Workspace Durable Object namespace.
+   *
+   * @remarks
+   * Address it with `idFromName(workspaceId)`, so one object owns each workspace's lease and
+   * version table. Optional, like every binding, so a missing binding fails closed instead of
+   * crashing the isolate.
+   */
+  readonly WORKSPACE?: DurableObjectNamespace | undefined;
+  /**
    * The control database: projects, tasks, and the conversation index.
    *
    * @remarks

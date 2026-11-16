@@ -5,7 +5,7 @@ priority: now
 design: agreed
 design-ref: D048, docs/durability.md §3.4
 depends-on: 0142, 0145
-touches: packages/server/src/do/workspace.ts, packages/server/src/do/workspace.test.ts, packages/server/src/index.ts, work/issues/0156-journal-in-do.md
+touches: packages/server/src/do/workspace.ts, packages/server/src/do/workspace.test.ts, packages/server/src/index.ts, packages/server/src/edge/env.ts, packages/server/test/integration/workspace-do.test.ts, tools/deploy/worker.ts, tools/deploy/cloudflare.config.ts, tools/deploy/config.test.ts, work/issues/0156-journal-in-do.md
 
 ## Goal
 
@@ -14,13 +14,13 @@ lease（0142）と版の表を実装し、Session DO から RPC で呼ばれる�
 
 ## Acceptance criteria
 
-- [ ] `Workspace(id)` の DO を作る。id は workspaceId
-- [ ] lease の取得・更新・解放。epoch を発番し、古い epoch の書き込みを拒否する
-- [ ] lease の期限切れは fail closed（書き込みは `lease_expired` で拒否）
-- [ ] `path → 現在の版` の表を持ち、`expectedVersion` の比較をここで行う
-- [ ] Session DO から呼ぶ RPC の面を最小に固定（apply / read / lease）
-- [ ] 直列化: 同じパスへの書き込みが同時に来たら、片方だけが通る（テスト）
-- [ ] 期限切れ・二重取得・別マシンの epoch を弾くテスト
+- [x] `Workspace(id)` の DO を作る。id は workspaceId
+- [x] lease の取得・更新・解放。epoch を発番し、古い epoch の書き込みを拒否する
+- [x] lease の期限切れは fail closed（書き込みは `lease_expired` で拒否）
+- [x] `path → 現在の版` の表を持ち、`expectedVersion` の比較をここで行う
+- [x] Session DO から呼ぶ RPC の面を最小に固定（apply / read / lease）
+- [x] 直列化: 同じパスへの書き込みが同時に来たら、片方だけが通る（テスト）
+- [x] 期限切れ・二重取得・別マシンの epoch を弾くテスト
 
 ## テスト条件
 
@@ -38,6 +38,7 @@ lease（0142）と版の表を実装し、Session DO から RPC で呼ばれる�
 | C10 | 別 workspaceId の要求 → 400 invalid_request、lease/版を汚さない | 高 | 受入1、1 workspace = 1 DO |
 | C11 | 絶対パス・`..`・NUL・ドライブ表記 → 400 invalid_request | 中 | 受入4、安全境界 |
 | C12 | 全変更 → `npm run check` → exit 0 | 高 | Result |
+| C13 | 実 workerd の DO に RPC で acquire → apply → read → 同時 apply → release 後の旧 epoch → cf dev 再起動後の read/apply → 片方だけ適用・旧 epoch 拒否・版と lease が残る | 高 | 受入1–6、durability §3.1–§3.4 |
 
 ## テスト設計
 
@@ -51,8 +52,9 @@ lease（0142）と版の表を実装し、Session DO から RPC で呼ばれる�
 | T6 | C9 | 契約（read の往復） | unit（実 SQLite） | "read reports absent before a write and the recorded version after" |
 | T7 | C10・C11 | 契約（境界の拒否） | unit（実 SQLite） | "a write for another workspace is refused" / "an unsafe path is refused by apply and read" |
 | T8 | C12 | ゲート | static / build | `npm run check` |
+| T9 | C13 | 契約テスト + 競合 + 故障注入（再起動） | integration（cf dev / workerd） | `test/integration/workspace-do.test.ts` "the Workspace DO serializes writes, fences the old epoch, and survives a restart" |
 
-`test/do/` は vitest.config.ts の include（`src/**/*.test.ts` と `test/integration/**`）に入らず実行されないため、unit は docs/testing.md どおり `src/do/workspace.test.ts` に置く。SQL と schema を含むので実 SQLite（node:sqlite、単一プロセス）で回す。DO の実ランタイム直列化そのものは `storage.transaction` の契約に委ね、テストではトランザクションを直列化するアダプタで read-check-write の原子性を証明する。
+`test/do/` は vitest.config.ts の include（`src/**/*.test.ts` と `test/integration/**`）に入らず実行されないため、unit は docs/testing.md どおり `src/do/workspace.test.ts` に置く。SQL と schema を含むので実 SQLite（node:sqlite、単一プロセス）で回す。unit では `storage.transaction` を直列化するアダプタで read-check-write の原子性を証明し、workerd 上の直列化・永続は `cf dev` の integration で確認する。
 
 ## Notes
 
@@ -71,3 +73,4 @@ lease（0142）と版の表を実装し、Session DO から RPC で呼ばれる�
 - 2026-11-07: 0556 から分割。Journal は 0169 へ。
 - 2026-11-17: 実装前のテスト分析・設計を追加（C1–C12 / T1–T8）。touches を修正: テストは vitest の include に入る `packages/server/src/do/workspace.test.ts` に置き、DO を Worker から export する `packages/server/src/index.ts` を追加。deploy 配線（binding / export）は 0151 の main 統合後に回す。
 - 2026-11-17: `Workspace` DO を実装（apply / read / lease、epoch の発番、期限切れ fail closed、版の表、`storage.transaction` による直列化）。12 unit tests（実 SQLite）を追加し、guard を壊す変異で検出力を確認。`npm run check` exit 0（100 server tests を含む）。`tools/deploy` は 0151 所有のため WORKSPACE binding と deploy 側 export は未配線。
+- 2026-11-17: 0151 / 0190 統合後の main に rebase。deploy 配線を追加: `tools/deploy/worker.ts` の Workspace export、`cloudflare.config.ts` の `Workspace` export と `WORKSPACE` binding、`WorkerEnv.WORKSPACE` 型、`config.test.ts` の検証。`cf dev` integration（`workspace-do.test.ts`）で実 workerd の DO に RPC 経由で acquire → apply → read、同時 apply の片側 conflict、release 後の旧 epoch 拒否、再起動後の版 / lease 永続を確認。
