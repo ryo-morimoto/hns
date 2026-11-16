@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { relay } from "./packages/web/vite.relay.ts";
 import { doctest } from "vite-plugin-doctest";
 
 // One runner for every layer (docs/testing.md). A project per package keeps
@@ -76,7 +77,11 @@ export default defineConfig({
       ...packageProjects("web", {
         environment: "jsdom",
         setupFiles: ["packages/web/test/setup.ts"],
-      }),
+      }).map((project) => ({
+        ...project,
+        // The web project compiles graphql tags with the same babel plugin the bundle uses.
+        plugins: [relay()],
+      })),
       { extends: true, test: { name: "tools", include: ["tools/**/*.test.ts"] } },
     ],
   },

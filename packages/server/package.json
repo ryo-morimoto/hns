@@ -16,6 +16,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./graphql": {
+      "source": "./src/graphql/index.ts",
+      "types": "./dist/graphql/index.d.ts",
+      "import": "./dist/graphql/index.js"
     }
   },
   "scripts": {

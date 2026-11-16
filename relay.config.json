@@ -1,0 +1,7 @@
+{
+  "src": "./packages/web/src",
+  "schema": "./packages/web/schema.graphql",
+  "language": "typescript",
+  "artifactDirectory": "./packages/web/src/__generated__",
+  "exclude": ["**/__generated__/**"]
+}

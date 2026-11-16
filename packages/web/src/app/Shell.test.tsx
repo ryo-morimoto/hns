@@ -3,9 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, afterEach, beforeEach, test } from "vitest";
-import { createFixtureSource } from "./fixtureSource.ts";
-import { Shell } from "./Shell.tsx";
+import { RelayEnvironmentProvider } from "react-relay";
+import { createTestEnvironment } from "../../test/support/relay.ts";
+import { workspaceFixture } from "../../test/support/workspaceFixtures.ts";
 import { fixtureSummarySource } from "./fixtureSummaries.ts";
+import { Shell } from "./Shell.tsx";
 import type { WorkspaceSummary } from "./workspaceSummary.ts";
 
 const originalMatchMedia = window.matchMedia;
@@ -28,17 +30,14 @@ function renderShell(
   panel?: ReactNode,
   summarySource?: () => Promise<readonly WorkspaceSummary[]>,
 ) {
-  const source = createFixtureSource();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { environment } = createTestEnvironment(workspaceFixture);
   return render(
-    <QueryClientProvider client={queryClient}>
-      <Shell
-        source={source}
-        onOpenCommand={onOpenCommand}
-        panel={panel}
-        summarySource={summarySource}
-      />
-    </QueryClientProvider>,
+    <RelayEnvironmentProvider environment={environment}>
+      <QueryClientProvider client={queryClient}>
+        <Shell onOpenCommand={onOpenCommand} panel={panel} summarySource={summarySource} />
+      </QueryClientProvider>
+    </RelayEnvironmentProvider>,
   );
 }
 
@@ -193,16 +192,16 @@ test("the active workspace stays first even without needs", async () => {
   expect(labels[1] ?? "").toMatch(/^hns:/u);
 });
 
-test("runs stay global when another workspace is active", async () => {
+// Catches: the run section moving inside a workspace body; runs have no GraphQL projection yet.
+test("the run section stays global when another workspace is active", async () => {
   window.location.hash = "#/p/project-docs";
   renderShell(undefined, undefined, fixtureSummarySource);
   await screen.findByRole("heading", { level: 1, name: "Workspace" });
 
   const runs = await screen.findByRole("region", { name: "実行" });
-  expect(runs.textContent ?? "").toMatch(/workflow-release/u);
-  expect(screen.getAllByText("workflow-release").length).toBe(1);
+  expect(runs.textContent ?? "").toMatch(/実行はありません/u);
   const body = screen.getByRole("group", { name: "docs の作業" });
-  expect(within(body).queryByText("workflow-release")).toBe(null);
+  expect(within(body).queryByRole("region", { name: "実行" })).toBe(null);
 });
 
 test("the mobile menu carries the needs-you count", async () => {

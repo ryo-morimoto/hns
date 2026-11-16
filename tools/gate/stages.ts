@@ -46,7 +46,7 @@ export const stages: readonly Stage[] = [
         cwd: root,
         argv: [
           binary(root, "oxlint"),
-          ...(all ? ["packages", "tools/deploy"] : dirs(packages)),
+          ...(all ? ["packages", "tools/deploy", "tools/codegen"] : dirs(packages)),
         ],
       },
     ],
@@ -60,7 +60,7 @@ export const stages: readonly Stage[] = [
         argv: [
           binary(root, "oxfmt"),
           "--check",
-          ...(all ? ["packages", "tools/deploy"] : dirs(packages)),
+          ...(all ? ["packages", "tools/deploy", "tools/codegen"] : dirs(packages)),
         ],
       },
     ],
@@ -81,6 +81,10 @@ export const stages: readonly Stage[] = [
         runs.push({
           cwd: root,
           argv: [binary(root, "tsrs"), "--noEmit", "-p", "tools/deploy/tsconfig.json"],
+        });
+        runs.push({
+          cwd: root,
+          argv: [binary(root, "tsrs"), "--noEmit", "-p", "tools/codegen/tsconfig.json"],
         });
       }
       return runs;

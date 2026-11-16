@@ -1,18 +1,18 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { RelayEnvironmentProvider } from "react-relay";
 import { Shell } from "./app/Shell.tsx";
-import { createFixtureSource } from "./app/fixtureSource.ts";
 import { fixtureSummarySource } from "./app/fixtureSummaries.ts";
 import { applyTheme, readTheme } from "./app/theme.ts";
 import { Gallery } from "./design/Gallery.tsx";
+import { createEnvironment } from "./relay/environment.ts";
 import "./design/system.css";
 
 // Apply the stored theme before the first paint so the shell does not flash the OS default.
 applyTheme(readTheme(window.localStorage));
 
-// There is no server yet; Relay replaces the fixture reads once it lands.
-const source = createFixtureSource();
+const environment = createEnvironment();
 const gallery = import.meta.env.DEV && window.location.hash === "#/design";
 
 const container = document.getElementById("root");
@@ -27,9 +27,11 @@ createRoot(container).render(
     {gallery ? (
       <Gallery />
     ) : (
-      <QueryClientProvider client={queryClient}>
-        <Shell source={source} summarySource={fixtureSummarySource} />
-      </QueryClientProvider>
+      <RelayEnvironmentProvider environment={environment}>
+        <QueryClientProvider client={queryClient}>
+          <Shell summarySource={fixtureSummarySource} />
+        </QueryClientProvider>
+      </RelayEnvironmentProvider>
     )}
   </StrictMode>,
 );

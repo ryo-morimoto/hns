@@ -17,6 +17,7 @@
     "postinstall": "npm install --prefix tools/deploy --no-audit --no-fund",
     "fmt:check": "node tools/gate/main.ts fmt --all",
     "record": "node packages/record/src/cli.ts",
+    "codegen": "node --conditions=source tools/codegen/graphql.ts && relay-compiler",
     "typecheck": "node tools/gate/main.ts typecheck --all",
     "test": "node tools/gate/main.ts test --all",
     "build": "node tools/gate/main.ts build --all",

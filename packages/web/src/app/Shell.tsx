@@ -1,8 +1,9 @@
 import { Drawer } from "@base-ui/react/drawer";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
 import type { Conversation, Project, Task } from "@hns/core";
-import type { WorkspaceSource } from "./workspaceSource.ts";
+import { useRelayEnvironment } from "react-relay";
+import { createRelaySource } from "./relaySource.ts";
 import { Button } from "../components/Button.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
 import { projectIdFrom } from "../routes/ids.ts";
@@ -17,7 +18,6 @@ import { totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
 import "./shell.css";
 
 export interface ShellProps {
-  readonly source: WorkspaceSource;
   /** The command palette mounts later; until then the entries render disabled. */
   readonly onOpenCommand?: (() => void) | undefined;
   /** The right panel mounts later; the shell only provides the slot. */
@@ -26,7 +26,9 @@ export interface ShellProps {
   readonly summarySource?: (() => Promise<readonly WorkspaceSummary[]>) | undefined;
 }
 
-export function Shell({ source, onOpenCommand, panel, summarySource }: ShellProps): ReactElement {
+export function Shell({ onOpenCommand, panel, summarySource }: ShellProps): ReactElement {
+  const environment = useRelayEnvironment();
+  const source = useMemo(() => createRelaySource(environment), [environment]);
   const route = useRoute();
   const mobile = useMediaQuery("(max-width: 768px)");
   const [theme, chooseTheme] = useTheme();
