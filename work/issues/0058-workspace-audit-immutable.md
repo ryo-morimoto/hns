@@ -1,7 +1,8 @@
 # 0058: auditLog を不変にする
 
-status: open
-priority: plan
+後継: 0190（workspace の低負債を一括で閉じる）。
+
+status: superseded
 depends-on: 0045
 touches: packages/workspace
 
@@ -24,3 +25,4 @@ touches: packages/workspace
 ## Log
 
 - 2026-11-07: 作成（コードレビューで可変の配列を返しているのを見つけた）。
+- 2026-11-11: 0190 に吸収（superseded）。

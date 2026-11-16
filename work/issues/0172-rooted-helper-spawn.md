@@ -1,7 +1,8 @@
 # 0172: rooted ヘルパーの起動を操作ごとにしない
 
-status: open
-priority: batch
+後継: 0191（workspace の実行性能を測って固定する）。
+
+status: superseded
 depends-on: -
 touches: packages/workspace/src/rooted.ts, packages/workspace/src/workspace.ts, packages/workspace/src/protocol.ts
 
@@ -39,3 +40,4 @@ dirfd モードの書き込みが **操作ごとに node プロセスを起動�
 ## Log
 
 - 2026-11-07: 作成（0170 の計測で判明）。
+- 2026-11-11: 0191 に吸収（superseded）。

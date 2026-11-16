@@ -1,7 +1,8 @@
 # 0060: helper の応答に長さの検証を入れる
 
-status: open
-priority: batch
+後継: 0190（workspace の低負債を一括で閉じる）。
+
+status: superseded
 depends-on: 0033
 touches: packages/workspace
 
@@ -25,3 +26,4 @@ helper が `size` を返し、クライアントで照合する。
 ## Log
 
 - 2026-11-07: 作成（コードレビューで base64 の長さ検証が無いのを見つけた）。
+- 2026-11-11: 0190 に吸収（superseded）。

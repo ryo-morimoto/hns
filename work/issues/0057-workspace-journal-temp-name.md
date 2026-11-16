@@ -1,7 +1,8 @@
 # 0057: journal の一時ファイル名を一意にする
 
-status: open
-priority: batch
+後継: 0190（workspace の低負債を一括で閉じる）。
+
+status: superseded
 depends-on: 0045
 touches: packages/workspace
 
@@ -24,3 +25,4 @@ Workspace が開くと、互いの temp を上書きして壊れうる。一意�
 ## Log
 
 - 2026-11-07: 作成（コードレビューで固定 `.tmp` を見つけた）。
+- 2026-11-11: 0190 に吸収（superseded）。

@@ -5,7 +5,7 @@
 
 ## 現在
 
-アクティブな変更レーンはない。0145 は done（b67262e）、E6（0150）は review PASS で main に統合済み（cff01f4）。0188 / 0144 / 0143 / 0183 / 0185 / 0186 / 0187 も main に統合済み。
+0141（E8）と 0146（E7）が実装中。0145 は done（b67262e）、E6（0150）は review PASS で main に統合済み（cff01f4）。0188 / 0144 / 0143 / 0183 / 0185 / 0186 / 0187 も main に統合済み。3本目は 0189（E9、D1 の開通）で、統合後に同じレーンで 0151 を開く。
 
 | レーン | issue | 状態 | 次の統合 |
 | --- | --- | --- | --- |
@@ -15,6 +15,9 @@
 | E4 | 統合・テスト基盤（このセッション） | 0187 と store test 分割を統合（b883f3f / 689f4c1） | — |
 | E5 | [0145](issues/0145-worker-edge.md) Worker の入口（認証境界・ルーティング・相関 ID） | done（b67262e, PASS）・main に commit | — |
 | E6 | [0150](issues/0150-store-d1-do-backend.md) store を D1 専用にする | done（bd1fabe, review PASS）・main に統合（cff01f4） | — |
+| E7 | [0146](issues/0146-session-do.md) Session DO（PiHarness・会話・run） | 実装中（design を issue に反映） | 0145 の後 |
+| E8 | [0141](issues/0141-durability-contract.md) 耐久の契約 | 実装中（docs / core の型） | 0140 done |
+| E9 | [0189](issues/0189-d1-wiring.md) Worker から D1 の store を開通させる | 開始待ち（3本目）。design review PASS（blocking 0）。統合後に 0151 | 0145 / 0150 done |
 
 - 0187 は TSDoc / doctest / tsdown / TypeDoc を 7 commit（be0fbb1..b883f3f）で統合し、store.test の機能分割を 689f4c1 で追加した。現在の main は 0144 の rebase 後（aa1ac20 以降）。
 - 0144 は `tools/deploy/`、gate の deploy stage、`package.json` / lock を統合した。root lock owner の変更は完了している。
@@ -30,14 +33,19 @@
 
 | 候補 | 依存 | touches | 判定 |
 | --- | --- | --- | --- |
-| [0141](issues/0141-durability-contract.md) 耐久の契約 | 0140 done | `docs/durability.md`, `docs/workspace.md`, `packages/core/src/durability.ts` | 第1候補 |
-| [0145](issues/0145-worker-edge.md) Worker の入口 | 0144 done | `packages/server/src/edge/`, server tests | **done**（b67262e, PASS） |
-| [0142](issues/0142-lease-fencing.md) lease と fencing | 0141 未マージ | `packages/core/src/lease.ts` | 0141 後 |
-| [0176](issues/0176-graphql-endpoint.md) /graphql | 0145 / 0175 未マージ | `packages/server/src/graphql/` | 0145 後 |
-| 0177〜0180 | 0176 / 0145 | web / codegen | 0176 後 |
-| 0184 / 0186 / 0187 | — | — | done。候補から外す |
+| [0141](issues/0141-durability-contract.md) 耐久の契約 | 0140 done | `docs/durability.md`, `docs/workspace.md`, `packages/core/src/durability.ts` | **E8 で実装中** |
+| [0146](issues/0146-session-do.md) Session DO | 0145 done | `packages/server/src/do/`, `packages/agent/` | **E7 で実装中** |
+| [0189](issues/0189-d1-wiring.md) D1 の開通 | 0145 / 0150 done | `store/src/migrations/`, `server/src/edge/env.ts`, `server/package.json`, `package-lock.json`（空き）, `tools/deploy/cloudflare.config.ts`, `ARCH.md` | **E9（3本目、design review PASS）** |
+| [0151](issues/0151-provider-gateway.md) provider gateway | 0143 / 0144 done | `server/src/gateway/`, store の migration | 0189 の後、同じレーン |
+| [0190](issues/0190-workspace-debt.md) → [0191](issues/0191-workspace-perf.md) | 0141 未マージ | `packages/workspace/` | 0141 の統合後。L4 が開く前 |
+| [0142](issues/0142-lease-fencing.md) lease と fencing | 0141 未マージ | `packages/core/src/lease.ts` | 0190 / 0191 の後 |
+| [0153](issues/0153-r2-object-store.md) ∥ [0156](issues/0156-journal-in-do.md) | 0141 / 0142 | `workspace/src/objects.ts`, `server/src/do/workspace.ts` | 0142 の後 |
+| [0147](issues/0147-machine-agent.md) → [0194](issues/0194-machine-sandbox.md) | 0145 done | `packages/machine/` | 0189 か 0151 の後 |
+| [0176](issues/0176-graphql-endpoint.md) /graphql → 0177〜0180 | 0146 未マージ | `packages/server/src/graphql/` | 0146 の統合後 |
+| 0184 / 0186 / 0187 / 0188 | — | — | done。候補から外す |
 
-0141 を次に開く。0142 は 0141 の後。0176 以降は 0145 / 0150 の outcome を見てから順を決める。
+0141 の統合後は 0190 → 0191 を先に置く（workspace の窓が L4 で閉じるため）。0142 → 0153 ∥ 0156 が続く。
+0189 の統合後は同じレーンで 0151、その後に 0147。0176 以降は 0146 の統合直後。
 
 ## 更新の規則
 

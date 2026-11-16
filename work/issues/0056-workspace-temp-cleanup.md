@@ -1,7 +1,8 @@
 # 0056: workspace の temp を後片付けする
 
-status: open
-priority: batch
+後継: 0190（workspace の低負債を一括で閉じる）。
+
+status: superseded
 depends-on: 0045
 touches: packages/workspace
 
@@ -24,3 +25,4 @@ root 直下に残り、watcher も無視するので気づかれないまま溜�
 ## Log
 
 - 2026-11-07: 作成（コードレビューで `#removeTemp` の失敗が無視されているのを見つけた）。
+- 2026-11-11: 0190 に吸収（superseded）。

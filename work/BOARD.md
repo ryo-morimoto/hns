@@ -19,47 +19,47 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（7）
+### now（9）
 
 | # | 作業 | 依存の状態 |
 | --- | --- | --- |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
+| [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | 0145 |
 | [0176](issues/0176-graphql-endpoint.md) | Worker に /graphql を載せる | 0145, 0146, 0150, 0175 |
 | [0177](issues/0177-global-id.md) | global id（Relay の store 要件） | 0176 |
 | [0178](issues/0178-web-relay-environment.md) | web の Relay environment と test harness | 0177 |
 | [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む（最初の画面） | 0178, 0102 |
 | [0180](issues/0180-codegen-gate.md) | relay-compiler をゲートに組み込む | 0175, 0178 |
+| [0189](issues/0189-d1-wiring.md) | Worker から D1 の store を開通させる | 0145, 0150 |
 
 
 
 
-### plan（62）
+### plan（63）
 
-- **L2 会話**: 0146, 0159
-- **L3 マシン**: 0147, 0148, 0165
-- **L4 耐久**: 0153, 0154, 0155, 0156, 0157, 0167, 0168, 0169
+- **L2 会話**: 0159
+- **L3 マシン**: 0147, 0148, 0165, 0194
+- **L4 耐久**: 0153, 0154, 0155, 0156, 0157, 0167, 0168, 0169, 0190, 0191
 - **L5 索引**: 0149
 - **L6 認証**: 0158
 - **L7 Web**: 0160
 - **L8 運用**: 0161, 0162, 0163, 0164, 0166
 - **L9 ゲートウェイ**: 0151, 0152
 - **L10 GraphQL**: 0181, 0182
-- **基盤・移植**: 0032, 0036, 0038, 0039, 0040, 0043, 0048, 0049, 0058, 0059, 0069, 0070, 0071
+- **基盤・移植**: 0032, 0036, 0038, 0039, 0040, 0043, 0048, 0049, 0059, 0069, 0070, 0071
 - **UI 画面**: 0103, 0104, 0105, 0106, 0107, 0108, 0109, 0110, 0111, 0112, 0113, 0114
 - **API / data**: 0116, 0117, 0122, 0123, 0124, 0125, 0126, 0127, 0128, 0129, 0130, 0131
 
-### batch（7）
+### batch（5）
 
 | # | 何 | なぜ今でないか |
 | --- | --- | --- |
 | 0041 | CI | gate と hooks で当面足りる |
-| 0056 | temp の後片付け | 小さい漏れ |
-| 0057 | temp 名の一意性 | 小さい |
-| 0060 | helper の長さ検証 | 小さい |
 | 0120 | Review evidence | 記録の自動化 |
-| 0172 | rooted helper の起動 | 性能。workspace を触るついで |
 | 0173 | docs の残り | 0140 の取りこぼし |
+| 0192 | findings 13 件の再判定 | 0146 の統合後。指摘の棚卸し |
+| 0193 | backlog メタデータの整合 | 0141 / 0146 の統合後。docs だけ |
 
 ### hold（8）
 
@@ -133,11 +133,11 @@
 | [0053](issues/0053-operationid-validation.md) | operationId の検証位置を決める | **done** | — | 0045 |
 | [0054](issues/0054-same-name-swap.md) | 同名ファイルの差し替え窓（TOCTOU の残り） | **done** | — | 0005 |
 | [0055](issues/0055-journal-save-batching.md) | Journal の保存を write 単位でまとめる | open | hold | 0045 |
-| [0056](issues/0056-workspace-temp-cleanup.md) | workspace の temp を後片付けする | open | batch | 0045 |
-| [0057](issues/0057-workspace-journal-temp-name.md) | journal の一時ファイル名を一意にする | open | batch | 0045 |
-| [0058](issues/0058-workspace-audit-immutable.md) | auditLog を不変にする | open | plan | 0045 |
+| [0056](issues/0056-workspace-temp-cleanup.md) | workspace の temp を後片付けする | **置換**（0190） | — | 0045 |
+| [0057](issues/0057-workspace-journal-temp-name.md) | journal の一時ファイル名を一意にする | **置換**（0190） | — | 0045 |
+| [0058](issues/0058-workspace-audit-immutable.md) | auditLog を不変にする | **置換**（0190） | — | 0045 |
 | [0059](issues/0059-agent-observe-bash.md) | agent の bash も観測する | open | plan | 0034 |
-| [0060](issues/0060-workspace-helper-reply-length.md) | helper の応答に長さの検証を入れる | open | batch | 0033 |
+| [0060](issues/0060-workspace-helper-reply-length.md) | helper の応答に長さの検証を入れる | **置換**（0190） | — | 0033 |
 | [0061](issues/0061-workspace-intent-temp-type.md) | JournalIntent.temp の「無い」を型で表す | open | hold | 0045 |
 | [0062](issues/0062-core-empty-patch.md) | 空の PATCH をどう扱うか決める | **置換**（0188） | — | — |
 | [0063](issues/0063-core-contract-error-path.md) | ContractError に path を残す | **置換**（0188） | — | — |
@@ -187,10 +187,10 @@
 | [0143](issues/0143-secret-placement.md) | 秘密の配置（gateway・git はマシン・DEK） | **done** | — | 0140 |
 | [0144](issues/0144-cf-deploy-env.md) | 配備と環境（cf CLI・cloudflare.config.ts・秘密の投入） | **done** | — | 0140 |
 | [0145](issues/0145-worker-edge.md) | Worker の入口（認証境界・ルーティング・相関 ID） | **done** | — | 0144 |
-| [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | open | plan | 0145 |
-| [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名・sandbox） | open | plan | 0145 |
+| [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | in-progress | now | 0145 |
+| [0147](issues/0147-machine-agent.md) | マシンエージェント（cloudflared・署名） | open | plan | 0145 |
 | [0148](issues/0148-machine-registry.md) | Machine レジストリ（D1 + fetch） | open | plan | 0147 |
-| [0149](issues/0149-d1-projection.md) | 会話・run の索引（D1） | open | plan | 0150 |
+| [0149](issues/0149-d1-projection.md) | 会話・run の索引（D1） | open | plan | 0146, 0150 |
 | [0150](issues/0150-store-d1-do-backend.md) | store を D1 専用にする（node:sqlite の削除） | **done** | — | 0144 |
 | [0151](issues/0151-provider-gateway.md) | provider gateway（鍵の分離・予算・緊急停止） | open | plan | 0143, 0144 |
 | [0152](issues/0152-real-provider.md) | 実プロバイダ（faux → 実・ストリーミング・usage） | open | plan | 0146, 0151 |
@@ -199,7 +199,7 @@
 | [0155](issues/0155-restore.md) | restore（base + Journal の再生） | open | plan | 0154 |
 | [0156](issues/0156-journal-in-do.md) | Workspace DO の骨格（lease・版・所有） | open | plan | 0142, 0145 |
 | [0157](issues/0157-versioned-write-remote.md) | 版付き書き込みのリモート化（ack が DO を通る） | open | plan | 0033, 0147, 0156 |
-| [0158](issues/0158-auth-edge.md) | 認証の再編（passkey / PRF / デバイス鍵） | open | plan | 0022, 0023, 0025, 0026, 0145 |
+| [0158](issues/0158-auth-edge.md) | 認証の再編（passkey / PRF / デバイス鍵） | open | plan | 0048, 0069, 0070, 0071, 0147 |
 | [0159](issues/0159-live-ws.md) | ライブ更新の WS 化（SSE の置き換え） | open | plan | 0146 |
 | [0160](issues/0160-ui-delivery.md) | UI の配信（Workers Assets・typed client） | open | plan | 0037, 0159 |
 | [0161](issues/0161-automation-target.md) | automations の実行先（マシン必須の明示） | open | plan | 0038, 0148 |
@@ -213,7 +213,7 @@
 | [0169](issues/0169-journal-truncation.md) | Journal と切り詰め（append・watermark・256KB閾値） | open | plan | 0141, 0156 |
 | [0170](issues/0170-integration-tier.md) | integration 層を分ける | **done** | — | - |
 | [0171](issues/0171-build-prepush.md) | build を pre-push に移す | **done** | — | 0170 |
-| [0172](issues/0172-rooted-helper-spawn.md) | rooted ヘルパーの起動を操作ごとにしない | open | batch | - |
+| [0172](issues/0172-rooted-helper-spawn.md) | rooted ヘルパーの起動を操作ごとにしない | **置換**（0191） | — | - |
 | [0173](issues/0173-docs-followups.md) | D047〜D053 採用後の docs の残り | open | batch | 0140 |
 | [0174](issues/0174-staged-content-merge.md) | ステージ内容と merge をゲートで覆う | **done** | — | 0170, 0171 |
 | [0175](issues/0175-graphql-relay-foundation.md) | core で SDL を起こす | open | now | 0037 |
@@ -230,6 +230,12 @@
 | [0185](issues/0185-tiers-removal.md) | tiers の二重実行を廃止する | **done** | — | 0183 |
 | [0186](issues/0186-test-colocation.md) | テストをコロケートし、issue 参照を削除する | **done** | — | 0184, 0185 |
 | [0187](issues/0187-tsdoc-doctest.md) | TSDoc 契約と doctest を展開する | **done** | — | 0186 |
+| [0189](issues/0189-d1-wiring.md) | Worker から D1 の store を開通させる | open | now | 0145, 0150 |
+| [0190](issues/0190-workspace-debt.md) | workspace の低負債を一括で閉じる（0056・0057・0058・0060） | open | plan | 0045 |
+| [0191](issues/0191-workspace-perf.md) | workspace の実行性能を測って固定する（0172） | open | plan | 0190 |
+| [0192](issues/0192-findings-reconcile.md) | findings 13 件を再判定し、直す | open | batch | 0145, 0146 |
+| [0193](issues/0193-backlog-metadata.md) | backlog のメタデータを現在に合わせる | open | batch | 0141, 0146 |
+| [0194](issues/0194-machine-sandbox.md) | machine の sandbox・hide・env 純度（0147 から分割） | open | plan | 0147 |
 
 ## ゲート
 
@@ -311,10 +317,10 @@ D047 以前の波は、下の **D049 のレーン**に置き換わった。以�
 | --- | --- | --- |
 | L0 契約 | `docs/`, `packages/core/src/{durability,lease}.ts` | 0140 → 0141 → 0142 ∥ 0143 |
 | L0c 撤去 | `packages/core/src/`, `packages/web/src/`, `docs/packages.md` | 0188（L1 より先） |
-| L1 基盤 | `deploy/`, `package.json`, `server/src/edge/`, `packages/store/src/`（L5 の `index/` を除く） | 0144 → 0145、0150 は 0145 の後に統合 |
+| L1 基盤 | `deploy/`, `package.json`, `server/src/edge/`, `packages/store/src/`（L5 の `index/` を除く） | 0144 → 0145、0150 は 0145 の後、0189（D1 の開通）は 0150 の後 |
 | L2 会話 | `server/src/do/session.ts`（PiHarness・1 ワークスペース 1 つ）, `packages/agent/`, `core/src/stream.ts` | 0146 → 0152 ∥ 0159 |
-| L3 マシン | `packages/machine/`, `server/src/machines/`, `core/src/machine.ts` | 0147 → 0148 ∥ 0165 |
-| L4 耐久 | `workspace/src/*`, `server/src/do/{workspace,journal}.ts`, `server/src/routes/files.ts` | 0153 ∥ 0156 → 0169 ∥ 0157 → 0154 → 0155 → 0168 → 0167 |
+| L3 マシン | `packages/machine/`, `server/src/machines/`, `core/src/machine.ts` | 0147 → 0194 ∥ 0148 ∥ 0165 |
+| L4 耐久 | `workspace/src/*`, `server/src/do/{workspace,journal}.ts`, `server/src/routes/files.ts` | 0190 → 0191 ∥ 0153 → 0156 → 0169 ∥ 0157 → 0154 → 0155 → 0168 → 0167 |
 | L5 索引 | `store/src/index/`, `server/src/routes/lists.ts` | 0149 |
 | L6 認証 | `server/src/auth/`, `core/src/auth.ts` | 0158 |
 | L7 Web | `packages/web/`, `deploy/assets/` | 0160 |
@@ -329,6 +335,10 @@ L4 だけは 0147（L3）を待つ。
 | ファイル | 所有者 | 扱い |
 | --- | --- | --- |
 | `packages/server/src/routes/index.ts` | 0145 | 以降のレーンは自分のルートを1行足すだけ。マージ直前に rebase |
+| `packages/server/src/edge/handler.ts` | 0145 | 面の依存は加算。面を足すレーンは1本ずつ |
+| `tools/deploy/worker.ts` | 0146 | binding と entrypoint の追記は1レーンずつ |
+| `tools/deploy/cloudflare.config.ts` | 0189 | D1 の binding を1回足す。以後は加算 |
+| `work/BOARD.md` / `work/LANES.md` | lead | レーンは触らない。統合のたびに lead が更新する |
 | `package.json` | 0144 → 0150 | lock owner。0150 が miniflare の devDependency を1件だけ足した。以降は依存を足さない |
 | `docs/safety.md` | 0143 | 0165 は 0143 の後に書く |
 | `docs/workspace.md` | 0141 | 0142 は触らない（型だけ） |
@@ -367,7 +377,7 @@ L4 だけは 0147（L3）を待つ。
 
 ## 完成までの順序（現行、D047〜D049・D053）
 
-**Cloudflare 採用**: L0 契約（0140 → 0141 → 0142 / 0143）→ 0188 契約の撤去 → L1 基盤（0144 / 0150 → 0145）→ L2〜L7・L9 を並列 → L4 耐久（0156 → 0169 / 0157 → 0154 → 0155 → 0168）→ 運用（0161〜0167）。
+**Cloudflare 採用**: L0 契約（0140 → 0141 → 0142 / 0143）→ 0188 契約の撤去 → L1 基盤（0144 / 0150 → 0145 → 0189）→ L2〜L7・L9 を並列 → L4 耐久（0156 → 0169 / 0157 → 0154 → 0155 → 0168）→ 運用（0161〜0167）。
 レーンの詳細は上の「D049 のレーン」を見る。
 
 ## 優先度
