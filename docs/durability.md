@@ -158,6 +158,42 @@ Run の終わりに:
 3. Workspace DO に「seq ≤ N は C' に含まれる」という watermark を書く
 4. watermark 以前の intent / outcome / 本文を消す。audit とイベントは残す
 
+### R2 の key と pack
+
+checkpoint の内容は R2 に置く。key は git の object id で、内容から決まる。
+
+- **個別の object**: `objects/<object id>`。値は git の object そのもの（`<type> <length>\0` + content）。同じ内容は同じ key になるので、書く前に head で存在を確かめ、あれば書かない（重複排除）。
+- **checkpoint**: commit から辿れる object を 1 つの pack（git v2）にまとめ、`checkpoints/<commit>.pack` に置く。1 checkpoint = 1 回の put を目標にする。
+- commit は pack の中にある。C から `checkpoints/<commit>.pack` を引き、ローカルで index すれば復元に必要な object を列挙できる（restore は [0155](../work/issues/0155-restore.md)）。
+- put は R2 の put が成功してから返す。既に同じ key があれば書かずに返すので、checkpoint の再送は no-op になる。
+
+### R2 の設定（versioning と object lock）
+
+環境ごとに bucket を 1 つ作る。名前は Worker 名 + `-objects`（`hns-dev-objects` / `hns-stg-objects` / `hns-prod-objects`）、binding 名は `OBJECTS`。bucket はデプロイより先に作る（deploy は binding の先を解決できない）。作業は認証済み（`cf auth login`）で行う。
+
+R2 には bucket の versioning が無い（2026-11 時点。ロードマップ）。**上書きしないことは設定ではなく key の作りで守る。**
+
+1. key は内容（または checkpoint の commit）から決まるので、同じ key に別の内容が来ない。
+2. 既に key があれば書かない（head → put の順）。checkpoint の再送は no-op になる。
+3. 消させないのは object lock（bucket lock ルール）。
+
+bucket lock は checkpoint を保持するために足す。保持期間は [0168](../work/issues/0168-retention-gc.md) の GC 方針より短くしない（例: 30 日）。
+
+```sh
+# 初回だけ。bucket 名は環境に合わせる。
+node_modules/.bin/cf r2 buckets create --name hns-dev-objects
+
+# checkpoints/ を 30 日は上書きも削除もできない。既存の object にも以後の object にも効く。
+cat > /tmp/hns-object-lock.json <<'JSON'
+[{"id":"checkpoints-immutable","enabled":true,"prefix":"checkpoints/","condition":{"type":"Age","maxAgeSeconds":2592000}}]
+JSON
+node_modules/.bin/cf r2 buckets locks update hns-dev-objects --rules @/tmp/hns-object-lock.json
+```
+
+- `checkpoints/` はルールの期間、上書きも削除もできない。ルールは既存の object にも、以後に作る object にも効く。
+- `objects/` は内容から key が決まるので、ロックしなくても同じ key の内容は変わらない（コードは既存 key を書かない）。誤削除まで防ぐなら同じルールを足すが、参照されない object の GC（0168）を止めるので、判断は 0168 に合わせる。
+- R2 の versioning が使えるようになったら、bucket 作成時に有効化する。key の設計は変えなくてよい。
+
 checkpoint 自体の保持（何個残し、いつ捨てるか）は [0168](../work/issues/0168-retention-gc.md)。
 
 これをやらないと DO が育つ。行の削除にも課金があるが、`$1/100万行` のオーダーで、放置のコストより安い。
