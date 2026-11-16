@@ -153,15 +153,35 @@ export function buildSdl(): string {
 }
 
 /**
+ * Builds a Query root from the model's object types.
+ *
+ * @remarks
+ * The root receives the schema's own instances, so a Query field can name `Project` or
+ * `Conversation` without defining a second type of that name.
+ */
+export type QueryRootFactory = (
+  objects: ReadonlyMap<string, GraphQLObjectType>,
+) => GraphQLObjectType;
+
+/**
  * The schema a server serves: the model types plus the caller's Query root.
  * Ordering is deterministic by construction (types and fields sorted by name, enum values in
  * declaration order), so the schema and the SDL artifact cannot disagree.
  *
- * @param query - The server's Query root; the model contributes none.
- * @returns A schema containing the model types and `query`.
+ * @param query - Builds the server's Query root from the model's object types. The root shares
+ * the very instances the schema is built with, so a Query field can name `Project` or
+ * `Conversation` without a duplicate definition.
+ * @returns A schema containing the model types and the Query root.
+ *
+ * @remarks
+ * The factory runs after the object types exist; it must not create a second `Project` type.
  */
-export function buildSchema(query: GraphQLObjectType): GraphQLSchema {
+export function buildSchema(query: QueryRootFactory): GraphQLSchema {
   const enums = createEnums();
   const objects = createObjects(enums);
-  return new GraphQLSchema({ query, types: [...enums.values(), ...objects.values()].sort(byName) });
+  const root = query(objects);
+  return new GraphQLSchema({
+    query: root,
+    types: [...enums.values(), ...objects.values()].sort(byName),
+  });
 }

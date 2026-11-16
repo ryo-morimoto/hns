@@ -6,6 +6,7 @@
  * generated from the entity specs; do not hand-edit it.
  */
 export { buildSchema, buildSdl, buildTypes } from "./schema.ts";
+export type { QueryRootFactory } from "./schema.ts";
 export {
   ConversationEntity,
   ENTITIES,

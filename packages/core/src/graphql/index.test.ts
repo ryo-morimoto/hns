@@ -22,7 +22,7 @@ test("SDL matches the committed golden", () => {
 });
 
 test("the model types plus a Query root form a valid schema", () => {
-  const schema = buildSchema(dummyQuery());
+  const schema = buildSchema(() => dummyQuery());
   expect(validateSchema(schema)).toStrictEqual([]);
 });
 
@@ -43,7 +43,7 @@ test("nullability follows the model", () => {
 });
 
 test("enum names are SCREAMING_SNAKE_CASE and keep the model values", () => {
-  const schema = buildSchema(dummyQuery());
+  const schema = buildSchema(() => dummyQuery());
   const type = schema.getType("TaskStatus");
   assert.ok(type instanceof GraphQLEnumType);
   expect(type.getValues().map((value) => value.name)).toStrictEqual([

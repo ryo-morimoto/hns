@@ -18,18 +18,21 @@ test("the production worker denies GraphQL without a session", async () => {
   expect(await response.json()).toMatchObject({ code: "unauthorized" });
 });
 
-test("the production worker reserves the GraphQL face", async () => {
+// Catches: the assembled Worker serving a different GraphQL face than the resolver module.
+test("the production worker serves GraphQL and fails closed without the database", async () => {
   const cookie = await sessionCookie("owner");
   const response = await worker.fetch(
     new Request(BASE + "/graphql", {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify({ query: "{ projects { __typename ... on QueryFailure { code } } }" }),
       headers: { "content-type": "application/json", cookie },
     }),
     envWith(),
   );
-  expect(response.status).toBe(501);
-  expect(await response.json()).toMatchObject({ code: "not_implemented" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: { projects: { __typename: "QueryFailure", code: "UNAVAILABLE" } },
+  });
 });
 
 // Catches: a correlation id that stops at the edge instead of reaching the DO.

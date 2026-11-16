@@ -9,6 +9,10 @@ const source = (path: string): string => fileURLToPath(new URL(path, import.meta
 // Tests import packages by name; resolve them to src so a test run never needs a build first.
 const alias = [
   { find: /^@hns\/core$/, replacement: source("./packages/core/src/index.ts") },
+  {
+    find: /^@hns\/core\/graphql$/,
+    replacement: source("./packages/core/src/graphql/index.ts"),
+  },
   { find: /^@hns\/record$/, replacement: source("./packages/record/src/index.ts") },
   { find: /^@hns\/store$/, replacement: source("./packages/store/src/index.ts") },
   { find: /^@hns\/workspace$/, replacement: source("./packages/workspace/src/index.ts") },
@@ -32,10 +36,7 @@ const packageProjects = (name: string, extra: Record<string, unknown> = {}) => [
     extends: true,
     test: {
       name,
-      include: [
-        `packages/${name}/src/**/*.test.ts`,
-        `packages/${name}/src/**/*.test.tsx`,
-      ],
+      include: [`packages/${name}/src/**/*.test.ts`, `packages/${name}/src/**/*.test.tsx`],
       includeSource: [`packages/${name}/src/**/*.{ts,tsx}`],
       exclude: ["**/integration/**"],
       ...extra,

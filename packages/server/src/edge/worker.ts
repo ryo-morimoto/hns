@@ -1,34 +1,8 @@
+import { createGraphQLFace } from "../graphql/index.ts";
+import { SESSION_NAME } from "../session-name.ts";
 import { withRequestIdHeader } from "./correlation.ts";
-import {
-  createEdge,
-  type EdgeRequest,
-  type GraphQLRequest,
-  type HandlerDependencies,
-} from "./handler.ts";
+import { createEdge, type EdgeRequest, type HandlerDependencies } from "./handler.ts";
 import { problem } from "./problem.ts";
-
-/**
- * The Durable Object name used until workspace selection exists.
- *
- * @remarks
- * One workspace means one Session (D049), but the edge does not yet know a workspace id.
- * The single default name is the placeholder; workspace selection replaces it when the
- * request carries a workspace.
- */
-const SESSION_NAME = "default";
-
-/**
- * The GraphQL face is reserved and closed until its handler lands.
- *
- * @internal
- */
-async function graphqlNotImplemented(request: GraphQLRequest): Promise<Response> {
-  return problem(
-    "not_implemented",
-    "The GraphQL face is not implemented yet.",
-    new URL(request.request.url).pathname,
-  );
-}
 
 /**
  * Forward `/ws` to the Session Durable Object.
@@ -52,7 +26,7 @@ async function forwardToSession(request: EdgeRequest): Promise<Response> {
 }
 
 const dependencies: HandlerDependencies = {
-  graphql: graphqlNotImplemented,
+  graphql: createGraphQLFace(),
   ws: forwardToSession,
 };
 
