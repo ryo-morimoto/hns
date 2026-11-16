@@ -1,6 +1,6 @@
 # 0179: サイドバーを Relay で読む（最初の 1 画面）
 
-status: in-progress
+status: done
 priority: now
 depends-on: 0178, 0102
 touches: packages/web/src/app/, packages/web/test/, packages/web/src/__generated__/, packages/web/README.md, work/issues/0179-sidebar-relay.md, work/BOARD.md, work/LANES.md
@@ -51,6 +51,15 @@ touches: packages/web/src/app/, packages/web/test/, packages/web/src/__generated
 - 2 回目の表示は Relay の store から返る（network 0）。テストは harness の `calls` で数える。
 - 遅延は Suspense の fallback、失敗は `QueryBoundary` の画面（読み込み直すボタン）で答える。「更新中」の表示は索引（0149）で足す。
 - global id は表示に使わず、URL と model の比較は復号した raw id で行う（`fromGlobalId`）。
+
+## Result
+
+- verdict: **PASS**（初回 PASS: blocking 0 / 低 8 → 修正 → 再レビュー PASS）
+- reviewer: review-0179（この変更を書いていない別エージェント）。最終判定 HEAD 31a8276 + 低の追修正。
+- 受入: 6/6。`npm run check` は ok（24 秒、codegen 込み）。web は 46 tests（Shell 15 / 失敗系 3 / viewModel 5 ほか）。
+- 実測: 初回の read は `ShellProjectsQuery` + 選択 project の `ShellWorkspaceQuery` の2回（DO RPC は 1）。同じ environment での開き直しは 0 回。
+- 残件（低）: シェル全体が Suspense に包まれるため、初回と未キャッシュの切替では chrome も fallback に替わる（本文・サイドバー単位の boundary は 0149 以降）。project 未選択時は sentinel id を組み立てるが request は送られない（projectId を nullable にするには schema 変更が要る）。workspace の typed failure と reload 実行のテストは未追加。実サーバの DO RPC 数と E2E は 0160 以降。
+- 記録: [work/records/0179.yaml](../records/0179.yaml)（verified）。
 
 ## やらないこと
 

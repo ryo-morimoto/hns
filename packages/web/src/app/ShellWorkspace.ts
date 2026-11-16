@@ -4,8 +4,9 @@ import { graphql } from "react-relay";
  * The selected project's conversations and tasks.
  *
  * @remarks
- * When no project is selected the two fields are skipped, so the screen costs no Session RPC.
- * `projectId` is still sent because the argument is non-null; it is never read when skipped.
+ * When no project is selected the two fields are skipped and Relay sends no request at all, so
+ * the screen costs no Session RPC. The argument is non-null, so the caller still builds a
+ * sentinel id; it never reaches the wire.
  */
 export const ShellWorkspaceQuery = graphql`
   query ShellWorkspaceQuery($projectId: ID!, $hasProject: Boolean!) {

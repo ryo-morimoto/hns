@@ -6,7 +6,7 @@
 
 | 象限 | 重要度 | 緊急度 | priority | 意味 | 件数 |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 4 |
+| Q1 | 高 | 高 | `now` | いまの波。依存が満たされている | 3 |
 | Q2 | 高 | 低 | `plan` | 重要だが、いまの波の後 | 63 |
 | Q3 | 低 | 中 | `batch` | 安い。隣接するときだけ | 7 |
 | Q4 | — | — | `hold` | いまはやらない | 8 |
@@ -19,14 +19,13 @@
 - `hold` はユーザーが明示したときだけ。着手するなら先に `plan` へ上げる。
 - 優先度を変えるときは、issue の `priority:` とこの表を同時に直す。
 
-### now（4）
+### now（3）
 
 | # | 作業 | 依存の状態 |
 | --- | --- | --- |
 | [0141](issues/0141-durability-contract.md) | 耐久の契約（ack の故障クラス・checkpoint・restore） | 0140 |
 | [0142](issues/0142-lease-fencing.md) | lease と fencing（版チェックの委譲） | 0141 |
 | [0146](issues/0146-session-do.md) | Session DO（PiHarness・会話・run） | 0145 |
-| [0179](issues/0179-sidebar-relay.md) | サイドバーを Relay で読む（最初の画面） | 0178, 0102 |
 
 
 

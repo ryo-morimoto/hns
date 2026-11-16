@@ -13,4 +13,6 @@
 の fragment を `useFragment` で描く（選択は component が持つ）。project 未選択では会話・タスクの
 field を `@include(if: $hasProject)` で skip し、Session RPC を出さない。
 
+- `npm run dev -w @hns/web`: Vite。`/graphql` へは同じ origin で送る（配信は 0160）
+- `npm run typecheck / build / test -w @hns/web`
 - `npm run codegen`: schema と artifact の再生成（リポジトリのルートで実行）

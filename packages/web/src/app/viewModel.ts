@@ -54,6 +54,9 @@ function taskStatusOf(value: TaskStatusName): TaskStatus {
     case "%future added value":
       throw new Error("the server sent a task status this build does not know");
   }
+  // A value outside the generated union still reaches here at runtime; fail loudly.
+  const unknown: never = value;
+  throw new Error("the server sent an unknown task status: " + String(unknown));
 }
 
 /**

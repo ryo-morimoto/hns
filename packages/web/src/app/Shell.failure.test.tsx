@@ -27,6 +27,30 @@ test("a typed project failure is shown without the server's message", async () =
   expect(document.body.textContent ?? "").not.toContain("UNAVAILABLE");
 });
 
+// Catches: a failed workspace read shown as an empty conversation list.
+test("a typed conversation failure is shown in the sidebar", async () => {
+  renderWith((call) => {
+    if (call.operation === "ShellProjectsQuery") {
+      return {
+        projects: {
+          __typename: "ProjectList",
+          projects: [{ id: "UHJvamVjdDpwcm9qZWN0LWhucw", name: "hns" }],
+        },
+      };
+    }
+    return {
+      conversations: {
+        __typename: "QueryFailure",
+        code: "UNAVAILABLE",
+        message: "internal detail",
+      },
+      tasks: { __typename: "TaskList", tasks: [] },
+    };
+  });
+  expect(await screen.findByText("読み込めません")).toBeTruthy();
+  expect(document.body.textContent ?? "").not.toContain("internal detail");
+});
+
 // Catches: a network failure unmounting the app with no way back.
 test("a network failure shows the recovery screen", async () => {
   renderWith(() => undefined);

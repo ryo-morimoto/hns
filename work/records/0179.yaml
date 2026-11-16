@@ -1,0 +1,39 @@
+schema: 1
+issue: "0179"
+intent: "最初の画面を Relay の fragment で通し、再訪を network 0 にする"
+criteria:
+  - id: C1
+    kind: test
+    status: passed
+    evidence: "packages/web/src/app/Shell.test.tsx（Sidebar の fragment が描画される）"
+  - id: C2
+    kind: test
+    status: passed
+    evidence: "Shell.test.tsx の 'the shell reads through Relay...'（同じ environment で開き直して calls 2 のまま）"
+  - id: C3
+    kind: test
+    status: passed
+    evidence: "同テスト（ShellWorkspaceQuery が 1 回。project 未選択では @include で送らない）"
+  - id: C4
+    kind: test
+    status: passed
+    evidence: "Shell.test.tsx の会話ルート（fragment の title）"
+  - id: C5
+    kind: test
+    status: passed
+    evidence: "既存の Shell テスト 14 本"
+  - id: C6
+    kind: eval
+    status: passed
+    evidence: "npm run check（gate ok）と独立レビュー PASS"
+limits:
+  - "シェル全体が Suspense に包まれ、初回と未キャッシュ切替で chrome も fallback に替わる"
+  - "project 未選択時は sentinel id を組む（request は送られない）"
+  - "実サーバの DO RPC 数と E2E は 0160 以降"
+decision:
+  by: "review-0179"
+  at: "2026-11-17T03:08:00.000Z"
+  basis: "blocking 0 の PASS（壊し実験 2 種で store 再利用と skip を確認）"
+invalidation:
+  - "0181 が鮮度を network-only に変えたとき（sentinel id と RPC 数を見直す）"
+  - "0149 の索引が入り、会話の読み先が D1 になったとき"
