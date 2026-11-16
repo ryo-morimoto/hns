@@ -6,7 +6,7 @@ export default defineConfig({
   format: ["esm"],
   platform: "node",
   root: "src",
-  dts: { entry: ["src/index.ts", "src/sandbox.ts"] },
+  dts: { entry: ["src/index.ts", "src/objects.ts", "src/sandbox.ts"] },
   sourcemap: true,
   clean: true,
   unbundle: true,

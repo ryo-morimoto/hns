@@ -11,3 +11,29 @@ export type {
 } from "./types.ts";
 export { Workspace } from "./workspace.ts";
 export type { FileWrite, RecoveryEntry, WorkspaceOptions } from "./workspace.ts";
+export {
+  GIT_OBJECT_TYPES,
+  buildPack,
+  checkpointPackKey,
+  getObject,
+  gitObjectId,
+  headObject,
+  listObjects,
+  objectKey,
+  putObject,
+  readCheckpointPack,
+  uploadCheckpointPack,
+} from "./objects.ts";
+export type {
+  BuiltPack,
+  CheckpointPack,
+  GitObject,
+  GitObjectType,
+  ObjectBody,
+  ObjectBucket,
+  ObjectListOptions,
+  ObjectListPage,
+  ObjectMetadata,
+  PackedObject,
+  StoredObject,
+} from "./objects.ts";
