@@ -29,6 +29,7 @@ type WorkspaceRpcCode =
   | "not_found"
   | "conflict"
   | "denied"
+  | "payload_too_large"
   | "unavailable"
   | "internal";
 
@@ -551,7 +552,8 @@ export class Workspace {
     }
     const gate: ApplyGate = await this.#state.storage.transaction(async () => {
       this.#claimWorkspace(input.workspaceId);
-      this.#claimProject(projectRoot);
+      // Checked, not written: the binding is recorded when an applied outcome commits.
+      this.#assertProject(projectRoot);
       const nowMs = this.#clock();
       const held = this.#lease();
       if (held === undefined) return { ok: false, code: "lease_not_held" };
@@ -578,9 +580,11 @@ export class Workspace {
       expectedVersion: input.expectedVersion,
       body: content,
     });
-    if (appended.status === "settled") return outcomeResponse(appended.entry);
+    if (appended.status === "settled")
+      return await this.#settledResponse(appended.entry, projectRoot);
     if (appended.status === "denied") {
-      return failure("conflict", "The operation id is already used for another write.", 409);
+      // The id names one attempt: another body under it is a refusal, not a version conflict.
+      return failure("denied", "The operation id is already used for another write.", 400);
     }
     const contentHash = appended.entry.body?.hash;
     if (contentHash === undefined) {
@@ -607,14 +611,14 @@ export class Workspace {
     if (!answer.ok) {
       // The code or error name, never the body or the key: enough to see which hop failed.
       console.error("workspace: machine write failed", answer.failure, answer.detail);
-      if (answer.failure === "denied") {
-        const settled = await this.#journal.appendOutcome({
+      if (answer.failure === "denied" || answer.failure === "too_large") {
+        const settled = await this.#journal.settle({
           path,
           result: { status: "denied", operationId: input.operationId, reason: answer.detail },
         });
         return outcomeResponse(settled.entry);
       }
-      const settled = await this.#journal.appendOutcome({
+      const settled = await this.#journal.settle({
         path,
         result: { status: "unknown", operationId: input.operationId, reason: "timeout" },
       });
@@ -625,29 +629,35 @@ export class Workspace {
     if (result.operationId !== input.operationId) {
       return failure("internal", "The machine answered a different operation.", 500);
     }
-    const settled = await this.#journal.appendOutcome({
-      path,
-      result:
-        result.status === "applied"
-          ? { status: "applied", operationId: input.operationId, version: result.version }
-          : result.status === "conflict"
-            ? {
-                status: "conflict",
-                operationId: input.operationId,
-                currentVersion: result.currentVersion,
-              }
-            : { status: "unknown", operationId: input.operationId, reason: result.reason },
-    });
-    if (settled.entry.status === "applied") {
-      const version = settled.entry.version;
-      if (version === null) throw new Error("an applied outcome has no version");
-      this.#putVersion(path, version);
-      await this.#journal.appendEvent({
-        eventKind: input.expectedVersion === ABSENT_VERSION ? "created" : "changed",
+    const settled = await this.#journal.settle(
+      {
         path,
-        version,
-      });
-    }
+        result:
+          result.status === "applied"
+            ? { status: "applied", operationId: input.operationId, version: result.version }
+            : result.status === "conflict"
+              ? {
+                  status: "conflict",
+                  operationId: input.operationId,
+                  currentVersion: result.currentVersion,
+                }
+              : { status: "unknown", operationId: input.operationId, reason: result.reason },
+      },
+      (entry) => {
+        // The ack implies these: they commit with the outcome, and a retry that finds the
+        // outcome settled does not run this again.
+        if (entry.status !== "applied") return;
+        const version = entry.version;
+        if (version === null) throw new Error("an applied outcome has no version");
+        this.#bindProject(projectRoot);
+        this.#putVersion(path, version);
+        this.#journal.appendEventInTransaction({
+          eventKind: input.expectedVersion === ABSENT_VERSION ? "created" : "changed",
+          path,
+          version,
+        });
+      },
+    );
     return outcomeResponse(settled.entry);
   }
 
@@ -701,9 +711,12 @@ export class Workspace {
     if (path === undefined || projectRoot === undefined) {
       return failure("invalid_request", "Invalid path.", 400);
     }
-    const machineId: string | undefined = await this.#state.storage.transaction(async () =>
-      this.#meta("machine_id"),
-    );
+    // The binding is checked before the machine, so a sibling project never reaches it; it is
+    // written only after a successful read.
+    const machineId: string | undefined = await this.#state.storage.transaction(async () => {
+      this.#assertProject(projectRoot);
+      return this.#meta("machine_id");
+    });
     if (machineId === undefined) {
       return failure("unavailable", "The workspace has no machine yet.", 503);
     }
@@ -717,13 +730,17 @@ export class Workspace {
     );
     if (!answer.ok) {
       // A definite refusal means the file is absent (or unreadable); it is not a transport
-      // failure, so the caller can tell "create it" from "the machine is unreachable".
+      // failure, so the caller can tell "create it" from "the machine is unreachable". A file
+      // beyond the read bound is its own answer, not a missing one.
+      if (answer.failure === "too_large") {
+        return failure("payload_too_large", "The file is larger than the read limit.", 413);
+      }
       if (answer.failure === "denied") return failure("not_found", "The file cannot be read.", 404);
       return failure("unavailable", "The machine did not answer.", 503);
     }
     const version = answer.result.version;
     const externalChange: boolean = await this.#state.storage.transaction(async () => {
-      this.#claimProject(projectRoot);
+      this.#bindProject(projectRoot);
       const previous = this.#currentVersion(path);
       if (previous !== version) this.#putVersion(path, version);
       return previous !== undefined && previous !== version;
@@ -754,17 +771,63 @@ export class Workspace {
   }
 
   /**
-   * Bind the workspace to the machine project its first file call names.
+   * Answer a retry that found its operation already settled.
+   *
+   * @param entry - The stored outcome; it is the answer for its operation id.
+   * @param projectRoot - The project the current request names.
+   * @returns The recorded answer.
+   *
+   * @remarks
+   * An applied outcome is the only one that implies a version and an event. If a record was
+   * written without them (an older face, or a manual repair) the cache is filled in here, in
+   * one transaction, so a retry converges. A conflict, unknown, or denied outcome needs nothing
+   * beyond its own record.
+   */
+  async #settledResponse(entry: JournalOutcomeEntry, projectRoot: string): Promise<Response> {
+    if (entry.status !== "applied") return outcomeResponse(entry);
+    await this.#state.storage.transaction(async () => {
+      this.#bindProject(projectRoot);
+      const version = entry.version;
+      if (version === null) throw new Error("an applied outcome has no version");
+      if (this.#currentVersion(entry.path) === version) return;
+      this.#putVersion(entry.path, version);
+      this.#journal.appendEventInTransaction({
+        eventKind: "changed",
+        path: entry.path,
+        version,
+      });
+    });
+    return outcomeResponse(entry);
+  }
+
+  /**
+   * Refuse a request whose project root differs from the workspace's binding.
    *
    * @param projectRoot - The project directory below the machine's ROOT.
    * @throws {WorkspaceProjectError} When the workspace is already bound to another project.
    *
    * @remarks
    * One workspace is one project: the binding keeps a later request from reading or writing a
-   * sibling project on the same machine. It is recorded on the first call that passes the local
-   * checks, read or write, and never moves.
+   * sibling project on the same machine. This check never writes; the binding is recorded with
+   * the first applied write or the first successful read.
    */
-  #claimProject(projectRoot: string): void {
+  #assertProject(projectRoot: string): void {
+    const bound = this.#meta("project_root");
+    if (bound !== undefined && bound !== projectRoot) throw new WorkspaceProjectError();
+  }
+
+  /**
+   * Record the workspace's project binding, if it has none yet.
+   *
+   * @param projectRoot - The project directory below the machine's ROOT.
+   * @throws {WorkspaceProjectError} When the workspace is already bound to another project.
+   *
+   * @remarks
+   * Called inside the transaction that commits the fact which justifies it: an applied outcome
+   * (with its version and event) or a successful read. A refusal, a conflict, an unknown, or a
+   * failed read must not claim the project.
+   */
+  #bindProject(projectRoot: string): void {
     const bound = this.#meta("project_root");
     if (bound === undefined) {
       this.#setMeta("project_root", projectRoot);
@@ -906,8 +969,14 @@ function outcomeResponse(entry: JournalOutcomeEntry): Response {
       const result: MutationResult = { status: "unknown", operationId: entry.operationId, reason };
       return json({ ok: true, result }, outcomeStatus(entry));
     }
-    case "denied":
+    case "denied": {
+      // A refused-write outcome carries the machine's refusal code; a size refusal has its own
+      // status so a caller can distinguish "too big" from "not allowed".
+      if (entry.reason === "too_large") {
+        return failure("payload_too_large", "The write is larger than the machine accepts.", 413);
+      }
       return failure("denied", entry.reason ?? "denied", outcomeStatus(entry));
+    }
   }
 }
 

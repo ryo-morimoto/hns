@@ -5,6 +5,7 @@ import { openSqliteState, type TestSqliteState } from "../../test/support/sqlite
 import { Workspace } from "../do/workspace.ts";
 import type { DurableObjectId, DurableObjectNamespace, DurableObjectStub } from "../edge/env.ts";
 import type { FilesRequest } from "../edge/handler.ts";
+import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { createFilesFace } from "./content.ts";
 
 interface Harness {
@@ -23,7 +24,7 @@ interface Harness {
  * is a fake. The stub forwards the face's Request straight to the object, as the Worker's
  * binding does.
  */
-function harness(): Harness {
+function harness(maxBodyBytes?: number): Harness {
   const opened = openSqliteState();
   const machine = fakeMachine();
   const workspace = new Workspace(opened.state, { files: machine });
@@ -36,8 +37,12 @@ function harness(): Harness {
       return stub;
     },
   };
+  const face =
+    maxBodyBytes === undefined
+      ? createFilesFace()
+      : createFilesFace({ ...DEFAULT_LIMITS, maxBodyBytes });
   return {
-    face: createFilesFace(),
+    face,
     namespace,
     machine,
     state: opened.state,
@@ -48,6 +53,10 @@ function harness(): Harness {
 interface RequestOptions {
   readonly method?: "GET" | "POST";
   readonly body?: unknown;
+  /** Raw text to send instead of a JSON body (for a malformed-body test). */
+  readonly rawBody?: string;
+  /** The content type to declare; defaults to JSON. */
+  readonly contentType?: string;
   readonly query?: Record<string, string>;
   readonly workspaceId?: string;
 }
@@ -96,8 +105,11 @@ function requestFor(h: Harness, options: RequestOptions = {}): FilesRequest {
     options.method === "POST"
       ? {
           method: "POST",
-          headers: { "content-type": "application/json", "x-request-id": "request-1" },
-          body: JSON.stringify(options.body),
+          headers: {
+            "content-type": options.contentType ?? "application/json",
+            "x-request-id": "request-1",
+          },
+          body: options.rawBody ?? JSON.stringify(options.body),
         }
       : { headers: { "x-request-id": "request-1" } };
   return {
@@ -296,6 +308,103 @@ test("a read of a missing file is 404 and an offline machine is 503", async () =
     const offline = await h.face(requestFor(h, { query: { path: "a.txt" } }));
     expect(offline.status).toBe(503);
     expect(await offline.json()).toMatchObject({ code: "unavailable" });
+  } finally {
+    h.close();
+  }
+});
+// Catches: a malformed or oversized save body reaching JSON.parse or the workspace.
+test("a non-JSON, wrongly typed, or oversized body is refused at the face", async () => {
+  const h = harness();
+  try {
+    await acquire(h);
+    const notJson = await h.face(requestFor(h, { method: "POST", rawBody: "{not json" }));
+    expect(notJson.status).toBe(400);
+    expect(await notJson.json()).toMatchObject({ code: "invalid_request" });
+
+    const wrongType = await h.face(
+      requestFor(h, { method: "POST", body: writeBody(), contentType: "text/plain" }),
+    );
+    expect(wrongType.status).toBe(415);
+    expect(await wrongType.json()).toMatchObject({ code: "unsupported_media_type" });
+
+    expect(h.machine.writes).toStrictEqual([]);
+  } finally {
+    h.close();
+  }
+  const small = harness(16);
+  try {
+    await acquire(small);
+    const oversized = await small.face(requestFor(small, { method: "POST", body: writeBody() }));
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toMatchObject({ code: "payload_too_large" });
+    expect(small.machine.writes).toStrictEqual([]);
+  } finally {
+    small.close();
+  }
+});
+
+// Catches: a workspace 400 (an unsafe path) being reported as "the machine is unavailable".
+test("a read the workspace refuses keeps its status", async () => {
+  const h = harness();
+  try {
+    await acquire(h);
+    const response = await h.face(
+      requestFor(h, { query: { projectRoot: "project", path: "../secret" } }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "invalid_request" });
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a file beyond the machine's read bound reported as missing.
+test("a read beyond the bound is a 413", async () => {
+  const h = harness();
+  try {
+    await acquire(h);
+    await h.face(requestFor(h, { method: "POST", body: writeBody() }));
+    h.machine.tooLargeNext();
+    const response = await h.face(
+      requestFor(h, { query: { projectRoot: "project", path: "a.txt" } }),
+    );
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ code: "payload_too_large" });
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a workspace answer that is not its envelope being reported as a save or a read.
+test("an answer that is not the workspace envelope is an internal error", async () => {
+  const h = harness();
+  try {
+    const base = requestFor(h, { query: { path: "a.txt" } });
+    const env = {
+      WORKSPACE: {
+        idFromName: (name: string) => ({ name }),
+        get: () => ({ fetch: () => Promise.resolve(new Response("not json", { status: 200 })) }),
+      },
+    };
+    const response = await h.face({ ...base, env });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ code: "internal" });
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a reused operation id reported as a version conflict.
+test("a reused operation id is a denial, not a conflict", async () => {
+  const h = harness();
+  try {
+    await acquire(h);
+    await h.face(requestFor(h, { method: "POST", body: writeBody() }));
+    const response = await h.face(
+      requestFor(h, { method: "POST", body: writeBody({ content: "two" }) }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "denied" });
   } finally {
     h.close();
   }

@@ -132,3 +132,38 @@ export const JOURNAL_SCHEMA: readonly string[] = [
   "CREATE INDEX IF NOT EXISTS journal_kind_seq ON journal (kind, seq)",
   "CREATE TABLE IF NOT EXISTS journal_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 ];
+/**
+ * The columns of the Journal table, in DDL order.
+ *
+ * @remarks
+ * The upgrade copies these explicitly rather than with `SELECT *`, so a column added later
+ * cannot silently shift into another slot.
+ */
+const JOURNAL_COLUMNS =
+  "seq, kind, operation_id, path, at, expected_version, version, current_version, status, reason, event_kind, body_hash, body_key, body_size, body";
+
+/**
+ * The statements that widen an existing Journal table to the current schema.
+ *
+ * @returns The statements, in order, to run inside one transaction.
+ *
+ * @remarks
+ * SQLite cannot widen a CHECK constraint, so a table created before `denied` joined the
+ * outcome statuses is renamed, recreated, copied, and replaced. The indexes are recreated after
+ * the old table (and its indexes) is dropped, because their names are taken until then. A crash
+ * cannot strand rows: the whole list runs in one transaction, so either the old table is still
+ * the Journal or the new one has every row.
+ */
+export function journalUpgradeStatements(): readonly string[] {
+  return [
+    "ALTER TABLE journal RENAME TO journal_previous",
+    ...JOURNAL_SCHEMA,
+    "INSERT INTO journal (" +
+      JOURNAL_COLUMNS +
+      ") SELECT " +
+      JOURNAL_COLUMNS +
+      " FROM journal_previous",
+    "DROP TABLE journal_previous",
+    ...JOURNAL_SCHEMA,
+  ];
+}

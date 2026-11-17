@@ -10,6 +10,7 @@ import {
   JOURNAL_INLINE_BODY_MAX_BYTES,
   JOURNAL_SCHEMA,
   journalBodyKey,
+  journalUpgradeStatements,
   parseJournalEntry,
   type JournalAuditEntry,
   type JournalBody,
@@ -332,10 +333,8 @@ export class Journal {
    *
    * @remarks
    * SQLite cannot widen a CHECK in place, and the DDL derives the status CHECK from
-   * {@link JOURNAL_OUTCOME_STATUSES}. The rename, recreate, copy, and drop run in one
-   * transaction, so a crash cannot strand the rows: either the old table is still the Journal
-   * or the new one has them. The indexes are recreated after the old table (and its indexes)
-   * is dropped, because their names are taken until then.
+   * {@link JOURNAL_OUTCOME_STATUSES}. The statements come from `@hns/store`'s
+   * `journalUpgradeStatements` and run in one transaction, so a crash cannot strand the rows.
    */
   async #rebuildStatusVocabulary(): Promise<void> {
     const row = this.#all(
@@ -345,11 +344,7 @@ export class Journal {
     const sql = v.parse(TableSqlRowSchema, row).sql;
     if (sql.includes("'denied'")) return;
     await this.#storage.transaction(async () => {
-      this.#exec("ALTER TABLE journal RENAME TO journal_previous");
-      for (const statement of JOURNAL_SCHEMA) this.#exec(statement);
-      this.#exec("INSERT INTO journal SELECT * FROM journal_previous");
-      this.#exec("DROP TABLE journal_previous");
-      for (const statement of JOURNAL_SCHEMA) this.#exec(statement);
+      for (const statement of journalUpgradeStatements()) this.#exec(statement);
     });
   }
 
@@ -431,6 +426,29 @@ export class Journal {
    * when the new result disagrees, because the first answer is the one the caller was given.
    */
   async appendOutcome(input: OutcomeAppendInput): Promise<OutcomeAppend> {
+    return await this.settle(input);
+  }
+
+  /**
+   * Record an outcome and, in the same transaction, whatever the outcome implies.
+   *
+   * @param input - The path and the result to record.
+   * @param after - Optional work inside the outcome's transaction; it runs only when this call
+   * appended the outcome, never for a retry that finds it settled.
+   * @returns `appended` for the first outcome, or `settled` with the recorded one on a retry.
+   * @throws Error when no intent names the result's `operationId`, or when the path differs.
+   *
+   * @remarks
+   * The outcome is the ack (INV-10), so everything the ack implies (the version table, the file
+   * event, the project binding) must commit with it: a crash cannot leave a version or an event
+   * without the outcome, and a retry that finds the outcome settled does not repeat the work.
+   * The callback receives the stored entry; it runs inside the transaction, so it may only
+   * touch the same storage.
+   */
+  async settle(
+    input: OutcomeAppendInput,
+    after?: (entry: JournalOutcomeEntry) => void,
+  ): Promise<OutcomeAppend> {
     const operationId = v.parse(OperationIdSchema, input.result.operationId);
     const outcome: OutcomeAppend = await this.#storage.transaction(async () => {
       const settled = this.#outcomeRow(operationId);
@@ -464,9 +482,47 @@ export class Journal {
         bodySize: null,
         body: null,
       });
-      return { status: "appended", entry: outcomeOf(this.#entryAt(seq)) };
+      const entry = outcomeOf(this.#entryAt(seq));
+      if (after !== undefined) after(entry);
+      return { status: "appended", entry };
     });
     return outcome;
+  }
+
+  /**
+   * Append one file event inside the caller's transaction.
+   *
+   * @param input - The event kind and, for a file event, its path and version.
+   * @returns The stored entry.
+   *
+   * @remarks
+   * The workspace calls this from {@link settle}'s callback so an applied outcome, its version,
+   * and its event are one transaction. Calling it outside a transaction would need its own, so
+   * the public {@link appendEvent} wraps it.
+   */
+  appendEventInTransaction(input: EventAppendInput): JournalEventEntry {
+    const seq = this.#nextSeq();
+    const path = input.eventKind === "overflow" ? null : input.path;
+    const version =
+      input.eventKind === "created" || input.eventKind === "changed" ? input.version : null;
+    this.#insert({
+      seq,
+      kind: "event",
+      operationId: null,
+      path,
+      at: this.#stamp(),
+      expectedVersion: null,
+      version,
+      currentVersion: null,
+      status: null,
+      reason: null,
+      eventKind: input.eventKind,
+      bodyHash: null,
+      bodyKey: null,
+      bodySize: null,
+      body: null,
+    });
+    return eventOf(this.#entryAt(seq));
   }
 
   /**
@@ -515,31 +571,7 @@ export class Journal {
    * every file.
    */
   async appendEvent(input: EventAppendInput): Promise<JournalEventEntry> {
-    const entry: JournalEventEntry = await this.#storage.transaction(async () => {
-      const seq = this.#nextSeq();
-      const path = input.eventKind === "overflow" ? null : input.path;
-      const version =
-        input.eventKind === "created" || input.eventKind === "changed" ? input.version : null;
-      this.#insert({
-        seq,
-        kind: "event",
-        operationId: null,
-        path,
-        at: this.#stamp(),
-        expectedVersion: null,
-        version,
-        currentVersion: null,
-        status: null,
-        reason: null,
-        eventKind: input.eventKind,
-        bodyHash: null,
-        bodyKey: null,
-        bodySize: null,
-        body: null,
-      });
-      return eventOf(this.#entryAt(seq));
-    });
-    return entry;
+    return await this.#storage.transaction(async () => this.appendEventInTransaction(input));
   }
 
   /**

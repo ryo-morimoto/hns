@@ -24,9 +24,13 @@ const CONFIG = [
   '    compatibilityDate: "2026-10-30",',
   '    compatibilityFlags: ["nodejs_compat"],',
   '    entrypoint: "worker.ts",',
-  '    exports: { Workspace: exports.durableObject({ storage: "sqlite" }) },',
+  "    exports: {",
+  '      Workspace: exports.durableObject({ storage: "sqlite" }),',
+  '      MigrationProbe: exports.durableObject({ storage: "sqlite" }),',
+  "    },",
   "    env: {",
   '      WORKSPACE: bindings.durableObject({ worker: "hns-workspace-do-test", exportName: "Workspace" }),',
+  '      MIGRATION: bindings.durableObject({ worker: "hns-workspace-do-test", exportName: "MigrationProbe" }),',
   "    },",
   "  },",
   "});",
@@ -35,12 +39,47 @@ const CONFIG = [
 
 const WORKER = [
   'import { Workspace } from "@hns/server";',
+  'import { JOURNAL_SCHEMA, journalUpgradeStatements } from "@hns/store";',
+  "",
+  "interface Storage {",
+  "  readonly sql: { exec(query: string): { toArray(): unknown[] } };",
+  "  transaction<T>(run: () => Promise<T>): Promise<T>;",
+  "}",
   "",
   "interface Env {",
   "  readonly WORKSPACE: {",
   "    idFromName(name: string): unknown;",
   "    get(id: unknown): { fetch(request: Request): Promise<Response> };",
   "  };",
+  "  readonly MIGRATION: {",
+  "    idFromName(name: string): unknown;",
+  "    get(id: unknown): { fetch(request: Request): Promise<Response> };",
+  "  };",
+  "}",
+  "",
+  "/**",
+  " * Runs the journal upgrade from a table created with the previous DDL, so the workerd",
+  " * migration (DDL inside one transaction) is proved end to end.",
+  " */",
+  "export class MigrationProbe {",
+  "  readonly #storage: Storage;",
+  "  constructor(state: { storage: Storage }) {",
+  "    this.#storage = state.storage;",
+  "  }",
+  "  async fetch(): Promise<Response> {",
+  "    for (const statement of JOURNAL_SCHEMA) {",
+  '      this.#storage.sql.exec(statement.replace(", \'denied\'", ""));',
+  "    }",
+  "    await this.#storage.transaction(async () => {",
+  "      for (const statement of journalUpgradeStatements()) this.#storage.sql.exec(statement);",
+  "    });",
+  "    const rows = this.#storage.sql",
+  "      .exec(\"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'journal'\")",
+  "      .toArray();",
+  "    return new Response(JSON.stringify({ ok: true, rows }), {",
+  '      headers: { "content-type": "application/json" },',
+  "    });",
+  "  }",
   "}",
   "",
   "export { Workspace };",
@@ -49,6 +88,9 @@ const WORKER = [
   "  async fetch(request: Request, env: Env): Promise<Response> {",
   "    const url = new URL(request.url);",
   '    if (url.pathname === "/health") return new Response("ok");',
+  '    if (url.pathname === "/migrate") {',
+  '      return env.MIGRATION.get(env.MIGRATION.idFromName("probe")).fetch(request);',
+  "    }",
   '    if (!url.pathname.startsWith("/t/")) return new Response("not found", { status: 404 });',
   '    const forwarded = new Request("https://workspace" + url.pathname.slice(2) + url.search, request);',
   '    return env.WORKSPACE.get(env.WORKSPACE.idFromName("w1")).fetch(forwarded);',
@@ -343,6 +385,30 @@ test.skipIf(!existsSync(CF))(
         throughSeq: 7,
       });
       expect(same.watermark.throughSeq).toBe(7);
+    } finally {
+      await stop(running);
+      running = undefined;
+    }
+  },
+  TIMEOUT_MS,
+);
+const Migration = v.object({
+  ok: v.literal(true),
+  rows: v.array(v.object({ sql: v.string() })),
+});
+
+test.skipIf(!existsSync(CF))(
+  "the journal table is rebuilt from the previous DDL inside a transaction",
+  async () => {
+    project = await writeProject();
+    const port = await freePort();
+    running = await start(project, port);
+    try {
+      const response = await fetch("http://127.0.0.1:" + String(port) + "/migrate");
+      expect(response.status).toBe(200);
+      const body = v.parse(Migration, await response.json());
+      // Catches: a workerd SQLite build that refuses DDL (rename/copy/drop) in a transaction.
+      expect(body.rows[0]?.sql).toContain("'denied'");
     } finally {
       await stop(running);
       running = undefined;

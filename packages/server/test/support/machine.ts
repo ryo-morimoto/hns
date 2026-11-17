@@ -38,6 +38,8 @@ export interface FakeMachine extends MachineFiles {
   failNext(): void;
   /** Make the next answer a definite refusal with this code. */
   denyNext(refusal: string): void;
+  /** Make the next answer a too-large refusal (the file or the body is beyond the bound). */
+  tooLargeNext(): void;
 }
 
 /**
@@ -52,6 +54,7 @@ export function fakeMachine(): FakeMachine {
   const reads: string[] = [];
   let failNext = false;
   let denial: string | undefined;
+  let tooLarge = false;
   let queue: Promise<void> = Promise.resolve();
 
   /** Run one write after the previous one, so the compare-and-write is serialized. */
@@ -64,7 +67,7 @@ export function fakeMachine(): FakeMachine {
     return await result;
   }
 
-  function failure(failureKind: "denied" | "unavailable", detail: string) {
+  function failure(failureKind: "denied" | "too_large" | "unavailable", detail: string) {
     return { ok: false as const, failure: failureKind, detail };
   }
 
@@ -88,6 +91,9 @@ export function fakeMachine(): FakeMachine {
     denyNext(refusal) {
       denial = refusal;
     },
+    tooLargeNext() {
+      tooLarge = true;
+    },
     async write(
       request: MachineWriteRequest,
       _call: MachineCall,
@@ -97,6 +103,10 @@ export function fakeMachine(): FakeMachine {
         if (failNext) {
           failNext = false;
           return failure("unavailable", "test transport failure");
+        }
+        if (tooLarge) {
+          tooLarge = false;
+          return failure("too_large", "too_large");
         }
         if (denial !== undefined) {
           const detail = denial;
@@ -153,6 +163,10 @@ export function fakeMachine(): FakeMachine {
       if (failNext) {
         failNext = false;
         return failure("unavailable", "test transport failure");
+      }
+      if (tooLarge) {
+        tooLarge = false;
+        return failure("too_large", "too_large");
       }
       const encoded = raw.get(request.path);
       if (encoded !== undefined) {

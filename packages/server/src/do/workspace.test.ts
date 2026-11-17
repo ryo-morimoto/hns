@@ -340,8 +340,9 @@ test("the same operation id with different content is denied before the machine"
     const response = await h.workspace.fetch(
       post("/rpc/apply", applyBody({ content: base64Of("two") })),
     );
-    expect(response.status).toBe(409);
-    expect(v.parse(ProtocolFailure, await response.json()).code).toBe("conflict");
+    // A reused id is a refusal, not a version conflict: nothing about the file changed.
+    expect(response.status).toBe(400);
+    expect(v.parse(Denied, await response.json()).code).toBe("denied");
     expect(h.machine.writes).toHaveLength(1);
   } finally {
     h.close();
@@ -523,6 +524,149 @@ test("a read while the machine is unreachable returns no content", async () => {
       code: "unavailable",
       message: "The machine did not answer.",
     });
+  } finally {
+    h.close();
+  }
+});
+/** Count the journal rows of one kind. */
+async function journalCounts(h: Harness): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const entry of (await h.journal.read()).entries) {
+    counts[entry.kind] = (counts[entry.kind] ?? 0) + 1;
+  }
+  return counts;
+}
+
+// Catches: a read for a sibling project reaching the machine before the binding check.
+test("a read for another project root is refused before the machine", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    expect((await apply(h.workspace, applyBody({ projectRoot: "one" }))).status).toBe("applied");
+    const readsBefore = h.machine.reads.length;
+    const response = await h.workspace.fetch(get("/rpc/read?projectRoot=two&path=a.txt"));
+    expect(response.status).toBe(400);
+    expect(v.parse(ProtocolFailure, await response.json()).code).toBe("invalid_request");
+    expect(h.machine.reads).toHaveLength(readsBefore);
+    expect((await read(h.workspace, "a.txt", "one")).status).toBe(200);
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a failed read claiming the project, so the first real write is refused.
+test("a failed read does not bind the project", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    expect((await read(h.workspace, "missing.txt", "one")).status).toBe(404);
+    const applied = await apply(h.workspace, applyBody({ projectRoot: "two" }));
+    expect(applied.status).toBe("applied");
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a refused or unknown write claiming the project before it applied anything.
+test("a refused write does not claim the project", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    h.machine.denyNext("path_denied");
+    const denied = await h.workspace.fetch(post("/rpc/apply", applyBody({ projectRoot: "one" })));
+    expect(denied.status).toBe(400);
+    const applied = await apply(
+      h.workspace,
+      applyBody({ operationId: "op-2", projectRoot: "two" }),
+    );
+    expect(applied.status).toBe("applied");
+  } finally {
+    h.close();
+  }
+});
+
+test("an unknown write and a lease refusal do not claim the project", async () => {
+  const h = harness();
+  try {
+    // No lease yet: the refusal happens before anything could bind.
+    const refused = await h.workspace.fetch(post("/rpc/apply", applyBody({ projectRoot: "one" })));
+    expect(await refusalOf(refused)).toBe("lease_not_held");
+    await acquire(h.workspace, leaseBody());
+    h.machine.failNext();
+    const unknown = await apply(h.workspace, applyBody({ projectRoot: "one" }));
+    expect(unknown.status).toBe("unknown");
+    const applied = await apply(
+      h.workspace,
+      applyBody({ operationId: "op-2", projectRoot: "two" }),
+    );
+    expect(applied.status).toBe("applied");
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: an applied outcome, its version, and its event landing in three transactions, so
+// simultaneous retries append the event twice.
+test("simultaneous retries append one intent, one outcome, and one event", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    const responses = await Promise.all([
+      h.workspace.fetch(post("/rpc/apply", applyBody())),
+      h.workspace.fetch(post("/rpc/apply", applyBody())),
+    ]);
+    for (const response of responses) {
+      expect(v.parse(ApplyOk, await response.json()).result.status).toBe("applied");
+    }
+    expect(await journalCounts(h)).toStrictEqual({ intent: 1, outcome: 1, event: 1 });
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: an outcome recorded without its version or event never being repaired, or the
+// repair appending a second event on every retry.
+test("a settled applied outcome repairs the version and event once", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    const content = base64Of("one");
+    await h.journal.appendIntent({
+      operationId: operationId("op-1"),
+      path: "a.txt",
+      expectedVersion: "absent",
+      body: new TextEncoder().encode("one"),
+    });
+    await h.journal.appendOutcome({
+      path: "a.txt",
+      result: {
+        status: "applied",
+        operationId: operationId("op-1"),
+        version: versionOfText("one"),
+      },
+    });
+    expect(await journalCounts(h)).toStrictEqual({ intent: 1, outcome: 1 });
+    const repaired = await h.workspace.fetch(post("/rpc/apply", applyBody({ content })));
+    expect(v.parse(ApplyOk, await repaired.json()).result.status).toBe("applied");
+    expect(await journalCounts(h)).toStrictEqual({ intent: 1, outcome: 1, event: 1 });
+    const retried = await h.workspace.fetch(post("/rpc/apply", applyBody({ content })));
+    expect(v.parse(ApplyOk, await retried.json()).result.status).toBe("applied");
+    expect(await journalCounts(h)).toStrictEqual({ intent: 1, outcome: 1, event: 1 });
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a file beyond the read bound reported as missing.
+test("a read beyond the bound is a 413, not a 404", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    expect((await apply(h.workspace, applyBody())).status).toBe("applied");
+    h.machine.tooLargeNext();
+    const result = await read(h.workspace, "a.txt");
+    expect(result.status).toBe(413);
+    expect(v.parse(ProtocolFailure, result.body).code).toBe("payload_too_large");
   } finally {
     h.close();
   }
