@@ -5,11 +5,11 @@
 
 ## 何を残すか
 
-- `events` テーブル。すべての HTTP リクエスト（method・path・status・所要）、会話の開始と終了（`chat.submitted` / `chat.settled`）、中断、サーバ側の例外。
+- `obs_events` 表（Session Durable Object の SQLite。D1 の `events` 表は migration 6 で廃止した）。すべての HTTP リクエスト（method・path・status・所要）、会話の開始と終了（`chat.submitted` / `chat.settled`）、中断、サーバ側の例外。
 - エージェントのターン（`agent.response`: provider/model・stopReason・トークン・コスト・エラー）。
 - ツールの呼び出しと結果（`tool.call` / `tool.result`: 名前・callId・所要・isError・診断コード）。引数と出力の中身は残さない。
 - クエリ文字列・ヘッダ・本文は残さない（token をログに落とさない）。
-- 30日より古いイベントは起動時に削除する（`pruneEvents`）。
+- 30日より古いイベントは起動時に削除する（`ObsStore.prune`）。
 
 ## イベントの種類
 
@@ -83,9 +83,19 @@ server（Durable Object）と machine は同じ `ObsLogEntry`（`@hns/core`）�
 - 外部設定・外部呼び出しの失敗（`gateway: <stage>` / `cost: <stage> failed`）。応答はコード付きの失敗として観測に
   出るため、これは原因の名前だけを残す 2 本目の線。
 
-index の `index.*` はこの節の対象ではない。`indexEntry`（`packages/server/src/obs/log.ts`）で 1 つの
-`ObsLogEntry` の形に組み立て、いまは同じ console sink へ 1 行の JSON として出す。イベント表への append へ繋ぐか
-どうかは、ターンの行数測定（`session-cost` の `ROWS_PER_TURN`）との関係を含めてデータ層のレーンで決める。
+### 索引の観測（`index.*`）と測定窓
+
+索引の `index.*` も observation で、`indexEntry`（`packages/server/src/obs/log.ts`）が組み立てた
+`ObsLogEntry` を、`Session` が同じ `obs_events` 表へ append する（`SessionIndex` の sink は
+`(entry: ObsLogEntry) => void`、既定の sink は console への 1 行）。
+
+- **測定窓**は「そのターンが書いた行」まで。`CostGate.turn` はターンの行を**測ってから**
+  `turnEnded` を呼び、索引の drain とその観測はそこ（窓の外）で書く。だから観測が増えても
+  `cost_turn.do_rows` は増えない（`session-cost.test.ts` の 10 行が同じ）。
+- **失敗時は観測を落とす**。drain が D1 で失敗したとき、`index_state` の状態行（`d1_write_failed`）だけを
+  書き、`index.drain.failed` の行は append しない。D1 障害のたびに 1 行増えると、障害が課金の測定を汚す。
+- 成功した drain の `index.legacy_rows` / `index.rebuilt` は窓の外で 1 行だけ書く。drain は先に索引を
+  読んで変更の無い行を書かないので、通常のターンでは行も D1 の書き込みも増えない。
 
 ## 失敗コードと status
 

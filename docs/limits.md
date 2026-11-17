@@ -48,7 +48,11 @@ Durable Object と R2 は、金額ではなく**行数とリクエスト数**で
   503 `limit_unavailable`（fail closed）。
 - **値**: コードに直書きしない。`cost_limits` の seed（無料枠の桁）を運用の `UPDATE` で変える。既定値・手順・
   アラートの受け取り方は [deploy/limits/README.md](../deploy/limits/README.md)。
-- **DB binding が無い環境**: コスト面を配線しない（上限が掛からない）。これはローカルの unit テスト専用で、
-  配備の Worker は必ず `DB` を bind する（無い環境で黙って上限なしにしないための区別）。
-  binding はあるが上限・当月合計・provider 行が読めない場合は 503 `limit_unavailable` で止める。
+- **DB binding が無い環境（fail closed）**: `HNS_ENV` が `dev` 以外（未設定を含む）で `DB` が無ければ、
+  Session は open しない（`session open failed` → 応答は 503 `unavailable`）。上限の無いまま走らせないための
+  fail closed で、配備の Worker は必ず `DB` を bind する。
+  - 例外は **`HNS_ENV=dev`** だけ（ローカルの unit テストが `DB` 無しで Session を開くため）。この場合コスト面と
+    会話索引は配線されず、上限も索引も掛からない。dev の配備でも `DB` は bind 済みなので、この分岐は本番では
+    起きない。
+  - binding はあるが上限・当月合計・provider 行が読めない場合は 503 `limit_unavailable` で止める（従来どおり）。
 - **実測**: 1 ターンの行・リクエスト・R2 の実測と月 1 万ターンへの外挿は [RESULTS](../deploy/limits/RESULTS.md)。

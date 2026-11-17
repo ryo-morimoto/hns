@@ -74,3 +74,26 @@
 - 途中で 2 件の blocking を修正: (1) method 405 → 400 の降格と 415 の code 変更（表に `method_not_allowed` を足して 405/413/415 をテストで固定）、(2) **worktree の codegen が main の server を読む**ために生成物が巻き戻った件（worktree の `buildSchemaSdl()` を直接呼び、絶対パスの relay 設定で再生成）。
 - gate: main の cwd から全 stage green（69.2s / 918 tests、integration 含む）。main の gate は exit 0（54.9s）。
 - follow-up（L6 / tools レーン）: codegen の `@hns/server` 解決を repo root の `packages/server` に固定し、gate の codegen stage で生成物の `git diff --exit-code` を回す。`relay-compiler` の cwd 依存も消す。docs/process.md の 3 行は恒久対策が入ったら外す。
+
+## L4（server のデータ層と安全）実装メモ — worktree lane-refactor-data
+
+- **migration 6**（`0006-drop-legacy-events.ts`）: D1 の `events` / `usage_log` を DROP。**正本（`obs_events` /
+  `cost_turn`）へは移行しない**。理由は migration の TSDoc とこの plan に書く: 観測は Session DO の SQLite が
+  唯一の書き手で、`obs_events` は行数上限（5000 件 / 30 日）で有界。費用は `cost_turn` が turn id と outcome を
+  持つ台帳で、旧 `usage_log` の行にはその 2 つが無い（コピーは CHECK に落ちるか、月次合計に「測っていない値」を
+  足す）。リリース前でデータ互換を持たないので、明示的な削除 1 本にまとめた。
+- 削除: 表 2 / repo 2（`events` / `usage`）/ store の export 6・core の型 4（`Event` / `Metrics` /
+  `NamedCount` / `StatusCount`、SDL は不変）。未使用の書き込み API（workflows / automations の write、
+  conversations の register / rename / setArchived / delete）は `Store` から外した。
+- **fail closed**: 非 `dev` かつ `DB` 無しは open しない（503）。`dev` の除外だけ docs/limits.md に書く。
+- **観測 sink**: `index.*` を `ObsLogEntry` で `obs_events` に書く。測定窓は「turn の書き込みまで」で、
+  測ってから `turnEnded` で drain と観測を書く。**drain 失敗時は観測を落とす**（D1 障害のたびに 1 行が
+  測定に乗らないように）。加えて drain は索引を先に読んで変更の無い行を書かない（これが無いと、`Session` が
+  `agent.response` を書かないターンで毎回 `index.drain.failed` が 1 行増え、10 行が 11 行になった）。
+  `session-cost.test.ts` の 10 行と RESULTS.md は不変。
+- **索引**: `page` は `updated_at DESC, id DESC`（`COALESCE` を外す）。索引は `conversations_page`
+  `(project_id, updated_at DESC, id DESC)` の**通常の索引**（部分索引にしない: 未索引の行があっても
+  `page` の述語から外れず、EXPLAIN が `USING INDEX` を返すことを integration で固定）。
+- **journal**: 語彙は core の `MACHINE_REFUSALS` 1 つ（machine は再エクスポート、store は `satisfies` で
+  一致を型で縛る）。二重実装は A 案で整理: DO（server/do/journal.ts）が唯一の実装で、store は行 schema・
+  parser・key・語彙だけ。このレーンでは reason の union 化と境界の TSDoc に留めた。
