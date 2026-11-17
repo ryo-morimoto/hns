@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -18,9 +18,13 @@ const CF = join(REPO_ROOT, "node_modules", ".bin", "cf");
 
 /** The lock every start takes; wrangler fixes one inspector port for every cf dev on the machine. */
 const LOCK_PATH = join(tmpdir(), "hns-cf-dev-inspector.lock");
+/** The short-lived guard that makes a takeover exclusive. */
+const TAKEOVER_PATH = LOCK_PATH + ".takeover";
 
 /** A record whose owner is gone, or that is this old, was abandoned by a worker that died. */
 const LOCK_STALE_MS = 10 * 60_000;
+/** A guard section is three file operations; one left this long belongs to a dead worker. */
+const TAKEOVER_STALE_MS = 5_000;
 
 const LOCK_POLL_MS = 250;
 const DEFAULT_MODE = "development";
@@ -76,6 +80,10 @@ interface Started {
 type Attempt =
   | { readonly ok: true; readonly started: Started }
   | { readonly ok: false; readonly output: string };
+
+type Takeover =
+  | { readonly taken: false }
+  | { readonly taken: true; readonly orphan: LockRecord | undefined };
 
 const lockRecord = v.object({
   /** The process that took the lock: the worker that started the child. */
@@ -151,9 +159,9 @@ const isCfDevProcess = async (pid: number): Promise<boolean> => {
   return parts.includes("dev") && parts.some((part) => part === "cf" || part.endsWith("/cf"));
 };
 
-const ageOf = async (): Promise<number> => {
+const ageOf = async (path: string): Promise<number> => {
   try {
-    return Date.now() - (await stat(LOCK_PATH)).mtimeMs;
+    return Date.now() - (await stat(path)).mtimeMs;
   } catch {
     // The record went away under the read; the next probe sees the lock as free.
     return 0;
@@ -180,8 +188,8 @@ const readLock = async (): Promise<LockView> => {
     throw error;
   }
   const record = parseLock(text);
-  if (record === null) return { state: "unreadable", ageMs: await ageOf() };
-  return { state: "held", record, ageMs: await ageOf() };
+  if (record === null) return { state: "unreadable", ageMs: await ageOf(LOCK_PATH) };
+  return { state: "held", record, ageMs: await ageOf(LOCK_PATH) };
 };
 
 const createLock = async (token: string, at: string): Promise<boolean> => {
@@ -234,8 +242,9 @@ const describeHolder = (view: LockView): string =>
  *
  * @remarks
  * The lock lives in the OS temp directory, so every worktree on the machine shares it. A record is
- * taken over only when its owner is gone or the record outlived {@link LOCK_STALE_MS}; a live holder
- * is waited for, at most `timeoutMs`, and the wait is logged so a slow suite explains itself.
+ * taken over when its owner is gone or the record outlived {@link LOCK_STALE_MS}; the takeover is
+ * exclusive ({@link takeOver}) and a live holder is waited for, at most `timeoutMs`, with the wait
+ * logged so a slow suite explains itself.
  *
  * @throws Error when the lock is still held after `timeoutMs`, or when this process already holds
  * it: a second cf dev would lose the inspector port to the first.
@@ -274,13 +283,22 @@ const acquireLock = async (timeoutMs: number): Promise<InspectorLock> => {
       continue;
     }
     console.log("[cf dev] taking over the inspector lock abandoned by " + describeHolder(current));
-    if (current.state === "held") await killAbandoned(current.record);
-    try {
-      await unlink(LOCK_PATH);
-    } catch (error) {
-      if (!(error instanceof Error)) throw error;
-      if (errnoOf(error) !== "ENOENT") throw error;
+    const takeover = await takeOver(token, at, current);
+    if (!takeover.taken) {
+      if (Date.now() >= deadline) {
+        throw new Error(
+          "timed out after " +
+            String(timeoutMs) +
+            "ms waiting for the cf dev inspector lock held by " +
+            describeHolder(current),
+        );
+      }
+      await sleep(LOCK_POLL_MS);
+      continue;
     }
+    // Our record is in place, so this is the child the replaced record named.
+    if (takeover.orphan !== undefined) await killAbandoned(takeover.orphan);
+    break;
   }
   held = token;
   if (announced) {
@@ -312,8 +330,88 @@ const probePort = async (): Promise<number> => {
   throw new Error("could not find a free port for cf dev");
 };
 
-const writeLock = async (token: string, at: string, child: number): Promise<void> => {
-  await writeFile(LOCK_PATH, JSON.stringify({ pid: process.pid, at, token, child }));
+/** Remove a lock file, treating "already gone" as done. */
+const remove = async (path: string): Promise<void> => {
+  try {
+    await unlink(path);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (errnoOf(error) !== "ENOENT") throw error;
+  }
+};
+
+/**
+ * Replace the record in one rename.
+ *
+ * @remarks
+ * The path never goes absent, so a waiter cannot create a second record between a delete and a
+ * create; readers see either the old record or the new one.
+ */
+const writeLock = async (token: string, at: string, child?: number): Promise<void> => {
+  const temporary = LOCK_PATH + "." + token + ".tmp";
+  const record: LockRecord =
+    child === undefined ? { pid: process.pid, at, token } : { pid: process.pid, at, token, child };
+  try {
+    await writeFile(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 });
+    await rename(temporary, LOCK_PATH);
+  } catch (error) {
+    await remove(temporary);
+    throw error;
+  }
+};
+
+/** Take the guard that makes read-then-replace exclusive, or report that another waiter has it. */
+const takeGuard = async (): Promise<boolean> => {
+  try {
+    await writeFile(TAKEOVER_PATH, String(process.pid), { flag: "wx", mode: 0o600 });
+    return true;
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (errnoOf(error) !== "EEXIST") throw error;
+  }
+  if ((await ageOf(TAKEOVER_PATH)) < TAKEOVER_STALE_MS) return false;
+  console.log("[cf dev] taking over the guard an abandoned takeover left behind");
+  await remove(TAKEOVER_PATH);
+  return false;
+};
+
+/**
+ * Whether a snapshot still describes the record a takeover judged abandoned.
+ *
+ * @remarks
+ * The guard makes the read and the replacement exclusive, but the record was judged before it was
+ * taken: another waiter may have replaced it, or its owner may have released and a new holder
+ * created. Only the record that was judged may be replaced, so a fresh record is never deleted.
+ */
+const sameRecord = (judged: LockView, current: LockView): boolean => {
+  switch (judged.state) {
+    case "absent":
+      return current.state === "absent";
+    case "unreadable":
+      return current.state === "unreadable" && current.ageMs >= LOCK_STALE_MS;
+    case "held":
+      return current.state === "held" && current.record.token === judged.record.token;
+  }
+};
+
+/**
+ * Replace the record a start judged abandoned, exclusively.
+ *
+ * @remarks
+ * The record is re-read inside the guard and only replaced when {@link sameRecord} still holds, so a
+ * record another waiter already replaced is never touched. The new record exists before the orphan
+ * is killed, so a process this start signals is the one the replaced record named.
+ */
+const takeOver = async (token: string, at: string, judged: LockView): Promise<Takeover> => {
+  if (!(await takeGuard())) return { taken: false };
+  try {
+    const current = await readLock();
+    if (!sameRecord(judged, current)) return { taken: false };
+    await writeLock(token, at);
+    return { taken: true, orphan: judged.state === "held" ? judged.record : undefined };
+  } finally {
+    await remove(TAKEOVER_PATH);
+  }
 };
 
 /** Keep what the child wrote, so a failure can quote it. */
