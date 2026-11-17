@@ -1,4 +1,4 @@
-import type { MutationResult } from "@hns/core";
+import type { AbsentVersion, MutationResult } from "@hns/core";
 
 /**
  * The content hash recorded for a version: "sha256:<hex>".
@@ -9,16 +9,6 @@ import type { MutationResult } from "@hns/core";
  * compare it against `expectedVersion`.
  */
 export type Version = string;
-
-/**
- * What a write expects to replace: a version, or nothing when the name is free.
- *
- * @remarks
- * There is no unconditional member: a write must name the version it saw.
- * `"absent"` requires the path not to exist, so it refuses a write that would
- * replace a file created since the caller looked.
- */
-export type ExpectedVersion = Version | "absent";
 
 /** The closed event vocabulary: every `kind` a journal event can carry. */
 export const FILE_EVENT_KINDS = ["created", "changed", "deleted", "overflow"] as const;
@@ -95,7 +85,7 @@ export interface AuditEntry {
 export interface JournalIntent {
   abs: string;
   rel: string;
-  expectedVersion: ExpectedVersion;
+  expectedVersion: AbsentVersion;
   contentHash: Version;
   temp: string;
   outcome?: MutationResult | undefined;

@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { MUTATION_UNKNOWN_REASONS } from "@hns/core";
 import type { JsonValue, MutationResult } from "@hns/core";
 import type { JournalIntent, JournalState } from "./types.ts";
 
@@ -8,7 +9,8 @@ const MutationResultSchema: v.GenericSchema<unknown, MutationResult> = v.variant
   v.object({
     status: v.literal("unknown"),
     operationId: v.string(),
-    reason: v.picklist(["io", "crash", "timeout"]),
+    // The stored reason is core's list, so a member added there is accepted here without a copy.
+    reason: v.picklist(MUTATION_UNKNOWN_REASONS),
   }),
 ]);
 

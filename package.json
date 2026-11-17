@@ -45,11 +45,6 @@
           "mkfifo"
         ]
       },
-      "packages/workspace": {
-        "entry": [
-          "src/rooted-helper.ts"
-        ]
-      },
       "packages/web": {
         "entry": [
           "src/**/*.test.{ts,tsx}"

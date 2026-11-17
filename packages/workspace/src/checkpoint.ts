@@ -20,6 +20,22 @@
  * uploading to R2 and writing the Journal watermark belong to the orchestration
  * (0157 / 0162). It runs under Node (git, child process, fs) and is therefore a
  * subpath export, not part of the root entry a Worker imports.
+ *
+ * @remarks
+ * **This export has no caller yet.** Restore is its one intended consumer and is
+ * not implemented; until it lands, nothing in the tree imports
+ * `@hns/workspace/checkpoint`, and the tests reach the source by relative path.
+ * The subpath stays because the root entry cannot hold it (the Worker bundle has
+ * no `node:child_process`), and a restore face that has to reach in through
+ * `src/` would be the deep import the package boundary forbids.
+ *
+ * The contract restore is expected to use, so a change here is visible as a
+ * change to a public shape: {@link checkpointRun} takes the workspace root and
+ * the Run id, and returns {@link Checkpoint} — the commit, its ref, the R2 key
+ * `checkpoints/<commit>.pack`, and the pack bytes. Restore reads that pack back
+ * with {@link readCheckpointPack} from `./objects`. A consumer that needs a
+ * different input or a different split (for example, uploading here instead of
+ * returning bytes) must change this subpath, and that is a public-surface change.
  */
 
 import { spawn } from "node:child_process";

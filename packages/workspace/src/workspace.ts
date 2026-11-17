@@ -9,7 +9,7 @@ import type {
   Result,
 } from "@earendil-works/pi-durable/env";
 import { operationId } from "@hns/core";
-import type { FileRead, MutationResult, OperationId } from "@hns/core";
+import type { AbsentVersion, FileRead, MutationResult, OperationId } from "@hns/core";
 import { Crash, Denied, FileFailure, Unavailable } from "./errors.ts";
 import type { CrashPoint } from "./errors.ts";
 import { emptyJournal, parseJournal } from "./journal.ts";
@@ -18,7 +18,6 @@ import type { HelperOutcome } from "./protocol.ts";
 import { Rooted } from "./rooted.ts";
 import type {
   AuditEntry,
-  ExpectedVersion,
   FileEvent,
   FileEventDraft,
   JournalIntent,
@@ -111,7 +110,7 @@ export interface FileWrite {
    * The version the caller saw, or "absent" when it expects the name to be
    * free. A write that no longer matches returns a conflict instead of applying.
    */
-  readonly expectedVersion: ExpectedVersion;
+  readonly expectedVersion: AbsentVersion;
   /**
    * The identity of one attempt. A replay with the same id returns the recorded
    * outcome; the same id with different content or `expectedVersion` is denied.
@@ -652,7 +651,7 @@ export class Workspace {
    * @throws {FileFailure} For any other read failure; a permission error must
    * not be mistaken for an absent file.
    */
-  async #versionOfFile(abs: string): Promise<ExpectedVersion> {
+  async #versionOfFile(abs: string): Promise<AbsentVersion> {
     if (this.#rooted !== undefined) {
       const outcome = await this.#rooted.hash(this.#partsOf(abs));
       if (outcome.kind === "version") return outcome.version;
@@ -1045,7 +1044,7 @@ export class Workspace {
   async #commitRooted(
     rec: JournalIntent,
     abs: string,
-    expectedVersion: ExpectedVersion,
+    expectedVersion: AbsentVersion,
   ): Promise<Commit> {
     if (this.#rooted === undefined) throw new Denied("rooted helper is off");
     const temp = rec.temp.slice(this.#canonicalRoot.length + 1);
@@ -1169,7 +1168,7 @@ export class Workspace {
    * watcher's echo do not become two events.
    */
   async #settlePath(rel: string): Promise<void> {
-    let version: ExpectedVersion;
+    let version: AbsentVersion;
     try {
       version = await this.#versionOfFile(this.#joinRoot(rel));
     } catch (error) {

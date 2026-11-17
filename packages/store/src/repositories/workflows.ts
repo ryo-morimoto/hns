@@ -1,13 +1,13 @@
 import * as v from "valibot";
-import {
-  type ConversationId,
-  type ProjectId,
-  type Workflow,
-  type WorkflowGraph,
-  type WorkflowNodeStatus,
-  type WorkflowRun,
-  type WorkflowRunNode,
-  type WorkflowRunStatus,
+import type {
+  ConversationId,
+  ProjectId,
+  Workflow,
+  WorkflowGraph,
+  WorkflowNodeStatus,
+  WorkflowRun,
+  WorkflowRunNode,
+  WorkflowRunStatus,
 } from "@hns/core";
 import { WorkflowGraphSchema } from "../schemas.ts";
 import type { StoreContext } from "../db.ts";
