@@ -1,6 +1,6 @@
 # 0148: Machine レジストリ（D1 + fetch）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D087
@@ -14,14 +14,14 @@ cloudflared は外向きの接続を維持する（D053）が、machine の状�
 
 ## Acceptance criteria
 
-- [ ] `Machine(id, name, hostname, publicKey, agentVersion, lastSeen, status)` を D1 に持つ。`publicKey` はマシンの device key（machine→Worker の検証に使う）
-- [ ] 登録はブラウザのセッションから行い、公開鍵を保存する（秘密はマシンから出ない）
-- [ ] 失効は即時に効く（以後の署名を拒否）
-- [ ] 疎通は署名付きの health 呼び出しで確かめ、結果を遅延書き込みする（毎回の同期更新をしない）
-- [ ] 同名・再イメージ・二重接続の扱いを決めてテストする
-- [ ] 切断中の Run は park し、再接続で照合する（INV-04）
-- [ ] control-plane の公開鍵を enrollment でマシンへ配る（秘密は Worker の secret。inbound の検証に使う）
-- [ ] 一覧は D1 から直接引く（索引を作らない）
+- [x] `Machine(id, name, hostname, publicKey, agentVersion, lastSeen, status)` を D1 に持つ。`publicKey` はマシンの device key（machine→Worker の検証に使う）
+- [x] 登録はブラウザのセッションから行い、公開鍵を保存する（秘密はマシンから出ない）
+- [x] 失効は即時に効く（以後の署名を拒否）
+- [x] 疎通は署名付きの health 呼び出しで確かめ、結果を遅延書き込みする（毎回の同期更新をしない）
+- [x] 同名・再イメージ・二重接続の扱いを決めてテストする
+- [x] 切断中の Run は park し、再接続で照合する（INV-04）
+- [x] control-plane の公開鍵を enrollment でマシンへ配る（秘密は Worker の secret。inbound の検証に使う）
+- [x] 一覧は D1 から直接引く（索引を作らない）
 
 ## Notes
 
@@ -121,3 +121,12 @@ cloudflared は外向きの接続を維持する（D053）が、machine の状�
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
 - 2026-11-07: DO をやめ、D1 + fetch に変更（D049）。
 - 2026-11-17: 0147 のキー分離（control-plane 鍵 / device key）を受けて、registry が両方を供給することを AC と Notes に足した。touches の migrations パスを実パスに直した。
+
+## Result
+
+- verdict: **PASS**（reviewer-0148。初回 FAIL 1（他人の machine を reimage して乗っ取れる）→ 修正 → PASS）
+- HEAD: e2c1a81（main に ff 統合）。gate は exit 0（1324 tests / 1325、main で 64.1s）。
+- 確認: `machines`（0008、name UNIQUE・public_key BLOB・status/key_algorithm の CHECK・索引なし）と `machine_events`（actor）。**reimage は登録した operator だけ**（`created_by` の照合 + `UPDATE … WHERE id=? AND created_by=? AND status<>'revoked'` の二重防御。両方に効くテストあり）。**一覧に `public_key` を返さない**（鍵は `registerMachine` の応答だけ）。一覧の所有者は **`isMine`**（本人の subject だけで計算し、他人の subject を出さない。これは D087 を超える判断なので contracts に根拠を書いた）。`recordProbe` は **1 文の UPDATE** で throttle を WHERE に畳む（revoked は書かない）。`deviceKey` は revoked / 欠損 / 非 32B で undefined（fail closed）。`/api/machines/keys` は session 必須。transport は control-plane 署名・3 秒・DNS 名以外は送らない。
+- 実経路: 実 D1（workerd）で enrollment → lease → 到達性 → device 鍵の署名検証。**0147 の agent には `health` op が有る**（`/rpc` に送る）。mutation 4 件 + B1 の 2 件を検出。
+- 誰がいつ呼ぶか: `Query.machines`（読み取り時に throttle probe、**定期 probe は 0161**）、`registerMachine` / `revokeMachine` はサインインした人。`deviceKey` は 0245 の Workspace DO が読む。**Worker → machine の transport の配線は 0249**。
+- 非 blocking（follow-up）: 他人の name + 同じ鍵は冪等に通る（存在確認に使えるが実害は低）/ server 側で CONFLICT を固定していない（store 側のみ）/ **`revokeMachine` に owner チェックが無く誰でも失効できる**（失効は安全側。D087 が決めていない）/ `machine_events` に読み手が無い（0161 / 監査 UI）/ `RegisteredMachine` が Machine の field を丸ごと複写する / 0245 のテストが手で作る `machines` 表を 0008 に寄せる。
