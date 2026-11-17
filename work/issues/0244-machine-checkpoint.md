@@ -1,6 +1,6 @@
 # 0244: machine の checkpoint 操作と signed pack 転送
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D106 / 0243 / docs/durability.md §5

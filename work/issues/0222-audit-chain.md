@@ -1,6 +1,6 @@
 # 0222: ツール決定の監査を Session DO に追記する（hash chain）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §8, §10

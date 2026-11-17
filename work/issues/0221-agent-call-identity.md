@@ -1,6 +1,6 @@
 # 0221: Agent のツール呼び出しに manifest と callHash を付ける（Phase 0）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §3–§4
