@@ -33,6 +33,15 @@ relay 設定で `relay-compiler` を回し、**出力の enum 名が worktree �
 どちらの場合も、統合前にメインの cwd から `node tools/gate/main.ts --all` を通し、生成物の `git diff` が空で
 あることを確かめる。worktree の gate が緑でも、隣の checkout を検証していることがある。
 
+**`@hns/*` を自前に向けたときの codegen の罠。** `--conditions=source` は `@hns/agent` を worktree の
+`src/index.ts` に解決し、その `src/agent.ts` は `@earendil-works/pi-durable` を **runtime で**読む。
+pi-durable の `exports` も `source` 条件で `./src/index.ts` を指すが、**配布物に `src/` は無い**ので、
+worktree の `node_modules/@earendil-works` をそのまま辿ると `ERR_MODULE_NOT_FOUND` で codegen が落ちる。
+
+- 対処: `node_modules/@earendil-works` を**メインの実体へリンク**する（サードパーティと同じ扱い）。
+- 症状が出たら、まず `node --conditions=source tools/codegen/graphql.ts` を worktree で直接叩いて切り分ける。
+  **pristine な main の worktree でも再現する**ので、レーンの変更を疑う前に手順を疑う。
+
 ## 完了・記録・成果
 
 完了は Result の追記ではなく、1 issue 1 レコードで表す（[D067](../decisions.md)）。置き場とスキーマは [0195](../../work/issues/0195-work-record-contract.md) で決める（YAML は D067）。done level はレコードから導出する。
