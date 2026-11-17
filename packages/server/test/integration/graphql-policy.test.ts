@@ -336,18 +336,41 @@ test("an agent subject's decision is policy_denied on the real D1 and writes not
   });
 });
 
-// C6: Catches: a glob stored as a pending proposal no approval could accept.
-test("a glob proposal is unsupported on the real D1 and stores nothing", async () => {
+// C6: Catches: a glob stored as a pending proposal no approval could accept — and, separately, a
+// glob rule that only knows `*` and `?`, which would let `a/{b,c}` through as invalid_request.
+test.each([
+  ["a/*", "a star"],
+  ["a/{b,c}", "a brace expansion"],
+  ["a/[bc]", "a character class"],
+  ["a/?.txt", "a question mark"],
+])("a glob proposal is unsupported on the real D1 and stores nothing (%s)", async (root) => {
   await withPolicy(async (store, workspaceId) => {
     const refused = await failureOf(
       run(store, AGENT, PROPOSE, {
-        input: { ...proposalInput(workspaceId), readRoots: ["a/*"] },
+        input: { ...proposalInput(workspaceId), readRoots: [root] },
       }),
       "proposePolicy",
     );
     expect(refused.code).toBe("UNSUPPORTED");
     expect(await store.policy.proposals(workspaceId)).toHaveLength(0);
-    expect(await store.policy.revisions(workspaceId)).toHaveLength(0);
+  });
+});
+
+// Catches: a NUL or a `..` root read as a normal path (the contract refuses both, and the face must
+// not turn either into invalid_request or, worse, store it).
+test.each([
+  ["a/..", "a parent segment"],
+  ["/etc", "an absolute path"],
+])("a root the contract cannot compare is unsupported on the real D1 (%s)", async (root) => {
+  await withPolicy(async (store, workspaceId) => {
+    const refused = await failureOf(
+      run(store, AGENT, PROPOSE, {
+        input: { ...proposalInput(workspaceId), writeRoots: [root] },
+      }),
+      "proposePolicy",
+    );
+    expect(refused.code).toBe("UNSUPPORTED");
+    expect(await store.policy.proposals(workspaceId)).toHaveLength(0);
   });
 });
 

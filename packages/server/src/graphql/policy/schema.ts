@@ -10,11 +10,10 @@ import {
   GraphQLUnionType,
   type GraphQLFieldConfigMap,
 } from "graphql";
-import { publicEnumName } from "@hns/core/graphql";
 import { POLICY_DIFF_KINDS, POLICY_PROPOSAL_STATUSES } from "@hns/core/capability";
 import type { GraphQLContext } from "../context.ts";
 import type { MutationModule } from "../mutations/index.ts";
-import { PolicyFailureType } from "./failure.ts";
+import { closedEnum, PolicyFailureType } from "./failure.ts";
 import { DecidePolicyInputType, PolicyProposalInputType } from "./inputs.ts";
 import {
   resolveDecidePolicy,
@@ -29,14 +28,6 @@ function resultUnion(name: string, payload: GraphQLObjectType): GraphQLUnionType
     name,
     types: [payload, PolicyFailureType],
     resolveType: (value: { readonly __typename: string }): string => value.__typename,
-  });
-}
-
-/** An enum over a closed vocabulary, spelled as GraphQL publishes it. */
-function enumOver(name: string, values: readonly string[]): GraphQLEnumType {
-  return new GraphQLEnumType({
-    name,
-    values: Object.fromEntries(values.map((value) => [publicEnumName(value), { value }])),
   });
 }
 
@@ -79,12 +70,12 @@ function policyTypes(): PolicyTypes {
   const diff = new GraphQLObjectType({
     name: "PolicyDiff",
     fields: {
-      kind: { type: new GraphQLNonNull(enumOver("PolicyDiffKind", POLICY_DIFF_KINDS)) },
+      kind: { type: new GraphQLNonNull(closedEnum("PolicyDiffKind", POLICY_DIFF_KINDS)) },
       added: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(atom))) },
       removed: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(atom))) },
     },
   });
-  const proposalStatus = enumOver("PolicyProposalStatus", POLICY_PROPOSAL_STATUSES);
+  const proposalStatus = closedEnum("PolicyProposalStatus", POLICY_PROPOSAL_STATUSES);
   const revision = new GraphQLObjectType({
     name: "PolicyRevision",
     fields: {

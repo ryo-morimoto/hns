@@ -19,11 +19,11 @@ import {
  * @remarks
  * **Who may approve, and the hole.** The session the edge verified names a subject and nothing
  * else, so {@link principalOf} reads it: a subject in the agent namespace is an agent, and every
- * other subject is a human. That is a **default, not an identity proof**. Until 0158 gives the
+ * other subject is a human. That is a **default, not an identity proof**. Until the login face gives the
  * session a \`kind\`, an agent that holds a person's \`hns_session\` cookie is indistinguishable from
  * that person **here**, and could approve a proposal. What this face guarantees is the part it
  * can: an agent subject cannot decide (checked here, and again in the service), and no path turns
- * an agent credential into a {@link HumanPrincipal}. The remaining hole belongs to 0158's login
+ * an agent credential into a {@link HumanPrincipal}. The remaining hole belongs to the login
  * face, and the issue's Result records it.
  *
  * The policy port answers with an outcome for every operation; an outage is a \`QueryReadError\` the
@@ -117,7 +117,7 @@ async function workspaceExists(workspaceId: ProjectId, context: GraphQLContext):
  * @returns The workspace's revisions with the active flag, or a union failure.
  *
  * @remarks
- * Reading opens the workspace's baseline policy (0223's idempotent \`ensure\`), so a workspace that
+ * Reading opens the workspace's baseline policy (the idempotent \`ensure\`), so a workspace that
  * exists always answers at least revision 1; \`not_found\` therefore means the workspace, not the
  * policy.
  */
@@ -233,7 +233,7 @@ export async function resolveProposePolicy(
  *
  * @remarks
  * **Only a human may decide.** The principal is read from the session and checked here, before
- * the service is called; the service checks again (0223), and either refusal is \`policy_denied\`.
+ * the service is called; the service checks again, and either refusal is \`policy_denied\`.
  * The review token is part of the input so the human's client names the view it decided on; the
  * service recomputes the token from the stored proposal's inputs and answers \`approval_stale\`
  * when the stored one no longer matches, so a token the client invents cannot pass.

@@ -16,7 +16,7 @@ import { createPolicyService } from "../../policy/service.ts";
  *
  * @remarks
  * One port for the whole policy face instead of one per field: the four fields are four views of
- * one service (0223), and separate ports would let a test pair a propose with a decision from a
+ * one service, and separate ports would let a test pair a propose with a decision from a
  * different service. A unit test replaces this port with a fake; production builds it over the
  * request's store, and the integration test builds the same service over a real D1.
  *
@@ -96,7 +96,7 @@ export type DecideOutcome =
       readonly diff: PolicyDiff;
     };
 
-/** The service's refusal codes (0223); the face adds \`not_found\` and \`invalid_request\` itself. */
+/** The service's refusal codes; the face adds \`not_found\` and \`invalid_request\` itself. */
 export type PolicyRefusalCode = "policy_denied" | "approval_stale" | "unsupported";
 
 /** An expected refusal, carried as a value so the resolver can map it to a union member. */
@@ -153,7 +153,7 @@ function diffAgainst(base: PolicyRevision | undefined, proposal: PolicyProposal)
  * @returns The port. An outage or a defect throws; the service's refusals are values.
  *
  * @remarks
- * The service owns every decision (0223): the principal check, the review token, the compare-and-
+ * The service owns every decision: the principal check, the review token, the compare-and-
  * swap, and \`unsupported\`. This port converts its results into the one outcome shape and adds the
  * read the list needs (each proposal's diff against the revision it names).
  */

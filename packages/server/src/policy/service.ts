@@ -143,9 +143,10 @@ export interface PolicyService {
    *
    * A candidate the atom algebra cannot compare (a glob root, a scope it does not know) is
    * **refused here with `unsupported`** instead of being stored as a proposal no approval could
-   * ever accept; an `equal` candidate is refused too, because approving it would move the revision
-   * without changing the policy. Approval still refuses `unsupported` on its own, because the
-   * algebra is the authority at both times.
+   * ever accept. An **`equal` candidate is stored**: a proposal that changes nothing is a valid
+   * review request (a human may reject it, or approve a no-op revision), and the diff a human reads
+   * says `equal` rather than being refused. Approval still refuses `unsupported` on its own,
+   * because the algebra is the authority at both times.
    *
    * @throws Error when the store cannot read or write.
    */
@@ -252,9 +253,6 @@ export function createPolicyService(options: PolicyServiceOptions): PolicyServic
       const diff = diffPolicy(active.document, input.candidate);
       if (diff.kind === "unsupported") {
         return failure("unsupported", "the policy difference cannot be computed");
-      }
-      if (diff.kind === "equal") {
-        return failure("unsupported", "the candidate policy equals the active one");
       }
       const id = newId();
       const proposal = await policy.createProposal({

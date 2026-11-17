@@ -11,7 +11,7 @@ import type { ProjectId } from "@hns/core";
 import * as v from "valibot";
 import { ProjectIdSchema } from "@hns/core";
 import { fromGlobalId } from "@hns/core/graphql";
-import { normalizePath } from "@hns/core/capability";
+import { GLOB_CHARACTERS, normalizePath } from "@hns/core/capability";
 import type { PolicyDocumentView } from "./views.ts";
 import { isPolicyProposalStatus } from "./views.ts";
 
@@ -188,6 +188,15 @@ function rootsOf(value: readonly string[], field: string): Decoded<readonly stri
   return { ok: true, value };
 }
 
+/** A root the atom algebra cannot compare; the refusal code is the policy face's, not an input error. */
+type Uncomparable =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly code: "invalid_request" | "unsupported";
+      readonly message: string;
+    };
+
 /**
  * Refuse a root the atom algebra could not compare.
  *
@@ -201,18 +210,27 @@ function rootsOf(value: readonly string[], field: string): Decoded<readonly stri
  * proposal no approval could ever accept (the service refuses it too; this is the face's own early
  * answer, and it is what makes the answer the caller sees `unsupported` rather than a guess).
  */
-function comparableRoots(
-  roots: readonly string[],
-): { readonly ok: true } | { readonly ok: false; readonly message: string } {
+function comparableRoots(roots: readonly string[]): Uncomparable {
   for (const root of roots) {
-    if (root.includes("*") || root.includes("?")) {
-      return { ok: false, message: "a glob root cannot be compared by the policy algebra" };
-    }
     const normalized = normalizePath(root);
-    if (normalized.kind !== "path") return { ok: false, message: normalized.reason };
+    if (normalized.kind !== "path") {
+      return { ok: false, code: "unsupported", message: normalized.reason };
+    }
   }
   return { ok: true };
 }
+
+/**
+ * The characters that make a root a glob, as the contract spells them.
+ *
+ * @internal
+ * @remarks
+ * Re-exported from the contract (`@hns/core/capability`) rather than written here: a second copy
+ * drifts, and a rule that recognized only `*` and `?` would let `a/{b,c}` through. The face does not
+ * test these characters itself — {@link normalizePath} already refuses them — but the list is named
+ * so a reader of this file can see that the rule is the contract's.
+ */
+export const ROOT_GLOB_CHARACTERS = GLOB_CHARACTERS;
 
 /**
  * Build the stored document a proposal asks for.
@@ -297,7 +315,7 @@ export function proposeInputOf(input: {
   const reason = reasonOf(input.reason);
   if (!reason.ok) return { ok: false, message: reason.message, code: "invalid_request" };
   const comparable = comparableRoots([...readRoots.value, ...writeRoots.value]);
-  if (!comparable.ok) return { ok: false, message: comparable.message, code: "unsupported" };
+  if (!comparable.ok) return { ok: false, message: comparable.message, code: comparable.code };
   const document = documentOf({
     readRoots: readRoots.value,
     writeRoots: writeRoots.value,

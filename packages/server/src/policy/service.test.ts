@@ -519,7 +519,10 @@ test("a candidate the algebra cannot compare is unsupported and is not stored", 
   expect(fake.proposals.size).toBe(0);
 });
 
-test("an equal candidate is refused rather than moved", async () => {
+// Catches: a proposal the human may legitimately want to make ("change nothing here") being
+// refused, which would leave a UI unable to express it; and a no-op approval moving the revision
+// without a diff a reader could see.
+test("an equal candidate is stored with an equal diff and moves nothing until approved", async () => {
   const { service, fake } = open();
   const active = await service.ensure(WORKSPACE);
   const result = await service.propose(AGENT, {
@@ -527,9 +530,10 @@ test("an equal candidate is refused rather than moved", async () => {
     candidate: active.document,
     reason: "same",
   });
-  assert.strictEqual(result.ok, false);
-  assert.strictEqual(result.ok ? undefined : result.code, "unsupported");
-  expect(fake.proposals.size).toBe(0);
+  assert.ok(result.ok);
+  assert.strictEqual(result.ok ? result.diff.kind : undefined, "equal");
+  expect(fake.proposals.size).toBe(1);
+  assert.strictEqual(fake.active?.revision, 1);
 });
 
 test("a stored proposal whose diff is unsupported cannot be approved", async () => {

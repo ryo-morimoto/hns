@@ -263,28 +263,37 @@ test("an agent decidePolicy is policy_denied and never calls the service", async
 });
 
 // C6: Catches: a proposal the atom algebra cannot compare being stored as pending, or a glob the
-// face hands to the service instead of refusing.
-test("a glob proposal is unsupported", async () => {
-  const face = fakeFace();
-  const proposed = await run(AGENT, PROPOSE, face, {
-    input: { ...PROPOSE_INPUT, readRoots: ["a/*"] },
-  });
-  expect(proposed.data).toMatchObject({
-    proposePolicy: { __typename: "PolicyFailure", code: "UNSUPPORTED" },
-  });
-});
+// face hands to the service instead of refusing. Every glob the contract knows must be refused —
+// a rule that only knew `*` and `?` would answer invalid_request for a brace expansion.
+test.each(["a/*", "a/{b,c}", "a/[bc]", "a/?.txt"])(
+  "a glob proposal (%s) is unsupported and never reaches the service",
+  async (root) => {
+    const face = fakeFace();
+    const proposed = await run(AGENT, PROPOSE, face, {
+      input: { ...PROPOSE_INPUT, readRoots: [root] },
+    });
+    expect(proposed.data).toMatchObject({
+      proposePolicy: { __typename: "PolicyFailure", code: "UNSUPPORTED" },
+    });
+    expect(face.propose).not.toHaveBeenCalled();
+  },
+);
 
-// Catches: a network proposal Phase 1 cannot honour being stored and honoured by nothing.
-test("a network proposal is unsupported", async () => {
-  const face = fakeFace();
-  const { data } = await run(AGENT, PROPOSE, face, {
-    input: { ...PROPOSE_INPUT, network: true },
-  });
-  expect(data).toMatchObject({
-    proposePolicy: { __typename: "PolicyFailure", code: "UNSUPPORTED" },
-  });
-  expect(face.propose).not.toHaveBeenCalled();
-});
+// Catches: a root the contract refuses for another reason (a `..` segment, an absolute path) being
+// reported as invalid_request, which would tell a client its request was malformed.
+test.each(["a/..", "/etc"])(
+  "a root the contract cannot compare (%s) is unsupported",
+  async (root) => {
+    const face = fakeFace();
+    const { data } = await run(AGENT, PROPOSE, face, {
+      input: { ...PROPOSE_INPUT, writeRoots: [root] },
+    });
+    expect(data).toMatchObject({
+      proposePolicy: { __typename: "PolicyFailure", code: "UNSUPPORTED" },
+    });
+    expect(face.propose).not.toHaveBeenCalled();
+  },
+);
 
 // C7: Catches: an empty list answering for a workspace that does not exist.
 test("an unknown workspace is not_found, not an empty list", async () => {

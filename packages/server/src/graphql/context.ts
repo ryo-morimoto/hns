@@ -91,7 +91,7 @@ export interface GraphQLContext {
   readonly reads: GraphQLReads;
   readonly writes: GraphQLWrites;
   /**
-   * The policy service's operations (0223), as the policy fields call them.
+   * The policy service's operations, as the policy fields call them.
    *
    * @remarks
    * One port rather than one per field: the four policy fields are four views of one service, and a
@@ -214,13 +214,13 @@ function defaultReads(env: WorkerEnv, requestId: string): GraphQLReads {
 }
 
 /**
- * The production policy face: the 0223 service over the request's control database.
+ * The production policy face: the policy service over the request's control database.
  *
  * @internal
  * @remarks
  * The port opens the policy lazily, so a request that never touches a policy field does not pay for
  * `ensure`. `bashSandbox` is `false`: no machine fact on the project row says a workspace has a
- * sandbox yet (0226 carries the machine's capability into the session), and `false` is the fail
+ * sandbox yet (the machine's capability has not reached the session), and `false` is the fail
  * closed default — the baseline then omits `bash` rather than granting a process nobody can
  * sandbox. A store that cannot be opened is `unavailable`, like every other read on this face.
  */

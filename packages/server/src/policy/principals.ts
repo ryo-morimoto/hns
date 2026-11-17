@@ -11,7 +11,7 @@
  * `policy_denied`.
  *
  * Phase 1 builds the actor from the authenticated session ({@link principalOf}). The session cookie
- * is a **person's** cookie until 0158 replaces the login face, so the default is
+ * is a **person's** cookie until a login face replaces it, so the default is
  * {@link HumanPrincipal}; an agent's subject namespace is the one value refused, and that refusal
  * is the second fence the GraphQL face checks before it calls `decide`.
  */
@@ -40,8 +40,8 @@ export type PolicyActor = AgentPrincipal | HumanPrincipal;
  * The edge mints one session for a person (the `hns_session` cookie); an agent's request is not a
  * session yet, so no agent subject exists in production. The namespace is declared here anyway so
  * the rule is one constant: a subject under it is **never** read as a human, and `decide` refuses
- * it. 0158 is where a session gains a `kind`; until then this prefix is the only marker, and it is
- * a denial, not an identity.
+ * it. A session does not yet carry a `kind`, so this prefix is the only marker, and it is a
+ * denial, not an identity.
  */
 export const AGENT_SUBJECT_PREFIX = "agent:";
 
@@ -51,9 +51,9 @@ export const AGENT_SUBJECT_PREFIX = "agent:";
  * @remarks
  * The session names a subject and nothing else; the face has already verified the cookie, so the
  * subject is either a person or a subject in the agent namespace. Only the second is an agent;
- * everything else is a human because the sole issuer of `hns_session` is the person's login, which
- * 0158 replaces. This is a **default**, not an identity proof: an agent that presents a person's
- * cookie is indistinguishable here, and 0158's `Session.kind` is where that closes.
+ * everything else is a human because the sole issuer of `hns_session` is the person's login. A login
+ * face replaces that issuer. This is a **default**, not an identity proof: an agent that presents a
+ * person's cookie is indistinguishable here, and a `Session.kind` is where that closes.
  *
  * @param subject - The verified session's subject.
  * @returns The agent principal for an agent namespace, a human principal otherwise.

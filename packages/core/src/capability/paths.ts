@@ -35,8 +35,15 @@ export type UnderResult = Under | Unsupported;
 /** A NUL byte, which no path may carry. */
 const NUL = String.fromCharCode(0);
 
-/** A segment containing one of these is a glob (or a pattern this contract does not compare). */
-const GLOB_CHARACTERS = ["*", "?", "[", "]", "{", "}"];
+/**
+ * The characters whose presence makes a path a glob, or a pattern this contract cannot compare.
+ *
+ * @remarks
+ * The rule is published so a face that has to refuse a glob **before** it builds a policy uses the
+ * contract's rule rather than a copy of it. A copy drifts: a rule that recognized only `*` and
+ * `?` would let `a/{b,c}` through here as a normal path while {@link normalizePath} refused it.
+ */
+export const GLOB_CHARACTERS = ["*", "?", "[", "]", "{", "}"] as const;
 
 function unsupported(reason: string): Unsupported {
   return { kind: "unsupported", reason };
