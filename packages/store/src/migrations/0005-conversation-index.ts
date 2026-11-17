@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS index_state (
  *
  * `indexed_at` is the new column: NULL means no Session has written the row into the index yet, so
  * a Session object's first drain (the backfill) is what fills it. `updated_at` stays nullable for
- * rows older than the index; the writer always fills it, and ordering reads
- * `COALESCE(updated_at, created_at)`.
+ * rows older than the index; the writer always fills it, and since migration 6 the page reads it
+ * directly (the index is on `updated_at`, not on a `COALESCE`).
  *
  * `index_state` is one row per workspace (the Session object's name): the backlog size and the
  * last success or failure, written only when that state changes (D078 U-04).

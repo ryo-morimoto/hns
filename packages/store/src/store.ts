@@ -5,7 +5,6 @@ import {
   conversationRepository,
   type ConversationRepository,
 } from "./repositories/conversations.ts";
-import { eventRepository, type EventRepository } from "./repositories/events.ts";
 import { indexStateRepository, type IndexStateRepository } from "./repositories/index-state.ts";
 import {
   projectRepository,
@@ -13,7 +12,6 @@ import {
   type ProjectRepository,
   type TaskRepository,
 } from "./repositories/projects.ts";
-import { usageRepository, type UsageRepository } from "./repositories/usage.ts";
 import { workflowRepository, type WorkflowRepository } from "./repositories/workflows.ts";
 import { createSql, type D1Binding } from "./sql.ts";
 
@@ -24,6 +22,12 @@ import { createSql, type D1Binding } from "./sql.ts";
  * The repositories share the adapter, the clock, and the id source. A repository call that
  * writes is one statement, or one D1 batch when it spans statements; D1 has no interactive
  * transaction. A store must not be used after {@link Store.close}.
+ *
+ * The surface is what a face uses: the read side of every model area, and the writes the
+ * Worker performs today. A write no face performs yet (workflow graph edits and runs,
+ * automation and firing edits, conversation registration and renames) is not reachable from
+ * `env.DB` until the issue that needs it adds it here with that caller. The Session object
+ * writes conversations through `@hns/store/conversation-index`, not through this store (D078).
  */
 export interface Store {
   readonly projects: ProjectRepository;
@@ -31,10 +35,8 @@ export interface Store {
   readonly conversations: ConversationRepository;
   /** The conversation index's backlog and last failure, one row per workspace. */
   readonly indexState: IndexStateRepository;
-  readonly events: EventRepository;
   readonly workflows: WorkflowRepository;
   readonly automations: AutomationRepository;
-  readonly usage: UsageRepository;
   /** Close the adapter. Calls made after this throw from the closed adapter. */
   close(): Promise<void>;
 }
@@ -71,10 +73,8 @@ export async function openStore(options: StoreOptions): Promise<Store> {
       tasks: taskRepository(context),
       conversations: conversationRepository(context),
       indexState: indexStateRepository(context),
-      events: eventRepository(context),
       workflows: workflowRepository(context),
       automations: automationRepository(context),
-      usage: usageRepository(context),
       close: () => sql.close(),
     };
   } catch (error) {

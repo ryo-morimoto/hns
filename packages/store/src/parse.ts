@@ -5,11 +5,9 @@ import * as v from "valibot";
 import type {
   Automation,
   Conversation,
-  Event,
   Firing,
   Project,
   Task,
-  Usage,
   Workflow,
   WorkflowRun,
   WorkflowRunNode,
@@ -17,11 +15,9 @@ import type {
 import {
   AutomationRowSchema,
   ConversationRowSchema,
-  EventRowSchema,
   FiringRowSchema,
   ProjectRowSchema,
   TaskRowSchema,
-  UsageTodaySchema,
   WorkflowRowSchema,
   WorkflowRunNodeRowSchema,
   WorkflowRunRowSchema,
@@ -73,22 +69,6 @@ export function parseConversation(input: unknown): Conversation {
  */
 export function parseTask(input: unknown): Task {
   return v.parse(TaskRowSchema, input);
-}
-
-/**
- * Parse a raw `events` row into the public {@link Event}.
- *
- * @remarks
- * `detail` is JSON text in the column and becomes a decoded `JsonValue`, or null when
- * the event carried no detail.
- *
- * @param input - A row read from SQLite.
- * @returns The validated event.
- * @throws ValiError if a required column is missing or a level or name is unknown.
- * @throws SyntaxError if `detail` is not valid JSON.
- */
-export function parseEvent(input: unknown): Event {
-  return v.parse(EventRowSchema, input);
 }
 
 /**
@@ -158,19 +138,4 @@ export function parseAutomation(input: unknown): Automation {
  */
 export function parseFiring(input: unknown): Firing {
   return v.parse(FiringRowSchema, input);
-}
-
-/**
- * Parse the aggregate row behind `usageRepository.today`.
- *
- * @remarks
- * The aggregate query always returns one row, with zeroed sums for an empty day, so the
- * result is totals rather than an absent value.
- *
- * @param input - The aggregate row read from SQLite.
- * @returns The validated daily totals.
- * @throws ValiError if the row does not have the three numeric totals.
- */
-export function parseUsageToday(input: unknown): Usage["today"] {
-  return v.parse(UsageTodaySchema, input);
 }

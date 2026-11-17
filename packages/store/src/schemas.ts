@@ -2,8 +2,6 @@ import * as v from "valibot";
 import {
   AUTOMATION_FIRING_STATUSES,
   ConversationIdSchema,
-  EVENT_LEVELS,
-  EVENT_NAMES,
   IsoTimestampSchema,
   PROJECT_EGRESS_POLICIES,
   ProjectIdSchema,
@@ -17,12 +15,9 @@ import type {
   AutomationAction,
   AutomationTrigger,
   Conversation,
-  Event,
   Firing,
-  JsonValue,
   Project,
   Task,
-  Usage,
   Workflow,
   WorkflowEdge,
   WorkflowGraph,
@@ -30,15 +25,6 @@ import type {
   WorkflowRun,
   WorkflowRunNode,
 } from "@hns/core";
-
-/** Decode the `detail` JSON text column; null means the event carried no detail. */
-const parseDetail = v.transform((text: string | null): JsonValue | null => {
-  if (text === null) return null;
-  const parsed: unknown = JSON.parse(text);
-
-  // SAFETY: detail is written with JSON.stringify of a JsonValue.
-  return parsed as JsonValue;
-});
 
 /** The `projects` row before `agent_cwd` is derived from the stored root. */
 const projectRowSchema = v.object({
@@ -106,34 +92,12 @@ export const TaskRowSchema: v.GenericSchema<unknown, Task> = v.object({
   updated_at: v.string(),
 });
 
-/**
- * The `events` table row.
- *
- * @remarks
- * `detail` is JSON text in the column and is decoded to a {@link JsonValue}, or null when
- * the event carried no detail. `status` and `duration_ms` are null when the event does not
- * describe an HTTP response.
- */
-export const EventRowSchema: v.GenericSchema<unknown, Event> = v.object({
-  id: v.string(),
-  at: v.string(),
-  level: v.picklist(EVENT_LEVELS),
-  event: v.picklist(EVENT_NAMES),
-  request_id: v.nullable(v.string()),
-  conversation_id: v.nullable(ConversationIdSchema),
-  status: v.nullable(v.number()),
-  duration_ms: v.nullable(v.number()),
-  detail: v.pipe(v.nullable(v.string()), parseDetail),
-});
-
 /** The input shape of {@link ProjectRowSchema}: a raw `projects` row. */
 export type ProjectRow = v.InferInput<typeof ProjectRowSchema>;
 /** The input shape of {@link ConversationRowSchema}, including the 0 or 1 `archived` flag. */
 export type ConversationRow = v.InferInput<typeof ConversationRowSchema>;
 /** The input shape of {@link TaskRowSchema}: a raw `tasks` row. */
 export type TaskRow = v.InferInput<typeof TaskRowSchema>;
-/** The input shape of {@link EventRowSchema}, including `detail` as JSON text. */
-export type EventRow = v.InferInput<typeof EventRowSchema>;
 
 /**
  * Decode a JSON text column and validate the decoded value in one step.
@@ -384,20 +348,4 @@ export const FiringRowSchema: v.GenericSchema<unknown, Firing> = v.object({
   detail: v.nullable(v.string()),
   run_id: v.nullable(v.string()),
   created_at: IsoTimestampSchema,
-});
-
-/** One day's usage totals, as the metrics and usage views consume them. */
-export type UsageToday = Usage["today"];
-
-/**
- * The aggregate row `usageRepository.today` returns.
- *
- * @remarks
- * `turns` counts usage rows, `tokens` sums the stored integer token counts, and `cost`
- * sums the recorded cost. An empty day parses as zeroed totals, not null.
- */
-export const UsageTodaySchema: v.GenericSchema<unknown, UsageToday> = v.object({
-  turns: v.number(),
-  tokens: v.number(),
-  cost: v.number(),
 });

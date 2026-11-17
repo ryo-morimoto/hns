@@ -1,7 +1,5 @@
-import assert from "node:assert/strict";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createD1Harness, type D1Harness } from "../harness.ts";
-import { graph } from "../../support.ts";
 
 let harness: D1Harness;
 
@@ -13,89 +11,47 @@ afterAll(async () => {
   await harness.dispose();
 });
 
-test("workflows keep versions, runs pin the version and nodes move through the states", async () => {
+const GRAPH = '{"nodes":[{"id":"a","type":"agent","prompt":"A"}],"edges":[]}';
+
+// The rows a workflow and a pinned run have, written the way the workflow's own writer will once
+// a face exists; this test proves the store reads them back through the model.
+const WORKFLOW = [
+  "INSERT INTO workflows (id, project_id, name, version, graph_json, created_at, updated_at)",
+  "VALUES ('w1', 'default', 'flow', 1, '" +
+    GRAPH +
+    "', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');",
+].join(" ");
+
+const RUN = [
+  "INSERT INTO workflow_runs (id, workflow_id, version, graph_json, status, input, created_at)",
+  "VALUES ('r1', 'w1', 1, '" + GRAPH + "', 'queued', 'ship', '2026-01-01T00:00:01.000Z');",
+  "INSERT INTO workflow_nodes (run_id, node_id, status) VALUES ('r1', 'a', 'pending');",
+].join(" ");
+
+// Catches: a stored workflow or run whose graph does not read back through the model.
+test("a stored workflow and its run read back with the pinned graph", async () => {
   await harness.withStore(async (store) => {
-    const project = await store.projects.ensureDefault();
-    const workflow = await store.workflows.create({
-      projectId: project.id,
-      name: "flow",
-      graph: graph([
-        { id: "plan", type: "agent", prompt: "Plan" },
-        { id: "check", type: "human", prompt: "Check" },
-      ]),
-    });
-    expect(workflow.version).toBe(1);
-    const updated = await store.workflows.update(
-      workflow.id,
-      graph([{ id: "solo", type: "agent", prompt: "Solo" }]),
-    );
-    expect(updated?.version).toBe(2);
-
-    const run = await store.workflows.createRun({ workflowId: workflow.id, input: "ship" });
-    assert.ok(run !== undefined);
-    assert.equal(run.version, 2);
-    expect((await store.workflows.getRunGraph(run.id))?.nodes.map((node) => node.id)).toStrictEqual(
-      ["solo"],
-    );
-    await store.workflows.update(
-      workflow.id,
-      graph([{ id: "later", type: "agent", prompt: "Later" }]),
-    );
-    expect((await store.workflows.getRunGraph(run.id))?.nodes.map((node) => node.id)).toStrictEqual(
-      ["solo"],
-    );
-    expect(run.nodes?.map((node) => node.status)).toStrictEqual(["pending"]);
-
-    await store.workflows.setRunStatus(run.id, "running");
-    await store.workflows.setNodeRunning(run.id, "solo", "Solo ship");
-    expect((await store.workflows.getRun(run.id))?.nodes?.[0]?.status).toBe("running");
-    await store.workflows.setNodeWaiting(run.id, "solo", "Approve");
-    const completed = await store.workflows.completeNode(run.id, "solo", "ok");
-    expect(completed?.status).toBe("done");
-    expect(await store.workflows.completeNode(run.id, "solo", "again")).toBe(undefined);
-    await store.workflows.finishRun(run.id, "done", '{"solo":"ok"}');
-    const finished = await store.workflows.getRun(run.id);
-    expect(finished?.status).toBe("done");
-    expect(finished?.output).toBe('{"solo":"ok"}');
-    expect((await store.workflows.getRun(run.id))?.nodes?.[0]?.output).toBe("ok");
+    await harness.exec(WORKFLOW + " " + RUN);
+    const workflows = await store.workflows.list();
+    expect(workflows.map((workflow) => [workflow.id, workflow.version])).toStrictEqual([["w1", 1]]);
+    expect((await store.workflows.get("w1"))?.graph.nodes.map((node) => node.id)).toStrictEqual([
+      "a",
+    ]);
+    expect(await store.workflows.get("missing")).toBe(undefined);
+    expect((await store.workflows.listRuns("w1")).map((run) => run.id)).toStrictEqual(["r1"]);
+    const run = await store.workflows.getRun("r1");
+    expect(run?.nodes?.map((node) => node.status)).toStrictEqual(["pending"]);
+    expect((await store.workflows.getRunGraph("r1"))?.nodes.map((node) => node.id)).toStrictEqual([
+      "a",
+    ]);
   });
 });
 
-test("resuming requeues running nodes and deletes cascade", async () => {
+// Catches: a corrupt stored graph read back as a default instead of failing.
+test("a corrupt stored graph fails loudly on read", async () => {
   await harness.withStore(async (store) => {
-    const project = await store.projects.ensureDefault();
-    const workflow = await store.workflows.create({
-      projectId: project.id,
-      name: "flow",
-      graph: graph([{ id: "a", type: "agent", prompt: "A" }]),
-    });
-    const run = await store.workflows.createRun({ workflowId: workflow.id, input: "x" });
-    assert.ok(run !== undefined);
-    await store.workflows.setNodeRunning(run.id, "a", "A");
-    await store.workflows.setRunStatus(run.id, "running");
-    const resumed = await store.workflows.resumeRuns();
-    expect(resumed.length).toBe(1);
-    expect((await store.workflows.getRun(run.id))?.nodes?.[0]?.status).toBe("pending");
-    expect(await store.workflows.delete(workflow.id)).toBe(true);
-    expect(await store.workflows.getRun(run.id)).toBe(undefined);
-    expect(await store.workflows.get(workflow.id)).toBe(undefined);
-  });
-});
-
-test("a run whose graph cannot be inserted rolls back whole", async () => {
-  await harness.withStore(async (store) => {
-    const project = await store.projects.ensureDefault();
-    const workflow = await store.workflows.create({
-      projectId: project.id,
-      name: "broken",
-      graph: graph([
-        { id: "same", type: "agent", prompt: "A" },
-        { id: "same", type: "agent", prompt: "B" },
-      ]),
-    });
-    await expect(
-      store.workflows.createRun({ workflowId: workflow.id, input: "x" }),
-    ).rejects.toThrow();
-    expect((await store.workflows.listRuns()).length).toBe(0);
+    await harness.exec(WORKFLOW);
+    await harness.exec("UPDATE workflows SET graph_json = '{}' WHERE id = 'w1'");
+    await expect(store.workflows.get("w1")).rejects.toThrow();
   });
 });

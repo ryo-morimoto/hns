@@ -195,7 +195,7 @@ test("one table holds intents, outcomes, audits, and events", async () => {
     await h.journal.appendAudit({
       operationId: operationId("op-2"),
       path: "b.txt",
-      reason: "escapes root",
+      reason: "path_denied",
     });
     await h.journal.appendEvent({ eventKind: "deleted", path: "b.txt" });
     expect(kinds(h.state)).toStrictEqual(["intent", "outcome", "audit", "event"]);
@@ -316,7 +316,7 @@ test("one mutation appends three rows and a retry appends none", async () => {
     await h.journal.appendAudit({
       operationId: operationId("op-2"),
       path: "b.txt",
-      reason: "escapes root",
+      reason: "path_denied",
     });
     expect(count(h.state)).toBe(4);
   } finally {
@@ -337,7 +337,7 @@ test("the watermark truncates intents and bodies but keeps audits and events", a
     await h.journal.appendAudit({
       operationId: operationId("op-2"),
       path: "b.txt",
-      reason: "escapes root",
+      reason: "path_denied",
     });
     await h.journal.appendEvent({ eventKind: "changed", path: "a.txt", version: "sha256:one" });
 
@@ -404,7 +404,7 @@ test("a cursor reads the journal in bounded pages without skipping or repeating"
       await h.journal.appendAudit({
         operationId: null,
         path: null,
-        reason: "attempt " + String(index),
+        reason: "path_denied",
       });
     }
     const seqs: number[] = [];
@@ -428,7 +428,7 @@ test("a cursor reads the journal in bounded pages without skipping or repeating"
 test("an invalid cursor or an out-of-range page size is refused", async () => {
   const h = await harness();
   try {
-    await h.journal.appendAudit({ operationId: null, path: null, reason: "attempt" });
+    await h.journal.appendAudit({ operationId: null, path: null, reason: "path_denied" });
     await expect(h.journal.read({ limit: 0 })).rejects.toThrow(RangeError);
     await expect(h.journal.read({ limit: JOURNAL_READ_MAX_LIMIT + 1 })).rejects.toThrow(RangeError);
     await expect(h.journal.read({ cursor: "01" })).rejects.toThrow();

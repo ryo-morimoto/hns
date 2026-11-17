@@ -29,7 +29,7 @@ test("opening a store migrates and seeds the default project", async () => {
     expect(projects[0]?.id).toBe("default");
     expect(projects[0]?.name).toBe("default");
   });
-  expect(await version()).toBe(5);
+  expect(await version()).toBe(6);
 });
 
 test("reopening keeps the data and does not duplicate the default project", async () => {
@@ -46,22 +46,22 @@ test("reopening keeps the data and does not duplicate the default project", asyn
   } finally {
     await second.close();
   }
-  expect(await version()).toBe(5);
+  expect(await version()).toBe(6);
 });
 
 test("migrateStore applies the schema without opening the repositories", async () => {
   await harness.reset();
   await migrateStore(harness.db);
-  expect(await version()).toBe(5);
+  expect(await version()).toBe(6);
   await migrateStore(harness.db);
-  expect(await version()).toBe(5);
+  expect(await version()).toBe(6);
 });
 
 test("a failing migration leaves no table or version row behind", async () => {
   await harness.reset();
   // Catches: a failed migration leaving partial tables or a version row behind.
-  // A view named events makes the migration's CREATE INDEX fail after the tables exist.
-  await harness.exec("CREATE VIEW events AS SELECT 1 AS x");
+  // A view named conversations makes the migration's CREATE INDEX fail after the tables exist.
+  await harness.exec("CREATE VIEW conversations AS SELECT 1 AS x");
   await expect(migrateStore(harness.db)).rejects.toThrow();
   const versionRow = await harness.db
     .prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations")

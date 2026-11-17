@@ -3,6 +3,7 @@ import { migration0002 } from "./0002-gateway.ts";
 import { migration0003 } from "./0003-cost.ts";
 import { migration0004 } from "./0004-project-workspace.ts";
 import { migration0005 } from "./0005-conversation-index.ts";
+import { migration0006 } from "./0006-drop-legacy-events.ts";
 import type { Migration } from "./migration.ts";
 
 /**
@@ -18,4 +19,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration0003,
   migration0004,
   migration0005,
+  migration0006,
 ];

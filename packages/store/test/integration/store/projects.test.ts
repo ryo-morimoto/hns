@@ -1,6 +1,7 @@
 import * as v from "valibot";
 import { ConversationIdSchema, ProjectIdSchema } from "@hns/core";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { openConversationIndex } from "../../../src/conversation-index/index.ts";
 import { createD1Harness, type D1Harness } from "../harness.ts";
 
 let harness: D1Harness;
@@ -71,11 +72,18 @@ test("deleting a project cascades to tasks and conversations", async () => {
   await harness.withStore(async (store) => {
     const project = await store.projects.create("cascade", "projects/cascade");
     await store.tasks.create({ projectId: project.id, title: "task" });
-    await store.conversations.register({
-      id: v.parse(ConversationIdSchema, "c1"),
-      projectId: project.id,
-      title: "chat",
-    });
+    await openConversationIndex(harness.db).upsert([
+      {
+        id: v.parse(ConversationIdSchema, "c1"),
+        projectId: project.id,
+        title: "chat",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        archived: false,
+        deletedAt: null,
+        indexedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
     expect((await store.tasks.list(project.id)).length).toBe(1);
     expect((await store.conversations.page({ projectId: project.id })).items.length).toBe(1);
     await store.projects.delete(project.id);

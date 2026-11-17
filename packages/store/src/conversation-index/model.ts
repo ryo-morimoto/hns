@@ -24,6 +24,13 @@ export interface ConversationIndexRow {
   readonly indexedAt: string;
 }
 
+/** The index of one stored conversation: what a drain compares before it writes. */
+export interface IndexedConversation {
+  readonly id: string;
+  /** The stored activity; null only for a row an older build wrote. */
+  readonly updatedAt: string | null;
+}
+
 /** The recorded state of one workspace's index. */
 export interface IndexStateRow {
   /** Conversations that have not reached D1; zero when the index is current. */

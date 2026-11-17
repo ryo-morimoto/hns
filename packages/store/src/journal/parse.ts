@@ -11,6 +11,7 @@ import type {
   JournalIntentEntry,
   JournalOutcomeEntry,
 } from "./model.ts";
+import { JOURNAL_REFUSAL_CODES } from "./refusals.ts";
 import {
   JOURNAL_BODY_HASH_PATTERN,
   JOURNAL_EVENT_KINDS,
@@ -40,6 +41,17 @@ const IntentRowSchema = v.object({
   body: v.nullable(BodyBytesSchema),
 });
 
+/**
+ * The reason column of an outcome and an audit: the unknown vocabulary or the refusal codes.
+ *
+ * @remarks
+ * One closed set per status: an `unknown` outcome names a `MutationUnknownReason` and a
+ * `denied` outcome or an audit names a machine refusal code. A value outside both is corruption.
+ * The column is the union here so the schema states what the row may hold; which half applies
+ * is checked against the status in `outcomeFieldsMatch`.
+ */
+const ReasonSchema = v.picklist([...JOURNAL_UNKNOWN_REASONS, ...JOURNAL_REFUSAL_CODES]);
+
 const OutcomeRowSchema = v.object({
   seq: SeqSchema,
   kind: v.literal("outcome"),
@@ -49,7 +61,7 @@ const OutcomeRowSchema = v.object({
   status: v.picklist(JOURNAL_OUTCOME_STATUSES),
   version: v.nullable(NonEmptyText),
   current_version: v.nullable(NonEmptyText),
-  reason: v.nullable(NonEmptyText),
+  reason: v.nullable(ReasonSchema),
 });
 
 const AuditRowSchema = v.object({
@@ -58,7 +70,7 @@ const AuditRowSchema = v.object({
   operation_id: v.nullable(OperationIdSchema),
   path: v.nullable(NonEmptyText),
   at: IsoTimestampSchema,
-  reason: NonEmptyText,
+  reason: v.picklist(JOURNAL_REFUSAL_CODES),
 });
 
 const EventRowSchema = v.object({
@@ -123,9 +135,13 @@ function outcomeFieldsMatch(row: OutcomeRow): boolean {
         JOURNAL_UNKNOWN_REASONS.some((reason) => reason === row.reason)
       );
     case "denied":
-      // The reason is the machine's refusal code; the vocabulary is the machine's, not the
-      // Journal's, so a code the Worker did not expect still reads back rather than failing.
-      return row.version === null && row.current_version === null && row.reason !== null;
+      // The reason is the machine's refusal code, from the core vocabulary this package checks
+      // its own list against; a code outside it is corruption, not a code to pass through.
+      return (
+        row.version === null &&
+        row.current_version === null &&
+        JOURNAL_REFUSAL_CODES.some((code) => code === row.reason)
+      );
   }
 }
 
@@ -218,7 +234,7 @@ const EventEntrySchema: v.GenericSchema<unknown, JournalEventEntry> = v.pipe(
  *   operation_id: "op-1",
  *   path: "a.txt",
  *   at: "2026-01-01T00:00:00.000Z",
- *   reason: "escapes root",
+ *   reason: "path_denied",
  * });
  * expect(entry.seq).toBe(1);
  * expect(entry.kind).toBe("audit");

@@ -5,8 +5,14 @@
  * The Journal is authoritative state (`J` in `(C, J)`, docs/durability.md §1). One table holds
  * intents, outcomes, audit entries, and events so one mutation never fans out into several row
  * types; `kind` says which shape a row has and `seq` orders every append. The table lives in the
- * Workspace Durable Object's SQLite, so the DO creates it on open; `@hns/store` owns only the row
- * shape, its parser, and the object-store key for bodies that do not fit in a row.
+ * Workspace Durable Object's SQLite, so the DO creates it on open.
+ *
+ * The one implementation is the DO's (`packages/server/src/do/journal.ts`): the transaction per
+ * mutation, the body spilling to R2, the watermark and truncation, and paged reads. This package
+ * owns the boundary it shares with that implementation — the DDL and its upgrade, the row shape,
+ * the parser, the object-store key, and the closed vocabularies a row may hold — so a reader
+ * outside the DO (a restore, a test) validates the same shapes the DO writes. This package has no
+ * second journal implementation and no dependency on the DO.
  */
 import { MUTATION_UNKNOWN_REASONS } from "@hns/core";
 

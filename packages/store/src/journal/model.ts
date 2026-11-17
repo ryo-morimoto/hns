@@ -1,4 +1,5 @@
-import type { IsoTimestamp, OperationId } from "@hns/core";
+import type { IsoTimestamp, MutationUnknownReason, OperationId } from "@hns/core";
+import type { JournalRefusalCode } from "./refusals.ts";
 import type { JournalEventKind, JournalOutcomeStatus } from "./schema.ts";
 
 /**
@@ -56,10 +57,11 @@ export interface JournalIntentEntry extends JournalEntryStamp {
  *
  * @remarks
  * The fields mirror `MutationResult` in `@hns/core` for `applied`, `conflict`, and `unknown`:
- * `version` is set only for `applied`, `currentVersion` only for `conflict`, and `reason`
- * only for `unknown` and `denied`. `denied` is the Journal's own settlement of an intent the
- * machine refused before writing, so no checkpoint has to reconcile it. An outcome is never
- * rewritten: a retry reads the recorded one (INV-04).
+ * `version` is set only for `applied`, `currentVersion` only for `conflict`, and `reason` is
+ * set only for `unknown` (a {@link MutationUnknownReason}) and `denied` (a
+ * {@link JournalRefusalCode}). `denied` is the Journal's own settlement of an intent the machine
+ * refused before writing, so no checkpoint has to reconcile it. An outcome is never rewritten: a
+ * retry reads the recorded one (INV-04).
  */
 export interface JournalOutcomeEntry extends JournalEntryStamp {
   readonly kind: "outcome";
@@ -74,7 +76,7 @@ export interface JournalOutcomeEntry extends JournalEntryStamp {
    * Why the outcome is `unknown` (a `MutationUnknownReason`), or the machine's refusal code
    * when it is `denied`; null for `applied` and `conflict`.
    */
-  readonly reason: string | null;
+  readonly reason: MutationUnknownReason | JournalRefusalCode | null;
 }
 
 /**
@@ -82,13 +84,14 @@ export interface JournalOutcomeEntry extends JournalEntryStamp {
  *
  * @remarks
  * Audits outlive truncation because a refusal is evidence: the write never happened, so no
- * checkpoint can absorb it. `operationId` is null when the attempt had no valid id.
+ * checkpoint can absorb it. `operationId` is null when the attempt had no valid id. `reason` is
+ * the machine's refusal code, the same closed vocabulary a `denied` outcome records.
  */
 export interface JournalAuditEntry extends JournalEntryStamp {
   readonly kind: "audit";
   readonly operationId: OperationId | null;
   readonly path: string | null;
-  readonly reason: string;
+  readonly reason: JournalRefusalCode;
 }
 
 /**

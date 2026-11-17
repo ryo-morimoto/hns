@@ -14,7 +14,5 @@ export type {
 } from "./repositories/conversations.ts";
 export type { IndexStateRepository } from "./repositories/index-state.ts";
 export type { ConversationIndexRow, IndexStateRow } from "./conversation-index/model.ts";
-export type { EventInput, EventListQuery, EventRepository } from "./repositories/events.ts";
-export type { UsageInput, UsageRepository } from "./repositories/usage.ts";
-export type { WorkflowCreateInput, WorkflowRepository } from "./repositories/workflows.ts";
-export type { AutomationCreateInput, AutomationRepository } from "./repositories/automations.ts";
+export type { WorkflowRepository } from "./repositories/workflows.ts";
+export type { AutomationRepository } from "./repositories/automations.ts";

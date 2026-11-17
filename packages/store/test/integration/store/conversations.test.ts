@@ -1,9 +1,18 @@
 import * as v from "valibot";
-import { ConversationIdSchema } from "@hns/core";
+import { ConversationIdSchema, type ConversationId, type ProjectId } from "@hns/core";
+import { openConversationIndex } from "../../../src/conversation-index/index.ts";
 import type { ConversationCursor } from "../../../src/index.ts";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createD1Harness, type D1Harness } from "../harness.ts";
 
+/**
+ * Write an indexed conversation row the way a Session's drain does.
+ *
+ * @remarks
+ * The store itself has no conversation write any more: the Session object owns them and writes
+ * through `@hns/store/conversation-index`. The read side is proved against rows that writer
+ * produces, so this test uses the same upsert rather than a hand-written INSERT.
+ */
 let harness: D1Harness;
 
 beforeAll(async () => {
@@ -14,18 +23,70 @@ afterAll(async () => {
   await harness.dispose();
 });
 
+/** The tombstone a Session's drain writes for a deleted conversation. */
+async function deleted(id: ConversationId, projectId: ProjectId): Promise<void> {
+  const index = openConversationIndex(harness.db);
+  await index.upsert([
+    {
+      id,
+      projectId,
+      title: "alpha chat",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+      archived: false,
+      deletedAt: "2026-01-03T00:00:00.000Z",
+      indexedAt: "2026-01-03T00:00:00.000Z",
+    },
+  ]);
+}
+
+/** The archive flag a Session's drain writes (there is no store write for it). */
+async function archived(id: ConversationId, projectId: ProjectId): Promise<void> {
+  const index = openConversationIndex(harness.db);
+  await index.upsert([
+    {
+      id,
+      projectId,
+      title: "chat",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+      archived: true,
+      deletedAt: null,
+      indexedAt: "2026-01-02T00:00:00.000Z",
+    },
+  ]);
+}
+
+async function register(input: {
+  readonly id: ConversationId;
+  readonly projectId: ProjectId;
+  readonly title: string;
+  readonly updatedAt?: string | undefined;
+}): Promise<void> {
+  const at = input.updatedAt ?? "2026-01-01T00:00:00.000Z";
+  const index = openConversationIndex(harness.db);
+  await index.upsert([
+    {
+      id: input.id,
+      projectId: input.projectId,
+      title: input.title,
+      createdAt: at,
+      updatedAt: at,
+      archived: false,
+      deletedAt: null,
+      indexedAt: at,
+    },
+  ]);
+}
+
 test("conversations are registered, searched, archived and soft-deleted", async () => {
   await harness.withStore(async (store) => {
     const project = await store.projects.ensureDefault();
     const other = await store.projects.create("other", "projects/other");
     const first = v.parse(ConversationIdSchema, "c1");
     const second = v.parse(ConversationIdSchema, "c2");
-    await store.conversations.register({
-      id: first,
-      projectId: project.id,
-      title: "alpha chat",
-    });
-    await store.conversations.register({ id: second, projectId: other.id, title: "beta chat" });
+    await register({ id: first, projectId: project.id, title: "alpha chat" });
+    await register({ id: second, projectId: other.id, title: "beta chat" });
     expect((await store.conversations.page()).items.length).toBe(2);
     expect(
       (await store.conversations.page({ projectId: other.id })).items.map(
@@ -37,11 +98,10 @@ test("conversations are registered, searched, archived and soft-deleted", async 
     ).toStrictEqual([first]);
     expect((await store.conversations.page({ q: "%" })).items.length).toBe(0);
     expect((await store.conversations.page({ q: "_" })).items.length).toBe(0);
-    await store.conversations.setArchived(other.id, second, true);
+    await archived(second, other.id);
     expect((await store.conversations.page()).items.length).toBe(1);
     expect((await store.conversations.page({ includeArchived: true })).items.length).toBe(2);
-    const deleted = await store.conversations.delete(project.id, first);
-    expect(deleted?.deleted_at).not.toBe(null);
+    await deleted(first, project.id);
     expect((await store.conversations.page({ includeArchived: true })).items.length).toBe(1);
     expect((await store.conversations.get(project.id, first))?.deleted_at !== null).toBe(true);
     await store.conversations.touch(other.id, second);
@@ -55,8 +115,8 @@ test("a conversation is fetched by its project and id pair", async () => {
     const first = await store.projects.ensureDefault();
     const second = await store.projects.create("other", "projects/other");
     const id = v.parse(ConversationIdSchema, "7");
-    await store.conversations.register({ id, projectId: first.id, title: "mine" });
-    await store.conversations.register({ id, projectId: second.id, title: "theirs" });
+    await register({ id, projectId: first.id, title: "mine" });
+    await register({ id, projectId: second.id, title: "theirs" });
     expect((await store.conversations.get(first.id, id))?.title).toBe("mine");
     expect((await store.conversations.get(second.id, id))?.title).toBe("theirs");
     expect(await store.conversations.get(second.id, v.parse(ConversationIdSchema, "8"))).toBe(
@@ -69,7 +129,7 @@ test("conversation list limits are clamped", async () => {
   await harness.withStore(async (store) => {
     const project = await store.projects.ensureDefault();
     for (let index = 0; index < 3; index += 1) {
-      await store.conversations.register({
+      await register({
         id: v.parse(ConversationIdSchema, "c" + index),
         projectId: project.id,
         title: "chat",
@@ -85,7 +145,7 @@ test("a keyset cursor pages through a stable list without repeating or skipping"
   await harness.withStore(async (store) => {
     const project = await store.projects.ensureDefault();
     for (let index = 0; index < 5; index += 1) {
-      await store.conversations.register({
+      await register({
         id: v.parse(ConversationIdSchema, "c" + index),
         projectId: project.id,
         title: "chat",
@@ -111,7 +171,7 @@ test("a row updated between pages does not stall or truncate the cursor walk", a
   await harness.withStore(async (store) => {
     const project = await store.projects.ensureDefault();
     for (let index = 0; index < 4; index += 1) {
-      await store.conversations.register({
+      await register({
         id: v.parse(ConversationIdSchema, "c" + index),
         projectId: project.id,
         title: "chat",

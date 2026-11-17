@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { createSql, type D1Binding, type SqlStatement } from "../sql.ts";
-import type { ConversationIndexRow, IndexStateRow } from "./model.ts";
+import type { ConversationIndexRow, IndexedConversation, IndexStateRow } from "./model.ts";
 import { readIndexState, writeIndexState } from "./state.ts";
 
 /** D1 refuses a statement with more than 100 bound parameters; stay under it. */
@@ -15,18 +15,34 @@ const UPDATE =
 
 const INSERT = "INSERT INTO conversations (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) ";
 
-/** The monotonic upsert: a stale resend never rolls a newer row back. */
+/**
+ * The monotonic upsert: a stale resend never rolls a newer row back.
+ *
+ * @remarks
+ * The row and the page order on `updated_at` alone; this writer always fills it (from
+ * `created_at` when the conversation was never touched), so a NULL stored value is a row an
+ * older build wrote and any write from this build supersedes it.
+ */
 const UPSERT =
   INSERT +
   "ON CONFLICT(project_id, id) " +
   UPDATE +
-  " WHERE excluded.updated_at >= COALESCE(conversations.updated_at, conversations.created_at)";
+  " WHERE excluded.updated_at >= COALESCE(conversations.updated_at, '')";
 
 /** The rebuild upsert: reindex is authoritative, so it repairs a row whatever it says. */
 const UPSERT_FORCED = INSERT + "ON CONFLICT(project_id, id) " + UPDATE;
 
 /** One id column, for the ids already stored under a project. */
 const IdRowSchema = v.object({ id: v.string() });
+
+const IndexedRowSchema = v.object({
+  id: v.string(),
+  updated_at: v.nullable(v.string()),
+  indexed_at: v.nullable(v.string()),
+});
+
+/** Rows one `read` page asks for; a project is read page by page, never all at once. */
+const READ_PAGE = 500;
 
 /** The row's bind values, in {@link COLUMNS} order. */
 function values(row: ConversationIndexRow): readonly (string | number | null)[] {
@@ -74,6 +90,19 @@ export interface ConversationIndex {
     projectId: string,
     rows: readonly ConversationIndexRow[],
   ): Promise<{ readonly indexed: number; readonly removed: number }>;
+  /**
+   * The indexes of the conversations in one project, for a drain to compare before writing.
+   *
+   * @remarks
+   * A drain reads these first, so a row the index already holds is not written again: D1 bills
+   * every statement, a batch included, and a drain runs after every turn. Keyset-paged on
+   * `(updated_at, id)` under the project, so a project larger than one page is read in full
+   * without an OFFSET walk.
+   *
+   * @param projectId - The project whose rows to read.
+   * @returns `id`, `updated_at`, and `indexed_at` for each row.
+   */
+  read(projectId: string): Promise<readonly IndexedConversation[]>;
   /** The workspace's recorded state, or undefined when no drain has written one. */
   state(workspaceId: string): Promise<IndexStateRow | undefined>;
   /** Record a transition of the workspace's state. */
@@ -128,6 +157,32 @@ export function openConversationIndex(db: D1Binding): ConversationIndex {
         .map((row) => v.parse(IdRowSchema, row).id)
         .filter((id) => !known.has(id));
       return { indexed: rows.length, removed: await remove(projectId, stale) };
+    },
+    async read(projectId) {
+      const rows: IndexedConversation[] = [];
+      let after: { readonly updatedAt: string | null; readonly id: string } | undefined;
+      for (;;) {
+        const page =
+          after === undefined || after.updatedAt === null
+            ? await sql.all(
+                "SELECT id, updated_at, indexed_at FROM conversations WHERE project_id = ? " +
+                  "ORDER BY updated_at DESC, id DESC LIMIT ?",
+                [projectId, READ_PAGE + 1],
+              )
+            : await sql.all(
+                "SELECT id, updated_at, indexed_at FROM conversations WHERE project_id = ? " +
+                  "AND (updated_at < ? OR (updated_at = ? AND id < ?)) " +
+                  "ORDER BY updated_at DESC, id DESC LIMIT ?",
+                [projectId, after.updatedAt, after.updatedAt, after.id, READ_PAGE + 1],
+              );
+        const parsed = page.map((row) => v.parse(IndexedRowSchema, row));
+        const kept = parsed.slice(0, READ_PAGE);
+        rows.push(...kept.map((row) => ({ id: row.id, updatedAt: row.updated_at })));
+        const last = kept[kept.length - 1];
+        if (parsed.length <= READ_PAGE || last === undefined || last.updated_at === null) break;
+        after = { updatedAt: last.updated_at, id: last.id };
+      }
+      return rows;
     },
     state: (workspaceId) => readIndexState(sql, workspaceId),
     writeState: (workspaceId, state, at) => writeIndexState(sql, workspaceId, state, at),

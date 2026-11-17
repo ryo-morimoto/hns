@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseConversation, parseEvent, parseProject, parseTask } from "./parse.ts";
+import { parseConversation, parseProject, parseTask } from "./parse.ts";
 
 const projectRow = {
   id: "p1",
@@ -24,17 +24,6 @@ const taskRow = {
   status: "doing",
   created_at: "2026-11-07T00:00:00.000Z",
   updated_at: "2026-11-07T00:01:00.000Z",
-};
-const eventRow = {
-  id: "e1",
-  at: "2026-11-07T00:00:00.000Z",
-  level: "info",
-  event: "chat.submitted",
-  request_id: null,
-  conversation_id: "c1",
-  status: 202,
-  duration_ms: 12,
-  detail: '{"a":1}',
 };
 
 test("a project row parses into the public model", () => {
@@ -74,20 +63,4 @@ test("a task row keeps its status", () => {
 
 test("an unknown task status fails loudly", () => {
   expect(() => parseTask({ ...taskRow, status: "paused" })).toThrow();
-});
-
-test("event detail is parsed from JSON", () => {
-  expect(parseEvent(eventRow).detail).toStrictEqual({ a: 1 });
-});
-
-test("a null event detail stays null", () => {
-  expect(parseEvent({ ...eventRow, detail: null }).detail).toBe(null);
-});
-
-test("a broken event detail fails loudly", () => {
-  expect(() => parseEvent({ ...eventRow, detail: "{" })).toThrow();
-});
-
-test("an unknown event level fails loudly", () => {
-  expect(() => parseEvent({ ...eventRow, level: "debug" })).toThrow();
 });
