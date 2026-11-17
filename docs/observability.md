@@ -26,6 +26,7 @@
 | Workflow       | `workflow.created` `workflow.updated` `workflow.run.started` `workflow.run.finished` `workflow.run.failed` `workflow.node.started` `workflow.node.finished` `workflow.node.waiting` | runId、nodeId、type、状態、所要                      |
 | Automation     | `automation.created` `automation.fired` `automation.skipped` `automation.finished`                                                                                                  | 起点、firing、run、状態                              |
 | 制限           | `chat.rate_limited` `chat.budget_exceeded`                                                                                                                                          | 残り時間、当日トークン                               |
+| 索引           | `index.rebuilt` `index.drain.failed` `index.state.failed` `index.legacy_rows`                                                                                                    | 索引した/消した件数、試行回数、コード                 |
 | HTTP           | `http` `http.error`                                                                                                                                                                 | method、path、status、所要                           |
 | DO             | `do.rpc`                                                                                                                                                                           | path、status、所要（会話 RPC は agent のイベントで表す） |
 | ファイル (machine) | `fs.op`                                                                                                                                                                       | op（read/stat/list/health）、path、status、所要     |
@@ -66,6 +67,66 @@ server（Durable Object）と machine は同じ `ObsLogEntry`（`@hns/core`）�
   `bytes`）。本文・ヘッダ・トークン・鍵は型にも allowlist にも無く、`formatObsLog` は既知のキーだけを書く。
   agent の応答 text はログに残さない。
 - 未知の hop / event / level を持つ行は `ValiError` で落ちる（既定値に落とさない）。
+
+### 観測外の欠陥ログ（console.error）
+
+観測ログに載せられない失敗だけが `console.error` で出る。**すべて「欠陥」**（起きたこと自体がバグか、観測の
+書き込みそのものが壊れた場合）で、リクエストの追跡対象にはならない。理由は次のどれか。
+
+- 観測の書き込み自体が失敗した（`session obs open failed` / `session obs append failed` / `edge: event write failed` /
+  `edge: response log failed`）。ログに書きにいって落ちたものをそのログに書けない。
+- Session が開けない・alarm が動かない（`session open failed` / `session alarm failed` / `session wake arm failed`）。
+  この場合そのオブジェクトの観測行は存在しない。
+- 想定外の例外（`edge: unhandled request` / `graphql: request failed` / `session rpc failed` / `workspace rpc failed` /
+  `session reindex failed`）。応答の 500 は `http.error` / `do.rpc` として観測に出る。ここで出るのは原因の名前だけで、
+  stack とメッセージは出さない（行データを含み得る）。
+- 外部設定・外部呼び出しの失敗（`gateway: <stage>` / `cost: <stage> failed`）。応答はコード付きの失敗として観測に
+  出るため、これは原因の名前だけを残す 2 本目の線。
+
+index の `index.*` はこの節の対象ではない。`indexEntry`（`packages/server/src/obs/log.ts`）で 1 つの
+`ObsLogEntry` の形に組み立て、いまは同じ console sink へ 1 行の JSON として出す。イベント表への append へ繋ぐか
+どうかは、ターンの行数測定（`session-cost` の `ROWS_PER_TURN`）との関係を含めてデータ層のレーンで決める。
+
+## 失敗コードと status
+
+サーバの面（edge・gateway・files・Session RPC・Workspace RPC）は、予期した失敗を閉じたコードで返す。
+**code → status の表は `packages/server/src/failures/status.ts` の 1 か所だけ**で、各面は自分が返すコードの
+部分集合を型で宣言して表から引く（面のコードから数値の引数は消えた）。ここは表の読み方だけを書く。
+
+| code                 | status | 返す面                                                        |
+| -------------------- | ------ | ------------------------------------------------------------- |
+| `unauthorized`       | 401    | edge                                                          |
+| `invalid_request`    | 400    | edge / files / session-rpc / workspace-rpc、（GraphQL の引数不正） |
+| `forbidden`          | —      | GraphQL の MutationFailure のみ（union のメンバー、HTTP は 200） |
+| `not_found`          | 404    | edge / gateway / files / session-rpc / workspace-rpc          |
+| `method_not_allowed` | 405    | edge / gateway / session-rpc / workspace-rpc                  |
+| `conflict`           | 409    | files / workspace-rpc                                         |
+| `denied`             | 400    | files / workspace-rpc（machine が書く前に断った）             |
+| `payload_too_large`  | 413    | edge / gateway / files / session-rpc / workspace-rpc          |
+| `unsupported_media_type` | 415 | edge / gateway / files / session-rpc / workspace-rpc         |
+| `upgrade_required`   | 426    | edge                                                          |
+| `not_implemented`    | 501    | edge                                                          |
+| `budget_exceeded`    | 429    | gateway                                                       |
+| `limit_exceeded`     | 429    | session-rpc（月次上限）、GraphQL（要求が面の上限超え）       |
+| `limit_unavailable`  | 503    | session-rpc                                                   |
+| `stopped`            | 503    | gateway                                                       |
+| `unavailable`        | 503    | edge / gateway / files / session-rpc / workspace-rpc / GraphQL |
+| `timeout`            | 504    | edge                                                          |
+| `upstream`           | 502    | gateway                                                       |
+| `internal`           | 500    | edge / files / session-rpc / workspace-rpc                    |
+| `lease_not_held` / `lease_expired` / `lease_epoch_stale` | 409 | files / workspace-rpc |
+| `stale_request` / `replayed` / `stale_connection` / `path_denied` / `busy` / `deadline_exceeded` | machine の `refusal.ts` の部分集合（server は返さない） | machine |
+
+- **綴りは 1 つ**。GraphQL の `QueryFailureCode` / `MutationFailureCode` も REST と同じ `invalid_request`（enum は
+  `INVALID_REQUEST`）を使う。意味は面で違う（GraphQL は「フィールドの引数が不正」、REST は「HTTP 要求が不正」）が、
+  同じ 400 に写像し、面ごとのコード集合は閉じたまま分けている。
+- **GraphQL の失敗は HTTP status を持たない**。結果 union のメンバーとして 200 のエンベロープに入る。
+  表の GraphQL 行は status を持てない（型で `transport: "graphql"`）。
+- machine は server を import できない（依存は server → machine）。machine の `refusal.ts` が同じ code の部分集合を
+  宣言し、値は `packages/machine/src/refusal.test.ts` が修正前の switch の値と 1:1 で固定している。上表の
+  `unauthorized` / `invalid_request` / `forbidden` / `not_found` / `method_not_allowed` / `internal` は machine も返し、
+  machine の `too_large` は server の `payload_too_large`（413）と同じ綴り違いのペア。
+- files 面の `unknown`（machine が適用したか決められない保存）だけは表の行が無く、面の中で 504 を 1 回書く。
 
 ## 保管
 

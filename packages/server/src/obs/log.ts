@@ -1,5 +1,13 @@
 import type { AgentEvent } from "@hns/agent";
-import { isoTimestamp, levelOfStatus, obsPath, type ObsLogEntry } from "@hns/core";
+import {
+  isoTimestamp,
+  levelOfStatus,
+  obsPath,
+  type EventLevel,
+  type EventName,
+  type IsoTimestamp,
+  type ObsLogEntry,
+} from "@hns/core";
 
 /** The facts of one finished HTTP request. */
 export interface HttpEventInput {
@@ -61,6 +69,66 @@ export function doEntry(
     status,
     durationMs,
   };
+}
+
+/** What one index observation reports. Every field is an id, a count, or a closed code. */
+export interface IndexEntryInput {
+  /** The event name; the index names are members of `EVENT_NAMES`. */
+  readonly event: EventName;
+  /** The correlation id of the request that triggered it; null for work no request triggered. */
+  readonly requestId: string | null;
+  /** When the hop observed it, ISO 8601 (UTC). */
+  readonly at: IsoTimestamp;
+  readonly level: EventLevel;
+  /** The conversation the drain stopped at, when it names one. */
+  readonly conversationId?: string | undefined;
+  /** The drain attempt count, as the object counts it. */
+  readonly attempt?: number | undefined;
+  /** The failure code recorded in `index_state`; only a failed drain carries one. */
+  readonly code?: string | undefined;
+  /** Rows the drain left waiting. */
+  readonly pending?: number | undefined;
+  /** Rows a rebuild wrote. */
+  readonly indexed?: number | undefined;
+  /** Rows a rebuild removed. */
+  readonly removed?: number | undefined;
+  /** Rows a drain found under an older object's metadata. */
+  readonly rows?: number | undefined;
+}
+
+/**
+ * Build the Session hop's entry for one index observation.
+ *
+ * @param input - The event, the correlation id, the clock, and the facts of that event.
+ * @returns One `ObsLogEntry` with the allowlisted detail keys only.
+ *
+ * @remarks
+ * The detail allowlist is `OBS_DETAIL_KEYS`; a fact with no key there (the error's name) is not
+ * written, so a line cannot grow a second, unchecked channel.
+ *
+ * @remarks
+ * The index used to write its own JSON under names the log did not know; every line now goes
+ * through the same entry the worker and the object write, so a reader parses one shape and an
+ * unknown name fails the same way on write and on read.
+ */
+export function indexEntry(input: IndexEntryInput): ObsLogEntry {
+  const detail: Record<string, string | number> = {};
+  if (input.conversationId !== undefined) detail.conversationId = input.conversationId;
+  if (input.attempt !== undefined) detail.attempt = input.attempt;
+  if (input.code !== undefined) detail.code = input.code;
+  if (input.pending !== undefined) detail.pending = input.pending;
+  if (input.indexed !== undefined) detail.indexed = input.indexed;
+  if (input.removed !== undefined) detail.removed = input.removed;
+  if (input.rows !== undefined) detail.rows = input.rows;
+  const entry: ObsLogEntry = {
+    v: 1,
+    at: input.at,
+    level: input.level,
+    event: input.event,
+    hop: "do",
+    requestId: input.requestId,
+  };
+  return Object.keys(detail).length === 0 ? entry : { ...entry, detail };
 }
 
 /**

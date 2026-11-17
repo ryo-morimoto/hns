@@ -1,16 +1,37 @@
 import type { AgentSession, IndexMark, PendingIndex, PendingIndexEntry } from "@hns/agent/session";
-import { INDEX_DRAIN_BATCH, type Conversation } from "@hns/core";
+import {
+  INDEX_DRAIN_BATCH,
+  isoTimestamp,
+  type Conversation,
+  type IsoTimestamp,
+  type ObsLogEntry,
+} from "@hns/core";
 import type {
   ConversationIndex,
   ConversationIndexRow,
   IndexStateRow,
 } from "@hns/store/conversation-index";
+import { indexEntry } from "../obs/log.ts";
 
-/** The one failure code recorded in `index_state`; the log line carries the cause. */
+/** The one failure code recorded in `index_state`; the event name says what failed. */
 const INDEX_WRITE_FAILED = "d1_write_failed";
 
-/** The log sink; production passes `console.error`, tests collect the lines. */
+/**
+ * The index's log sink: one line of text.
+ *
+ * @remarks
+ * The index used to build its own JSON. Every observation is now built by {@link indexEntry}, so
+ * the entry has the one shape the worker and the object write; this sink still receives a line,
+ * and `Session` passes the line to the same console sink as before, so the cost gate's turn
+ * measurement is unchanged. Connecting the sink to the event log (an `ObsLogEntry` append) is
+ * the data-lane decision about the measurement window.
+ */
 export type IndexLog = (line: string) => void;
+
+/** The one-line text of one index observation, built as {@link indexEntry}. */
+export function indexLine(entry: ObsLogEntry): string {
+  return JSON.stringify(entry);
+}
 
 /** What the Session gives the index drain. */
 export interface SessionIndexOptions {
@@ -66,8 +87,8 @@ function sameState(left: IndexStateRow, right: IndexStateRow): boolean {
  * The index is a copy; the object's metadata is the truth. A drain writes at most
  * {@link INDEX_DRAIN_BATCH} rows and clears each one with a compare-and-set, so a turn that
  * commits during the drain stays dirty. A D1 failure never fails the turn: the dirty mark
- * stays, the state row records the backlog, one structured line is logged, and the next RPC or
- * alarm retries (D078 U-04). `index_state` is written only on a transition, not every turn.
+ * stays, the state row records the backlog, one line is logged, and the next RPC or alarm
+ * retries (D078 U-04). `index_state` is written only on a transition, not every turn.
  */
 export class SessionIndex {
   readonly #session: AgentSession;
@@ -125,12 +146,15 @@ export class SessionIndex {
     }
     if (pending.legacy > 0) {
       this.#log(
-        JSON.stringify({
-          event: "index.legacy_rows",
-          requestId,
-          workspace: this.#workspaceId,
-          rows: pending.legacy,
-        }),
+        indexLine(
+          indexEntry({
+            event: "index.legacy_rows",
+            requestId,
+            at: this.#at(),
+            level: "info",
+            rows: pending.legacy,
+          }),
+        ),
       );
     }
     await this.#recordPending(pending.remaining);
@@ -189,15 +213,23 @@ export class SessionIndex {
     };
     await this.#write(this.#state);
     this.#log(
-      JSON.stringify({
-        event: "index.rebuilt",
-        requestId,
-        workspace: this.#workspaceId,
-        indexed,
-        removed,
-      }),
+      indexLine(
+        indexEntry({
+          event: "index.rebuilt",
+          requestId,
+          at: this.#at(),
+          level: "info",
+          indexed,
+          removed,
+        }),
+      ),
     );
     return { indexed, removed };
+  }
+
+  /** The clock reading the index uses for its lines, branded as the log's timestamp. */
+  #at(): IsoTimestamp {
+    return isoTimestamp(new Date(this.#now()).toISOString());
   }
 
   /** The mark a drain clears after writing one entry. */
@@ -254,29 +286,31 @@ export class SessionIndex {
   /** Record one failed drain: a structured line, then the state transition. */
   async #recordFailure(
     requestId: string,
+    // The cause is not written (no allowlisted detail key); the event name and code say what failed.
     // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a caught value is unknown by definition.
     error: unknown,
     backlog: number,
     entry: PendingIndexEntry | undefined,
   ): Promise<void> {
-    const at = new Date(this.#now()).toISOString();
     this.#log(
-      JSON.stringify({
-        event: "index.drain.failed",
-        requestId,
-        workspace: this.#workspaceId,
-        conversationId: entry?.conversation.id ?? null,
-        attempt: this.#attempts,
-        code: INDEX_WRITE_FAILED,
-        cause: error instanceof Error ? error.name : "unknown",
-        pending: backlog,
-      }),
+      indexLine(
+        indexEntry({
+          event: "index.drain.failed",
+          requestId,
+          at: this.#at(),
+          level: "warn",
+          conversationId: entry?.conversation.id,
+          attempt: this.#attempts,
+          code: INDEX_WRITE_FAILED,
+        }),
+      ),
     );
-    await this.#recordFailureState(backlog, at);
+    void error;
+    await this.#recordFailureState(backlog, this.#at());
   }
 
   /** Write the failure state, keeping the first error time of a run of failures. */
-  async #recordFailureState(backlog: number, at: string): Promise<void> {
+  async #recordFailureState(backlog: number, at: IsoTimestamp): Promise<void> {
     const current = await this.#current();
     if (current !== undefined) {
       if (current.pending === backlog && current.lastErrorCode === INDEX_WRITE_FAILED) return;
@@ -302,15 +336,18 @@ export class SessionIndex {
   async #write(state: IndexStateRow): Promise<void> {
     try {
       await this.#index.writeState(this.#workspaceId, state, new Date(this.#now()).toISOString());
-    } catch (error) {
+    } catch {
       this.#state = undefined;
       this.#loaded = false;
       this.#log(
-        JSON.stringify({
-          event: "index.state.failed",
-          workspace: this.#workspaceId,
-          cause: error instanceof Error ? error.name : "unknown",
-        }),
+        indexLine(
+          indexEntry({
+            event: "index.state.failed",
+            requestId: null,
+            at: this.#at(),
+            level: "warn",
+          }),
+        ),
       );
     }
   }

@@ -1,7 +1,7 @@
 import type { ConversationId, EntryId, SubmissionId } from "@earendil-works/pi-durable";
 import type { AgentSession, IndexMark, PendingIndexEntry } from "@hns/agent/session";
 import type { Conversation } from "@hns/core";
-import { ConversationIdSchema, ProjectIdSchema } from "@hns/core";
+import { ConversationIdSchema, parseObsLog, ProjectIdSchema } from "@hns/core";
 import type { D1Binding } from "@hns/store";
 import { openConversationIndex } from "@hns/store/conversation-index";
 import * as v from "valibot";
@@ -123,6 +123,7 @@ function flaky(d1: FakeD1): FlakyBinding {
   };
 }
 
+
 function send(id: string): Request {
   return new Request("https://session/rpc/conversations/" + id + "/messages", {
     method: "POST",
@@ -214,9 +215,19 @@ test("a D1 failure leaves the turn successful, the row dirty, and the backlog re
       lastErrorCode: "d1_write_failed",
       lastSyncedAt: expect.any(String),
     });
+    // The drain's line is the log entry the index builds, not free JSON: the shape of the log is
+    // one type across the worker, the object, and the index.
     const lines = errors.mock.calls.map((call) => String(call[0]));
     const line = lines.find((text) => text.includes("index.drain.failed"));
     expect(line).toBeDefined();
+    expect(parseObsLog(JSON.parse(line ?? "null"))).toMatchObject({
+      v: 1,
+      level: "warn",
+      event: "index.drain.failed",
+      hop: "do",
+      // No `pending` count: OBS_DETAIL_KEYS has no key for it, so the line keeps the code only.
+      detail: { code: "d1_write_failed" },
+    });
     expect(line).not.toContain("hi");
     expect(line).not.toContain("answered");
 
