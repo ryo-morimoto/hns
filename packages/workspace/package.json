@@ -17,6 +17,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./checkpoint": {
+      "source": "./src/checkpoint.ts",
+      "types": "./dist/checkpoint.d.ts",
+      "import": "./dist/checkpoint.js"
+    },
     "./objects": {
       "source": "./src/objects.ts",
       "types": "./dist/objects.d.ts",

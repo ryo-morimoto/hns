@@ -5,6 +5,7 @@
 - `src/workspace.ts` — `Workspace.open({ env, root, journalPath, context })`。`write()` は `expectedVersion` と一致したときだけ置換し、結果は `@hns/core` の `MutationResult` で返す。
 - `src/rooted.ts` / `src/rooted-helper.ts` — 解決と open / rename を dirfd でまとめる helper。Linux で exec できる環境だけ動き、それ以外は `Workspace.mode === "checks"` の経路に落ちる。
 - `./sandbox` — `detectSandbox()`（bubblewrap の検出と失敗 code）と `createSandboxEnv` / `createNoExecEnv`。
+- `./checkpoint` — `checkpointRun({ root, runId })`。Run の終わりに作業ツリーを parent なしの commit にし、`refs/hns/checkpoints/<runId>` を進めて、R2 に置く pack の bytes を返す。ユーザーの HEAD・index・ブランチは動かさない。Node の git / child_process を使うため root entry には出さない（Worker から import しない）。R2 への put と watermark は 0157 / 0162。
 
 ```ts
 import { Workspace } from "@hns/workspace";
