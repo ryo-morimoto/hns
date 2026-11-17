@@ -86,6 +86,21 @@ type MutationResult =
 - root が symlink のときは、開いた時点の解決結果に固定する。差し替えは反映されない
 - Windows の区切り・大文字小文字、macOS の正規化は未検証（Linux のみ）
 
+## Project root（0127 / D080）
+
+1 project = 1 workspace root。root はマシンの ROOT からの相対 POSIX パスで、`""` はマシンの ROOT そのもの（既定 project）。
+root は作成時に固定し、移動しない（D080 U-03）。
+
+| 層 | 何をするか | 何をしないか |
+| --- | --- | --- |
+| core（`workspace-root.ts`） | lexical 検証だけ: 絶対パス・`..`・`.`・空 segment・`\\`・NUL・`.hns` segment・ドライブ表記・長さ / segment を拒否。store には通った値だけを書く | 実体の検査（realpath / symlink / ROOT 外）はしない |
+| Worker | D1 の `Project.workspace_root` を正本にする。file API は URL の workspace id（= project id）から root を引き、client が送った `projectRoot` は 400 で拒否する。`/ws` と `Query.conversations` は D1 で project の存在を確かめてから Session DO をアドレスする | 実 fs を見ない。lexical 検証を通った root でも machine が拒否することがある（fail closed） |
+| machine（`containInRoot` / `applyVersionedWrite`） | ROOT を dirfd で開き、`projectRoot` と `path` を別々に解決する。realpath の包含と最終要素の `O_NOFOLLOW` で、`..`・中間 symlink・ROOT 外・他ユーザーの path を拒否する | Worker の代わりに lexical 検証をやり直さない |
+
+- **agent の cwd は project root**。会話作成時に Worker が root を渡し、Session DO が会話メタデータ（内部）と `pi.agent.cwd` に保存する。root が無い会話には env を作らない（fail closed）。
+- **egress**: `Project.egress`（`inherit` / `deny` / `allowlist`）を model に持つ。執行は machine（0147 / 0194）で、`allowlist` は proxy ができるまで `deny` と同じ。
+- **sandbox**: project root だけを bind し、兄弟 project は `--tmpfs <ROOT>` で隠す（0194）。`.hns` は見せない。
+
 ### 脅威モデル
 
 - `exec` は sandbox で root 外に書けない（bubblewrap が要る）。
