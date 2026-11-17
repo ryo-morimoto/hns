@@ -7,6 +7,7 @@ import {
   type OperationId,
 } from "@hns/core";
 import {
+  JOURNAL_COLUMN_NAMES,
   JOURNAL_INLINE_BODY_MAX_BYTES,
   JOURNAL_SCHEMA,
   journalBodyKey,
@@ -154,6 +155,7 @@ const SeqSchema = v.pipe(v.number(), v.integer(), v.minValue(1));
 const SeqRowSchema = v.object({ seq: SeqSchema });
 const MetaRowSchema = v.object({ value: v.string() });
 const TableSqlRowSchema = v.object({ sql: v.pipe(v.string(), v.minLength(1)) });
+const TableColumnRowSchema = v.object({ name: v.pipe(v.string(), v.minLength(1)) });
 const CounterSchema = v.pipe(
   v.string(),
   v.regex(/^(0|[1-9][0-9]*)$/u),
@@ -335,6 +337,8 @@ export class Journal {
    * SQLite cannot widen a CHECK in place, and the DDL derives the status CHECK from
    * {@link JOURNAL_OUTCOME_STATUSES}. The statements come from `@hns/store`'s
    * `journalUpgradeStatements` and run in one transaction, so a crash cannot strand the rows.
+   * The source must have exactly the known previous columns: the copy names them, and a table
+   * with extra columns would lose those silently, so that case throws instead.
    */
   async #rebuildStatusVocabulary(): Promise<void> {
     const row = this.#all(
@@ -343,6 +347,18 @@ export class Journal {
     if (row === undefined) return;
     const sql = v.parse(TableSqlRowSchema, row).sql;
     if (sql.includes("'denied'")) return;
+    // The upgrade copies named columns: anything but the known previous schema would lose
+    // columns silently, so a surprise fails closed instead.
+    const columns = this.#all("SELECT name FROM pragma_table_info('journal')").map(
+      (column) => v.parse(TableColumnRowSchema, column).name,
+    );
+    const expected = [...JOURNAL_COLUMN_NAMES];
+    if (
+      columns.length !== expected.length ||
+      columns.some((name, index) => name !== expected[index])
+    ) {
+      throw new Error("the journal table is not the known previous schema; refusing to upgrade it");
+    }
     await this.#storage.transaction(async () => {
       for (const statement of journalUpgradeStatements()) this.#exec(statement);
     });

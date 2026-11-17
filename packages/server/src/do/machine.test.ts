@@ -53,10 +53,19 @@ test("an oversized answer is unavailable", async () => {
   vi.stubGlobal("fetch", () =>
     Promise.resolve(new Response("x".repeat(1_048_577), { status: 200 })),
   );
-  const answer = await client().read({ path: "a.txt" }, call);
-  if (answer.ok) throw new Error("expected no usable answer");
-  expect(answer.failure).toBe("unavailable");
-  expect(answer.detail).toBe("answer too large");
+  // A body without a usable content-length is cut off while it streams.
+  const streamed = await client().read({ path: "a.txt" }, call);
+  if (streamed.ok) throw new Error("expected no usable answer");
+  expect(streamed.failure).toBe("unavailable");
+  expect(streamed.detail).toBe("unreadable or oversized answer");
+
+  // A declared oversize is refused before the body is read at all.
+  vi.stubGlobal("fetch", () =>
+    Promise.resolve(new Response("x", { status: 200, headers: { "content-length": "2000000" } })),
+  );
+  const declared = await client().read({ path: "a.txt" }, call);
+  if (declared.ok) throw new Error("expected no usable answer");
+  expect(declared.detail).toBe("answer too large");
 });
 
 // Catches: the machine's own size refusal being folded into "denied" (or into a missing file).

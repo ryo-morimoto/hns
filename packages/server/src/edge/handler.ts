@@ -54,7 +54,7 @@ export interface HandlerDependencies {
    * Optional so a missing binding or an unwired deployment fails closed (503) instead of
    * crashing, and so an edge test that does not exercise the face needs no stub.
    */
-  readonly files?: ((request: FilesRequest) => Promise<Response>) | undefined;
+  readonly files?: ((request: FilesRequest, limits: EdgeLimits) => Promise<Response>) | undefined;
   /** Called once per request; production forwards the entry to the Session object. */
   readonly onResponse?: ((event: EdgeResponseEvent, env: WorkerEnv) => void) | undefined;
 }
@@ -180,14 +180,17 @@ async function route(
     if (dependencies.files === undefined) {
       return problem("unavailable", "The files face is not configured.", path);
     }
-    return dependencies.files({
-      request,
-      env,
-      session,
-      requestId,
-      signal,
-      workspaceId: files[1] ?? "",
-    });
+    return dependencies.files(
+      {
+        request,
+        env,
+        session,
+        requestId,
+        signal,
+        workspaceId: files[1] ?? "",
+      },
+      limits,
+    );
   }
   if (path === "/api/events" || path === "/api/metrics") {
     if (request.method !== "GET") return methodNotAllowed("GET", path);

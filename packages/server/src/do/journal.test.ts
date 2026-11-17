@@ -660,3 +660,24 @@ test("a journal table without the denied status is rebuilt in place", async () =
     opened.close();
   }
 });
+// Catches: a table whose columns are not the known previous schema being upgraded, silently
+// dropping the extra column.
+test("an unknown previous schema is refused instead of upgraded", async () => {
+  const opened = openSqliteState();
+  const nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+  try {
+    // The previous DDL, plus a column this upgrade does not know.
+    for (const statement of JOURNAL_SCHEMA) {
+      const old = statement.replace(", 'denied'", "");
+      opened.state.storage.sql.exec(
+        statement.includes("CREATE TABLE IF NOT EXISTS journal")
+          ? old.replace("body BLOB,", "body BLOB, extra TEXT,")
+          : old,
+      );
+    }
+    const journal = new Journal(opened.state.storage, { now: () => nowMs });
+    await expect(journal.ensureSchema()).rejects.toThrow(/known previous schema/u);
+  } finally {
+    opened.close();
+  }
+});

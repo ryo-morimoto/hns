@@ -111,7 +111,16 @@ test("a read result carries the bytes and their version", () => {
   );
 });
 // Catches: a signer and a verifier reading different header names for the same field.
-test("each signed field maps to the header the list declares", () => {
+// The expected names are written out, not derived from the same list, so a reordering or a
+// rename of the wire contract fails here.
+test("each signed field maps to its wire header", () => {
+  expect(SIGNED_HEADER_BY_FIELD).toStrictEqual({
+    machineId: "x-hns-machine",
+    connection: "x-hns-connection",
+    seq: "x-hns-seq",
+    timestamp: "x-hns-timestamp",
+    nonce: "x-hns-nonce",
+    signature: "x-hns-signature",
+  });
   expect(Object.values(SIGNED_HEADER_BY_FIELD)).toStrictEqual([...SIGNED_HEADERS]);
-  expect(new Set(Object.values(SIGNED_HEADER_BY_FIELD)).size).toBe(SIGNED_HEADERS.length);
 });

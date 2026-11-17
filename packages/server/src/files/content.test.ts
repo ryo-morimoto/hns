@@ -37,12 +37,10 @@ function harness(maxBodyBytes?: number): Harness {
       return stub;
     },
   };
-  const face =
-    maxBodyBytes === undefined
-      ? createFilesFace()
-      : createFilesFace({ ...DEFAULT_LIMITS, maxBodyBytes });
+  const handler = createFilesFace();
+  const limits = maxBodyBytes === undefined ? DEFAULT_LIMITS : { ...DEFAULT_LIMITS, maxBodyBytes };
   return {
-    face,
+    face: (request: FilesRequest) => handler(request, limits),
     namespace,
     machine,
     state: opened.state,

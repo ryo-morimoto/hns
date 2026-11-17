@@ -33,6 +33,46 @@ const DEFINITE_REFUSALS = new Set(["path_denied", "forbidden", "not_found", "inv
 /** The largest answer this client reads; the machine's own response bound is 256 KiB. */
 const MAX_ANSWER_BYTES = 1_048_576;
 
+/**
+ * Read the answer body up to {@link MAX_ANSWER_BYTES}, or undefined when it is larger or fails.
+ *
+ * @param response - The machine's answer.
+ * @returns The decoded text, or undefined when the body cannot be read or exceeds the bound.
+ *
+ * @remarks
+ * The bound is enforced while the body streams, so a body without a usable `content-length`
+ * is cut off at the limit instead of being materialized first. A body that cannot be read is
+ * no answer, never a success.
+ */
+async function readAnswerText(response: Response): Promise<string | undefined> {
+  const body = response.body;
+  if (body === null) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_ANSWER_BYTES) {
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return undefined;
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 /** The prefixes of the Ed25519 PKCS#8 encoding, up to the 32-byte seed. */
 const PKCS8_PREFIX = Uint8Array.from([
   0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
@@ -242,23 +282,14 @@ export function createSignedMachineFiles(
       };
     }
     // Reading the answer can fail too (a cut connection, an unreadable body); that is no
-    // answer, never a success. The size is bounded so a runaway body cannot be materialized.
+    // answer, never a success. The size is bounded while streaming.
     const declared = Number(response.headers.get("content-length") ?? "0");
     if (Number.isFinite(declared) && declared > MAX_ANSWER_BYTES) {
       return { ok: false, failure: "unavailable", detail: "answer too large" };
     }
-    let text: string;
-    try {
-      text = await response.text();
-    } catch (error) {
-      return {
-        ok: false,
-        failure: "unavailable",
-        detail: error instanceof Error ? error.name : "unreadable answer",
-      };
-    }
-    if (text.length > MAX_ANSWER_BYTES) {
-      return { ok: false, failure: "unavailable", detail: "answer too large" };
+    const text = await readAnswerText(response);
+    if (text === undefined) {
+      return { ok: false, failure: "unavailable", detail: "unreadable or oversized answer" };
     }
     let answer: v.InferOutput<typeof AnswerSchema>;
     try {

@@ -3,16 +3,16 @@ import * as v from "valibot";
 import { readBody } from "../edge/body.ts";
 import type { DurableObjectStub } from "../edge/env.ts";
 import type { FilesRequest } from "../edge/handler.ts";
-import { DEFAULT_LIMITS, type EdgeLimits } from "../edge/limits.ts";
+import type { EdgeLimits } from "../edge/limits.ts";
 
 /**
  * The closed failure codes the files face answers with.
  *
  * @remarks
- * A caller branches on `code». `conflict» means the file changed since the version the caller
- * sent; `unknown» means the save may or may not have landed and must be reconciled by a read;
- * `denied» is a refusal the machine decided before writing. None of these is ever rounded into
- * `applied».
+ * A caller branches on `code`. `conflict` means the file changed since the version the caller
+ * sent; `unknown` means the save may or may not have landed and must be reconciled by a read;
+ * `denied` is a refusal the machine decided before writing. None of these is ever rounded into
+ * `applied`.
  */
 const FILES_FAILURES = [
   "invalid_request",
@@ -32,10 +32,10 @@ type FilesFailure = (typeof FILES_FAILURES)[number];
 
 /** The body of a versioned write. */
 const WriteInput = v.object({
-  /** The project directory below the machine's ROOT; `""» is the root itself. */
+  /** The project directory below the machine's ROOT; `""` is the root itself. */
   projectRoot: v.string(),
   path: v.pipe(v.string(), v.minLength(1)),
-  /** The version the editor saw, or `"absent"». */
+  /** The version the editor saw, or `"absent"`. */
   expectedVersion: v.pipe(v.string(), v.minLength(1)),
   /** The attempt's id; a retry with the same id returns the recorded outcome. */
   operationId: OperationIdSchema,
@@ -188,8 +188,9 @@ async function bodyOf<T>(
 /**
  * The files content face: versioned reads and writes over the machine.
  *
- * @param limits - The edge's request budgets; the body limit and content type apply here too.
  * @returns A handler for one authenticated edge request whose path names one workspace.
+ * It receives the edge's request budgets, so the body limit this face enforces is the same one
+ * the edge would enforce for any other face.
  *
  * @remarks
  * The face owns the wire: it reads the caller's body with the edge's limits, parses it, forwards
@@ -198,10 +199,11 @@ async function bodyOf<T>(
  * 504, and neither is ever reported as a save. Authentication and the method are the edge's job
  * (D059); an oversized or non-JSON body is this face's failure (413 / 415).
  */
-export function createFilesFace(
-  limits: EdgeLimits = DEFAULT_LIMITS,
-): (request: FilesRequest) => Promise<Response> {
-  return async function files(request: FilesRequest): Promise<Response> {
+export function createFilesFace(): (
+  request: FilesRequest,
+  limits: EdgeLimits,
+) => Promise<Response> {
+  return async function files(request: FilesRequest, limits: EdgeLimits): Promise<Response> {
     const stub = workspaceStub(request.env, request.workspaceId);
     if (stub === undefined) {
       // This face's failures are its own union, not the edge's problem+json (that is for

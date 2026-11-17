@@ -139,8 +139,25 @@ export const JOURNAL_SCHEMA: readonly string[] = [
  * The upgrade copies these explicitly rather than with `SELECT *`, so a column added later
  * cannot silently shift into another slot.
  */
-const JOURNAL_COLUMNS =
-  "seq, kind, operation_id, path, at, expected_version, version, current_version, status, reason, event_kind, body_hash, body_key, body_size, body";
+export const JOURNAL_COLUMN_NAMES = [
+  "seq",
+  "kind",
+  "operation_id",
+  "path",
+  "at",
+  "expected_version",
+  "version",
+  "current_version",
+  "status",
+  "reason",
+  "event_kind",
+  "body_hash",
+  "body_key",
+  "body_size",
+  "body",
+] as const;
+
+const JOURNAL_COLUMNS = JOURNAL_COLUMN_NAMES.join(", ");
 
 /**
  * The statements that widen an existing Journal table to the current schema.

@@ -373,10 +373,12 @@ test("a handler past the deadline returns 504 and aborts the signal", async () =
 // support, or matching a deeper path than the one it owns.
 test("the files face requires a session and only GET or POST", async () => {
   const calls: FilesRequest[] = [];
+  const passed: number[] = [];
   const deps: HandlerDependencies = {
     ...recordingDeps().deps,
-    files(request: FilesRequest): Promise<Response> {
+    files(request: FilesRequest, limits): Promise<Response> {
       calls.push(request);
+      passed.push(limits.maxBodyBytes);
       return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     },
   };
@@ -400,6 +402,8 @@ test("the files face requires a session and only GET or POST", async () => {
   expect(calls[0]?.workspaceId).toBe("w1");
   expect(calls[0]?.requestId).toBe(ok.headers.get("x-request-id"));
   expect(calls[0]?.session.subject).toBe("owner");
+  // Catches: a face reading a body with a different limit than the edge enforces.
+  expect(passed[0]).toBe(DEFAULT_LIMITS.maxBodyBytes);
 
   const unknown = await edge(get("/api/workspaces/w1/files/extra", { cookie }), envWith());
   await expectProblem(unknown, 404, "not_found");
