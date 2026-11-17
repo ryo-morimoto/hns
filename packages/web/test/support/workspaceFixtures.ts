@@ -16,9 +16,27 @@ const intent = v.parse(ConversationIdSchema, "conversation-intent");
 const design = v.parse(ConversationIdSchema, "conversation-design");
 
 const projects: readonly Project[] = [
-  { id: hns, name: "hns", created_at: "2026-11-01T00:00:00.000Z" },
-  { id: scratch, name: "scratch", created_at: "2026-11-06T00:00:00.000Z" },
-  { id: docs, name: "docs", created_at: "2026-11-05T00:00:00.000Z" },
+  {
+    id: hns,
+    name: "hns",
+    workspace_root: "",
+    agent_cwd: "",
+    created_at: "2026-11-01T00:00:00.000Z",
+  },
+  {
+    id: scratch,
+    name: "scratch",
+    workspace_root: "projects/scratch",
+    agent_cwd: "projects/scratch",
+    created_at: "2026-11-06T00:00:00.000Z",
+  },
+  {
+    id: docs,
+    name: "docs",
+    workspace_root: "projects/docs",
+    agent_cwd: "projects/docs",
+    created_at: "2026-11-05T00:00:00.000Z",
+  },
 ];
 
 const conversations: readonly Conversation[] = [
@@ -56,6 +74,8 @@ const tasks: readonly Task[] = [
 const projectPayload = (project: Project) => ({
   id: toGlobalId("Project", project.id),
   name: project.name,
+  workspaceRoot: project.workspace_root,
+  agentCwd: project.agent_cwd,
   createdAt: project.created_at,
 });
 

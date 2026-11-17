@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { expect, test } from "vitest";
-import worker from "./worker.ts";
+import worker, { resolveSessionName, type ProjectLookup } from "./worker.ts";
+import { project } from "../../test/support/graphql.ts";
 import { assetsWith, envWith, sessionCookie, sessionWith } from "../../test/support/edge.ts";
 
 const BASE = "https://hns.test";
@@ -96,6 +97,54 @@ test("the production worker fails closed when the session binding is missing", a
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({ code: "unavailable" });
 });
+
+// Catches: a project switch that still addresses the one legacy Session object.
+test("a project WebSocket addresses that project's Session object", async () => {
+  const lookup: ProjectLookup = (_env, id) => Promise.resolve(project(id));
+  const resolved = await resolveSessionName(envWith(), "p1", lookup);
+  expect(resolved).toStrictEqual({ ok: true, name: "p1" });
+});
+
+// Catches: a missing project parameter breaking the conversations the deployment already has.
+test("a WebSocket with no project keeps the legacy default object", async () => {
+  const lookup: ProjectLookup = () => Promise.reject(new Error("must not be called"));
+  expect(await resolveSessionName(envWith(), null, lookup)).toStrictEqual({
+    ok: true,
+    name: "default",
+  });
+  expect(
+    await resolveSessionName(envWith(), "default", () => Promise.resolve(project("default"))),
+  ).toStrictEqual({ ok: true, name: "default" });
+});
+
+// Catches: an unknown project creating an empty Session object.
+test("an unknown project is refused before any object is addressed", async () => {
+  const resolved = await resolveSessionName(envWith(), "missing", () => Promise.resolve(undefined));
+  expect(resolved).toStrictEqual({
+    ok: false,
+    code: "not_found",
+    message: "No project has this id.",
+  });
+});
+
+// Catches: an unreadable database reported as "no such project", hiding an outage.
+test("a failed project lookup is unavailable, not not_found", async () => {
+  const resolved = await resolveSessionName(envWith(), "p1", () =>
+    Promise.reject(new Error("db down")),
+  );
+  expect(resolved).toMatchObject({ ok: false, code: "unavailable" });
+});
+
+// Catches: a path or an empty string used as a Durable Object name.
+test.each(["", "../x", "a/b", "a b", "a".repeat(129)])(
+  "an invalid project parameter is refused: %j",
+  async (raw) => {
+    const resolved = await resolveSessionName(envWith(), raw, () =>
+      Promise.reject(new Error("must not be called")),
+    );
+    expect(resolved).toMatchObject({ ok: false, code: "invalid_request" });
+  },
+);
 
 test("the production worker serves static GET through ASSETS", async () => {
   const assets = assetsWith(new Response("shell", { status: 200 }));

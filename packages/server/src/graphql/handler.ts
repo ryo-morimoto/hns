@@ -12,7 +12,7 @@ import {
 import type { JsonValue } from "@hns/core";
 import type { GraphQLRequest } from "../edge/handler.ts";
 import { DEFAULT_LIMITS, type EdgeLimits } from "../edge/limits.ts";
-import { createContext, type GraphQLReads } from "./context.ts";
+import { createContext, type GraphQLReads, type GraphQLWrites } from "./context.ts";
 import {
   assertWithinBytes,
   assertWithinLimits,
@@ -50,6 +50,8 @@ type RowLimits = Pick<EdgeLimits, "maxRowsPerRequest" | "maxRowsPerList">;
 export interface GraphQLFaceDependencies {
   /** Replace one or more reads; production reads D1 and the Session DO. */
   readonly reads?: Partial<GraphQLReads> | undefined;
+  /** Replace one or more writes; production writes D1. */
+  readonly writes?: Partial<GraphQLWrites> | undefined;
   /** Replace the feature mutation modules; production uses the registered collection. */
   readonly mutations?: readonly MutationModule[] | undefined;
   /** The query limits; production uses {@link DEFAULT_GRAPHQL_LIMITS}. */
@@ -220,6 +222,7 @@ export function createGraphQLFace(
       requestId: request.requestId,
       session: request.session,
       reads: dependencies.reads,
+      writes: dependencies.writes,
       maxRows: rows.maxRowsPerRequest,
       maxRowsPerList: rows.maxRowsPerList,
     });

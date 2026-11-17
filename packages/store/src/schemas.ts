@@ -6,6 +6,7 @@ import {
   EVENT_NAMES,
   IsoTimestampSchema,
   ProjectIdSchema,
+  WorkspaceRootSchema,
   TASK_STATUSES,
   WORKFLOW_NODE_STATUSES,
   WORKFLOW_RUN_STATUSES,
@@ -38,18 +39,33 @@ const parseDetail = v.transform((text: string | null): JsonValue | null => {
   return parsed as JsonValue;
 });
 
+/** The `projects` row before `agent_cwd` is derived from the stored root. */
+const projectRowSchema = v.object({
+  id: ProjectIdSchema,
+  name: v.string(),
+  workspace_root: WorkspaceRootSchema,
+  created_at: v.string(),
+});
+
 /**
  * The `projects` table row.
  *
  * @remarks
- * The row is already the public shape; no storage-only column is decoded. Timestamps are
- * stored as ISO text and checked only for presence, not for the ISO format.
+ * `agent_cwd` is not a stored column: it is the project's `workspace_root`, filled here so the
+ * model has one value with one source. A stored root that is missing or not canonical throws in
+ * `WorkspaceRootSchema` instead of being read as the machine ROOT. Timestamps are stored as ISO
+ * text and checked only for presence, not for the ISO format.
  */
-export const ProjectRowSchema: v.GenericSchema<unknown, Project> = v.object({
-  id: ProjectIdSchema,
-  name: v.string(),
-  created_at: v.string(),
-});
+export const ProjectRowSchema: v.GenericSchema<unknown, Project> = v.pipe(
+  projectRowSchema,
+  v.transform((row): Project => ({
+    id: row.id,
+    name: row.name,
+    workspace_root: row.workspace_root,
+    agent_cwd: row.workspace_root,
+    created_at: row.created_at,
+  })),
+);
 
 /**
  * The `conversations` table row.

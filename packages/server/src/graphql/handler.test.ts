@@ -2,15 +2,16 @@ import { expect, test, vi } from "vitest";
 import type { JsonValue } from "@hns/core";
 import { toGlobalId } from "@hns/core/graphql";
 import { createEdge } from "../edge/handler.ts";
+import { QueryReadError } from "./failures.ts";
 import { envWith, sessionCookie, sessionWith } from "../../test/support/edge.ts";
 import { noteMutation } from "../../test/graphql/fixture-mutation.ts";
-import { conversation, project, task } from "../../test/support/graphql.ts";
+import { project, task } from "../../test/support/graphql.ts";
 import type { WorkerEnv } from "../edge/env.ts";
 import type { GraphQLFaceDependencies } from "./handler.ts";
 import { createGraphQLFace } from "./handler.ts";
 
 const PROJECTS =
-  "{ projects { __typename ... on ProjectList { projects { id name createdAt } } ... on QueryFailure { code } } }";
+  "{ projects { __typename ... on ProjectList { projects { id name workspaceRoot agentCwd createdAt } } ... on QueryFailure { code } } }";
 
 /** The JSON body a test sends; mirrors the shape the face parses. */
 interface RequestBody {
@@ -52,28 +53,52 @@ test("projects are served from the injected read", async () => {
       projects: {
         __typename: "ProjectList",
         projects: [
-          { id: toGlobalId("Project", "p1"), name: "One", createdAt: "2026-01-01T00:00:00.000Z" },
+          {
+            id: toGlobalId("Project", "p1"),
+            name: "One",
+            workspaceRoot: "",
+            agentCwd: "",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
         ],
       },
     },
   });
 });
 
-// Catches: a project filter that is not applied, or a conversation view that leaks snake_case.
-test("conversations are filtered to the requested project", async () => {
-  const send = edgeWith({
-    reads: {
-      conversations: () =>
-        Promise.resolve([conversation("c1", "p1", "Mine"), conversation("c2", "p2", "Theirs")]),
+// Catches: a conversation view that leaks snake_case, or the response losing the project scope.
+test("a project's conversations are served from that project's Session object", async () => {
+  const session = sessionWith(
+    new Response(
+      JSON.stringify({
+        ok: true,
+        conversations: [
+          {
+            id: "c1",
+            project_id: "p1",
+            title: "Mine",
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: null,
+            archived: false,
+            deleted_at: null,
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ),
+  );
+  const send = edgeWith();
+  const response = await send(
+    {
+      query:
+        '{ conversations(projectId: "' +
+        toGlobalId("Project", "p1") +
+        '") { __typename ... on ConversationList { conversations { id projectId title isArchived } } } }',
     },
-  });
-  const response = await send({
-    query:
-      '{ conversations(projectId: "' +
-      toGlobalId("Project", "p1") +
-      '") { __typename ... on ConversationList { conversations { id projectId title isArchived } } } }',
-  });
+    envWith({ session: session.namespace }),
+  );
   expect(response.status).toBe(200);
+  expect(session.ids).toStrictEqual(["p1"]);
   expect(await response.json()).toMatchObject({
     data: {
       conversations: {
@@ -123,7 +148,7 @@ test("conversations are one Session RPC carrying the request id", async () => {
     envWith({ session: session.namespace }),
   );
   expect(response.status).toBe(200);
-  expect(session.ids).toStrictEqual(["default"]);
+  expect(session.ids).toStrictEqual(["p1"]);
   expect(session.requests).toHaveLength(1);
   const forwarded = session.requests[0];
   if (forwarded === undefined) throw new Error("the Session RPC was not called");
@@ -332,6 +357,105 @@ test("a mutation document on a face with no module is refused with 400", async (
 
 const CREATE_NOTE =
   "mutation Create($text: String!) { createNote(text: $text) { __typename ... on NotePayload { text actor } ... on MutationFailure { code } } }";
+
+const CREATE_PROJECT =
+  "mutation Create($name: String!, $workspaceRoot: String!) { createProject(name: $name, workspaceRoot: $workspaceRoot) { __typename ... on CreateProjectPayload { project { id name workspaceRoot agentCwd } } ... on MutationFailure { code } } }";
+
+/** A write port that records its input and answers with the created project. */
+function createProjectWrite() {
+  return vi.fn((input: { readonly name: string; readonly workspaceRoot: string }) =>
+    Promise.resolve(project("p9", input.name, input.workspaceRoot)),
+  );
+}
+
+// Catches: a mutation that returns a payload without writing, or a root that never reaches the store.
+test("createProject writes through the store and returns the project", async () => {
+  const write = createProjectWrite();
+  const send = edgeWith({ writes: { createProject: write } });
+  const response = await send({
+    query: CREATE_PROJECT,
+    variables: { name: "a", workspaceRoot: "projects/a" },
+  });
+  expect(response.status).toBe(200);
+  expect(write).toHaveBeenCalledWith({ name: "a", workspaceRoot: "projects/a" });
+  expect(await response.json()).toMatchObject({
+    data: {
+      createProject: {
+        __typename: "CreateProjectPayload",
+        project: {
+          id: toGlobalId("Project", "p9"),
+          name: "a",
+          workspaceRoot: "projects/a",
+          agentCwd: "projects/a",
+        },
+      },
+    },
+  });
+});
+
+// Catches: a non-canonical root written as if the machine could still resolve it, or an empty
+// root silently pointing a new project at the machine ROOT.
+test.each(["/abs", "../x", "a//b", "a\\b", ".hns/x", ""])(
+  "createProject refuses the root %j without writing",
+  async (root) => {
+    const write = createProjectWrite();
+    const send = edgeWith({ writes: { createProject: write } });
+    const response = await send({
+      query: CREATE_PROJECT,
+      variables: { name: "a", workspaceRoot: root },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { createProject: { __typename: "MutationFailure", code: "INVALID_ARGUMENT" } },
+    });
+    expect(write).not.toHaveBeenCalled();
+  },
+);
+
+// Catches: a database outage reported as a created project.
+test("createProject reports an unavailable store as a typed failure", async () => {
+  const send = edgeWith({
+    writes: {
+      createProject: () =>
+        Promise.reject(new QueryReadError("unavailable", "The database write failed.")),
+    },
+  });
+  const response = await send({
+    query: CREATE_PROJECT,
+    variables: { name: "a", workspaceRoot: "projects/a" },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: { createProject: { __typename: "MutationFailure", code: "UNAVAILABLE" } },
+  });
+});
+
+// Catches: a mutation spending rows outside the request budget.
+test("createProject spends the request's row budget before writing", async () => {
+  const write = createProjectWrite();
+  const send = edgeWith({
+    writes: { createProject: write },
+    rows: { maxRowsPerRequest: 0, maxRowsPerList: 0 },
+  });
+  const response = await send({
+    query: CREATE_PROJECT,
+    variables: { name: "a", workspaceRoot: "projects/a" },
+  });
+  expect(await response.json()).toMatchObject({
+    data: { createProject: { __typename: "MutationFailure", code: "LIMIT_EXCEEDED" } },
+  });
+  expect(write).not.toHaveBeenCalled();
+});
+
+// Catches: a non-string root coerced or reported as a server failure instead of 400.
+test("createProject refuses a non-string workspaceRoot with 400", async () => {
+  const send = edgeWith({ writes: { createProject: createProjectWrite() } });
+  const response = await send({
+    query: CREATE_PROJECT,
+    variables: { name: "a", workspaceRoot: 42 },
+  });
+  expect(response.status).toBe(400);
+});
 
 // Catches: a registered mutation field the face validates but never executes, or a payload read
 // as a failure.

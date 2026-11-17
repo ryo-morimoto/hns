@@ -16,7 +16,7 @@ afterAll(async () => {
 test("conversations are registered, searched, archived and soft-deleted", async () => {
   await harness.withStore(async (store) => {
     const project = await store.projects.ensureDefault();
-    const other = await store.projects.create("other");
+    const other = await store.projects.create("other", "projects/other");
     const first = v.parse(ConversationIdSchema, "c1");
     const second = v.parse(ConversationIdSchema, "c2");
     await store.conversations.register({

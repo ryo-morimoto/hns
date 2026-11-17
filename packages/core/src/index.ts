@@ -6,4 +6,5 @@ export * from "./machine.ts";
 export * from "./observability.ts";
 export * from "./result.ts";
 export * from "./stream.ts";
+export * from "./workspace-root.ts";
 export * from "./workflow.ts";

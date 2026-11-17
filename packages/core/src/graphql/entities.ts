@@ -14,6 +14,8 @@ export const ProjectEntity = defineEntity<Project>({
   fields: {
     id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
     name: { name: "name", kind: "scalar", type: "String", nonNull: true },
+    workspace_root: { name: "workspaceRoot", kind: "scalar", type: "String", nonNull: true },
+    agent_cwd: { name: "agentCwd", kind: "scalar", type: "String", nonNull: true },
     created_at: { name: "createdAt", kind: "scalar", type: "String", nonNull: true },
   },
 });

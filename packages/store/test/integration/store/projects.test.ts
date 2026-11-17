@@ -15,8 +15,10 @@ afterAll(async () => {
 
 test("projects are created, renamed, listed and deleted", async () => {
   await harness.withStore(async (store) => {
-    const created = await store.projects.create("demo");
+    const created = await store.projects.create("demo", "projects/demo");
     expect((await store.projects.get(created.id))?.name).toBe("demo");
+    expect(created.workspace_root).toBe("projects/demo");
+    expect(created.agent_cwd).toBe("projects/demo");
     expect((await store.projects.rename(created.id, "renamed"))?.name).toBe("renamed");
     expect((await store.projects.list()).map((project) => project.name)).toStrictEqual([
       "default",
@@ -28,9 +30,44 @@ test("projects are created, renamed, listed and deleted", async () => {
   });
 });
 
+// Catches: the default project pointing anywhere but the machine ROOT it already used.
+test("the default project keeps the machine ROOT", async () => {
+  await harness.withStore(async (store) => {
+    const project = await store.projects.ensureDefault();
+    expect(project.id).toBe("default");
+    expect(project.workspace_root).toBe("");
+    expect(project.agent_cwd).toBe("");
+  });
+});
+
+// Catches: two projects sharing a root, or one project's root leaking into another's row.
+test("projects keep separate roots", async () => {
+  await harness.withStore(async (store) => {
+    const a = await store.projects.create("a", "projects/a");
+    const b = await store.projects.create("b", "projects/b");
+    expect((await store.projects.get(a.id))?.workspace_root).toBe("projects/a");
+    expect((await store.projects.get(b.id))?.workspace_root).toBe("projects/b");
+    const roots = (await store.projects.list()).map((project) => project.workspace_root);
+    expect(roots).toStrictEqual(["", "projects/a", "projects/b"]);
+  });
+});
+
+// Catches: a non-canonical root stored by a caller that skipped the mutation's validation.
+test.each(["", "/abs", "../x", "a//b", ".hns/x", "a\\b"])(
+  "creating a project with the root %j is refused and writes nothing",
+  async (root) => {
+    await harness.withStore(async (store) => {
+      await expect(store.projects.create("bad", root)).rejects.toThrow();
+      expect((await store.projects.list()).map((project) => project.name)).toStrictEqual([
+        "default",
+      ]);
+    });
+  },
+);
+
 test("deleting a project cascades to tasks and conversations", async () => {
   await harness.withStore(async (store) => {
-    const project = await store.projects.create("cascade");
+    const project = await store.projects.create("cascade", "projects/cascade");
     await store.tasks.create({ projectId: project.id, title: "task" });
     await store.conversations.register({
       id: v.parse(ConversationIdSchema, "c1"),

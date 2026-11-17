@@ -40,7 +40,8 @@ import {
  *
  * @example
  * ```ts @import.meta.vitest
- * expect(parseProject({ id: "p1", name: "Project", created_at: "2026-01-01T00:00:00.000Z" }).name).toBe("Project");
+ * expect(parseProject({ id: "p1", name: "Project", workspace_root: "projects/p1", created_at: "2026-01-01T00:00:00.000Z" }).agent_cwd).toBe("projects/p1");
+ * expect(() => parseProject({ id: "p1", name: "Project", workspace_root: "../x", created_at: "2026-01-01T00:00:00.000Z" })).toThrow();
  * expect(() => parseProject({ name: "Project" })).toThrow();
  * ```
  */

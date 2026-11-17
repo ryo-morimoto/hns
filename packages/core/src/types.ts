@@ -133,6 +133,24 @@ export type JsonValue =
 export interface Project {
   id: ProjectId;
   name: string;
+  /**
+   * The project's directory below the machine's ROOT; empty means the ROOT itself.
+   *
+   * @remarks
+   * A POSIX path that is already canonical: no absolute path, `..`, `.`, empty segment,
+   * backslash, NUL, or `.hns` segment. The model checks that lexically; the machine checks
+   * whether the real path stays below its ROOT. Fixed when the project is created.
+   */
+  workspace_root: string;
+  /**
+   * The directory the agent starts in, relative to the machine's ROOT.
+   *
+   * @remarks
+   * Equal to {@link Project.workspace_root}: the project root is the agent's cwd. It is a
+   * separate field so a surface can name the cwd without reading the storage name, and no API
+   * changes one without the other.
+   */
+  agent_cwd: string;
   /** ISO 8601 (UTC), set by the store. */
   created_at: string;
 }

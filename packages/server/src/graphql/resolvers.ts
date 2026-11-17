@@ -106,6 +106,9 @@ function requiredProjectId(value: string | null | undefined): ProjectId {
   if (decoded.value.type !== "Project") {
     throw new QueryReadError("invalid_argument", "projectId must name a Project.");
   }
+  if (decoded.value.id.length === 0) {
+    throw new QueryReadError("invalid_argument", "projectId must name a Project.");
+  }
   return v.parse(ProjectIdSchema, decoded.value.id);
 }
 
@@ -182,8 +185,9 @@ export async function resolveTasks(
  * @returns The list, or a union failure for an invalid argument or an unreachable session.
  *
  * @remarks
- * The object returns the newest page and the resolver filters it by project, so a quiet project
- * can be missing from a busy page until 0149 indexes conversations in D1.
+ * The read addresses the project's own Session object (D080), so another project's
+ * conversations never appear. The page is the object's newest page until 0149 indexes
+ * conversations in D1.
  */
 export async function resolveConversations(
   _source: undefined,
@@ -194,9 +198,7 @@ export async function resolveConversations(
     const projectId = requiredProjectId(args.projectId);
     const limit = pageSize(args.first, context.maxRowsPerList);
     spend(context, limit);
-    const conversations = (await context.reads.conversations(limit))
-      .filter((conversation) => conversation.project_id === projectId)
-      .slice(0, limit);
+    const conversations = (await context.reads.conversations(projectId, limit)).slice(0, limit);
     return conversations.map(conversationView);
   });
   if (!result.ok) return result.failure;

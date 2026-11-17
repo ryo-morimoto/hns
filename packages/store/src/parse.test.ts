@@ -1,7 +1,12 @@
 import { expect, test } from "vitest";
 import { parseConversation, parseEvent, parseProject, parseTask } from "./parse.ts";
 
-const projectRow = { id: "p1", name: "hns", created_at: "2026-11-07T00:00:00.000Z" };
+const projectRow = {
+  id: "p1",
+  name: "hns",
+  workspace_root: "projects/hns",
+  created_at: "2026-11-07T00:00:00.000Z",
+};
 const conversationRow = {
   id: "c1",
   project_id: "p1",
@@ -35,6 +40,8 @@ test("a project row parses into the public model", () => {
   expect(parseProject(projectRow)).toStrictEqual({
     id: "p1",
     name: "hns",
+    workspace_root: "projects/hns",
+    agent_cwd: "projects/hns",
     created_at: "2026-11-07T00:00:00.000Z",
   });
 });

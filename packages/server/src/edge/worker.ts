@@ -1,8 +1,12 @@
+import { ProjectIdSchema, type Project } from "@hns/core";
+import * as v from "valibot";
 import { createFilesFace } from "../files/content.ts";
 import { createGraphQLFace } from "../graphql/index.ts";
-import { SESSION_NAME } from "../session-name.ts";
 import { httpEntry } from "../obs/log.ts";
+import { ProjectParamSchema } from "../project-id.ts";
+import { LEGACY_SESSION_NAME, sessionNameFor } from "../session-name.ts";
 import { withRequestIdHeader } from "./correlation.ts";
+import { storeFor } from "./store.ts";
 import {
   createEdge,
   type EdgeRequest,
@@ -19,11 +23,69 @@ function rpcPath(path: string): string | undefined {
   return undefined;
 }
 
-/** Address the one Session object this deployment names. */
-function sessionStub(env: WorkerEnv) {
+/** Address the Session object with `name`. */
+function sessionStub(env: WorkerEnv, name: string) {
   const session = env.SESSION;
   if (session === undefined) return undefined;
-  return session.get(session.idFromName(SESSION_NAME));
+  return session.get(session.idFromName(name));
+}
+
+/** The one project the observability log belongs to (the legacy default object). */
+const OBS_SESSION_NAME = LEGACY_SESSION_NAME;
+
+/** Find one project in D1; a missing store or a failed read rejects. */
+export type ProjectLookup = (env: WorkerEnv, projectId: string) => Promise<Project | undefined>;
+
+/** The production lookup: the D1 project table through the shared store. */
+async function lookupProject(env: WorkerEnv, projectId: string): Promise<Project | undefined> {
+  const store = await storeFor(env);
+  return await store.projects.get(v.parse(ProjectIdSchema, projectId));
+}
+
+/** Why a WebSocket request named no usable Session object. */
+type SessionNameResult =
+  | { readonly ok: true; readonly name: string }
+  | {
+      readonly ok: false;
+      readonly code: "invalid_request" | "not_found" | "unavailable";
+      readonly message: string;
+    };
+
+/**
+ * Decide which Session object a `/ws` request addresses.
+ *
+ * @param env - The Worker environment (for the D1 lookup).
+ * @param raw - The `project` query value, or null when the client named none.
+ * @param lookup - The project lookup; production uses D1, tests inject a fake.
+ * @returns The object name, or the typed refusal.
+ *
+ * @remarks
+ * A missing `project` keeps the legacy default object, so a client that predates project
+ * switching still reaches its conversations. An explicit project is verified in D1 **before**
+ * `idFromName`, so an unknown or empty project never creates a Session object (D080). The
+ * lookup failing is `unavailable`, not `not_found`: an unreadable database must not read as
+ * "the project does not exist".
+ */
+export async function resolveSessionName(
+  env: WorkerEnv,
+  raw: string | null,
+  lookup: ProjectLookup = lookupProject,
+): Promise<SessionNameResult> {
+  if (raw === null) return { ok: true, name: LEGACY_SESSION_NAME };
+  const parsed = v.safeParse(ProjectParamSchema, raw);
+  if (!parsed.success) {
+    return { ok: false, code: "invalid_request", message: "project is not a project id." };
+  }
+  let project: Project | undefined;
+  try {
+    project = await lookup(env, parsed.output);
+  } catch {
+    return { ok: false, code: "unavailable", message: "The project could not be read." };
+  }
+  if (project === undefined) {
+    return { ok: false, code: "not_found", message: "No project has this id." };
+  }
+  return { ok: true, name: sessionNameFor(project.id) };
 }
 
 /**
@@ -35,8 +97,11 @@ function sessionStub(env: WorkerEnv) {
  * the messages. A missing binding is a 503, not a 404: the face exists but is not wired.
  */
 async function forwardToSession(request: EdgeRequest): Promise<Response> {
-  const stub = sessionStub(request.env);
-  const path = new URL(request.request.url).pathname;
+  const url = new URL(request.request.url);
+  const path = url.pathname;
+  const resolved = await resolveSessionName(request.env, url.searchParams.get("project"));
+  if (!resolved.ok) return problem(resolved.code, resolved.message, path);
+  const stub = sessionStub(request.env, resolved.name);
   if (stub === undefined) {
     return problem("unavailable", "The session binding is not configured.", path);
   }
@@ -56,7 +121,7 @@ async function forwardToSession(request: EdgeRequest): Promise<Response> {
  * only exposes its internal surface; the correlation id and the query string travel unchanged.
  */
 async function forwardObs(request: EdgeRequest): Promise<Response> {
-  const stub = sessionStub(request.env);
+  const stub = sessionStub(request.env, OBS_SESSION_NAME);
   const url = new URL(request.request.url);
   const path = rpcPath(url.pathname);
   if (path === undefined) return problem("not_found", "No route matches this path.", url.pathname);
@@ -80,7 +145,7 @@ async function forwardObs(request: EdgeRequest): Promise<Response> {
  * answer. The entry carries the pathname and status only, never a body or a header value.
  */
 function recordResponse(event: EdgeResponseEvent, env: WorkerEnv): void {
-  const stub = sessionStub(env);
+  const stub = sessionStub(env, OBS_SESSION_NAME);
   if (stub === undefined) return;
   const entry = httpEntry({ ...event, now: Date.now() });
   const forwarded = new Request("https://session.internal/rpc/events", {

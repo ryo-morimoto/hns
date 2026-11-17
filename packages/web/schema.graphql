@@ -11,9 +11,11 @@ type Conversation {
 }
 
 type Project {
+  agentCwd: String!
   createdAt: String!
   id: ID!
   name: String!
+  workspaceRoot: String!
 }
 
 type Task {
@@ -65,4 +67,26 @@ union TaskListResult = TaskList | QueryFailure
 
 type TaskList {
   tasks: [Task!]!
+}
+
+type Mutation {
+  createProject(name: String!, workspaceRoot: String!): CreateProjectResult!
+}
+
+union CreateProjectResult = CreateProjectPayload | MutationFailure
+
+type CreateProjectPayload {
+  project: Project!
+}
+
+type MutationFailure {
+  code: MutationErrorCode!
+  message: String!
+}
+
+enum MutationErrorCode {
+  FORBIDDEN
+  INVALID_ARGUMENT
+  LIMIT_EXCEEDED
+  UNAVAILABLE
 }

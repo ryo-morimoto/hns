@@ -78,7 +78,8 @@ test("the Mutation root receives the schema's own model instances", () => {
 
 test("ids are exposed as ID and the brand is not part of the contract", () => {
   const sdl = buildSdl();
-  expect(sdl).toMatch(/type Project \{\n  createdAt: String!\n  id: ID!/u);
+  expect(sdl).toMatch(/type Project \{\n  agentCwd: String!\n  createdAt: String!\n  id: ID!/u);
+  expect(sdl).toMatch(/  workspaceRoot: String!/u);
   expect(sdl).toMatch(/  projectId: ID!/u);
   expect(sdl).toMatch(/type Task \{\n  createdAt: String!\n  id: ID!/u);
   const typeNames = [...sdl.matchAll(/^(?:type|enum) (\w+)/gmu)].map((match) => match[1]);

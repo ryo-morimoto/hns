@@ -11,6 +11,8 @@ import type { Conversation, Project, Task } from "@hns/core";
 export interface ProjectView {
   readonly id: string;
   readonly name: string;
+  readonly workspaceRoot: string;
+  readonly agentCwd: string;
   readonly createdAt: string;
 }
 
@@ -46,6 +48,8 @@ export function projectView(project: Project): ProjectView {
   return {
     id: toGlobalId("Project", project.id),
     name: project.name,
+    workspaceRoot: project.workspace_root,
+    agentCwd: project.agent_cwd,
     createdAt: project.created_at,
   };
 }

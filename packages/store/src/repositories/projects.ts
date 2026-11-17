@@ -1,4 +1,11 @@
-import type { Project, ProjectId, Task, TaskStatus } from "@hns/core";
+import {
+  parseProjectWorkspaceRoot,
+  parseWorkspaceRoot,
+  type Project,
+  type ProjectId,
+  type Task,
+  type TaskStatus,
+} from "@hns/core";
 import type { StoreContext } from "../db.ts";
 import { parseProject, parseTask } from "../parse.ts";
 
@@ -15,8 +22,15 @@ export interface ProjectRepository {
   list(): Promise<Project[]>;
   /** The project with `id`, or `undefined` when it does not exist. */
   get(id: ProjectId): Promise<Project | undefined>;
-  /** Create a project. The id and timestamp come from the store context. */
-  create(name: string): Promise<Project>;
+  /**
+   * Create a project.
+   *
+   * @param name - The display name.
+   * @param workspaceRoot - The project's canonical directory below the machine ROOT. Empty is
+   * refused: only the seeded default project points at the ROOT itself.
+   * @throws ValiError when `workspaceRoot` is empty or not canonical. Nothing is written.
+   */
+  create(name: string, workspaceRoot: string): Promise<Project>;
   /** Rename a project; `undefined` when it does not exist. */
   rename(id: ProjectId, name: string): Promise<Project | undefined>;
   /**
@@ -89,11 +103,20 @@ export function projectRepository(context: StoreContext): ProjectRepository {
       return rows.map((row) => parseProject(row));
     },
     get,
-    async create(name) {
-      const project = parseProject({ id: newId(), name, created_at: now() });
+    async create(name, workspaceRoot) {
+      // The repository is the last gate before storage: a caller that skipped the mutation's
+      // validation still cannot store a non-canonical root.
+      const workspace_root = parseProjectWorkspaceRoot(workspaceRoot);
+      const project = parseProject({
+        id: newId(),
+        name,
+        workspace_root,
+        created_at: now(),
+      });
       const row = await sql.get(
-        "INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?) RETURNING *",
-        [project.id, project.name, project.created_at],
+        "INSERT INTO projects (id, name, workspace_root, created_at) VALUES (?, ?, ?, ?) " +
+          "RETURNING *",
+        [project.id, project.name, project.workspace_root, project.created_at],
       );
       if (row === undefined) throw new Error("project was not created");
       return parseProject(row);
@@ -111,11 +134,19 @@ export function projectRepository(context: StoreContext): ProjectRepository {
     async ensureDefault() {
       const existing = await get(DEFAULT_PROJECT_ID);
       if (existing !== undefined) return existing;
-      const project = parseProject({ id: "default", name: "default", created_at: now() });
+      // The default project is the one exception to "a new project names a directory": it is
+      // the workspace that already ran at the machine ROOT.
+      const workspace_root = parseWorkspaceRoot("");
+      const project = parseProject({
+        id: "default",
+        name: "default",
+        workspace_root,
+        created_at: now(),
+      });
       const row = await sql.get(
-        "INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?) " +
+        "INSERT INTO projects (id, name, workspace_root, created_at) VALUES (?, ?, ?, ?) " +
           "ON CONFLICT(id) DO NOTHING RETURNING *",
-        [project.id, project.name, project.created_at],
+        [project.id, project.name, project.workspace_root, project.created_at],
       );
       if (row !== undefined) return parseProject(row);
       const seeded = await get(DEFAULT_PROJECT_ID);

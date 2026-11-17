@@ -10,9 +10,15 @@ import {
 
 const AT = "2026-01-01T00:00:00.000Z";
 
-/** A project with stable timestamps. */
-export function project(id: string, name: string = id): Project {
-  return { id: v.parse(ProjectIdSchema, id), name, created_at: AT };
+/** A project with stable timestamps; the root defaults to the machine ROOT. */
+export function project(id: string, name: string = id, workspaceRoot = ""): Project {
+  return {
+    id: v.parse(ProjectIdSchema, id),
+    name,
+    workspace_root: workspaceRoot,
+    agent_cwd: workspaceRoot,
+    created_at: AT,
+  };
 }
 
 /** A conversation in `projectId`. */

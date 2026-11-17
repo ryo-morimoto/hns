@@ -1,11 +1,12 @@
 import * as v from "valibot";
 import type { Conversation, Project, ProjectId, Task } from "@hns/core";
 import { ConversationIdSchema, ProjectIdSchema } from "@hns/core";
-import { openStore, type D1Binding, type Store } from "@hns/store";
+import type { Store } from "@hns/store";
 import type { WorkerEnv } from "../edge/env.ts";
 import { createRowBudget, type RowBudget } from "../edge/limits.ts";
 import type { Session } from "../edge/session.ts";
-import { SESSION_NAME } from "../session-name.ts";
+import { storeFor, StoreUnavailableError } from "../edge/store.ts";
+import { sessionNameFor } from "../session-name.ts";
 import { QueryReadError } from "./failures.ts";
 
 /**
@@ -18,7 +19,26 @@ import { QueryReadError } from "./failures.ts";
 export interface GraphQLReads {
   readonly projects: () => Promise<readonly Project[]>;
   readonly tasks: (projectId: ProjectId) => Promise<readonly Task[]>;
-  readonly conversations: (limit: number) => Promise<readonly Conversation[]>;
+  readonly conversations: (projectId: ProjectId, limit: number) => Promise<readonly Conversation[]>;
+}
+
+/** What a resolver asks the store to write. */
+interface CreateProjectInput {
+  readonly name: string;
+  /** Already canonical; the resolver refuses an empty or non-canonical root first. */
+  readonly workspaceRoot: string;
+}
+
+/**
+ * The writes one GraphQL request performs.
+ *
+ * @remarks
+ * Same shape as {@link GraphQLReads}: one port per mutation field, replaced in tests so the
+ * resolver contract is proven without D1. A port throws `QueryReadError` for an expected outage;
+ * the resolver turns that into a `MutationFailure` and never into a payload.
+ */
+export interface GraphQLWrites {
+  readonly createProject: (input: CreateProjectInput) => Promise<Project>;
 }
 
 /** What one request carries into its resolvers. */
@@ -34,6 +54,7 @@ export interface GraphQLContext {
    */
   readonly session: Session;
   readonly reads: GraphQLReads;
+  readonly writes: GraphQLWrites;
   /** The rows this request may still read or write across every resolver. */
   readonly budget: RowBudget;
   /** The most rows one list field may return. */
@@ -46,69 +67,50 @@ export interface GraphQLContextOptions {
   readonly requestId: string;
   readonly session: Session;
   readonly reads?: Partial<GraphQLReads> | undefined;
+  readonly writes?: Partial<GraphQLWrites> | undefined;
   readonly maxRows: number;
   readonly maxRowsPerList: number;
 }
 
-const STORES = new WeakMap<D1Binding, Promise<Store>>();
-
-/**
- * The D1 store for this isolate, opened once.
- *
- * @remarks
- * A rejected open is dropped from the cache so the next request retries instead of failing until
- * the isolate is evicted. 0149 replaces this memo with a provider that counts the opens.
- */
-async function storeFor(env: WorkerEnv): Promise<Store> {
-  const db = env.DB;
-  if (db === undefined) {
-    throw new QueryReadError("unavailable", "The database binding is not configured.");
+/** Open the store, mapping a missing binding or a failed open to `unavailable`. */
+async function storeWith(env: WorkerEnv, requestId: string): Promise<Store> {
+  try {
+    return await storeFor(env);
+  } catch (error) {
+    if (error instanceof StoreUnavailableError) {
+      console.error("graphql: store open failed", requestId, error.name);
+      throw new QueryReadError("unavailable", error.message);
+    }
+    throw error;
   }
-  const cached = STORES.get(db);
-  if (cached !== undefined) return cached;
-  const opened = openStore({ d1: db });
-  STORES.set(db, opened);
-  void opened.catch(() => {
-    STORES.delete(db);
-  });
-  return opened;
 }
 
 /**
- * Read through the D1 store, mapping an expected outage to `unavailable`.
+ * Run one store call, mapping an expected outage to `unavailable`.
  *
  * @internal
  * @remarks
  * A corrupt row (`ValiError`) is not an outage: it means the stored data disagrees with the
- * model, so it stays an unexpected failure and becomes a 500.
+ * model, so it stays an unexpected failure and becomes a 500. A failed write is not reported as
+ * a completed one.
  */
-async function readStore<T>(
+async function storeCall<T>(
   env: WorkerEnv,
   requestId: string,
-  read: (store: Store) => Promise<T>,
+  action: "read" | "write",
+  work: (store: Store) => Promise<T>,
 ): Promise<T> {
-  let store: Store;
+  const store = await storeWith(env, requestId);
   try {
-    store = await storeFor(env);
-  } catch (error) {
-    if (error instanceof QueryReadError) throw error;
-    console.error(
-      "graphql: store open failed",
-      requestId,
-      error instanceof Error ? error.name : "unknown",
-    );
-    throw new QueryReadError("unavailable", "The database could not be opened.");
-  }
-  try {
-    return await read(store);
+    return await work(store);
   } catch (error) {
     if (error instanceof v.ValiError) throw error;
     console.error(
-      "graphql: store read failed",
+      "graphql: store " + action + " failed",
       requestId,
       error instanceof Error ? error.name : "unknown",
     );
-    throw new QueryReadError("unavailable", "The database read failed.");
+    throw new QueryReadError("unavailable", "The database " + action + " failed.");
   }
 }
 
@@ -129,16 +131,18 @@ const ConversationListRpcSchema = v.object({
 });
 
 /**
- * Read the newest conversations from the Session Durable Object.
+ * Read the newest conversations from the project's own Session Durable Object.
  *
  * @internal
  * @remarks
- * One RPC per request; the resolver filters by project. Until 0149 indexes conversations in D1,
- * the filter sees only this page, so a quiet project can appear empty on a busy workspace.
+ * One RPC per request to `sessionNameFor(projectId)`. The object holds one project's
+ * conversations (D080), so the read is isolated by the object, not by a filter here. Until 0149
+ * indexes conversations in D1, this is still one page.
  */
 async function readConversations(
   env: WorkerEnv,
   requestId: string,
+  projectId: ProjectId,
   limit: number,
 ): Promise<readonly Conversation[]> {
   const namespace = env.SESSION;
@@ -149,7 +153,7 @@ async function readConversations(
   let response: Response;
   try {
     response = await namespace
-      .get(namespace.idFromName(SESSION_NAME))
+      .get(namespace.idFromName(sessionNameFor(projectId)))
       .fetch(new Request(url, { method: "GET", headers: { "x-request-id": requestId } }));
   } catch (error) {
     console.error(
@@ -173,12 +177,22 @@ async function readConversations(
   return parsed.output.conversations;
 }
 
-/** The production reads: D1 for projects and tasks, the Session DO for conversations. */
+/** The production reads: D1 for projects and tasks, the project's Session DO for conversations. */
 function defaultReads(env: WorkerEnv, requestId: string): GraphQLReads {
   return {
-    projects: () => readStore(env, requestId, (store) => store.projects.list()),
-    tasks: (projectId) => readStore(env, requestId, (store) => store.tasks.list(projectId)),
-    conversations: (limit) => readConversations(env, requestId, limit),
+    projects: () => storeCall(env, requestId, "read", (store) => store.projects.list()),
+    tasks: (projectId) => storeCall(env, requestId, "read", (store) => store.tasks.list(projectId)),
+    conversations: (projectId, limit) => readConversations(env, requestId, projectId, limit),
+  };
+}
+
+/** The production writes: D1 for the project table. */
+function defaultWrites(env: WorkerEnv, requestId: string): GraphQLWrites {
+  return {
+    createProject: (input) =>
+      storeCall(env, requestId, "write", (store) =>
+        store.projects.create(input.name, input.workspaceRoot),
+      ),
   };
 }
 
@@ -189,17 +203,22 @@ function defaultReads(env: WorkerEnv, requestId: string): GraphQLReads {
  * @returns The context; its reads are the overrides where given, the production reads otherwise.
  */
 export function createContext(options: GraphQLContextOptions): GraphQLContext {
-  const defaults = defaultReads(options.env, options.requestId);
-  const overrides = options.reads ?? {};
+  const reads = defaultReads(options.env, options.requestId);
+  const writes = defaultWrites(options.env, options.requestId);
+  const readOverrides = options.reads ?? {};
+  const writeOverrides = options.writes ?? {};
   return {
     requestId: options.requestId,
     session: options.session,
     budget: createRowBudget(options.maxRows),
     maxRowsPerList: options.maxRowsPerList,
     reads: {
-      projects: overrides.projects ?? defaults.projects,
-      tasks: overrides.tasks ?? defaults.tasks,
-      conversations: overrides.conversations ?? defaults.conversations,
+      projects: readOverrides.projects ?? reads.projects,
+      tasks: readOverrides.tasks ?? reads.tasks,
+      conversations: readOverrides.conversations ?? reads.conversations,
+    },
+    writes: {
+      createProject: writeOverrides.createProject ?? writes.createProject,
     },
   };
 }

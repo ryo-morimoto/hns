@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import * as v from "valibot";
+import { parseProject } from "./parse.ts";
 import { AutomationActionSchema, AutomationTriggerSchema, WorkflowGraphSchema } from "./schemas.ts";
 
 // Catches: moving the workflow and automation JSON schemas from core to store dropped the
@@ -50,6 +51,17 @@ test("an empty automation chat prompt is rejected", () => {
 
 test("an empty automation task title is rejected", () => {
   expect(v.safeParse(AutomationActionSchema, { type: "task", title: "" }).success).toBe(false);
+});
+
+// Catches: a missing or non-canonical stored root being read as the machine ROOT.
+test("a project row without a canonical root fails closed", () => {
+  const row = { id: "p1", name: "p1", created_at: "2026-01-01T00:00:00.000Z" };
+  expect(() => parseProject(row)).toThrow();
+  expect(() => parseProject({ ...row, workspace_root: null })).toThrow();
+  expect(() => parseProject({ ...row, workspace_root: "../x" })).toThrow();
+  expect(() => parseProject({ ...row, workspace_root: "/abs" })).toThrow();
+  expect(parseProject({ ...row, workspace_root: "" }).agent_cwd).toBe("");
+  expect(parseProject({ ...row, workspace_root: "projects/p1" }).agent_cwd).toBe("projects/p1");
 });
 
 test("valid automation values parse", () => {

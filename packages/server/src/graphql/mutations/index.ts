@@ -1,5 +1,6 @@
 import { GraphQLObjectType, type GraphQLFieldConfigMap } from "graphql";
 import type { GraphQLContext } from "../context.ts";
+import { createProjectModule } from "./create-project.ts";
 
 /**
  * One feature's contribution to the Mutation root.
@@ -28,10 +29,11 @@ export interface MutationModule {
  * Every feature mutation, in declaration order.
  *
  * @remarks
- * Empty until the first feature lands. The schema then has no Mutation root at all, so the
- * published SDL and Relay's codegen do not change while the face is unused.
+ * The schema has a Mutation root exactly when this is non-empty, which keeps a deployment with
+ * no writes free of an empty (and invalid) root. `createProject` is the first real feature; the
+ * 0198 skeleton's fixture stays test-only.
  */
-export const MUTATION_MODULES: readonly MutationModule[] = [];
+export const MUTATION_MODULES: readonly MutationModule[] = [createProjectModule()];
 
 /**
  * Build the Mutation root from the feature modules.
