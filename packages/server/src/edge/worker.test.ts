@@ -44,11 +44,35 @@ test("the production worker forwards /ws with the request id", async () => {
     envWith({ session: session.namespace }),
   );
   expect(response.status).toBe(501);
-  expect(session.ids).toStrictEqual(["default"]);
+  expect(session.ids.every((id) => id === "default")).toBe(true);
   const forwarded = session.requests.at(0);
   assert.ok(forwarded !== undefined);
+  expect(forwarded.url).toContain("/ws");
   expect(forwarded.headers.get("x-request-id")).toBe("caller-2");
   expect(response.headers.get("x-request-id")).toBe("caller-2");
+  const recorded = session.requests.at(1);
+  assert.ok(recorded !== undefined);
+  expect(recorded.method).toBe("POST");
+  expect(recorded.url).toContain("/rpc/events");
+  expect(recorded.headers.get("x-request-id")).toBe("caller-2");
+});
+
+// Catches: the REST face 404ing, or the correlation id stopping before the DO.
+test("the production worker forwards the observability API with the request id", async () => {
+  const cookie = await sessionCookie("owner");
+  const session = sessionWith(new Response('{"ok":true,"events":[]}', { status: 200 }));
+  const response = await worker.fetch(
+    new Request(BASE + "/api/events?limit=5", {
+      headers: { cookie, "x-request-id": "caller-3" },
+    }),
+    envWith({ session: session.namespace }),
+  );
+  expect(response.status).toBe(200);
+  const forwarded = session.requests.at(0);
+  assert.ok(forwarded !== undefined);
+  expect(forwarded.url).toContain("/rpc/events?limit=5");
+  expect(forwarded.headers.get("x-request-id")).toBe("caller-3");
+  expect(response.headers.get("x-request-id")).toBe("caller-3");
 });
 
 test("the production worker fails closed when the session binding is missing", async () => {

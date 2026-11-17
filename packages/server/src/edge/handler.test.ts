@@ -4,6 +4,7 @@ import { assetsWith, d1With, envWith, sessionCookie } from "../../test/support/e
 import {
   createEdge,
   type EdgeRequest,
+  type EdgeResponseEvent,
   type GraphQLRequest,
   type HandlerDependencies,
 } from "./handler.ts";
@@ -177,6 +178,72 @@ test("an unknown POST is 404 and does not reach ASSETS or a face", async () => {
   expect(assets.requests).toHaveLength(0);
   expect(calls.graphql).toHaveLength(0);
   expect(calls.ws).toHaveLength(0);
+});
+
+test("the observability API requires a session and only GET", async () => {
+  const observed: EdgeRequest[] = [];
+  const deps: HandlerDependencies = {
+    graphql: () => Promise.resolve(new Response("ok")),
+    ws: () => Promise.resolve(new Response("ok")),
+    obs(request: EdgeRequest): Promise<Response> {
+      observed.push(request);
+      return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+    },
+  };
+  const edge = createEdge(deps);
+  for (const path of ["/api/events", "/api/metrics"]) {
+    const denied = await edge(get(path), envWith());
+    await expectProblem(denied, 401, "unauthorized");
+    const wrong = await edge(post(path, "{}"), envWith());
+    await expectProblem(wrong, 405, "method_not_allowed");
+    expect(wrong.headers.get("allow")).toBe("GET");
+  }
+  expect(observed).toHaveLength(0);
+
+  const cookie = await sessionCookie("owner");
+  const allowed = await edge(
+    get("/api/events?limit=5", { cookie, "x-request-id": "caller-1" }),
+    envWith(),
+  );
+  expect(allowed.status).toBe(200);
+  expect(observed).toHaveLength(1);
+  expect(observed[0]?.requestId).toBe("caller-1");
+  expect(observed[0]?.session.subject).toBe("owner");
+  expect(allowed.headers.get("x-request-id")).toBe("caller-1");
+});
+
+// Catches: an /api face looking configured while the Session binding is absent.
+test("the observability API fails closed without a Session binding", async () => {
+  const cookie = await sessionCookie("owner");
+  const response = await createEdge(recordingDeps().deps)(
+    get("/api/metrics", { cookie }),
+    envWith(),
+  );
+  await expectProblem(response, 503, "unavailable");
+});
+
+// Catches: the worker hop recording a query string, a body, or a header.
+test("the edge records the pathname and the status, never the query or the body", async () => {
+  const recorded: EdgeResponseEvent[] = [];
+  const deps: HandlerDependencies = {
+    graphql: () => Promise.resolve(new Response("ok", { status: 200 })),
+    ws: () => Promise.resolve(new Response("ok")),
+    onResponse(event: EdgeResponseEvent): void {
+      recorded.push(event);
+    },
+  };
+  const cookie = await sessionCookie("owner");
+  const edge = createEdge(deps);
+  await edge(get("/api/debug?token=super-secret", { cookie }), envWith());
+  await edge(post("/graphql", '{"query":"super-secret"}', { cookie }), envWith());
+  expect(recorded).toHaveLength(2);
+  expect(recorded[0]).toMatchObject({ method: "GET", path: "/api/debug", status: 404 });
+  expect(recorded[1]).toMatchObject({ method: "POST", path: "/graphql", status: 200 });
+  const text = JSON.stringify(recorded);
+  expect(text).not.toContain("super-secret");
+  expect(text).not.toContain("token");
+  expect(recorded.every((event) => event.requestId.length > 0)).toBe(true);
+  expect(recorded.every((event) => event.durationMs >= 0)).toBe(true);
 });
 
 // Catches: a debug route reappearing under /api.

@@ -20,10 +20,30 @@ export interface GraphQLRequest extends EdgeRequest {
   readonly body: string;
 }
 
+/** One finished request, as the observability log records it. */
+export interface EdgeResponseEvent {
+  readonly requestId: string;
+  readonly method: string;
+  /** The pathname only; the edge never records the query string. */
+  readonly path: string;
+  readonly status: number;
+  readonly durationMs: number;
+}
+
 /** The handlers owned by the issues that implement each face. */
 export interface HandlerDependencies {
   readonly graphql: (request: GraphQLRequest) => Promise<Response>;
   readonly ws: (request: EdgeRequest) => Promise<Response>;
+  /**
+   * The observability REST face, forwarded to the Session object.
+   *
+   * @remarks
+   * Optional so the face fails closed (503) when the binding is missing, and so an edge test
+   * that does not exercise the API needs no stub.
+   */
+  readonly obs?: ((request: EdgeRequest) => Promise<Response>) | undefined;
+  /** Called once per request; production forwards the entry to the Session object. */
+  readonly onResponse?: ((event: EdgeResponseEvent, env: WorkerEnv) => void) | undefined;
 }
 
 /** The fetch signature the Worker module exposes. */
@@ -126,6 +146,17 @@ async function route(
     }
     return dependencies.ws({ request, env, session, requestId, signal });
   }
+  if (path === "/api/events" || path === "/api/metrics") {
+    if (request.method !== "GET") return methodNotAllowed("GET", path);
+    const session = await authenticate(request, env);
+    if (session === null) {
+      return problem("unauthorized", "A valid session cookie is required.", path);
+    }
+    if (dependencies.obs === undefined) {
+      return problem("unavailable", "The observability face is not configured.", path);
+    }
+    return dependencies.obs({ request, env, session, requestId, signal });
+  }
   if (path === "/api" || path.startsWith("/api/")) {
     return problem("not_found", "No route matches this path.", path);
   }
@@ -159,6 +190,7 @@ export function createEdge(
   return async function edge(request: Request, env: WorkerEnv): Promise<Response> {
     const requestId = resolveRequestId(request.headers.get(REQUEST_ID_HEADER));
     const path = new URL(request.url).pathname;
+    const started = Date.now();
     const controller = new AbortController();
     let response: Response;
     try {
@@ -179,6 +211,26 @@ export function createEdge(
         response = problem("internal", "Unexpected failure.", path);
       }
     }
-    return withResponseRequestId(response, requestId);
+    const decorated = withResponseRequestId(response, requestId);
+    try {
+      dependencies.onResponse?.(
+        {
+          requestId,
+          method: request.method,
+          path,
+          status: decorated.status,
+          durationMs: Date.now() - started,
+        },
+        env,
+      );
+    } catch (error) {
+      // Observation is a side effect: a logging bug must not turn a served request into a 500.
+      console.error(
+        "edge: response log failed",
+        requestId,
+        error instanceof Error ? error.name : "unknown",
+      );
+    }
+    return decorated;
   };
 }
