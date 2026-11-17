@@ -45,7 +45,8 @@ function writeTitle(environment: Environment, conversationId: string, title: str
  * fragment reads that field from the store. A snapshot is the frame that carries it; append,
  * delta, pong, and error change no list field, so they leave the store alone. A snapshot for a
  * conversation the list has not loaded creates nothing: the frame is not a substitute for the
- * read that names the conversation.
+ * read that names the conversation. A title is a plain string, so an empty one is written like
+ * any other; the server's value is the truth.
  *
  * The title is also kept per conversation, because a later list read normalizes the server's
  * older value over it. {@link reapplyLiveTitles} puts it back once that read lands.

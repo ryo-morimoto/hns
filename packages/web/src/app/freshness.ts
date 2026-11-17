@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Environment, FetchPolicy } from "relay-runtime";
 
 /**
@@ -21,8 +21,8 @@ export type FreshnessScreen = (typeof FRESHNESS_SCREENS)[number];
  * How long a screen that changes slowly is answered from the store.
  *
  * @remarks
- * Settings, providers, and machines reuse this window when those screens are built (D097);
- * the workspace list is the first screen that needs it.
+ * Settings, providers, and machines reuse this window when those screens are built (D097).
+ * The project list is the screen that uses it today.
  */
 export const SLOW_SCREEN_TTL_MS = 30_000;
 
@@ -33,15 +33,20 @@ export const SLOW_SCREEN_TTL_MS = 30_000;
  * Every entry is a departure from {@link DEFAULT_FETCH_POLICY}, so `reason` is required: a
  * screen that shows a stale list without saying why is a decision, and the decision belongs
  * next to the policy. `ttlMs` is the window in which the store answers alone; once it has
- * passed, the next mount or focus goes to the network again.
+ * passed, the next mount or focus reads the network again.
  *
  * A screen that subscribes or reads the network on every mount has no need for a TTL; one that
  * has neither but also no TTL would never revalidate, and the table test refuses that shape.
  */
 export interface FreshnessPolicy {
-  /** The policy a read uses once the store copy is too old to trust. */
-  readonly fetchPolicy: Exclude<FetchPolicy, typeof DEFAULT_FETCH_POLICY>;
-  /** How long the store answers alone, in milliseconds; null means every read goes to the network. */
+  /**
+   * The policy a read uses once the store copy is too old to trust.
+   *
+   * @remarks
+   * `store-only` is excluded: with an empty or collected record the read would never finish.
+   */
+  readonly fetchPolicy: Exclude<FetchPolicy, typeof DEFAULT_FETCH_POLICY | "store-only">;
+  /** How long the store answers alone, in milliseconds; null means every mount reads the network. */
   readonly ttlMs: number | null;
   /** Whether the screen holds a live subscription that patches the store (0159). */
   readonly subscribes: boolean;
@@ -57,10 +62,10 @@ export interface FreshnessPolicy {
  *   conversation), so a revisit is answered from the store inside the TTL and revalidated after
  *   it or when the tab regains focus.
  * - `workspace`: the conversation and task lists feed Needs you, so a stale copy misleads. No
- *   live channel carries the lists themselves (0159 subscribes per conversation, and subscribing
- *   the list needs a server and protocol change), so each mount reads the network while the
- *   store stays on screen. The open conversation's title is still live: its socket patches the
- *   list record. A reconnect refetches the lists to pick up what the socket cannot carry.
+ *   live channel carries the lists themselves (a list subscription needs a server and protocol
+ *   change), so each mount reads the network while the store stays on screen. The open
+ *   conversation's title is still live: its socket patches the list record. A reconnect
+ *   refetches the lists to pick up what the socket cannot carry.
  * - `conversation`: the transcript is followed by a cursor. A store copy has no cursor, so lost
  *   frames cannot be filled in from it; the read is always the network's and the socket keeps it
  *   current.
@@ -134,12 +139,17 @@ function readsOf(environment: Environment): Map<FreshnessScreen, number> {
   return created;
 }
 
-/** What a screen's Relay read needs to mount and to re-run. */
-export interface ScreenRead {
-  /** Pass to `useLazyLoadQuery` / `usePreloadedQuery`. */
-  readonly fetchPolicy: FetchPolicy;
-  /** Pass to `useLazyLoadQuery`; it changes only when the read must run again. */
-  readonly fetchKey: string;
+/** What a TTL screen passes to {@link useScreenRead} so it can revalidate itself. */
+export interface ScreenReadOptions {
+  /**
+   * Run the screen's read again, writing into the same store.
+   *
+   * @remarks
+   * The hook cannot know a query and its variables, so a TTL screen supplies the read. A
+   * rejection leaves the window stale, which makes the next focus read again instead of waiting
+   * out a window that never succeeded.
+   */
+  readonly revalidate?: (() => Promise<void>) | undefined;
 }
 
 /**
@@ -147,50 +157,71 @@ export interface ScreenRead {
  *
  * @param environment - The Relay environment whose store answers the read.
  * @param screen - The screen; it selects the entry from {@link FRESHNESS}.
- * @returns The `fetchPolicy` and `fetchKey` for the screen's `useLazyLoadQuery`.
+ * @param options - The revalidation read for a screen with a TTL.
+ * @returns The `fetchPolicy` for the screen's `useLazyLoadQuery`.
  *
  * @remarks
- * The window is recorded once a mount that went to the network is on screen. A first read that
- * fails throws to the boundary before anything is recorded, so the next visit asks the network
- * again instead of trusting an empty store. A TTL screen also revalidates when the tab returns
- * to the foreground; screens without a TTL rely on their subscription or on an explicit
- * refetch, so nothing polls.
+ * The window is recorded once a read that went to the network is on screen: the component does
+ * not commit while that read is in flight, so a failed first read registers nothing and the next
+ * visit asks again. A TTL screen also revalidates when the tab returns to the foreground, and
+ * records the window only after that read succeeds; a failure is retried on the next focus. No
+ * screen polls.
+ *
+ * A caller may override the returned policy for a case the table does not cover (the shell keeps
+ * the default while no project is selected, so an empty request never leaves). The screen still
+ * records the mount; a screen without a TTL never reads that record, so nothing changes.
  */
-export function useScreenRead(environment: Environment, screen: FreshnessScreen): ScreenRead {
+export function useScreenRead(
+  environment: Environment,
+  screen: FreshnessScreen,
+  options: ScreenReadOptions = {},
+): FetchPolicy {
   const policy = FRESHNESS[screen];
-  const [fetchPolicy, setFetchPolicy] = useState<FetchPolicy>(() =>
+  const revalidate = options.revalidate;
+  const [fetchPolicy] = useState<FetchPolicy>(() =>
     fetchPolicyFor(screen, { lastFetchedAt: readsOf(environment).get(screen), now: Date.now() }),
   );
-  const [generation, setGeneration] = useState(0);
   const startedWith = useRef(fetchPolicy);
+  const inFlight = useRef(false);
 
+  // Mounting starts the window when the read is on screen, not when its request is dispatched.
   useEffect(() => {
     if (startedWith.current !== DEFAULT_FETCH_POLICY) readsOf(environment).set(screen, Date.now());
   }, [environment, screen]);
 
-  useEffect(() => {
+  const reread = useCallback((): void => {
+    if (inFlight.current) return;
     const ttl = policy.ttlMs;
-    if (ttl === null) return;
-    const revalidate = (): void => {
-      const last = readsOf(environment).get(screen);
-      const now = Date.now();
-      if (last !== undefined && now - last < ttl) return;
-      readsOf(environment).set(screen, now);
-      setFetchPolicy(policy.fetchPolicy);
-      setGeneration((value) => value + 1);
-    };
-    // Leaving the tab also fires visibilitychange; only the return is worth a request.
-    const revalidateWhenVisible = (): void => {
-      if (document.visibilityState === "hidden") return;
-      revalidate();
-    };
-    window.addEventListener("focus", revalidate);
-    document.addEventListener("visibilitychange", revalidateWhenVisible);
-    return () => {
-      window.removeEventListener("focus", revalidate);
-      document.removeEventListener("visibilitychange", revalidateWhenVisible);
-    };
-  }, [environment, screen, policy]);
+    if (ttl === null || revalidate === undefined) return;
+    const last = readsOf(environment).get(screen);
+    const now = Date.now();
+    if (last !== undefined && now - last < ttl) return;
+    inFlight.current = true;
+    void revalidate()
+      .then(() => {
+        readsOf(environment).set(screen, Date.now());
+      })
+      .catch(() => {
+        // The window stays stale, so the next focus reads again; the screen keeps what it shows.
+      })
+      .finally(() => {
+        inFlight.current = false;
+      });
+  }, [environment, policy, screen, revalidate]);
 
-  return { fetchPolicy, fetchKey: screen + ":" + String(generation) };
+  useEffect(() => {
+    if (policy.ttlMs === null) return;
+    const rereadWhenVisible = (): void => {
+      if (document.visibilityState === "hidden") return;
+      reread();
+    };
+    window.addEventListener("focus", reread);
+    document.addEventListener("visibilitychange", rereadWhenVisible);
+    return () => {
+      window.removeEventListener("focus", reread);
+      document.removeEventListener("visibilitychange", rereadWhenVisible);
+    };
+  }, [policy, reread]);
+
+  return fetchPolicy;
 }

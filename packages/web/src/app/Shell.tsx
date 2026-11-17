@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactElement, type ReactNode } f
 import type { ConversationLink, ProjectLink, TaskLink } from "./viewModel.ts";
 import { toGlobalId } from "@hns/core/graphql";
 import { useFragment, useLazyLoadQuery, useRelayEnvironment } from "react-relay";
+import { fetchQuery } from "relay-runtime";
 import type { ShellProjectsQuery as ShellProjectsQueryType } from "../__generated__/ShellProjectsQuery.graphql";
 import type { ShellWorkspaceQuery as ShellWorkspaceQueryType } from "../__generated__/ShellWorkspaceQuery.graphql";
 import type { SidebarConversations$key } from "../__generated__/SidebarConversations.graphql";
@@ -74,8 +75,12 @@ function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellPro
   const environment = useRelayEnvironment();
   const projectKey = route.projectId === null ? null : projectIdFrom(route.projectId);
   const hasProject = projectKey !== null;
-  const projectsRead = useScreenRead(environment, "projects");
-  const workspaceRead = useScreenRead(environment, "workspace");
+  // The project list is read again when its window passes; the read writes the same store.
+  const revalidateProjects = useCallback(async () => {
+    await fetchQuery(environment, ShellProjectsQuery, {}).toPromise();
+  }, [environment]);
+  const projectsPolicy = useScreenRead(environment, "projects", { revalidate: revalidateProjects });
+  const workspacePolicy = useScreenRead(environment, "workspace");
   // A reconnect asks the open screen for a fresh list; the store stays on screen meanwhile.
   const [reloads, setReloads] = useState(0);
   const onReconnect = useCallback(() => {
@@ -86,8 +91,7 @@ function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellPro
     ShellProjectsQuery,
     {},
     {
-      fetchPolicy: projectsRead.fetchPolicy,
-      fetchKey: projectsRead.fetchKey,
+      fetchPolicy: projectsPolicy,
     },
   );
   const workspace = useLazyLoadQuery<ShellWorkspaceQueryType>(
@@ -100,8 +104,9 @@ function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellPro
     {
       // Without a selected project the query selects nothing; asking the network for it would
       // spend a request on an empty answer (0179), so the default policy answers from the store.
-      fetchPolicy: hasProject ? workspaceRead.fetchPolicy : DEFAULT_FETCH_POLICY,
-      fetchKey: workspaceRead.fetchKey + ":" + String(reloads),
+      fetchPolicy: hasProject ? workspacePolicy : DEFAULT_FETCH_POLICY,
+      // The counter changes only on a reconnect, which is the one case the socket cannot heal.
+      fetchKey: "workspace:" + String(reloads),
     },
   );
 

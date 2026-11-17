@@ -73,6 +73,13 @@ test("a closed conversation stops holding its live title", () => {
   expect(storedTitle(environment, "2")).toBe("サーバーの題");
 });
 
+// Catches: a rename to an empty title being dropped, so the store keeps the previous one.
+test("an empty snapshot title is written like any other", () => {
+  const environment = environmentWithConversation("2", "古い題");
+  applyLiveFrameToStore(environment, snapshotOf("2", ""));
+  expect(storedTitle(environment, "2")).toBe("");
+});
+
 // Catches: a frame inventing a conversation record before the read that names it has landed.
 test("a snapshot for a conversation the store has never seen writes nothing", () => {
   const environment = environmentWithConversation("2", "古い題");

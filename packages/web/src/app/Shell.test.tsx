@@ -136,6 +136,47 @@ test("a TTL screen revalidates on focus only after its window", async () => {
   });
 });
 
+// Catches: a failed focus revalidation counted as fresh, so a stale list is not asked for again
+// until a whole window has passed. A rejected read leaves the window as it was (D097).
+test("a failed focus revalidation is retried on the next focus", async () => {
+  let projects = 0;
+  const { environment, calls } = createTestEnvironment((call) => {
+    if (call.operation === "ShellProjectsQuery") {
+      projects += 1;
+      if (projects === 2) return undefined;
+    }
+    return workspaceFixture(call);
+  });
+  renderShellWith(environment);
+  await screen.findByRole("heading", { name: "Workspace" });
+  expect(countOf(calls, "ShellProjectsQuery")).toBe(1);
+
+  /** Focus with the clock past the window, the way a user returns to an old tab. */
+  function focusAfterWindow(): void {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + SLOW_SCREEN_TTL_MS);
+    try {
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+    } finally {
+      clock.mockRestore();
+    }
+  }
+
+  focusAfterWindow();
+  await waitFor(() => {
+    expect(countOf(calls, "ShellProjectsQuery")).toBe(2);
+  });
+  await act(async () => undefined);
+  // The failed read changed nothing on screen, and it did not start a new window.
+  expect(screen.getByRole("heading", { name: "Workspace" })).toBeTruthy();
+
+  focusAfterWindow();
+  await waitFor(() => {
+    expect(countOf(calls, "ShellProjectsQuery")).toBe(3);
+  });
+});
+
 // Catches: a live frame updating only the live panel, leaving the sidebar's title on the value
 // the last read returned.
 test("a live snapshot patches the conversation title without a read", async () => {
