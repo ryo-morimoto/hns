@@ -2,8 +2,8 @@
 
 残作業と検証はこのディレクトリ。
 
-- `BOARD.md`: 状態・依存・並列の索引。
-- `issues/NNNN-slug.md`: 1 issue 1ファイル。
+- `BOARD.md`: 状態・依存・並列の索引（`now` と止まっている理由だけ。型は [issue-format.md](issue-format.md)）。
+- `issues/NNNN-slug.md`: 1 issue 1ファイル。**Goal / Acceptance / Log の 3 節**（[issue-format.md](issue-format.md)）。設計は issue に書かない。
 - `research/`: 提供資料の原文と実測ノート。書き換えない。
 - `poc/`: 検証コード。
 - `scratch/`: gitignore。
@@ -13,18 +13,18 @@
 | priority | 重要度 | 緊急度 | 意味 |
 | --- | --- | --- | --- |
 | `now` | 高 | 高 | いまの波。依存が満たされていて、すぐ着手してよい |
-| `plan` | 高 | 低 | 重要だが、いまの波の後。レーンの順に上げる |
-| `batch` | 低 | 中 | 安い・隣接するときだけ。単独では着手しない |
-| `hold` | — | — | いまはやらない（Want・保留・新しい設計に吸収） |
+| `next` | 高 | 低 | 重要だが、いまの波の後。レーンの順に上げる |
+| `later` | 低 | 中 | 安い・隣接するときだけ。単独では着手しない |
+| `parked` | — | — | いまはやらない（Want・保留・新しい設計に吸収） |
 
 - **agent が着手してよいのは `now` だけ。** `now` が空なら止まって人に聞く。
-- `plan` を `now` に上げるのは人の判断。agent が自分で昇格しない。
+- `next` を `now` に上げるのは人の判断。agent が自分で昇格しない。
 - 一覧と件数は [BOARD.md](BOARD.md) の「優先度マトリクス」。変えるときは issue と BOARD を同時に直す。
 
 ## 設計の合意（design）
 
 `priority` は**いつやるか**、`design` は**設計が人間と合意できているか**。別の軸として持つ。
-`plan` は「この波の後」と「設計が未合意」を兼ねない。
+`next` は「この波の後」と「設計が未合意」を兼ねない。
 
 | design | 意味 | now にできるか |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 | `pending` | 重要だが設計が未合意（未判定・rescope 待ちを含む） | できない。設計レビューで `agreed` にする |
 
 - `design: pending` は、設計レビュー（D069 の設計層）で `design-ref` に根拠（DNNN / docs の節）を書いて `agreed` にする。レビューは実装前に行う。
-- `now` の条件は **`design: agreed` かつ `depends-on` 充足**。`plan` はどちらかが欠けている状態で、BOARD は理由（設計待ち / 順番待ち / 依存待ち）で分ける。
+- `now` の条件は **`design: agreed` かつ `depends-on` 充足**。`next` は、設計・依存・枠のどれかが理由で `now` ではない状態で、BOARD は理由（設計待ち / 順番待ち / 依存待ち）で分ける。
 - 設計を変えない issue（欠陥の返済・docs・メタデータ）は `agreed` とし、`design-ref: 設計を変えない（理由）` と書く。
 - 完了した issue は `design` を持たない。既存の done は遡及しない。新規 issue は `design: pending` で作り、設計レビューで `agreed` にする。
 
@@ -44,7 +44,7 @@
 # NNNN: Title
 
 status: open | in-progress | blocked | done | superseded
-priority: now | plan | batch | hold
+priority: now | next | later | parked
 design: agreed | pending
 design-ref: DNNN / docs の節（agreed のとき）
 depends-on: NNNN, NNNN
