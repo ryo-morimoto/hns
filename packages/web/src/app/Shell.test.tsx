@@ -169,6 +169,49 @@ test("a live snapshot patches the conversation title without a read", async () =
   expect(countOf(calls, "ShellWorkspaceQuery")).toBe(1);
 });
 
+// Catches: a reconnect refetch normalizing the list read over the title the live snapshot set,
+// so the open conversation's heading reverts to the title of the last read.
+test("a reconnect refetch keeps the live title", async () => {
+  window.location.hash = "#/p/project-hns/c/conversation-intent";
+  const { environment, calls } = createTestEnvironment(workspaceFixture);
+  const { factory, sockets } = socketFactory();
+  renderShellWith(environment, undefined, factory);
+  expect(await screen.findByRole("heading", { name: "Web の土台" })).toBeTruthy();
+
+  const frame: LiveSnapshotFrame = {
+    type: "snapshot",
+    protocol: 1,
+    cursor: "1",
+    conversationId: "conversation-intent",
+    title: "名前が変わった会話",
+    entries: [],
+    draft: "",
+  };
+  act(() => {
+    sockets[0]?.open();
+    sockets[0]?.message(frame);
+  });
+  expect(await screen.findByRole("heading", { name: "名前が変わった会話" })).toBeTruthy();
+
+  act(() => {
+    sockets[0]?.drop();
+  });
+  await waitFor(() => {
+    expect(sockets).toHaveLength(2);
+  });
+  act(() => {
+    sockets[1]?.open();
+    sockets[1]?.message(frame);
+  });
+
+  await waitFor(() => {
+    expect(countOf(calls, "ShellWorkspaceQuery")).toBe(2);
+  });
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("名前が変わった会話");
+  });
+});
+
 // Catches: a reconnect that heals the socket but leaves the lists as they were before the drop,
 // so conversations added while offline never appear.
 test("a reconnect refetches the open screen's lists", async () => {

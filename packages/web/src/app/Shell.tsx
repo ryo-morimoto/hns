@@ -15,6 +15,7 @@ import { formatHash } from "../routes/route.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
 import type { LiveSocketFactory } from "../live/client.ts";
+import { reapplyLiveTitles } from "../live/store.ts";
 import { DEFAULT_FETCH_POLICY, subscribesToLive, useScreenRead } from "./freshness.ts";
 import { LiveConnection } from "./LiveConnection.tsx";
 import { ProjectWorkspaceProvider, type ProjectWorkspace } from "./ProjectWorkspace.tsx";
@@ -156,6 +157,7 @@ function ShellFrame({
   onReconnect,
 }: ShellFrameProps): ReactElement {
   const route = useRoute();
+  const environment = useRelayEnvironment();
   const mobile = useMediaQuery("(max-width: 768px)");
   const [theme, chooseTheme] = useTheme();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -170,6 +172,13 @@ function ShellFrame({
     useFragment(SidebarConversationsFragment, conversationsRef)?.conversations ?? []
   ).map(conversationLinkOf);
   const tasks = (useFragment(SidebarTasksFragment, tasksRef)?.tasks ?? []).map(taskLinkOf);
+
+  // A list read carries the title the server had when it began; the socket's snapshot is newer,
+  // so it is put back after every render that could have normalized over it. Re-running is cheap:
+  // only titles the store no longer holds are written, so this settles after one extra render.
+  useEffect(() => {
+    reapplyLiveTitles(environment);
+  });
 
   const summaries = useQuery({
     queryKey: ["workspace-summaries"],

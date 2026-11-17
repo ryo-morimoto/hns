@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactElement } from "react";
 import { useRelayEnvironment } from "react-relay";
 import { explainConnection, type LiveConversationState } from "../live/state.ts";
 import type { LiveSocketFactory } from "../live/client.ts";
-import { applyLiveFrameToStore } from "../live/store.ts";
+import { applyLiveFrameToStore, forgetLiveTitle } from "../live/store.ts";
 import { useLiveConnection } from "../live/useLiveConnection.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
 
@@ -52,6 +52,12 @@ export function LiveConnection({
     },
   });
   const previous = useRef(state.status);
+
+  useEffect(() => {
+    return () => {
+      forgetLiveTitle(environment, conversationId);
+    };
+  }, [environment, conversationId]);
 
   useEffect(() => {
     const reconnected = previous.current === "reconnecting" && state.status === "online";
