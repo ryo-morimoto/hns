@@ -63,3 +63,5 @@
 ## 実施結果
 
 - #1 Shell テストの分割（28b84f1）: vitest --project web は 14.50 → 6.16s（−8.3s / −57%）、Shell 系は 1 ファイル 12.5s → 4 ファイル並列 4.2/3.3/3.0/2.3s。web の commit gate 17 → 6.8s。22 tests は 1:1、assertion 82 個の multiset 一致、shuffle でも green。check は 55.3s（test 38.9s）。
+
+- #4 stage 順（2787390）: STAGES を build → test に。指定 build ありの 68.5s → 事前 build なしの 55.4s（−13.1s / −19%）。fresh・dist なしの check が exit 0（reviewer 57.4s、888 tests）。回帰テスト（indexOf build < test）と docs/parallel-change の追記。
