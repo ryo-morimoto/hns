@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
+import { createRegistry, MemoryStorage, type HarnessOptions } from "@earendil-works/pi-durable";
 import type { AgentEvent } from "./events.ts";
 import { openSession } from "./session.ts";
 import type { AgentLiveView, AgentSession } from "./session.ts";
@@ -20,6 +20,7 @@ const START = 1_800_000_000_000;
 async function withSession(
   run: (fixture: Fixture) => Promise<void>,
   events?: AgentEvent[],
+  environment?: HarnessOptions["env"],
 ): Promise<void> {
   const faux = fauxProvider();
   const models = createModels();
@@ -37,6 +38,7 @@ async function withSession(
       request += 1;
       return "request-" + request;
     },
+    env: environment,
     onEvent:
       events === undefined
         ? undefined
@@ -78,6 +80,49 @@ test("conversations are created, listed newest first, and fetched by id", async 
       (await session.listConversations(1)).map((conversation) => conversation.title),
     ).toStrictEqual(["Second"]);
   });
+});
+
+// Catches: the project root stored but never handed to the agent, so relative paths run in the
+// wrong directory.
+test("a conversation's workspace root becomes the agent cwd given to env", async () => {
+  const seen: (string | undefined)[] = [];
+  await withSession(
+    async ({ session }) => {
+      const conversation = await session.createConversation({
+        title: "Rooted",
+        workspaceRoot: "projects/a",
+      });
+      await session.send(conversation.id, "hi");
+    },
+    undefined,
+    (target) => {
+      seen.push(target.cwd);
+      return undefined;
+    },
+  );
+  expect(seen.length).toBeGreaterThan(0);
+  expect(seen.every((cwd) => cwd === "projects/a")).toBe(true);
+});
+
+// Catches: an unknown root invented as the machine ROOT instead of leaving the cwd unset.
+test("a conversation without a workspace root gets no cwd", async () => {
+  const seen: (string | undefined)[] = [];
+  await withSession(
+    async ({ session }) => {
+      const conversation = await session.createConversation({
+        title: "Unrooted",
+        projectId: "p1",
+      });
+      await session.send(conversation.id, "hi");
+    },
+    undefined,
+    (target) => {
+      seen.push(target.cwd);
+      return undefined;
+    },
+  );
+  expect(seen.length).toBeGreaterThan(0);
+  expect(seen.every((cwd) => cwd === undefined)).toBe(true);
 });
 
 test("an invalid conversation id is refused", async () => {

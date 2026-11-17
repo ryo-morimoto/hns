@@ -6,7 +6,11 @@ import type {
   SubmissionId,
   Wake,
 } from "@earendil-works/pi-durable";
-import { InvalidConversationIdError, type AgentSession } from "@hns/agent/session";
+import {
+  InvalidConversationIdError,
+  type AgentSession,
+  type CreateConversationInput,
+} from "@hns/agent/session";
 import { ConversationIdSchema, isoTimestamp, ProjectIdSchema, type Conversation } from "@hns/core";
 import { expect, test, vi } from "vitest";
 import * as v from "valibot";
@@ -106,6 +110,31 @@ test("an invalid body is a typed 400", async () => {
   const response = await handleSessionRpc(post("/rpc/conversations", {}), fake.session);
   expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({ code: "invalid_request" });
+});
+
+// Catches: the project root dropped at the RPC boundary, so the agent gets no cwd.
+test("a conversation is created with the project root the caller hands it", async () => {
+  const seen: CreateConversationInput[] = [];
+  const fake = fakeSession({
+    createConversation: async (input) => {
+      seen.push(input);
+      return CONVERSATION;
+    },
+  });
+  const response = await handleSessionRpc(
+    post("/rpc/conversations", {
+      title: "x",
+      projectId: "p1",
+      workspaceRoot: "projects/p1",
+    }),
+    fake.session,
+  );
+  expect(response.status).toBe(201);
+  expect(seen[0]).toStrictEqual({
+    title: "x",
+    projectId: "p1",
+    workspaceRoot: "projects/p1",
+  });
 });
 
 test("a missing conversation is a typed 404", async () => {

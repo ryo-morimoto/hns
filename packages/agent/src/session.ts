@@ -36,6 +36,15 @@ export const MAX_INPUT_LENGTH = 64 * 1024;
 export interface CreateConversationInput {
   readonly title: string;
   readonly projectId?: string | undefined;
+  /**
+   * The project's workspace root below the machine's ROOT; empty is the ROOT itself.
+   *
+   * @remarks
+   * Internal: it is stored in the conversation's metadata and becomes the agent's `cwd`, but
+   * it is not part of the public {@link Conversation}. Omitted means the root is unknown, and
+   * the environment builder is then given no cwd instead of an invented one.
+   */
+  readonly workspaceRoot?: string | undefined;
 }
 
 /** The options the composition root provides to one workspace Session. */
@@ -134,6 +143,8 @@ export class ConversationNotFoundError extends Error {
 interface ConversationMetadata extends JsonObject {
   readonly title: string;
   readonly projectId: string;
+  /** The project root copied at creation; absent means it was not known (fail closed). */
+  readonly workspaceRoot?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly isArchived: boolean;
@@ -163,6 +174,7 @@ const ConversationIndexDoc = defineDoc<ConversationIndex>({
 const CreateInputSchema: v.GenericSchema<unknown, CreateConversationInput> = v.object({
   title: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200)),
   projectId: v.optional(v.pipe(v.string(), v.minLength(1)), "default"),
+  workspaceRoot: v.optional(v.string()),
 });
 
 const InputSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_INPUT_LENGTH));
@@ -336,7 +348,7 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
     async createConversation(input: CreateConversationInput): Promise<Conversation> {
       const parsed = v.parse(CreateInputSchema, input);
       const createdAt = nowIso();
-      const metadata: ConversationMetadata = {
+      const metadataBase = {
         title: parsed.title,
         projectId: parsed.projectId ?? "default",
         createdAt,
@@ -344,11 +356,19 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
         isArchived: false,
         deletedAt: null,
       };
+      const metadata: ConversationMetadata =
+        parsed.workspaceRoot === undefined
+          ? metadataBase
+          : { ...metadataBase, workspaceRoot: parsed.workspaceRoot };
       const conversation = await harness.createConversation(
         {
           ownership: { kind: "ownerless" },
           init: async (tx, id) => {
             await writeMetadata(tx, id, metadata);
+            // The agent's cwd is the project root; the harness passes it to the env builder.
+            if (parsed.workspaceRoot !== undefined) {
+              await configure(tx, id, { cwd: parsed.workspaceRoot });
+            }
           },
         },
         options.context,

@@ -73,6 +73,14 @@ interface SessionRpcFailure {
 const CreateSchema = v.object({
   title: v.string(),
   projectId: v.optional(v.pipe(v.string(), v.minLength(1)), "default"),
+  /**
+   * The project's workspace root, resolved by the caller from D1.
+   *
+   * @remarks
+   * Optional because the internal face has callers older than project roots; omitted means the
+   * root is unknown, and the conversation gets no agent cwd rather than a guessed one.
+   */
+  workspaceRoot: v.optional(v.string()),
 });
 
 const SendSchema = v.object({
@@ -209,10 +217,15 @@ export async function handleSessionRpc(
         if (!body.ok) return body.response;
         const parsed = v.safeParse(CreateSchema, body.value);
         if (!parsed.success) return failure("invalid_request", "Invalid conversation input.", 400);
-        const input =
+        const base = { title: parsed.output.title };
+        const withProject =
           parsed.output.projectId === undefined
-            ? { title: parsed.output.title }
-            : { title: parsed.output.title, projectId: parsed.output.projectId };
+            ? base
+            : { ...base, projectId: parsed.output.projectId };
+        const input =
+          parsed.output.workspaceRoot === undefined
+            ? withProject
+            : { ...withProject, workspaceRoot: parsed.output.workspaceRoot };
         const conversation = await session.createConversation(input);
         return json({ ok: true, conversation }, 201);
       }
