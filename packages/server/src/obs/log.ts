@@ -1,5 +1,5 @@
 import type { AgentEvent } from "@hns/agent";
-import { isoTimestamp, obsPath, type EventLevel, type ObsLogEntry } from "@hns/core";
+import { isoTimestamp, levelOfStatus, obsPath, type ObsLogEntry } from "@hns/core";
 
 /** The facts of one finished HTTP request. */
 export interface HttpEventInput {
@@ -10,13 +10,6 @@ export interface HttpEventInput {
   readonly durationMs: number;
   /** Epoch milliseconds; tests pass a fixed clock. */
   readonly now: number;
-}
-
-/** The severity of one HTTP answer. */
-function levelOfStatus(status: number): EventLevel {
-  if (status >= 500) return "error";
-  if (status >= 400) return "warn";
-  return "info";
 }
 
 /**

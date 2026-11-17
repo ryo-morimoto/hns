@@ -1,13 +1,10 @@
 import type { AgentSession, IndexMark, PendingIndex, PendingIndexEntry } from "@hns/agent/session";
-import type { Conversation } from "@hns/core";
+import { INDEX_DRAIN_BATCH, type Conversation } from "@hns/core";
 import type {
   ConversationIndex,
   ConversationIndexRow,
   IndexStateRow,
 } from "@hns/store/conversation-index";
-
-/** How many conversations one drain writes before the next RPC or alarm continues. */
-const MAX_INDEX_BATCH = 50;
 
 /** The one failure code recorded in `index_state`; the log line carries the cause. */
 const INDEX_WRITE_FAILED = "d1_write_failed";
@@ -67,7 +64,7 @@ function sameState(left: IndexStateRow, right: IndexStateRow): boolean {
  *
  * @remarks
  * The index is a copy; the object's metadata is the truth. A drain writes at most
- * {@link MAX_INDEX_BATCH} rows and clears each one with a compare-and-set, so a turn that
+ * {@link INDEX_DRAIN_BATCH} rows and clears each one with a compare-and-set, so a turn that
  * commits during the drain stays dirty. A D1 failure never fails the turn: the dirty mark
  * stays, the state row records the backlog, one structured line is logged, and the next RPC or
  * alarm retries (D078 U-04). `index_state` is written only on a transition, not every turn.
@@ -100,7 +97,7 @@ export class SessionIndex {
     this.#attempts += 1;
     let pending: PendingIndex;
     try {
-      pending = await this.#session.pendingIndex(MAX_INDEX_BATCH);
+      pending = await this.#session.pendingIndex(INDEX_DRAIN_BATCH);
     } catch (error) {
       await this.#recordFailure(requestId, error, 0, undefined);
       return;

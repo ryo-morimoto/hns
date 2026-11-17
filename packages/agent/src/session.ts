@@ -16,7 +16,13 @@ import type {
   Tx,
   Wake,
 } from "@earendil-works/pi-durable";
-import { ConversationIdSchema, isoTimestamp, ProjectIdSchema, type Conversation } from "@hns/core";
+import {
+  ConversationIdSchema,
+  INDEX_DRAIN_BATCH,
+  isoTimestamp,
+  ProjectIdSchema,
+  type Conversation,
+} from "@hns/core";
 import * as v from "valibot";
 import type { AgentEventSink } from "./events.ts";
 import { lastAssistantText } from "./transcript.ts";
@@ -33,9 +39,9 @@ export const DEFAULT_TRANSCRIPT_PAGE = 50;
 /** The longest user input accepted by one turn. */
 export const MAX_INPUT_LENGTH = 64 * 1024;
 /** The most conversations one index drain returns; the rest waits for the next drain. */
-export const DEFAULT_INDEX_BATCH = 50;
-/** The largest index batch a caller may ask for. */
-export const MAX_INDEX_BATCH = 500;
+export const DEFAULT_INDEX_BATCH = INDEX_DRAIN_BATCH;
+/** The most conversations one index listing may ask for. */
+export const INDEX_LIST_LIMIT = 500;
 
 /** What to create; projectId is the default project when absent. */
 export interface CreateConversationInput {
@@ -548,7 +554,7 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
       return true;
     },
     async pendingIndex(limit?: number): Promise<PendingIndex> {
-      const batch = cap(limit, DEFAULT_INDEX_BATCH, MAX_INDEX_BATCH);
+      const batch = cap(limit, DEFAULT_INDEX_BATCH, INDEX_LIST_LIMIT);
       const index = await readIndex(harness, options.context);
       const pending: { entry: PendingIndexEntry; legacy: boolean }[] = [];
       for (const [id, meta] of Object.entries(index.items)) {

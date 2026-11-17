@@ -1,5 +1,6 @@
 import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import {
+  ABSENT_VERSION,
   MACHINE_WRITE_UNKNOWN_REASONS,
   OperationIdSchema,
   isoTimestamp,
@@ -16,9 +17,6 @@ import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
 
 /** How long an issued lease stays valid unless renewed. */
 const DEFAULT_LEASE_TTL_MS = 60_000;
-
-/** The expected version that names a path with no recorded version. */
-const ABSENT_VERSION = "absent";
 
 const LEASE_ACTIONS = ["acquire", "renew", "release"] as const;
 type LeaseAction = (typeof LEASE_ACTIONS)[number];

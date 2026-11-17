@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import type { IncomingHttpHeaders } from "node:http";
+import { SIGNED_HEADER_BY_FIELD } from "@hns/core";
 import { MachineRefusal } from "./refusal.ts";
 import {
   parseHealthResult,
@@ -32,6 +33,23 @@ test("the signed headers parse to their wire spelling", () => {
     nonce: "nonce-0123456789abcdef",
     signature: SIGNATURE,
   });
+});
+
+// Catches: the machine parsing a private copy of the signed fields, which would drift from the
+// headers core's signer builds (one renamed header and every request is refused).
+test("every signed field is read from the header core names for it", () => {
+  const parsed = parseSignedHeaders(headers());
+  expect(Object.keys(parsed)).toStrictEqual(Object.keys(SIGNED_HEADER_BY_FIELD));
+  for (const header of Object.values(SIGNED_HEADER_BY_FIELD)) {
+    expect(Object.values(parsed)).toContain(headers()[header]);
+  }
+  // The correlation-id rule the machine id and connection follow is core's, not a copy.
+  expect(() => parseSignedHeaders(headers({ "x-hns-machine": "has space" }))).toThrow(
+    MachineRefusal,
+  );
+  expect(() => parseSignedHeaders(headers({ "x-hns-connection": "x".repeat(129) }))).toThrow(
+    MachineRefusal,
+  );
 });
 
 test("a missing, repeated, or malformed header is refused as unauthorized", () => {

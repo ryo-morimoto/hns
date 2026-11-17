@@ -3,27 +3,18 @@ import type { IncomingHttpHeaders } from "node:http";
 import {
   MachineReadResultSchema,
   MachineWriteRequestSchema,
+  OBS_REQUEST_ID_PATTERN,
   SIGNED_HEADER_BY_FIELD,
 } from "@hns/core";
-import type { JsonValue, MachineReadResult, MachineWriteRequest } from "@hns/core";
+import type { JsonValue, MachineReadResult, MachineWriteRequest, SignedHeaders } from "@hns/core";
 import { MachineRefusal, REFUSAL_CODES } from "./refusal.ts";
 import type { RefusalCode } from "./refusal.ts";
 
 export { SIGNED_HEADERS } from "@hns/core";
-export type { SignedHeaderName } from "@hns/core";
+export type { SignedHeaderName, SignedHeaders } from "@hns/core";
 
-/** The parsed headers of one signed request, each field still on the wire spelling. */
-export interface SignedHeaders {
-  readonly machineId: string;
-  readonly connection: string;
-  /** A positive decimal string; the signature covers the text, not a number. */
-  readonly seq: string;
-  /** Epoch milliseconds as a decimal string. */
-  readonly timestamp: string;
-  readonly nonce: string;
-  /** Base64url of the 64-byte Ed25519 signature. */
-  readonly signature: string;
-}
+/** The header each field arrives in, from the core map. */
+const HEADER_OF: Readonly<Record<keyof SignedHeaders, string>> = SIGNED_HEADER_BY_FIELD;
 
 /** A header value as Node hands it over, before any parsing. */
 const HeaderValue = v.union([v.string(), v.array(v.string()), v.undefined()]);
@@ -37,14 +28,47 @@ const HeaderText = v.pipe(
   v.minLength(1),
 );
 
-const SignedHeadersSchema: v.GenericSchema<unknown, SignedHeaders> = v.object({
-  machineId: v.pipe(HeaderText, v.regex(/^[A-Za-z0-9._:-]{1,128}$/)),
-  connection: v.pipe(HeaderText, v.regex(/^[A-Za-z0-9._:-]{1,128}$/)),
-  seq: v.pipe(HeaderText, v.regex(/^[1-9][0-9]{0,15}$/)),
-  timestamp: v.pipe(HeaderText, v.regex(/^[0-9]{1,16}$/)),
-  nonce: v.pipe(HeaderText, v.regex(/^[\w-]{16,64}$/)),
-  signature: v.pipe(HeaderText, v.regex(/^[\w-]{86}$/)),
-});
+/**
+ * Each signed header as it arrives: exactly once, and matching the rule of the field it carries.
+ *
+ * @remarks
+ * The machine id and the connection follow the edge's correlation-id rule (it is the same safe
+ * printable set); the rest are a sequence, a timestamp, a nonce, and a base64url signature.
+ */
+const SIGNED_HEADER_RULES = {
+  machineId: v.pipe(HeaderText, v.regex(OBS_REQUEST_ID_PATTERN)),
+  connection: v.pipe(HeaderText, v.regex(OBS_REQUEST_ID_PATTERN)),
+  seq: v.pipe(HeaderText, v.regex(/^[1-9][0-9]{0,15}$/u)),
+  timestamp: v.pipe(HeaderText, v.regex(/^[0-9]{1,16}$/u)),
+  nonce: v.pipe(HeaderText, v.regex(/^[\w-]{16,64}$/u)),
+  signature: v.pipe(HeaderText, v.regex(/^[\w-]{86}$/u)),
+} satisfies Record<keyof SignedHeaders, v.GenericSchema<unknown, string>>;
+
+const SignedHeadersSchema: v.GenericSchema<unknown, SignedHeaders> = v.object(SIGNED_HEADER_RULES);
+
+/**
+ * The wire headers keyed by field, each still unparsed.
+ *
+ * @param headers - The request's headers as Node parsed them.
+ * @returns One value per field of {@link SignedHeaders}; the schema refuses a missing or
+ * repeated one.
+ */
+function headerValuesByField(
+  headers: IncomingHttpHeaders,
+): Record<keyof SignedHeaders, string | string[] | undefined> {
+  let values: Record<keyof SignedHeaders, string | string[] | undefined> = {
+    machineId: undefined,
+    connection: undefined,
+    seq: undefined,
+    timestamp: undefined,
+    nonce: undefined,
+    signature: undefined,
+  };
+  for (const [field, header] of Object.entries(HEADER_OF)) {
+    Object.assign(values, { [field]: headers[header] });
+  }
+  return values;
+}
 
 /**
  * Parse the signed headers of one request.
@@ -56,14 +80,7 @@ const SignedHeadersSchema: v.GenericSchema<unknown, SignedHeaders> = v.object({
  * refused rather than guessed.
  */
 export function parseSignedHeaders(headers: IncomingHttpHeaders): SignedHeaders {
-  const parsed = v.safeParse(SignedHeadersSchema, {
-    machineId: headers[SIGNED_HEADER_BY_FIELD.machineId],
-    connection: headers[SIGNED_HEADER_BY_FIELD.connection],
-    seq: headers[SIGNED_HEADER_BY_FIELD.seq],
-    timestamp: headers[SIGNED_HEADER_BY_FIELD.timestamp],
-    nonce: headers[SIGNED_HEADER_BY_FIELD.nonce],
-    signature: headers[SIGNED_HEADER_BY_FIELD.signature],
-  });
+  const parsed = v.safeParse(SignedHeadersSchema, headerValuesByField(headers));
   if (!parsed.success) {
     throw new MachineRefusal("unauthorized", "the request is not signed with the machine headers");
   }

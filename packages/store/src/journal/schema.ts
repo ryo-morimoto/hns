@@ -8,7 +8,7 @@
  * Workspace Durable Object's SQLite, so the DO creates it on open; `@hns/store` owns only the row
  * shape, its parser, and the object-store key for bodies that do not fit in a row.
  */
-import type { MutationUnknownReason } from "@hns/core";
+import { MUTATION_UNKNOWN_REASONS } from "@hns/core";
 
 /** The closed set of entries the Journal stores. */
 export const JOURNAL_KINDS = ["intent", "outcome", "audit", "event"] as const;
@@ -42,12 +42,8 @@ export const JOURNAL_OUTCOME_STATUSES = ["applied", "conflict", "unknown", "deni
 /** One stored outcome status. */
 export type JournalOutcomeStatus = (typeof JOURNAL_OUTCOME_STATUSES)[number];
 
-/** Why an outcome is unknown, taken from the core model. */
-export const JOURNAL_UNKNOWN_REASONS = [
-  "io",
-  "crash",
-  "timeout",
-] as const satisfies readonly MutationUnknownReason[];
+/** Why an outcome is unknown, the machine's list from the core model. */
+export const JOURNAL_UNKNOWN_REASONS = MUTATION_UNKNOWN_REASONS;
 
 /**
  * The largest body that stays in its row: 256KB.

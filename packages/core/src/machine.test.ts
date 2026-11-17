@@ -143,9 +143,9 @@ test("the signed fields come from one header-to-field map", () => {
     seq: "1",
     timestamp: "0",
     nonce: "n",
-    "x-hns-signature": "s",
+    signature: "s",
   };
-  const { ["x-hns-signature"]: _signature, ...fields } = sample;
+  const { signature: _signature, ...fields } = sample;
   const signed: RequestSignature = { ...fields, method: "POST", path: "/rpc", bodyHash: "00" };
   expect(Object.keys(signed)).toStrictEqual([...SIGNED_FIELDS, "method", "path", "bodyHash"]);
 });

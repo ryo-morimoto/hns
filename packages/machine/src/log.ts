@@ -3,6 +3,7 @@ import * as v from "valibot";
 import {
   formatObsLog,
   isoTimestamp,
+  levelOfStatus,
   ObsRequestIdSchema,
   obsPath,
   type ObsLogEntry,
@@ -44,13 +45,6 @@ export function requestIdOf(headers: IncomingHttpHeaders): string | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
   const parsed = v.safeParse(ObsRequestIdSchema, value);
   return parsed.success ? parsed.output : null;
-}
-
-/** The severity of one fs answer. */
-function levelOfStatus(status: number): "info" | "warn" | "error" {
-  if (status >= 500) return "error";
-  if (status >= 400) return "warn";
-  return "info";
 }
 
 /**

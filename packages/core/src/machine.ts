@@ -120,9 +120,8 @@ export type RequestSignature = Readonly<{ [K in SignedField]: string }> & {
  * The signed headers as the verifier parses them: every header-borne field, still on the wire
  * spelling. The signature is one of them; it is not part of the message it authenticates.
  */
-export type SignedHeaders = Readonly<
-  { readonly [K in SignedField]: string } & { readonly "x-hns-signature": string }
->;
+// The signature header carries no field of the message; it is the signature itself.
+export type SignedHeaders = Readonly<Pick<RequestSignature, SignedField> & { signature: string }>;
 
 /**
  * The bytes an Ed25519 signature is computed over.

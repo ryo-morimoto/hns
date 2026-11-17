@@ -1,8 +1,7 @@
+import { OBS_REQUEST_ID_PATTERN } from "@hns/core";
+
 /** The correlation header used on every request and forwarded to downstream hops. */
 export const REQUEST_ID_HEADER = "x-request-id";
-
-/** Printable characters only, bounded so a client cannot inject log lines or huge values. */
-const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/u;
 
 /**
  * Use the inbound id when it is safe, otherwise generate a new one.
@@ -16,7 +15,7 @@ const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/u;
  * character and length check.
  */
 export function resolveRequestId(header: string | null): string {
-  if (header !== null && REQUEST_ID.test(header)) return header;
+  if (header !== null && OBS_REQUEST_ID_PATTERN.test(header)) return header;
   return crypto.randomUUID();
 }
 
