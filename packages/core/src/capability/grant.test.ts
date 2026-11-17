@@ -185,10 +185,9 @@ test("an ECDSA-P256 grant verifies with WebCrypto and is allowed", async () => {
 // a signature that is not even base64url.
 test("a signature that does not verify is grant_invalid", async () => {
   const genuine = await signedGrant();
-  const flipped =
-    genuine.signature.slice(0, -2) +
-    (genuine.signature.endsWith("A") ? "B" : "A") +
-    genuine.signature.slice(-1);
+  // Flip the first character, not one near the end: P-256 signatures are DER and base64url pads the
+  // tail, so a late flip could land in the padding and still verify (about one miss in 65536).
+  const flipped = (genuine.signature.startsWith("A") ? "B" : "A") + genuine.signature.slice(1);
   const cases: SignedGrant[] = [
     { payload: genuine.payload, signature: flipped },
     { payload: genuine.payload, signature: "not base64url!" },
