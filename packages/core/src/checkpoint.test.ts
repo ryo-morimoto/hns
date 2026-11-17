@@ -54,6 +54,7 @@ test("the mirror vocabulary is the closed set the contract names", () => {
     "push_rejected",
     "network",
     "repo_unavailable",
+    "unsupported",
     "unknown",
   ]);
 });
@@ -138,16 +139,23 @@ test("the transition table covers every status and only failed returns to pendin
   expect(new Set(MIRROR_TRANSITIONS.pending)).toStrictEqual(
     new Set<MirrorStatus>(["mirrored", "skipped", "failed"]),
   );
-  expect([...MIRROR_TRANSITIONS.failed]).toStrictEqual(["pending"]);
+  // A retry returns to pending, or straight to mirrored when a re-check finds the commit: the
+  // confirmation lost after a push is one move, not a new push.
+  expect([...MIRROR_TRANSITIONS.failed]).toStrictEqual(["pending", "mirrored"]);
 });
 
 // Catches: a retry recorded from a terminal state, or a mirror that "moves" to where it already is.
 test("pending may fail and mirrored may not", () => {
   expect(canMirrorTransition("pending", "failed")).toBe(true);
   expect(canMirrorTransition("mirrored", "failed")).toBe(false);
+  expect(canMirrorTransition("mirrored", "mirrored")).toBe(false);
   expect(canMirrorTransition("skipped", "pending")).toBe(false);
   expect(canMirrorTransition("failed", "pending")).toBe(true);
-  expect(canMirrorTransition("failed", "mirrored")).toBe(false);
+  // A re-check that finds the commit moves failed straight to mirrored; a failed state never
+  // becomes skipped, because a run over the limits never reaches a push to fail.
+  expect(canMirrorTransition("failed", "mirrored")).toBe(true);
+  expect(canMirrorTransition("failed", "skipped")).toBe(false);
+  expect(canMirrorTransition("failed", "failed")).toBe(false);
   expect(canMirrorTransition("pending", "pending")).toBe(false);
 });
 

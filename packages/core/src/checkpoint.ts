@@ -42,8 +42,9 @@ export type MirrorStatus = (typeof MIRROR_STATUSES)[number];
  * every one of them, so none may fail the checkpoint's acknowledgement. `too_large` is a blob or
  * pack over Artifacts' push limit; `unauthorized` is a refused token; `push_rejected` is the
  * remote refusing the ref; `network` is a transport failure; `repo_unavailable` is the repo
- * binding failing to get or create the repository; `unknown` is a failure the mirror could not
- * classify, kept so the state can be recorded instead of guessed at.
+ * binding failing to get or create the repository; `unsupported` is a request the mirror will
+ * not make (a remote that is not Artifacts' https remote, or another Run's ref); `unknown` is a
+ * failure the mirror could not classify, kept so the state can be recorded instead of guessed at.
  */
 export const MIRROR_FAILURES = [
   "too_large",
@@ -51,6 +52,7 @@ export const MIRROR_FAILURES = [
   "push_rejected",
   "network",
   "repo_unavailable",
+  "unsupported",
   "unknown",
 ] as const;
 
@@ -63,15 +65,17 @@ export type MirrorFailure = (typeof MIRROR_FAILURES)[number];
  * @remarks
  * The table is the state machine, and callers read it from here rather than re-deriving it. A
  * mirror starts `pending` and settles as `mirrored`, is `skipped` when the run is over
- * Artifacts' limits, or `failed`. Only from `failed` does a retry move the mirror back to
- * `pending`. `mirrored` and `skipped` are terminal, so their rows are empty. A status added to
- * {@link MIRROR_STATUSES} does not compile until it has a row here.
+ * Artifacts' limits, or `failed`. From `failed` a retry moves the mirror back to `pending`, or
+ * straight to `mirrored` when a re-check finds the commit at the mirror's ref (a push whose
+ * confirmation was lost): re-checking is not a new push, so it is one move, not a round trip
+ * through `pending`. `mirrored` and `skipped` are terminal, so their rows are empty. A status
+ * added to {@link MIRROR_STATUSES} does not compile until it has a row here.
  */
 export const MIRROR_TRANSITIONS: Readonly<Record<MirrorStatus, readonly MirrorStatus[]>> = {
   pending: ["mirrored", "skipped", "failed"],
   mirrored: [],
   skipped: [],
-  failed: ["pending"],
+  failed: ["pending", "mirrored"],
 };
 
 /**

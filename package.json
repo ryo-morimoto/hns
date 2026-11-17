@@ -36,6 +36,15 @@
           "test/integration/**/*.test.ts"
         ]
       },
+      "packages/workspace": {
+        "entry": [
+          "src/**/*.test.ts",
+          "test/integration/**/*.test.ts"
+        ],
+        "ignoreBinaries": [
+          "openssl"
+        ]
+      },
       "packages/machine": {
         "entry": [
           "src/**/*.test.ts",

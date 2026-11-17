@@ -60,6 +60,44 @@ export type MirrorPushOutcome =
 const GIT_TIMEOUT_MS = 60_000;
 
 /**
+ * Whether a remote is one the mirror will talk to.
+ *
+ * @param remote - The remote a mirror request named.
+ * @returns True only for an `https://` URL with a host and no userinfo.
+ *
+ * @remarks
+ * The machine's `mirror` operation is reachable by whoever holds the device key, and its body
+ * names the remote. Git would happily treat `file:///etc`, an `ssh://` host, or an
+ * `ext::sh -c ...` transport as a remote, which is a way to make the machine read or run
+ * something that is not Artifacts. Only the scheme Artifacts publishes
+ * (`https://<account>.artifacts.cloudflare.net/git/<namespace>/<repo>.git`) passes; the Worker's
+ * side compares the host with the remote its binding issued.
+ *
+ * @internal
+ */
+export function mirrorRemoteUrl(remote: string): URL | undefined {
+  let url: URL;
+  try {
+    url = new URL(remote);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:") return undefined;
+  if (url.hostname === "") return undefined;
+  // A userinfo section would be a credential in a URL, which the token rule forbids.
+  if (url.username !== "" || url.password !== "") return undefined;
+  return url;
+}
+
+/**
+ * The mirror's failure for a request the mirror will not make.
+ *
+ * @remarks
+ * `unsupported` is the contract's word for a remote or ref the mirror refuses before git runs.
+ */
+export const UNSUPPORTED: MirrorFailure = "unsupported";
+
+/**
  * The environment a git process of the mirror runs in.
  *
  * @param remote - The remote the request goes to, for its header key.
@@ -253,6 +291,11 @@ export const isMirrorFailure = (value: string): value is MirrorFailure =>
  */
 export async function pushCheckpoint(request: MirrorPushRequest): Promise<MirrorPushOutcome> {
   const ref = request.ref ?? mirrorRef(request.runId);
+  if (mirrorRemoteUrl(request.remote) === undefined) {
+    // A remote that is not Artifacts' https one is not a mirror: git would read a file, connect
+    // over ssh, or run an ext:: command for whoever holds the device key.
+    return { status: "failed", failure: UNSUPPORTED, ref };
+  }
   const args = pushArgs(request.remote, request.commit, ref);
   if (request.token.length > 0 && args.some((argument) => argument.includes(request.token))) {
     // Not reachable with the argument list above; the guard is what keeps it that way if a
@@ -342,12 +385,19 @@ export interface MirrorConfirmRequest {
 export async function confirmMirror(
   request: MirrorConfirmRequest,
 ): Promise<{ readonly ok: true } | { readonly ok: false; readonly failure: MirrorFailure }> {
+  if (mirrorRemoteUrl(request.remote) === undefined) return { ok: false, failure: UNSUPPORTED };
   const env = mirrorGitEnv(request.remote, request.token);
-  const read = await runGit(request.root, ["ls-remote", request.remote, request.ref], env);
+  // The full ref name, twice: `ls-remote` also matches `<ref>^{}` (the peeled tag), so the
+  // answer has to be exactly one line naming this ref and nothing else.
+  const read = await runGit(
+    request.root,
+    ["ls-remote", request.remote, request.ref, request.ref],
+    env,
+  );
   if (!read.ok) return { ok: false, failure: failureOfGit(read.stderr) };
-  const line = read.stdout.split("\n").find((candidate) => candidate.length > 0);
-  if (line === undefined) return { ok: false, failure: "push_rejected" };
-  const [id, named] = line.split("\t");
+  const lines = read.stdout.split("\n").filter((candidate) => candidate.length > 0);
+  if (lines.length !== 1) return { ok: false, failure: "push_rejected" };
+  const [id, named] = lines[0]?.split("\t") ?? [];
   if (named !== request.ref) return { ok: false, failure: "push_rejected" };
   return id === request.commit ? { ok: true } : { ok: false, failure: "push_rejected" };
 }

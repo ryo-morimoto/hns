@@ -9,7 +9,7 @@ import type { RootIdentity } from "@hns/workspace";
 import { CheckpointError, checkpointRun } from "@hns/workspace/checkpoint";
 import type { Checkpoint } from "@hns/workspace/checkpoint";
 import { mirrorRef } from "@hns/workspace/mirror";
-import { pushCheckpoint } from "@hns/workspace/mirror-push";
+import { mirrorRemoteUrl, pushCheckpoint } from "@hns/workspace/mirror-push";
 import { GIT_OBJECT_TYPES, type GitObject, type GitObjectType } from "@hns/workspace/objects";
 import { fitsCheckpointPack, type MachineWriteRequest, type MachineWriteResult } from "@hns/core";
 import { containInRoot } from "./containment.ts";
@@ -263,6 +263,13 @@ async function mirrorPath(
   signal.throwIfAborted();
   if (operation.ref !== mirrorRef(operation.runId)) {
     throw new MachineRefusal("invalid_request", "the ref is not the Run's mirror branch");
+  }
+  if (mirrorRemoteUrl(operation.remote) === undefined) {
+    // The device key's holder names the remote. Only Artifacts' https remote is a mirror: a
+    // `file://`, an `ssh://`, or an `ext::` transport would make the machine read or run
+    // something that is not the mirror, so it is refused before the commit is even measured
+    // (and `pushCheckpoint` repeats the check for any other caller).
+    return { status: "failed", failure: "unsupported", ref: operation.ref };
   }
   await assertRootIdentity(root, identity);
   const packed = await runGitPack(root, operation.commit).catch(() => undefined);
