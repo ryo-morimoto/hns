@@ -62,11 +62,21 @@ interface PolicyProposalView {
   readonly diff: PolicyDiff;
 }
 
-/** An approved decision: the new active revision and the diff that was approved. */
+/**
+ * An approved decision: the new active revision and the diff that was approved.
+ *
+ * @remarks
+ * `proposalStale` says the **policy moved but the proposal record did not close**: the swap
+ * succeeded and the candidate is active, while another decision had already decided this proposal
+ * row in between, so this call could not also stamp it. The approval is real and must not be
+ * retried (a retry is `approval_stale` against the moved pointer, which would tell the caller the
+ * policy did not move when it did). An auditor reads the decision from the revision's row.
+ */
 interface PolicyApproval {
   readonly revision: PolicyRevision;
   readonly proposal: PolicyProposal;
   readonly diff: PolicyDiff;
+  readonly proposalStale?: true;
 }
 
 /** A rejected decision: the closed proposal and the diff the human refused. */
@@ -300,36 +310,31 @@ export function createPolicyService(options: PolicyServiceOptions): PolicyServic
           ? failure("approval_stale", "the proposal is already decided")
           : { ok: true, proposal: decided, diff };
       }
-      const appended = await policy.append({
+      // One atomic write: the revision and the pointer move together, or neither moves.
+      const activation = await policy.activate({
         workspaceId: proposal.workspaceId,
+        baseRevision: proposal.baseRevision,
+        baseHash: proposal.baseHash,
         revision: proposal.baseRevision + 1,
         hash: proposal.candidateHash,
         document: proposal.candidate,
         createdAt: now(),
         createdBy: actor.id,
       });
-      if (!appended) {
-        return failure(
-          "approval_stale",
-          "revision " + String(proposal.baseRevision + 1) + " is already stored",
-        );
-      }
-      const swapped = await policy.activate({
-        workspaceId: proposal.workspaceId,
-        baseRevision: proposal.baseRevision,
-        revision: proposal.baseRevision + 1,
-        hash: proposal.candidateHash,
-      });
-      if (!swapped) {
+      if (activation !== "activated") {
         return failure("approval_stale", "the active policy moved during the swap");
       }
+      // The policy already moved. A failure to stamp the proposal row must not be reported as a
+      // refused approval: the caller would retry, and the retry would answer `approval_stale`
+      // against the revision this call just activated.
       const decided = await close(proposal.id, actor, input.reason, "approved");
-      if (decided === undefined) {
-        return failure("approval_stale", "the proposal is already decided");
-      }
+      const stored = decided ?? (await policy.proposal(proposal.id));
+      if (stored === undefined) throw new Error("the decided proposal is missing");
       const revision = await policy.revision(proposal.workspaceId, proposal.baseRevision + 1);
       if (revision === undefined) throw new Error("the activated revision is missing");
-      return { ok: true, revision, proposal: decided, diff };
+      return decided === undefined
+        ? { ok: true, revision, proposal: stored, diff, proposalStale: true }
+        : { ok: true, revision, proposal: decided, diff };
     },
   };
 }

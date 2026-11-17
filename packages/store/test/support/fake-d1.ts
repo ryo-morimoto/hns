@@ -2,16 +2,20 @@
    anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type --
    This adapter is the D1 boundary: rows and bindings are unknown until a caller parses them. */
 import { DatabaseSync } from "node:sqlite";
-import type { D1Binding } from "@hns/store";
 import * as v from "valibot";
+import type { D1Binding } from "../../src/sql.ts";
 
 /**
  * A D1 binding over an in-memory `node:sqlite` database.
  *
  * @remarks
- * The cost ledger's SQL, constraints, and migration run for real here; only D1's wire shape
- * (rows under `results`, changes under `meta.changes`) is emulated. A scenario that needs
- * workerd stays in `test/integration/`.
+ * The SQL, constraints, and migrations of whichever package under test run for real here; only
+ * D1's wire shape (rows under `results`, changes under `meta.changes`) is emulated. A scenario
+ * that needs workerd stays in `test/integration/`.
+ *
+ * It lives in `@hns/store`'s support because `D1Binding` is the store's own boundary type. A
+ * server test that needs a control database imports this; the store never imports a server test
+ * file, which would point the dependency backwards (`docs/packages.md`).
  */
 export interface FakeD1 {
   readonly db: D1Binding;

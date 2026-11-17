@@ -8,7 +8,7 @@ import { openSession } from "@hns/agent/session";
 import type { D1Binding } from "@hns/store";
 import { expect, test } from "vitest";
 import * as v from "valibot";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { Session, type SessionRuntimeFactory } from "./session.ts";
 import type { SessionEnv, SessionState } from "./state.ts";

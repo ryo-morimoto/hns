@@ -6,7 +6,7 @@ import type { D1Binding } from "@hns/store";
 import { openConversationIndex } from "@hns/store/conversation-index";
 import * as v from "valibot";
 import { expect, test, vi } from "vitest";
-import { openFakeD1, type FakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1, type FakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { createObsStore } from "../obs/store.ts";
 import { Session } from "./session.ts";

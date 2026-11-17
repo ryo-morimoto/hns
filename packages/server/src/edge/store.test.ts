@@ -3,7 +3,7 @@ import { openStore } from "@hns/store";
 import * as v from "valibot";
 import { expect, test } from "vitest";
 import { envWith } from "../../test/support/edge.ts";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { projectFor, StoreUnavailableError } from "./store.ts";
 
 const id = (value: string) => v.parse(ProjectIdSchema, value);

@@ -25,6 +25,11 @@ import type {
  * A document whose form this module cannot compare — a glob, a path that does not normalize, a
  * tool with no policy, an egress host entry this contract does not know — has **no atoms**, and
  * `diffPolicy` answers `unsupported`: an expansion must never be hidden as `narrowing` or `equal`.
+ *
+ * An **unknown tool** does not reach this module: `PolicyDocumentSchema` is a strict object whose
+ * `tools` names exactly `read_file`, `write_file`, and `bash`, so a document naming any other tool
+ * is refused at the boundary before an atom is computed. `unsupported` here is the answer for a
+ * tool or scope this contract knows but cannot compare, not for one it has never heard of.
  */
 
 const TOOL_FIELDS = ["read_file", "write_file", "bash"] as const;

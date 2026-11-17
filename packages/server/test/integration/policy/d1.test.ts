@@ -169,6 +169,79 @@ test("a stale approval on the real D1 reports approval_stale and moves nothing",
   });
 });
 
+// Catches: a stale approval that writes the revision but loses the swap, leaving an orphan revision
+// that the next approval would collide with — the workspace would then be stuck, not closed.
+test("a stale approval on the real D1 writes no revision at all", async () => {
+  await withStore(async (store) => {
+    const service = serviceOver(store);
+    const first = await service.ensure(WORKSPACE);
+    // The write the service would make for a decision built on revision 1, made after the base has moved.
+    const moved = await store.policy.activate({
+      workspaceId: WORKSPACE,
+      baseRevision: first.revision,
+      baseHash: first.hash,
+      revision: 2,
+      hash: "c".repeat(64),
+      document: first.document,
+      createdAt: isoTimestamp("2026-01-01T00:00:00.000Z"),
+      createdBy: "human-1",
+    });
+    expect(moved).toBe("activated");
+    const stale = await store.policy.activate({
+      workspaceId: WORKSPACE,
+      baseRevision: 1,
+      baseHash: first.hash,
+      revision: 3,
+      hash: "d".repeat(64),
+      document: first.document,
+      createdAt: isoTimestamp("2026-01-01T00:00:00.000Z"),
+      createdBy: "human-1",
+    });
+    expect(stale).toBe("stale");
+    expect((await store.policy.active(WORKSPACE))?.revision).toBe(2);
+    // Exactly the two revisions the successful activation wrote; the stale one wrote none.
+    expect(
+      (await store.policy.revisions(WORKSPACE)).map((revision) => revision.revision),
+    ).toStrictEqual([1, 2]);
+  });
+});
+
+// Catches: a proposal row that another decision closed after this one's checks, being reported as a
+// failed approval even though the pointer had already moved (the caller would then retry and be told
+// `approval_stale` about its own success).
+test("a decision on a proposal another decision closed first is approved, not refused", async () => {
+  await withStore(async (store) => {
+    const service = serviceOver(store);
+    await service.ensure(WORKSPACE);
+    const proposed = await service.propose(AGENT, {
+      workspaceId: WORKSPACE,
+      candidate: wider(),
+      reason: "read the docs",
+    });
+    expect(proposed.ok).toBe(true);
+    if (!proposed.ok) return;
+    const decided = await service.decide(HUMAN, {
+      proposalId: proposed.proposal.id,
+      decision: "approve",
+      reason: "ok",
+    });
+    expect(decided.ok).toBe(true);
+    if (!decided.ok || !("revision" in decided)) return;
+    // This call closed the row itself, so there is no stale proposal to report.
+    expect(decided.proposalStale).toBeUndefined();
+    // A second decision now sees a moved pointer and refuses without writing anything.
+    const again = await service.decide(HUMAN, {
+      proposalId: proposed.proposal.id,
+      decision: "approve",
+      reason: "ok",
+    });
+    expect(again.ok).toBe(false);
+    if (again.ok) return;
+    expect(again.code).toBe("approval_stale");
+    expect((await store.policy.revisions(WORKSPACE)).length).toBe(2);
+  });
+});
+
 test("an agent principal cannot approve on the real D1", async () => {
   await withStore(async (store) => {
     const service = serviceOver(store);

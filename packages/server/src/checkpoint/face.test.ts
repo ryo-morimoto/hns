@@ -3,7 +3,7 @@ import { createCheckpointFace } from "./face.ts";
 import type { CheckpointRequest } from "../edge/handler.ts";
 import type { DurableObjectNamespace } from "../edge/env.ts";
 import { openStore } from "@hns/store";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { envWith, sessionCookie } from "../../test/support/edge.ts";
 
 const BASE = "https://hns.test";

@@ -1,9 +1,10 @@
+import assert from "node:assert/strict";
 import { migrateStore } from "../migrate.ts";
 import type { PolicyDocument, PolicyRevision } from "@hns/core/capability";
 import { policyHash } from "@hns/core/capability";
 import { isoTimestamp } from "@hns/core";
 import { beforeEach, describe, expect, test } from "vitest";
-import { openFakeD1, type FakeD1 } from "../../../server/test/support/d1.ts";
+import { openFakeD1, type FakeD1 } from "../../test/support/fake-d1.ts";
 import { clock, counter } from "../../test/support.ts";
 import { policyRepository, type PolicyRepository, type PolicySeed } from "./policy.ts";
 import { createContext } from "../db.ts";
@@ -76,45 +77,83 @@ describe("the policy rows in real SQLite", () => {
     expect(second.hash).toBe(first.hash);
   });
 
-  // Catches: a compare-and-swap that moves the pointer whatever revision is active.
+  // Catches: an append that replaces a stored revision, or a swap of the same number that does.
   test("activate moves the pointer only while the base revision is active", async () => {
-    await policy.ensure(WORKSPACE, await seed());
+    const first = await policy.ensure(WORKSPACE, await seed());
     const next = await revisionAt(2, CANDIDATE);
-    await policy.append(next);
     expect(
       await policy.activate({
         workspaceId: WORKSPACE,
-        baseRevision: 2,
-        revision: 2,
+        baseRevision: first.revision,
+        baseHash: first.hash,
+        revision: next.revision,
         hash: next.hash,
+        document: next.document,
+        createdAt: next.createdAt,
+        createdBy: next.createdBy,
       }),
-    ).toBe(false);
-    expect((await policy.active(WORKSPACE))?.revision).toBe(1);
+    ).toBe("activated");
+    expect((await policy.active(WORKSPACE))?.revision).toBe(2);
+    // The same base can never move the pointer a second time, and the same number is not rewritten.
     expect(
       await policy.activate({
         workspaceId: WORKSPACE,
-        baseRevision: 1,
-        revision: 2,
+        baseRevision: first.revision,
+        baseHash: first.hash,
+        revision: next.revision,
         hash: next.hash,
+        document: next.document,
+        createdAt: next.createdAt,
+        createdBy: next.createdBy,
       }),
-    ).toBe(true);
-    const active = await policy.active(WORKSPACE);
-    expect(active?.revision).toBe(2);
-    expect(active?.hash).toBe(next.hash);
+    ).toBe("exists");
+    expect((await policy.revision(WORKSPACE, 2))?.document).toStrictEqual(CANDIDATE);
   });
 
-  // Catches: an append that replaces a stored revision.
-  test("a revision is append-only: the same number cannot be written twice", async () => {
+  // Catches: an approval that appends the revision but loses the swap, leaving an orphan that every
+  // later approval would collide with ("fail stuck", not "fail closed").
+  test("a stale activate writes neither the revision nor the pointer", async () => {
     await policy.ensure(WORKSPACE, await seed());
+    const before = await policy.active(WORKSPACE);
     const next = await revisionAt(2, CANDIDATE);
-    expect(await policy.append(next)).toBe(true);
     expect(
-      await policy.append({
-        ...next,
-        document: { v: 1, tools: {}, egress: { enabled: false, hosts: [] } },
+      await policy.activate({
+        workspaceId: WORKSPACE,
+        // The base this decision was built on is gone: another decision moved it first.
+        baseRevision: 99,
+        baseHash: "0".repeat(64),
+        revision: next.revision,
+        hash: next.hash,
+        document: next.document,
+        createdAt: next.createdAt,
+        createdBy: next.createdBy,
       }),
-    ).toBe(false);
-    expect((await policy.revision(WORKSPACE, 2))?.document).toStrictEqual(CANDIDATE);
+    ).toBe("stale");
+    expect(await policy.active(WORKSPACE)).toStrictEqual(before);
+    expect((await policy.revisions(WORKSPACE)).length).toBe(1);
+    expect(await policy.revision(WORKSPACE, 2)).toBeUndefined();
+  });
+
+  // Catches: a swap that matches only the revision number, so a same-numbered but different base passes.
+  test("activate does not swap when the base hash differs", async () => {
+    await policy.ensure(WORKSPACE, await seed());
+    const active = await policy.active(WORKSPACE);
+    assert.ok(active !== undefined);
+    const next = await revisionAt(2, CANDIDATE);
+    expect(
+      await policy.activate({
+        workspaceId: WORKSPACE,
+        baseRevision: active.revision,
+        baseHash: "1".repeat(64),
+        revision: next.revision,
+        hash: next.hash,
+        document: next.document,
+        createdAt: next.createdAt,
+        createdBy: next.createdBy,
+      }),
+    ).toBe("stale");
+    expect((await policy.active(WORKSPACE))?.hash).toBe(active.hash);
+    expect(await policy.revision(WORKSPACE, 2)).toBeUndefined();
   });
 
   test("a proposal keeps its pending status until a decision, and only a pending one moves", async () => {

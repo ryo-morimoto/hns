@@ -4,7 +4,7 @@ import { isoTimestamp } from "@hns/core";
 import type { AgentSession } from "@hns/agent/session";
 import type { SessionEnv } from "./state.ts";
 import { expect, test, vi } from "vitest";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { createObsStore } from "../obs/store.ts";
 import { auditSink, createPolicyAudit, type PolicyAudit } from "./audit.ts";

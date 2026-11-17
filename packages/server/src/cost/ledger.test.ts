@@ -1,6 +1,6 @@
 import { migrateStore, type D1Binding } from "@hns/store";
 import { expect, test } from "vitest";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import {
   monthBounds,
   readMonthlyTotal,

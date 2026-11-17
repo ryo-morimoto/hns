@@ -1,6 +1,6 @@
 import { migrateStore, type D1Binding } from "@hns/store";
 import { expect, test } from "vitest";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { limitFor, readCostLimits } from "./limits.ts";
 
 /** A database with the migrations applied and its closer. */

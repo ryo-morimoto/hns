@@ -18,6 +18,7 @@ export type { WorkflowRepository } from "./repositories/workflows.ts";
 export type { AutomationRepository } from "./repositories/automations.ts";
 export type {
   PolicyActivation,
+  PolicyActivationResult,
   PolicyActive,
   PolicyProposalInput,
   PolicyRepository,

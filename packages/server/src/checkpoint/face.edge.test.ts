@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import * as v from "valibot";
 import type { DurableObjectNamespace } from "../edge/env.ts";
 import { createEdge, type HandlerDependencies } from "../edge/handler.ts";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { envWith, sessionCookie } from "../../test/support/edge.ts";
 import { createCheckpointFace } from "./face.ts";
 

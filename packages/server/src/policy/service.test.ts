@@ -3,6 +3,7 @@ import { isoTimestamp, type IsoTimestamp } from "@hns/core";
 import type { PolicyDocument, PolicyRevision, ToolPolicy } from "@hns/core/capability";
 import type {
   PolicyActivation,
+  PolicyActivationResult,
   PolicyActive,
   PolicyProposalInput,
   PolicyRepository,
@@ -85,23 +86,34 @@ function fakeRepository(): FakeRepository {
         .filter((revision) => revision.workspaceId === workspaceId)
         .sort((left, right) => left.revision - right.revision);
     },
-    async append(revision: PolicyRevision): Promise<boolean> {
-      if (revisions.has(key(revision.workspaceId, revision.revision))) return false;
-      revisions.set(key(revision.workspaceId, revision.revision), revision);
-      return true;
-    },
-    async activate(activation: PolicyActivation): Promise<boolean> {
+    async activate(activation: PolicyActivation): Promise<PolicyActivationResult> {
       beforeActivate?.();
       beforeActivate = undefined;
       const current = active;
-      if (current === undefined || current.revision !== activation.baseRevision) return false;
+      // Both writes are guarded by the same precondition, as the SQL is: a stale base writes nothing.
+      if (
+        current === undefined ||
+        current.revision !== activation.baseRevision ||
+        current.hash !== activation.baseHash
+      ) {
+        return "stale";
+      }
+      if (revisions.has(key(activation.workspaceId, activation.revision))) return "exists";
+      revisions.set(key(activation.workspaceId, activation.revision), {
+        workspaceId: activation.workspaceId,
+        revision: activation.revision,
+        hash: activation.hash,
+        document: activation.document,
+        createdAt: activation.createdAt,
+        createdBy: activation.createdBy,
+      });
       active = {
         workspaceId: activation.workspaceId,
         revision: activation.revision,
         hash: activation.hash,
         updatedAt: at(),
       };
-      return true;
+      return "activated";
     },
     async createProposal(input: PolicyProposalInput): Promise<StoredPolicyProposal> {
       const created = at();
@@ -546,6 +558,34 @@ test("a stored proposal whose diff is unsupported cannot be approved", async () 
   expect(fake.active?.hash).toBe(active.hash);
   expect((await fake.repository.revisions(WORKSPACE)).length).toBe(1);
   expect((await fake.repository.proposal(proposed.proposal.id))?.status).toBe("pending");
+});
+
+test("an approval whose proposal row closes under it still reports the revision it activated", async () => {
+  const { service, fake } = open();
+  await service.ensure(WORKSPACE);
+  const proposed = await service.propose(AGENT, {
+    workspaceId: WORKSPACE,
+    candidate: withReadRoot("docs"),
+    reason: "read the docs",
+  });
+  assert.ok(proposed.ok);
+  // Another decision closes the row after this decision's currency checks and before its swap.
+  fake.beforeActivate = () => {
+    const stored = fake.proposals.get(proposed.proposal.id);
+    assert.ok(stored !== undefined);
+    fake.proposals.set(proposed.proposal.id, { ...stored, status: "rejected" });
+  };
+  const result = await service.decide(HUMAN, {
+    proposalId: proposed.proposal.id,
+    decision: "approve",
+    reason: "ok",
+  });
+  // The pointer moved: the answer is a success that says the proposal row did not close here.
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.ok("revision" in result);
+  expect(result.revision.revision).toBe(2);
+  expect(result.proposalStale).toBe(true);
+  expect(fake.active?.revision).toBe(2);
 });
 
 test("a rejection closes the proposal and leaves the active policy alone", async () => {

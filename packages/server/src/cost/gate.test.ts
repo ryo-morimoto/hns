@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { migrateStore, type D1Binding } from "@hns/store";
 import { expect, test } from "vitest";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import type { CostAlert } from "./alerts.ts";
 import {

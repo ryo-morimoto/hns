@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { openStore } from "@hns/store";
 import * as v from "valibot";
-import { openFakeD1 } from "../../test/support/d1.ts";
+import { openFakeD1 } from "../../../store/test/support/fake-d1.ts";
 import { fakeMachine, versionOfText, type FakeMachine } from "../../test/support/machine.ts";
 import { openSqliteState, type TestSqliteState } from "../../test/support/sqlite.ts";
 import { Workspace } from "../do/workspace.ts";
