@@ -336,6 +336,8 @@ export class Workspace {
   readonly #leaseTtlMs: number;
   readonly #journal: Journal;
   readonly #files: MachineFiles | undefined;
+  /** The queue that serializes the calls which can decide the project binding. */
+  #bindingQueue: Promise<void> = Promise.resolve();
   readonly #ready: Promise<void>;
 
   /**
@@ -536,6 +538,11 @@ export class Workspace {
    * is recorded as `unknown` and is not rounded.
    */
   async #apply(request: Request): Promise<Response> {
+    return await this.#serializedByBinding(async () => await this.#applyOnce(request));
+  }
+
+  /** One apply, run under the binding queue when the workspace has no project yet. */
+  async #applyOnce(request: Request): Promise<Response> {
     const body = await bodyOf(request);
     if (!body.ok) return body.response;
     const parsed = v.safeParse(ApplySchema, body.value);
@@ -702,6 +709,11 @@ export class Workspace {
    * workspace (an agent's shell) shows up as `externalChange` and the next save conflicts.
    */
   async #read(url: URL, request: Request): Promise<Response> {
+    return await this.#serializedByBinding(async () => await this.#readOnce(url, request));
+  }
+
+  /** One read, run under the binding queue when the workspace has no project yet. */
+  async #readOnce(url: URL, request: Request): Promise<Response> {
     const files = this.#files;
     if (files === undefined) {
       return failure("unavailable", "The machine is not configured.", 503);
@@ -782,6 +794,9 @@ export class Workspace {
    * written without them (an older face, or a manual repair) the cache is filled in here, in
    * one transaction, so a retry converges. A conflict, unknown, or denied outcome needs nothing
    * beyond its own record.
+   *
+   * The repair emits `changed` because the outcome does not record whether the write created
+   * the file; a watcher re-hashes the path anyway, so the approximation does not hide a change.
    */
   async #settledResponse(entry: JournalOutcomeEntry, projectRoot: string): Promise<Response> {
     if (entry.status !== "applied") return outcomeResponse(entry);
@@ -798,6 +813,34 @@ export class Workspace {
       });
     });
     return outcomeResponse(entry);
+  }
+
+  /**
+   * Run one call while the workspace has no project binding, one at a time.
+   *
+   * @param work - The whole call: the binding check, the machine call, and the settle.
+   * @returns The call's answer.
+   *
+   * @remarks
+   * The binding is written by the call that commits the fact justifying it (an applied
+   * outcome, or a successful read), which happens near the end of the call. Without this
+   * queue, two concurrent first calls could both pass the unbound check, both reach the
+   * machine, and the loser's bind would roll its outcome back, leaving a pending intent that
+   * blocks the checkpoint watermark. Once bound, the check is enough and no queue is taken.
+   */
+  async #serializedByBinding<T>(work: () => Promise<T>): Promise<T> {
+    if (this.#meta("project_root") !== undefined) return await work();
+    const previous = this.#bindingQueue;
+    let release: () => void = () => {};
+    this.#bindingQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
   }
 
   /**

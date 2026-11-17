@@ -671,3 +671,63 @@ test("a read beyond the bound is a 413, not a 404", async () => {
     h.close();
   }
 });
+// Catches: two concurrent first writes with different projects both reaching the machine, so
+// the loser's bind rolls its outcome back and leaves a pending intent that stops the watermark.
+test("concurrent first writes with different project roots bind once", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    const responses = await Promise.all([
+      h.workspace.fetch(
+        post("/rpc/apply", applyBody({ operationId: "op-a", projectRoot: "one", path: "a.txt" })),
+      ),
+      h.workspace.fetch(
+        post("/rpc/apply", applyBody({ operationId: "op-b", projectRoot: "two", path: "b.txt" })),
+      ),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toStrictEqual([200, 400]);
+    expect(h.machine.writes).toHaveLength(1);
+    expect(await journalCounts(h)).toStrictEqual({ intent: 1, outcome: 1, event: 1 });
+    // No attempt is left pending, so a checkpoint can truncate the journal.
+    const written = await h.journal.writeWatermark(100);
+    expect(written.watermark.throughSeq).toBe(100);
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: the same hole between a first read and a first write of another project.
+test("a concurrent first read and write bind once", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    const responses = await Promise.all([
+      h.workspace.fetch(post("/rpc/apply", applyBody({ projectRoot: "one", path: "a.txt" }))),
+      h.workspace.fetch(get("/rpc/read?projectRoot=two&path=b.txt")),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toStrictEqual([200, 400]);
+    expect(h.machine.writes.length + h.machine.reads.length).toBe(1);
+    const written = await h.journal.writeWatermark(100);
+    expect(written.watermark.throughSeq).toBe(100);
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a too-large write recorded as a plain denial instead of a 413.
+test("a too-large write is a 413 denial", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    h.machine.tooLargeNext();
+    const response = await h.workspace.fetch(post("/rpc/apply", applyBody()));
+    expect(response.status).toBe(413);
+    expect(v.parse(ProtocolFailure, await response.json()).code).toBe("payload_too_large");
+    // The outcome is recorded, so the retry returns the same answer and the watermark can pass.
+    const retry = await h.workspace.fetch(post("/rpc/apply", applyBody()));
+    expect(retry.status).toBe(413);
+    expect(await journalCounts(h)).toStrictEqual({ intent: 1, outcome: 1 });
+  } finally {
+    h.close();
+  }
+});
