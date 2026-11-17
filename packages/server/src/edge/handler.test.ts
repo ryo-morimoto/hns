@@ -9,6 +9,7 @@ import {
   type GraphQLRequest,
   type HandlerDependencies,
 } from "./handler.ts";
+import type { AssetFetcher } from "./env.ts";
 import { DEFAULT_LIMITS } from "./limits.ts";
 
 const BASE = "https://hns.test";
@@ -56,6 +57,46 @@ async function expectProblem(response: Response, status: number, code: string): 
   expect(await response.json()).toMatchObject({ code });
   expect(response.headers.get("access-control-allow-origin")).toBeNull();
 }
+
+interface FakeAssets {
+  readonly fetcher: AssetFetcher;
+  readonly requests: string[];
+}
+
+/** An asset layer that answers by pathname; an unknown path is a 404 like the real one. */
+function assetsAt(routes: Readonly<Record<string, () => Response>>): FakeAssets {
+  const requests: string[] = [];
+  return {
+    requests,
+    fetcher: {
+      fetch(request: Request): Promise<Response> {
+        const path = new URL(request.url).pathname;
+        requests.push(path);
+        const make = routes[path];
+        if (make === undefined) return Promise.resolve(new Response("not found", { status: 404 }));
+        const response = make();
+        if (request.method === "HEAD") {
+          return Promise.resolve(
+            new Response(null, { status: response.status, headers: response.headers }),
+          );
+        }
+        return Promise.resolve(response);
+      },
+    },
+  };
+}
+
+const indexHtml = (): Response =>
+  new Response('<!doctype html><div id="root"></div>', {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+
+const hashedScript = (): Response =>
+  new Response("console.log(1)", {
+    status: 200,
+    headers: { "content-type": "text/javascript" },
+  });
 
 // Catches: an unauthenticated request reaching a face handler.
 test("an unauthenticated GraphQL request is denied before the handler", async () => {
@@ -141,6 +182,114 @@ test("GET /ws with a session reaches the ws handler", async () => {
   assert.ok(called !== undefined);
   expect(called.session.subject).toBe("owner");
   expect(called.requestId).toBe(response.headers.get("x-request-id"));
+});
+
+// Catches: a deep link losing the shell on reload, or the shell being cached across a deploy.
+test("a navigation to an unknown path is answered with the no-cache shell", async () => {
+  const assets = assetsAt({ "/index.html": indexHtml });
+  const response = await createEdge(recordingDeps().deps)(
+    get("/p/a/c/b", { accept: "text/html,application/xhtml+xml" }),
+    envWith({ assets: assets.fetcher }),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain('id="root"');
+  expect(assets.requests).toStrictEqual(["/p/a/c/b", "/index.html"]);
+  expect(response.headers.get("cache-control")).toBe("no-cache");
+  expect(response.headers.get("content-security-policy")).toContain("script-src 'self'");
+  expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(response.headers.get("referrer-policy")).toBe("same-origin");
+  expect(response.headers.get("permissions-policy")).toContain("camera=()");
+  expect(response.headers.get("access-control-allow-origin")).toBeNull();
+});
+
+// Catches: a missing hashed script answered with HTML, which hides a broken deploy.
+test("a hashed asset is immutable and a missing asset stays a 404", async () => {
+  const assets = assetsAt({ "/assets/app-abc123.js": hashedScript });
+  const edge = createEdge(recordingDeps().deps);
+  const asset = await edge(get("/assets/app-abc123.js"), envWith({ assets: assets.fetcher }));
+  expect(asset.status).toBe(200);
+  expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+
+  const missing = await edge(
+    get("/assets/missing.js", { accept: "text/html" }),
+    envWith({ assets: assets.fetcher }),
+  );
+  expect(missing.status).toBe(404);
+  expect(await missing.text()).not.toContain('id="root"');
+  expect(assets.requests).toStrictEqual(["/assets/app-abc123.js", "/assets/missing.js"]);
+});
+
+// Catches: the SPA fallback swallowing a missing asset instead of only a navigation.
+test("only a navigation falls back to the shell", async () => {
+  const assets = assetsAt({ "/index.html": indexHtml });
+  const edge = createEdge(recordingDeps().deps);
+  const plain = await edge(get("/unknown"), envWith({ assets: assets.fetcher }));
+  expect(plain.status).toBe(404);
+  const navigation = await edge(
+    get("/unknown", { accept: "text/html" }),
+    envWith({ assets: assets.fetcher }),
+  );
+  expect(navigation.status).toBe(200);
+  expect(await navigation.text()).toContain('id="root"');
+  expect(assets.requests).toStrictEqual(["/unknown", "/unknown", "/index.html"]);
+});
+
+// Catches: the login route being a 404 instead of the shell that 0108 mounts.
+test("GET /login is served the shell", async () => {
+  const assets = assetsAt({ "/index.html": indexHtml });
+  const response = await createEdge(recordingDeps().deps)(
+    get("/login?next=%2Fp%2Fa", { accept: "text/html" }),
+    envWith({ assets: assets.fetcher }),
+  );
+  expect(response.status).toBe(200);
+  expect(assets.requests).toStrictEqual(["/login", "/index.html"]);
+  expect(response.headers.get("cache-control")).toBe("no-cache");
+});
+
+// Catches: the fallback answering an API or WebSocket path with the HTML shell.
+test("the faces and /assets are never answered by the shell", async () => {
+  const assets = assetsAt({ "/index.html": indexHtml });
+  const edge = createEdge(recordingDeps().deps);
+  const env = envWith({ assets: assets.fetcher });
+
+  await expectProblem(
+    await edge(get("/api/unknown", { accept: "text/html" }), env),
+    404,
+    "not_found",
+  );
+  await expectProblem(
+    await edge(get("/graphql", { accept: "text/html" }), env),
+    405,
+    "method_not_allowed",
+  );
+  await expectProblem(await edge(get("/ws", { accept: "text/html" }), env), 401, "unauthorized");
+  expect((await edge(get("/assets", { accept: "text/html" }), env)).status).toBe(404);
+  expect((await edge(get("/graphql/", { accept: "text/html" }), env)).status).toBe(404);
+  expect(assets.requests).toStrictEqual(["/assets", "/graphql/"]);
+});
+
+// Catches: the root document being cached across a deploy.
+test("the root document is revalidated", async () => {
+  const assets = assetsAt({ "/": indexHtml, "/index.html": indexHtml });
+  const response = await createEdge(recordingDeps().deps)(
+    get("/", { accept: "text/html" }),
+    envWith({ assets: assets.fetcher }),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-cache");
+  expect(assets.requests).toStrictEqual(["/"]);
+});
+
+test("a HEAD navigation gets the shell headers and no body", async () => {
+  const assets = assetsAt({ "/index.html": indexHtml });
+  const response = await createEdge(recordingDeps().deps)(
+    new Request(BASE + "/p/a", { method: "HEAD", headers: { accept: "text/html" } }),
+    envWith({ assets: assets.fetcher }),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-cache");
+  expect(await response.text()).toBe("");
+  expect(assets.requests).toStrictEqual(["/p/a", "/index.html"]);
 });
 
 // Catches: a signed-out browser being unable to load the app shell.

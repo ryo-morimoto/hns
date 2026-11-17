@@ -1,11 +1,11 @@
 # 0160: UI の配信（Workers Assets・typed client）
 
-status: open
-priority: next
+status: in-progress
+priority: now
 design: agreed
 design-ref: D094
 depends-on: 0159
-touches: packages/web/, packages/server/src/edge/, tools/deploy/, deploy/assets/
+touches: packages/web/, packages/server/src/edge/, tools/deploy/, deploy/assets/, .gitignore, work/issues/0160-ui-delivery.md
 
 ## Goal
 
@@ -18,6 +18,8 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 - [ ] custom domain を既定にし、workers.dev は dev / CI にする
 - [ ] `/graphql` は 401、画面はクライアントで `/login` にルーティングし、元の deep link に戻る
 - [ ] XSS の面を確認（UI から exec に届くため、0158 / 0165 と突き合わせる）
+
+- 2026-11-17: 0127 の後に lead が `next` から `now` へ。UI を Worker から配信し、typed client と WS を組み合わせる。
 
 ## Notes
 
@@ -32,7 +34,7 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 
 - 契約は **GraphQL**（D059 / 0188）。0037 の REST は撤去済みなので、AC の「typed client を 0037 から生成」は **Relay の codegen（0180）** に読み替える。
 - edge は 0145。session は 0145 / D079。WS は 0159。
-- Workers Assets で `packages/web/dist` を配る。
+- Workers Assets で web の build 出力を配る（実装では `deploy/assets`、`tools/deploy/wrangler.config.ts` の `assetsDirectory`）。
 
 ### 決定 1: 配信は Workers Assets + edge の fallback
 
@@ -75,7 +77,7 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 ### 決定 6: 開発時の same-origin
 
 - Vite の dev は `/graphql` / `/api` / `/ws` を `server.proxy` でローカルの server（8787）へ。`/ws` は `ws: true`。
-- 現状の `packages/web/vite.config.ts` は proxy を持たない（コメントで「GraphQL の実装時に足す」と予告）。`tools/deploy/cloudflare.config.ts` にも `ASSETS` はまだ無い。0160 が両方を足す。
+- 設計時点の `packages/web/vite.config.ts` は proxy を持たず、`tools/deploy/cloudflare.config.ts` にも `ASSETS` が無かった。0160 が両方を足した（上の「実装」）。
 - cookie / passkey は same-origin で動かす。CORS を足さない。
 
 ### 決定（D094）
@@ -89,19 +91,60 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 | U-05 | source map | **決定（user）**: production では配らない | 0165 | 2026-11-17 |
 | U-06 | typed client | **決定（user）**: Relay の codegen（0180）。0037 の記述を削除 | 0180 / 0037 | 2026-11-17 |
 
-### テスト条件（案）
+## 実装（2026-11-17）
+
+- **配信**: `tools/deploy/wrangler.config.ts` が `assetsDirectory: "../../deploy/assets"` を指す。
+  `cloudflare.config.ts` の `worker.assets` は `notFoundHandling: "none"` / `runWorkerFirst: true`、
+  `env.ASSETS` は `bindings.assets()`。`packages/web/vite.config.ts` の `build.outDir` は `deploy/assets`
+  （`emptyOutDir` / sourcemap なし）。`deploy/assets/` は gitignore。
+- **edge の fallback**: `GET`/`HEAD` は GraphQL / WS / files / observability / `/api` を先に処理し、
+  残りを `ASSETS` へ流す。`ASSETS` が 404 かつ `Accept: text/html` かつ `/assets`・`/api`・
+  `/graphql`・`/ws` 以外のときだけ `/index.html` を返す。`/assets/*` は
+  `public, max-age=31536000, immutable`、HTML は `no-cache`。
+- **ヘッダ**: HTML に CSP（D094 の directive）・`X-Content-Type-Options: nosniff`・
+  `Referrer-Policy: same-origin`・`Permissions-Policy`。production の source map は生成も配布もしない。
+- **domain**: staging / production は `HNS_DOMAIN` 必須で `domains: [host]` / `workersDev: false`。
+  development は `workersDev: true` で domain なし。`previewUrls: false`。`deploy.sh` は web build を
+  先に走らせる。
+- **typed client**: 既存の relay-compiler artifact（0180 の codegen stage）をそのまま使い、WS は
+  `/ws` の別口（0159）。手書き client を足さない。
+- **401**: `createEnvironment({ onUnauthorized })` が 401 で
+  `/login?next=<pathname+search+hash>` に遷移し、`nextPathFrom` が同一 origin のパスだけ復元する。
+  ログイン画面は 0108 が持ち、この issue は配線と戻り先の検証まで。
+- **XSS**: web の描画に `dangerouslySetInnerHTML` / `innerHTML` 等の sink が無いことを確認し、
+  model の文字列がテキストで出ることを jsdom で固定した。exec 側の受け口は 0158 / 0165。
+
+## テスト条件
 
 | ID | 条件（Given → When → Then） | リスク | 出所 |
 | --- | --- | --- | --- |
 | C1 | `/p/a/c/b` を GET（Accept: html）→ index。再読込 / deep link が通る | 高 | 受入1 |
 | C2 | `/assets/<hash>.js` → 200、`immutable`。`/assets/missing.js` → 404（index でない）。`/unknown`（Accept なし）→ 404、`/unknown`（Accept: html）→ index | 高 | 受入1 |
-| C3 | `/api/unknown` → JSON 404（HTML でない）。`/graphql` 未認証 → 401 | 高 | 受入1・4 |
-| C4 | `index.html` → `no-cache`。デプロイ後に新しい index を取る | 中 | 受入1 |
-| C5 | `/login` → 画面。ログイン後に元の deep link へ戻る | 高 | 受入4 |
-| C6 | CSP / nosniff / referrer のヘッダ。production に source map が無い | 高 | 受入5 |
+| C3 | `/api/unknown` → JSON 404（HTML でない）。`/graphql` 未認証 → 401。`/graphql` / `/ws` / `/assets` は fallback しない | 高 | 受入1・4 |
+| C4 | `index.html` / SPA fallback → `no-cache`。デプロイ後に新しい index を取る | 中 | 受入1 |
+| C5 | 401 → クライアントが `/login?next=...` に遷移し、`nextPathFrom` が元の deep link を返す。`/login` 自身では再遷移しない（画面は 0108） | 高 | 受入4 |
+| C6 | HTML に CSP / nosniff / referrer / permissions のヘッダ。production に source map が無い | 高 | 受入5 |
 | C7 | dev の proxy で `/graphql` / `/api` / `/ws` が same-origin で通る | 中 | 受入2 |
 | C8 | Relay の codegen が `schema.graphql` と一致する（0180 のゲート） | 中 | 受入2 |
-| C9 | `npm run check` | 高 | — |
+| C9 | `<img onerror>` / `<script>` を含む model の文字列 → 画面 → 実行されずテキストで出る。HTML 注入 sink が無い | 高 | 受入5 |
+| C10 | staging / production → custom domain、`workersDev: false`。development → workers.dev。`ASSETS` binding と `deploy/assets` が一致 | 高 | 受入1・3 |
+| C11 | `npm run check` | 高 | — |
+
+## テスト設計
+
+| ID | 条件 | 技法 | 層 | テスト |
+| --- | --- | --- | --- | --- |
+| T1 | C1 | 同値分割（navigation / non-navigation） | unit | `packages/server/src/edge/handler.test.ts` "a navigation to an unknown path is answered with the no-cache shell" |
+| T2 | C2 | 境界値（hashed / missing / non-HTML） | unit | 同 "a hashed asset is immutable and a missing asset stays a 404" / "only a navigation falls back to the shell" |
+| T3 | C3 | デシジョンテーブル（face × method × Accept） | unit | 同 "the faces and /assets are never answered by the shell" + 既存の 401 / 405 |
+| T4 | C4 | 契約（cache header） | unit | 同 C1 / "the root document is revalidated" / "GET /login is served the shell" |
+| T5 | C5 | 状態遷移（401 → login → return） | unit（jsdom） | `packages/web/src/auth/login.test.ts`、`packages/web/src/relay/environment.test.ts` |
+| T6 | C6 | 契約（ヘッダ）/ 構成 | unit | `handler.test.ts` の C1 + `packages/web/src/config.test.ts` |
+| T7 | C7 | 構成（proxy） | unit | `packages/web/src/config.test.ts` "development proxies..." |
+| T8 | C8 | 生成の一致 | static | `npm run check` の codegen stage / `tools/codegen/verify.ts` |
+| T9 | C9 | 故障注入（markup）/ 静的検査 | component + static | `packages/web/src/app/xss.test.tsx` |
+| T10 | C10 | 構成（domain / workers.dev / assets） | unit | `tools/deploy/config.test.ts` + `cf deploy --dry-run` の worker.config.json |
+| T11 | C11 | ゲート | static | `npm run check` |
 
 ## Log
 
@@ -115,3 +158,15 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-17: 実装。Workers Assets（`tools/deploy/wrangler.config.ts` の `deploy/assets`、`ASSETS` binding、
+  `runWorkerFirst`）、edge の手動 SPA fallback と immutable / no-cache、custom domain（`HNS_DOMAIN`）と
+  workers.dev の切替、Vite proxy、401 → `/login?next=` の配線、XSS の確認。`npm run check` exit 0
+  （829 tests / 128 files、38.4s）。`cf deploy --dry-run` は development / production とも exit 0 で、
+  production の Build Output は `domains:["hns.example.com"]` / `workersDev:false` / `ASSETS` を含む。
+  `deploy/assets` は hashed JS/CSS と index のみで `.map` を持たない。ログイン画面は 0108 の担当で、
+  この issue は遷移と復帰先の配線まで（画面は実装していない）。独立レビューは未割当で、status は
+  `in-progress` のまま。
+- 2026-11-17: `cf dev --mode development` で実配信を確認。`/` / `/p/a/c/b` / `/login` は 200 の index に
+  `Cache-Control: no-cache` と CSP / nosniff / Referrer-Policy / Permissions-Policy、`/assets/index-*.js` は
+  200 に `public, max-age=31536000, immutable`、`/assets/missing.js` は 404（index でない）。
+  `POST /graphql` は 401（`application/problem+json`）、`GET /graphql` は 405、`/api/unknown` は JSON 404。

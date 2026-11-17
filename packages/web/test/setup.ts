@@ -16,4 +16,6 @@ if (!("ResizeObserver" in globalThis)) {
   globalThis.ResizeObserver = ResizeObserverStub;
 }
 
-Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+if (typeof Element !== "undefined") {
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+}

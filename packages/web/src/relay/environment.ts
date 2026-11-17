@@ -15,6 +15,15 @@ type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 export interface EnvironmentOptions {
   /** The fetch to send through; tests inject one so no request leaves the process. */
   readonly fetch?: FetchLike | undefined;
+  /**
+   * Called once when the edge answers 401.
+   *
+   * @remarks
+   * The edge refuses an unauthenticated `/graphql` before the face runs. The client keeps the
+   * deep link and sends the browser to `/login`; the login screen (0108) restores it with
+   * `nextPathFrom`.
+   */
+  readonly onUnauthorized?: (() => void) | undefined;
 }
 
 /**
@@ -40,6 +49,9 @@ export function createEnvironment(options: EnvironmentOptions = {}): Environment
         credentials: "same-origin",
         body: JSON.stringify({ query: params.text, variables }),
       });
+      if (response.status === 401) {
+        options.onUnauthorized?.();
+      }
       if (!response.ok) {
         throw new Error("graphql request failed with " + String(response.status));
       }

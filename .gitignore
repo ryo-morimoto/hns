@@ -3,6 +3,7 @@ node_modules/
 *.log
 work/scratch/
 dist/
+deploy/assets/
 docs/api/
 .cache/
 .npm-cache/

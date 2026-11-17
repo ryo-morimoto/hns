@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { workerFor } from "./cloudflare.config.ts";
-import { deploymentFor } from "./modes.ts";
+import { customDomainFor, deploymentFor } from "./modes.ts";
+import { buildSettings } from "./wrangler.config.ts";
 
 // Catches: a mode mapping that sends staging to the production Worker, or lets a missing URL/model through.
 
@@ -102,4 +103,54 @@ test("the worker declares the machine URL and control-plane key", () => {
 test("the harness worker binds the gateway service by name", () => {
   const worker = workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3"));
   expect(worker.env.GATEWAY).toStrictEqual({ type: "worker", worker: "hns-prod-gateway" });
+});
+
+// Catches: the edge having no asset binding, or the asset layer serving before the API faces.
+test("the worker binds the assets and routes every request through the edge", () => {
+  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  expect(worker.env.ASSETS).toStrictEqual({ type: "assets" });
+  expect(worker.assets).toStrictEqual({ notFoundHandling: "none", runWorkerFirst: true });
+});
+
+// Catches: a production deploy that silently keeps the workers.dev host.
+test("production publishes on its custom domain and turns workers.dev off", () => {
+  const worker = workerFor({
+    ...deploymentFor("production", "https://agent.example", "ollama/llama3"),
+    domain: "hns.example.com",
+  });
+  expect(worker).toHaveProperty("domains", ["hns.example.com"]);
+  expect(worker.workersDev).toBe(false);
+  expect(worker.previewUrls).toBe(false);
+});
+
+// Catches: a development deploy accidentally claiming the production hostname.
+test("development keeps workers.dev and declares no custom domain", () => {
+  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  expect(worker).not.toHaveProperty("domains");
+  expect(worker.workersDev).toBe(true);
+  expect(worker.previewUrls).toBe(false);
+});
+
+// Catches: a deploy that falls back to workers.dev when HNS_DOMAIN is missing.
+test("staging and production require a hostname", () => {
+  expect(customDomainFor("production", "hns.example.com")).toBe("hns.example.com");
+  expect(customDomainFor("staging", "HNS.Example.COM")).toBe("hns.example.com");
+  expect(() => customDomainFor("production", undefined)).toThrow(/HNS_DOMAIN/);
+  expect(() => customDomainFor("staging", undefined)).toThrow(/HNS_DOMAIN/);
+  for (const invalid of [
+    "https://hns.example.com",
+    "hns.example.com/path",
+    "hns",
+    "hns example.com",
+  ]) {
+    expect(() => customDomainFor("production", invalid)).toThrow(/HNS_DOMAIN/);
+  }
+  expect(customDomainFor("development", "hns.example.com")).toBeUndefined();
+});
+
+// Catches: the deploy project pointing at a stale or missing asset directory.
+test("the deploy project serves the built web app from deploy/assets", () => {
+  expect(buildSettings.assetsDirectory).toBe("../../deploy/assets");
+  expect(buildSettings.uploadSourceMaps).toBe(false);
+  expect(buildSettings.types.generate).toBe(false);
 });

@@ -46,7 +46,11 @@ check_secrets_file "$gateway_secrets" "${gateway_keys[@]}"
 
 : "${HNS_AGENT_URL:?set HNS_AGENT_URL to the tunnel URL}"
 : "${HNS_MODEL:?set HNS_MODEL to the provider model}"
-export HNS_AGENT_URL HNS_MODEL
+: "${HNS_DOMAIN:?set HNS_DOMAIN to the custom domain (for example hns.example.com)}"
+export HNS_AGENT_URL HNS_MODEL HNS_DOMAIN
+
+# The Worker serves the built web app from deploy/assets; cf does not run the web build.
+( cd ../.. && npm run build -w @hns/web )
 
 ../../node_modules/.bin/cf auth whoami >/dev/null || { echo "not logged in: run cf auth login" >&2; exit 2; }
 

@@ -15,6 +15,7 @@
   },
   "include": [
     "cloudflare.config.ts",
+    "wrangler.config.ts",
     "modes.ts",
     "worker.ts",
     "config.test.ts",

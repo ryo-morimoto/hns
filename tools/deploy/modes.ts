@@ -4,13 +4,21 @@ export const MODES = ["development", "staging", "production"] as const;
 /** One of the supported CLI modes. */
 export type Mode = (typeof MODES)[number];
 
-/** What one mode maps to: the Worker name, its agent URL, and its model. */
+/** What one mode maps to: the Worker name, its agent URL, its model, and its custom domain. */
 export interface Deployment {
   readonly mode: Mode;
   readonly env: "dev" | "stg" | "prod";
   readonly workerName: string;
   readonly agentUrl: string;
   readonly model: string;
+  /**
+   * The hostname the Worker is published to.
+   *
+   * @remarks
+   * Absent in development, where the Worker stays on workers.dev (D094). Staging and
+   * production require it, so a deploy cannot silently publish to the workers.dev host.
+   */
+  readonly domain?: string | undefined;
 }
 
 const ENV_BY_MODE: Record<Mode, { env: Deployment["env"]; workerName: string }> = {
@@ -72,6 +80,34 @@ export const deploymentFor = (
     agentUrl: httpsUrl(required(agentUrl, "HNS_AGENT_URL", selected), selected),
     model: required(model, "HNS_MODEL", selected),
   };
+};
+
+const HOSTNAME =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+
+/** Validate a custom domain; a URL, a path, or a bare label is rejected. */
+const customDomain = (value: string, mode: string): string => {
+  const host = value.toLowerCase();
+  if (!HOSTNAME.test(host)) {
+    throw new Error(`HNS_DOMAIN must be a hostname for mode ${mode}`);
+  }
+  return host;
+};
+
+/**
+ * The custom domain for a mode.
+ *
+ * @param mode - The selected mode.
+ * @param domain - `HNS_DOMAIN` from the environment.
+ * @returns The hostname for staging and production; undefined in development.
+ *
+ * @remarks
+ * Development and CI keep workers.dev (D094). Staging and production publish on a custom
+ * domain only; a missing or malformed value throws instead of falling back to workers.dev.
+ */
+export const customDomainFor = (mode: Mode, domain: string | undefined): string | undefined => {
+  if (mode === "development") return undefined;
+  return customDomain(required(domain, "HNS_DOMAIN", mode), mode);
 };
 
 /**

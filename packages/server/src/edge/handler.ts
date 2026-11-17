@@ -65,6 +65,31 @@ export type EdgeFetch = (request: Request, env: WorkerEnv) => Promise<Response>;
 /** The files content face: `/api/workspaces/<workspaceId>/files`. */
 const FILES_PATH = /^\/api\/workspaces\/([^/]+)\/files$/u;
 
+/** The cache policy for Vite's content-hashed files under `/assets`. */
+const ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/** The index must be revalidated so a deploy is visible on the next load. */
+const INDEX_CACHE_CONTROL = "no-cache";
+
+/**
+ * The headers attached to the HTML shell.
+ *
+ * @remarks
+ * The shell renders model data as text, so scripts are limited to the hashed bundle Vite
+ * emits and no inline script is allowed (D094 / D096). Styles allow inline style attributes
+ * because the design system sets CSS variables inline.
+ */
+const SHELL_SECURITY_HEADERS = {
+  "content-security-policy":
+    "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "same-origin",
+  "permissions-policy": "camera=(), microphone=(), geolocation=()",
+} as const;
+
+/** The path prefixes the SPA fallback must never answer. */
+const NON_SPA_PREFIXES = ["/assets", "/api", "/graphql", "/ws"] as const;
+
 class DeadlineError extends Error {
   constructor() {
     super("request deadline exceeded");
@@ -122,6 +147,86 @@ function methodNotAllowed(allowed: "GET" | "POST", path: string): Response {
   );
   response.headers.set("allow", allowed);
   return response;
+}
+
+/** Whether the caller asked for an HTML document (a navigation). */
+function wantsHtml(request: Request): boolean {
+  const accept = request.headers.get("accept");
+  return accept !== null && accept.toLowerCase().includes("text/html");
+}
+
+/** Whether a path may be answered by the SPA fallback instead of a 404. */
+function isSpaPath(path: string): boolean {
+  return !NON_SPA_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+}
+
+/** Whether the asset layer answered with an HTML document. */
+function isHtmlResponse(response: Response): boolean {
+  return response.headers.get("content-type")?.toLowerCase().includes("text/html") ?? false;
+}
+
+/** Copy a response, replacing the named headers. */
+function withHeaders(response: Response, headers: Readonly<Record<string, string>>): Response {
+  const copy = new Headers(response.headers);
+  for (const [name, value] of Object.entries(headers)) copy.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: copy,
+  });
+}
+
+/** Apply the cache and security headers an asset response needs. */
+function decorateAsset(response: Response, path: string): Response {
+  if (response.status !== 200 && response.status !== 304) return response;
+  if (path.startsWith("/assets/")) {
+    return withHeaders(response, { "cache-control": ASSET_CACHE_CONTROL });
+  }
+  if (!isHtmlResponse(response)) return response;
+  return withHeaders(response, {
+    ...SHELL_SECURITY_HEADERS,
+    "cache-control": INDEX_CACHE_CONTROL,
+  });
+}
+
+/**
+ * Serve a static request, falling back to `index.html` for a client-side route.
+ *
+ * @internal
+ * @remarks
+ * Only a navigation (GET/HEAD + `Accept: text/html`) whose asset is missing becomes the
+ * shell. `/assets`, `/api`, `/graphql`, and `/ws` keep their own 404s, so a missing script
+ * is not answered with HTML and the API never grows a catch-all (D094). The index is fetched
+ * from the asset layer as `/index.html` so the documented no-cache policy applies to the
+ * fallback too.
+ */
+async function serveStatic(
+  request: Request,
+  env: WorkerEnv,
+  path: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const assets = env.ASSETS;
+  if (assets === undefined) {
+    return problem("not_found", "Static assets are not configured.", path);
+  }
+  const response = await assets.fetch(new Request(request, { signal }));
+  const navigable = request.method === "GET" || request.method === "HEAD";
+  if (response.status !== 404 || !navigable || !wantsHtml(request) || !isSpaPath(path)) {
+    return decorateAsset(response, path);
+  }
+  const index = await assets.fetch(
+    new Request(new URL("/index.html", request.url), {
+      method: request.method,
+      headers: request.headers,
+      signal,
+    }),
+  );
+  if (index.status === 404) return response;
+  return withHeaders(index, {
+    ...SHELL_SECURITY_HEADERS,
+    "cache-control": INDEX_CACHE_CONTROL,
+  });
 }
 
 /**
@@ -207,10 +312,7 @@ async function route(
     return problem("not_found", "No route matches this path.", path);
   }
   if (request.method === "GET" || request.method === "HEAD") {
-    if (env.ASSETS === undefined) {
-      return problem("not_found", "Static assets are not configured.", path);
-    }
-    return env.ASSETS.fetch(new Request(request, { signal }));
+    return serveStatic(request, env, path, signal);
   }
   return problem("not_found", "No route matches this path.", path);
 }
