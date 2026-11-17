@@ -466,6 +466,57 @@ test("a failed project lookup is a 503", async () => {
   }
 });
 
+// Catches: the production D1 lookup bypassed, so a write lands in the machine ROOT or another
+// project's directory instead of the project's root.
+test("the production lookup reads the project root from D1", async () => {
+  const database = openFakeD1();
+  const seeded = await openStore({ d1: database.db, newId: () => "one" });
+  try {
+    await seeded.projects.create("one", "projects/one");
+  } finally {
+    await seeded.close();
+  }
+  const sqlite = openSqliteState();
+  const machine = fakeMachine();
+  const workspace = new Workspace(sqlite.state, { files: machine });
+  const namespace: DurableObjectNamespace = {
+    idFromName: (name: string) => ({ name }),
+    get: () => ({ fetch: (request: Request) => workspace.fetch(request) }),
+  };
+  try {
+    const acquired = await workspace.fetch(
+      new Request("https://workspace.internal/rpc/lease/acquire", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId: "one", machineId: "m1" }),
+      }),
+    );
+    expect(acquired.status).toBe(200);
+    const handler = createFilesFace();
+    const response = await handler(
+      {
+        request: new Request("https://hns.test/api/workspaces/one/files", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-request-id": "request-1" },
+          body: JSON.stringify(writeBody()),
+        }),
+        env: { DB: database.db, WORKSPACE: namespace },
+        session: { subject: "owner", expiresAt: Date.now() + 60_000 },
+        requestId: "request-1",
+        signal: new AbortController().signal,
+        workspaceId: "one",
+      },
+      DEFAULT_LIMITS,
+    );
+    expect(response.status).toBe(200);
+    expect(machine.writes[0]?.projectRoot).toBe("projects/one");
+    expect(machine.writes[0]?.path).toBe("a.txt");
+  } finally {
+    sqlite.close();
+    database.close();
+  }
+});
+
 // Catches: a corrupt project row rounded into a retryable 503 instead of a defect (the edge
 // answers 500 for a thrown error; the point here is that the face does not catch it).
 test("a corrupt project row is not reported as an outage", async () => {
