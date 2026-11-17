@@ -65,3 +65,12 @@
 - `tools/codegen/graphql.ts` の `@hns/server/graphql` は worktree の `node_modules` → `../../packages/server`（= main checkout）に解決される。そのため worktree から `npm run codegen` を回すと、**main のサーバで web の SDL / relay が生成**され、worktree の server の改名が web に反映されないのに gate は green になる（L3 の b275ca7 で発生）。
 - 対策: worktree で SDL を変えたら、(1) `node --conditions=source` で worktree の source から `buildSchemaSdl()` を直接書く、(2) relay-compiler を同じ schema で回す、(3) worktree で web の型 / テストを再実行、(4) main の cwd から codegen verify が差分なしを確認、の 4 段。
 - 恒久対策: codegen の `@hns/server` 解決を worktree 側に向ける（`customConditions: ["source"]` と `--conditions=source` を codegen でも使う）か、codegen を worktree の root から解決するように tools/codegen を直す。L6 か follow-up。
+
+## L3（server の失敗 union と status 写像）完了 — 25da484
+
+- code→status の表は `server/src/failures/status.ts` の 1 か所。edge / gateway / files / session-rpc / workspace-rpc は面のコード集合を型で宣言して表から引き、写像関数に数値の引数が 0（grep 0）。
+- GraphQL は `failureType(name, codes)` に共通化し、`invalid_argument` → `invalid_request` に改名（SDL / relay 2 ファイル / web 93 tests が追随）。machine は `REFUSAL_STATUS` の部分集合 + 13 パリティ。
+- `index.*` は `indexEntry` / `indexLine` で ObsLogEntry の形（sink は L4）。`docs/observability.md` に表の対応と `transport` 列、console.error の位置づけ。
+- 途中で 2 件の blocking を修正: (1) method 405 → 400 の降格と 415 の code 変更（表に `method_not_allowed` を足して 405/413/415 をテストで固定）、(2) **worktree の codegen が main の server を読む**ために生成物が巻き戻った件（worktree の `buildSchemaSdl()` を直接呼び、絶対パスの relay 設定で再生成）。
+- gate: main の cwd から全 stage green（69.2s / 918 tests、integration 含む）。main の gate は exit 0（54.9s）。
+- follow-up（L6 / tools レーン）: codegen の `@hns/server` 解決を repo root の `packages/server` に固定し、gate の codegen stage で生成物の `git diff --exit-code` を回す。`relay-compiler` の cwd 依存も消す。docs/process.md の 3 行は恒久対策が入ったら外す。
