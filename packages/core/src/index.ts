@@ -1,5 +1,7 @@
 export * from "./types.ts";
 export * from "./codecs.ts";
+export * from "./checkpoint.ts";
+export * from "./review.ts";
 export * from "./durability.ts";
 export * from "./lease.ts";
 export * from "./machine.ts";
