@@ -34,7 +34,9 @@
 
 ## 相関 ID とホップ
 
-1つのリクエストを `x-request-id` 1つで追う。新しい ID を作るのは edge だけで、下流は受信値をそのまま使う。
+1つのリクエストを `x-request-id` 1つで追う。HTTP の相関 ID を発番するのは edge で、下流は受信値をそのまま使う。
+edge を通らない内部呼び出し（agent の `send` / `openAgent` など）は、呼び出し側が ID を渡さない場合に
+自分の turn ID を生成することがある。その場合は edge の HTTP ID と相関しない。
 
 | ホップ | 何が記録するか | どこから ID を受けるか |
 | --- | --- | --- |
@@ -71,8 +73,11 @@ server（Durable Object）と machine は同じ `ObsLogEntry`（`@hns/core`）�
 - 保持は **30 日**、件数は **5000 件**（ワークスペースあたり）。append 時に上限を超えた分を1文で消し、
   保持の削除は 256 回の append ごとに1回だけ回す。
 - API の `limit` は 1..500。古い行は起動時と上の間隔で消える。
-- 会話 RPC（`/rpc/conversations/...`）は `do.rpc` を別に書かない。ターンの DO ホップは
-  `agent.response`（同じ requestId）で表し、1ホップを二重に数えない。
+- 会話の送信 RPC は、**成功して agent イベントを書いたときだけ** `do.rpc` を省略する
+  （ターンの DO ホップは `agent.response` が同じ requestId で表す）。失敗したターン（400 / 429 / 503）は
+  agent イベントが無いので `do.rpc` を残し、trace が worker で止まらないようにする。
+- edge の `http` イベントは応答後に fire-and-forget で送る。`waitUntil` には乗せていないため、応答直後に
+  isolate が終了すると行が失われ得る。`/api/metrics` の件数と p50/p95 は**下限**として読む。
 
 ## API
 
@@ -96,6 +101,7 @@ HNS_URL=http://127.0.0.1:8787 HNS_SESSION_COOKIE='hns_session=...' \
 ```
 
 - 環境変数は `HNS_URL` と `HNS_SESSION_COOKIE`。`/api/events?requestId=...` を読む。
+  trace 自身の要求は `x-request-id` を送らない（自分の ID でログを汚さない）。
 - hop ごとに event / path / status / 所要 / conversationId / runId を時系列で出し、最後に
   `reached` と `stopped after`（到達した最も深い hop）と `not observed` を出す。
 - `--expect <hop>` を付けると、その hop に届いていないとき exit 1（「どこで詰まったか」を機械可読にする）。
