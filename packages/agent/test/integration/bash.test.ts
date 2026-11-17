@@ -136,5 +136,8 @@ test("a command that times out still reports a failed result", async (t) => {
     expect(turn.settlement.status).toBe("done");
     expect(outcomes.length, JSON.stringify(outcomes)).toBe(1);
     expect(outcomes[0]?.ok).toBe(false);
+    // The timeout reached the tool: the call ran (its own time to fail), so it was not dropped by the
+    // second validation pi-durable runs on the arguments a hook hands back (0221 B3').
+    expect(outcomes[0]?.ms).toBeGreaterThan(0);
   });
 });

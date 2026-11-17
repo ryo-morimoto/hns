@@ -202,10 +202,10 @@ function toolHooks(options: ToolHookOptions): ToolHooks {
     async beforeTool(call, _api, context) {
       const identity = await identityOf(call.name);
       const spec = specFor(call.id, identity, context);
-      // A model that wrote bash's `timeout` (seconds) is refused here, as a value: the manifest's
-      // descriptor is `timeoutMs` alone, and a second name for one value must not reach a hash.
-      const seconds = refuseSeconds(call.name, call.arguments);
-      const model = seconds ?? modelArguments(identity.definition.toolId, call.arguments);
+      // The harness validated the call against pi-durable's schema and coerced it; admission parses the
+      // arguments as the model's own schema sees them (a model's `timeout` reaches the strictObject and
+      // is refused there, before anything is hashed or run).
+      const model = modelArguments(identity.definition.toolId, call.arguments);
       const admission = await admitCall(spec, model);
       if (!admission.ok) {
         // The call does not run, and its refusal is the call's result: `afterTool` writes the
@@ -322,28 +322,6 @@ function isBashInput(args: ModelArguments): args is BashInput {
 
 function isReadFileArguments(args: ModelArguments): args is ReadFileArguments {
   return "path" in args;
-}
-
-/**
- * A bash call that wrote `timeout` (seconds), as the arguments admission refuses.
- *
- * @param name - The tool the model called.
- * @param args - What `beforeTool` first received: pi-durable's validated arguments.
- * @returns The arguments with `timeout` kept, so the tool's own schema refuses it as an unknown key;
- * undefined for any other tool, or a bash call without `timeout`.
- *
- * @remarks
- * pi-durable's bash schema is open, so a model's `timeout` passes its validation and would be
- * converted into a rounded `timeoutMs` — one timeout with two spellings, one of them fractional. The
- * refusal is made here, before `admitCall` hashes anything, so the call is `unsupported` and nothing
- * runs; the harness schema declares `timeout` only for the arguments `beforeTool` hands back.
- */
-function refuseSeconds(
-  name: string,
-  args: ToolHookArguments,
-): (ModelArguments & { readonly timeout: unknown }) | undefined {
-  if (name !== "bash" || !("timeout" in args)) return undefined;
-  return { command: "", timeout: args["timeout"] };
 }
 
 /**
@@ -468,7 +446,8 @@ function toolId(name: string): ToolId {
  * milliseconds). `timeout` is declared because pi-durable re-validates the arguments the hook hands
  * back with this same schema (`tool.js`), and `beforeTool` hands `execute` the admitted `timeoutMs`
  * in the seconds pi-durable's bash takes. A model that writes `timeout` never reaches this schema's
- * post-hook pass: `beforeTool` refuses the call as `unsupported` first (`refuseSeconds`).
+ * post-hook pass: a model's `timeout` is refused by admission's strictObject (see
+ * `bashModelArguments`), before anything is hashed or run.
  */
 function bashHarnessParameters(): JsonObject {
   return {

@@ -432,8 +432,12 @@ describe("bash's timeout vocabulary (B3)", () => {
         expect(outcome.isError).toBe(true);
         expect(audits.map((event) => event.event)).toEqual(["tool.call", "tool.result"]);
         expect(decisionOf(audits)).toMatchObject({ outcome: "deny", code: "unsupported" });
-        // Nothing ran: the tool's own output never reached the model, and only the refusal did.
-        expect(outcome.result).not.toContain("timeout");
+        // Nothing ran: the tool's own output never reached the model, and the refusal names the key.
+        expect(outcome.result).not.toContain("timed out");
+        // The decision's message names the key the tool refused, not a length or type error.
+        const decision = decisionOf(audits);
+        if (decision?.outcome !== "deny") throw new Error("the call was not refused");
+        expect(decision.message).toContain("timeout");
         expect(lastEvent(audits, "tool.result")).toMatchObject({ durationMs: 0 });
       },
       { kind: "sandboxed" },

@@ -14,8 +14,6 @@ import {
 import type {
   AuditEvent,
   AuditEventBase,
-  ToolCallAuditEvent,
-  ToolResultAuditEvent,
   CallDigest,
   DenialCode,
   DenyDecision,
@@ -1033,24 +1031,6 @@ function toAuditEvent(
   readonly decision: PolicyDecision;
   readonly durationMs: number;
 };
-/**
- * A row as one of the contract's audit events.
- *
- * @param row - The fields this module wrote for one step of a call.
- * @param event - Which step it is.
- * @param decision - The decision, for a `tool.result`.
- * @param outcome - The duration, for a `tool.result`.
- * @returns The event the audit sink receives.
- *
- * @remarks
- * The row is what the contract's event is, **with one known gap**: a refused call's row has no
- * `callHash` or `argsHash`, which `AuditEventBase` requires. The gap is stated here rather than
- * papered over with empty strings — `""` is not a hash and the contract's schema refuses it — so the
- * value passed on is an `AuditRow`, and the contract's `AuditEvent` type is claimed only at this
- * one call, where the 0220 proposal (this lane's Result) makes those two members optional. The audit
- * sink's consumer (0222) parses what it stores; until the proposal lands, a refused row is the one
- * it must accept without hashes.
- */
 function toAuditEvent(
   row: AuditRow,
   event: "tool.call",
