@@ -1,12 +1,23 @@
 import * as v from "valibot";
 import type { IncomingHttpHeaders } from "node:http";
 import {
+  CHECKPOINT_PACK_CONTENT_TYPE,
+  CheckpointPackUploadResultSchema,
+  CheckpointPrepareResultSchema,
+  MACHINE_RPC_PATH,
   MachineReadResultSchema,
   MachineWriteRequestSchema,
   OBS_REQUEST_ID_PATTERN,
   SIGNED_HEADER_BY_FIELD,
 } from "@hns/core";
-import type { JsonValue, MachineReadResult, MachineWriteRequest, SignedHeaders } from "@hns/core";
+import type {
+  CheckpointPackUploadResult,
+  CheckpointPrepareResult,
+  JsonValue,
+  MachineReadResult,
+  MachineWriteRequest,
+  SignedHeaders,
+} from "@hns/core";
 import { MachineRefusal, REFUSAL_CODES } from "./refusal.ts";
 import type { RefusalCode } from "./refusal.ts";
 
@@ -87,11 +98,91 @@ export function parseSignedHeaders(headers: IncomingHttpHeaders): SignedHeaders 
   return parsed.output;
 }
 
+/**
+ * The route a checkpoint pack arrives on, below {@link MACHINE_RPC_PATH}.
+ *
+ * @remarks
+ * `/rpc/checkpoint/<runId>/pack`. The signed message already covers the path, so a pack signed
+ * for one Run cannot be replayed at another: the signature covers the path string, and the path
+ * holds the Run id.
+ */
+const PACK_PATH_PREFIX = MACHINE_RPC_PATH + "/checkpoint/";
+const PACK_PATH_SUFFIX = "/pack";
+
+/**
+ * The `op` a successful pack upload answers with.
+ *
+ * @remarks
+ * A pack upload is not one of {@link OPERATION_NAMES}: it has no JSON operation and no body to
+ * parse. The name is still in the response envelope so a caller can tell the two success shapes
+ * apart without reading the route it called.
+ */
+export const PACK_RESPONSE_OP = "pack";
+
+/**
+ * The media type a pack's body must carry.
+ *
+ * @remarks
+ * The checkpoint contract's ({@link CHECKPOINT_PACK_CONTENT_TYPE}), re-exported through this
+ * module because the route reads it. The body is a git pack, never JSON, and a request that
+ * labels it as anything else is refused before a byte of it is kept.
+ */
+export const MACHINE_PACK_CONTENT_TYPE = CHECKPOINT_PACK_CONTENT_TYPE;
+
+/**
+ * Whether a request path is the pack route, and for which Run.
+ *
+ * @param path - The request URL as the client sent it, query excluded by the caller.
+ * @returns The Run id when the path is the pack route, otherwise undefined.
+ *
+ * @remarks
+ * Only the shape is decided here; whether the Run id is usable is the checkpoint's
+ * `assertRunId`. A path that does not match is not the pack route, so the agent answers it the
+ * way it answers every other unknown route.
+ */
+export function checkpointPackRunId(path: string): string | undefined {
+  if (!path.startsWith(PACK_PATH_PREFIX) || !path.endsWith(PACK_PATH_SUFFIX)) return undefined;
+  const runId = path.slice(PACK_PATH_PREFIX.length, path.length - PACK_PATH_SUFFIX.length);
+  return runId === "" || runId.includes("/") ? undefined : runId;
+}
+
+/**
+ * The pack route for one Run.
+ *
+ * @param runId - The Run id.
+ * @returns `/rpc/checkpoint/<runId>/pack`; {@link checkpointPackRunId} reads it back.
+ */
+export function checkpointPackPath(runId: string): string {
+  return PACK_PATH_PREFIX + runId + PACK_PATH_SUFFIX;
+}
+
 /** The operations the agent answers; each is one closed member. */
-export const OPERATION_NAMES = ["health", "stat", "read", "list", "write"] as const;
+export const OPERATION_NAMES = ["health", "stat", "read", "list", "write", "checkpoint"] as const;
 
 /** One operation name. */
 export type OperationName = (typeof OPERATION_NAMES)[number];
+
+/**
+ * One checkpoint of one Run, as the Worker asks for it.
+ *
+ * @remarks
+ * The answer is metadata only ({@link CheckpointResult}): the pack is a separate binary request
+ * to {@link checkpointPackPath}. `committedAt` is Unix seconds and pins the commit, so a retried
+ * prepare of a Run that has no checkpoint yet still makes the same commit.
+ */
+export interface CheckpointRequest {
+  readonly op: "checkpoint";
+  /** The Run id; it names `refs/hns/checkpoints/<runId>` and is the idempotency key. */
+  readonly runId: string;
+  /** Commit time in Unix seconds; the default is the machine's clock. */
+  readonly committedAt?: number | undefined;
+}
+
+const CheckpointRequestSchema: v.GenericSchema<unknown, CheckpointRequest> = v.object({
+  op: v.literal("checkpoint"),
+  runId: v.pipe(v.string(), v.minLength(1)),
+  committedAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+});
 
 /** The closed request body: an operation and the ROOT-relative path it names. */
 export type Operation =
@@ -99,7 +190,8 @@ export type Operation =
   | { readonly op: "stat"; readonly path: string }
   | { readonly op: "read"; readonly path: string }
   | { readonly op: "list"; readonly path: string }
-  | MachineWriteRequest;
+  | MachineWriteRequest
+  | CheckpointRequest;
 
 const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
   v.variant("op", [
@@ -109,6 +201,7 @@ const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
     v.object({ op: v.literal("list"), path: v.string() }),
   ]),
   MachineWriteRequestSchema,
+  CheckpointRequestSchema,
 ]);
 
 /**
@@ -163,12 +256,39 @@ export type ListEntry = { readonly name: string; readonly kind: MachineFileKind 
 export type ListResult = { readonly entries: readonly ListEntry[] };
 
 /**
+ * What the checkpoint operation reports: the checkpoint's metadata, never a pack.
+ *
+ * @remarks
+ * This is the checkpoint contract's prepare answer (0243): the commit, the ref, the R2 key, the
+ * object count, the pack's size, the largest blob's size, and whether this call made the commit.
+ * The pack travels on {@link checkpointPackPath}, so no field here can hold its bytes and a
+ * caller that forgot to upload has nothing to confuse them with.
+ */
+export type CheckpointResult = CheckpointPrepareResult;
+
+/** What the pack upload reports: the Run and the bytes the body delivered. */
+export type CheckpointPackResult = CheckpointPackUploadResult;
+
+/**
  * A successful answer: the operation name and its result, which is JSON on the
  * wire and is parsed into the operation's result type by the caller.
  */
 export interface SuccessBody {
   readonly ok: true;
   readonly op: OperationName;
+  readonly result: JsonValue;
+}
+
+/**
+ * A successful pack upload: metadata about the bytes, which are already gone.
+ *
+ * @remarks
+ * `op: "pack"` because the upload is not one of {@link OPERATION_NAMES}: it is not a JSON
+ * operation and it does not parse a body. The result is the checkpoint contract's upload answer.
+ */
+export interface PackSuccessBody {
+  readonly ok: true;
+  readonly op: typeof PACK_RESPONSE_OP;
   readonly result: JsonValue;
 }
 
@@ -180,7 +300,7 @@ export interface RefusalBody {
 }
 
 /** What the agent writes: one success or one refusal. */
-export type ResponseBody = SuccessBody | RefusalBody;
+export type ResponseBody = SuccessBody | PackSuccessBody | RefusalBody;
 
 /** A JSON value, recursively: the result of an operation is one on the wire. */
 const JsonValueSchema: v.GenericSchema<unknown, JsonValue> = v.lazy(() =>
@@ -203,6 +323,11 @@ const ResponseBodySchema: v.GenericSchema<unknown, ResponseBody> = v.union([
   v.object({
     ok: v.literal(true),
     op: v.picklist(OPERATION_NAMES),
+    result: JsonValueSchema,
+  }),
+  v.object({
+    ok: v.literal(true),
+    op: v.literal(PACK_RESPONSE_OP),
     result: JsonValueSchema,
   }),
 ]);
@@ -285,4 +410,30 @@ export function parseReadResult(value: JsonValue): ReadResult {
  */
 export function parseListResult(value: JsonValue): ListResult {
   return v.parse(ListResultSchema, value);
+}
+
+/**
+ * Parse the result of a checkpoint answer.
+ *
+ * @param value - A success envelope's `result`.
+ * @returns The checkpoint's metadata; a value carrying a pack is not a checkpoint result.
+ * @throws When the value is not a prepare result.
+ *
+ * @remarks
+ * The parser is the checkpoint contract's schema (0243), so an answer that gained a field is
+ * refused at the boundary instead of being read as if it still had the old shape.
+ */
+export function parseCheckpointResult(value: JsonValue): CheckpointResult {
+  return v.parse(CheckpointPrepareResultSchema, value);
+}
+
+/**
+ * Parse the result of a pack upload answer.
+ *
+ * @param value - A success envelope's `result`.
+ * @returns The Run and the byte count the upload received.
+ * @throws When the value is not an upload result.
+ */
+export function parseCheckpointPackResult(value: JsonValue): CheckpointPackResult {
+  return v.parse(CheckpointPackUploadResultSchema, value);
 }

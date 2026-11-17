@@ -24,11 +24,17 @@ cloudflared は外向きの接続を保ち、この agent へは `127.0.0.1` で
 
 ## 要求
 
-`POST /rpc` だけを答える。body は `{ "op": "health" | "stat" | "read" | "list", "path": "..." }` と、
+`POST /rpc` と、checkpoint の pack だけの `POST /rpc/checkpoint/<runId>/pack` を答える。body は `{ "op": "health" | "stat" | "read" | "list", "path": "..." }` と、
 版付き書き込みの `{ "op": "write", "projectRoot", "path", "expectedVersion", "operationId", "content" (base64), "contentHash" }`。
 write は `projectRoot` と `path` を別々に検証し、ROOT の dirfd から各段を `O_NOFOLLOW` で辿り、現在の版を
 再計算して `expectedVersion` と比べ、同一ディレクトリの temp を rename する。結果は `applied` / `conflict` /
 `unknown` + `path`（@hns/core の `MachineWriteResult`）。
+
+checkpoint は `{ "op": "checkpoint", "runId", "committedAt"? }` で、`@hns/workspace` の `checkpointRun` を呼んで
+`refs/hns/checkpoints/<runId>` を進め、**metadata だけ**（runId / ref / commit / packKey / objectCount / packBytes /
+maxBlobBytes / created）を返す。pack は `POST /rpc/checkpoint/<runId>/pack`（`application/x-git-pack`、
+`content-length` 必須、最大 64MiB）に、同じ署名ヘッダで body を pack のバイト列として送る。受け取った pack は
+`onCheckpointPack` の sink に渡す（R2 への書き込みは Worker 側、0245）。
 
 ヘッダ（すべて必須）:
 

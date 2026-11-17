@@ -7,7 +7,7 @@
   machine の write op はこれを使い、`projectRoot` と `path` を別々に検証して、同じ親ディレクトリに temp を書いて rename する。
 - `src/rooted.ts` / `src/rooted-helper.ts` — 解決と open / rename を dirfd でまとめる helper。Linux で exec できる環境だけ動き、それ以外は `Workspace.mode === "checks"` の経路に落ちる。fd 走査は `src/files.ts` を共有する。
 - `./sandbox` — `detectSandbox()`（bubblewrap の検出と失敗 code）と `createSandboxEnv` / `createNoExecEnv`。
-- `./checkpoint` — `checkpointRun({ root, runId })`。Run の終わりに作業ツリーを parent なしの commit にし、`refs/hns/checkpoints/<runId>` を進めて、R2 に置く pack の bytes を返す。ユーザーの HEAD・index・ブランチは動かさない。Node の git / child_process を使うため root entry には出さない（Worker から import しない）。R2 への put と watermark は 0157 / 0162。
+- `./checkpoint` — `checkpointRun({ root, runId, committedAt? })`。Run の終わりに作業ツリーを parent なしの commit にし、`refs/hns/checkpoints/<runId>` を進めて、R2 に置く pack の bytes とサイズ（`packBytes` / `maxBlobBytes`）を返す。ユーザーの HEAD・index・ブランチは動かさない。Node の git / child_process を使うため root entry には出さない（Worker から import しない）。R2 への put と watermark は 0157 / 0162。
   利用者はまだ 0 人。想定利用者は未実装の restore で、そのために subpath を残す: root entry には child_process を置けないので、restore が `src/` を深く import する形にはしない。契約は「`{ root, runId }` を受けて `Checkpoint`（commit / ref / packKey / pack bytes）を返す」で、pack の読み戻しは `./objects` の `readCheckpointPack`。入出力を変えるときはこの公開面の変更として扱う。
 
 ```ts

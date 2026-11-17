@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The `checkpoint` operation: snapshots ROOT's working tree as `refs/hns/checkpoints/<runId>` and answers metadata
+  only (0243's prepare answer, with the pack's size and largest blob). One Run has one commit, however often it is
+  asked.
+- The signed pack route `POST /rpc/checkpoint/<runId>/pack` (`application/x-git-pack`, `content-length` required,
+  64 MiB): a declared length over the limit is refused before the body is read and nothing partial is kept. Packs
+  and operations have separate deadlines and share the concurrency slots.
+
 ## 0.1.0
 
 - Loopback-only HTTP agent behind cloudflared: `POST /rpc` with health / stat / read / list.

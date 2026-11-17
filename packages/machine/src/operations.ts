@@ -1,15 +1,19 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readdir } from "node:fs/promises";
+import { lstat, open, readdir, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import type { Dirent } from "node:fs";
 import { FileFailure, FileSystemFailure, applyVersionedWrite } from "@hns/workspace";
 import type { RootIdentity } from "@hns/workspace";
+import { CheckpointError, checkpointRun } from "@hns/workspace/checkpoint";
+import type { Checkpoint } from "@hns/workspace/checkpoint";
 import type { MachineWriteRequest, MachineWriteResult } from "@hns/core";
 import { containInRoot } from "./containment.ts";
 import type { Limits } from "./limits.ts";
 import { MachineRefusal } from "./refusal.ts";
 import type {
+  CheckpointRequest,
+  CheckpointResult,
   HealthResult,
   ListResult,
   MachineFileKind,
@@ -53,7 +57,36 @@ export type OperationResult =
   | StatResult
   | ReadResult
   | ListResult
-  | MachineWriteResult;
+  | MachineWriteResult
+  | CheckpointResult;
+
+/**
+ * One checkpoint at a time per root and Run.
+ *
+ * @remarks
+ * `checkpointRun` already settles a race on the ref with a compare-and-swap, but both callers
+ * of a lost race still build the pack, and the Worker would see two `created: true` answers for
+ * one Run. Serializing the machine's own calls makes the second one read the first one's ref and
+ * answer `created: false`, so the Run's checkpoint is decided once. The key is the root and the
+ * Run id: two Runs may still checkpoint the same tree at once.
+ */
+const checkpointLocks = new Map<string, Promise<void>>();
+
+/** Run one checkpoint after any checkpoint of the same root and Run has settled. */
+async function withCheckpointLock<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = checkpointLocks.get(key) ?? Promise.resolve();
+  const run = previous.then(work);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  checkpointLocks.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (checkpointLocks.get(key) === tail) checkpointLocks.delete(key);
+  }
+}
 
 /**
  * Run one operation against ROOT.
@@ -70,7 +103,8 @@ export type OperationResult =
  * @throws {MachineRefusal} `not_found` for a missing parent, `too_large` for a
  * file over the response bound, `forbidden` for a symbolic link as the final
  * component, `invalid_request` for a non-regular file, `deadline_exceeded`
- * once the deadline passes.
+ * once the deadline passes, `invalid_request` for an unusable checkpoint Run id,
+ * and `internal` for a replaced ROOT or a git failure.
  * @throws {FileFailure} With pi-durable's codes for any other file failure, so
  * the caller branches on a code instead of a message.
  */
@@ -93,9 +127,132 @@ export async function runOperation(
       return await listPath(root, operation.path, signal);
     case "write":
       return await writePath(operation, root, identity, signal);
+    case "checkpoint":
+      return await checkpointPath(operation, root, identity, signal);
   }
   const unreachable: never = operation;
   return unreachable;
+}
+
+/**
+ * Turn a checkpoint failure into the refusal the Worker reads.
+ *
+ * @param failure - The typed failure `checkpointRun` threw.
+ * @returns `invalid-run-id` is a caller error; a root that is not a work tree, or a git
+ * invocation that failed, is a state the machine cannot serve, answered as `internal`.
+ *
+ * @remarks
+ * None of them moved the ref, so the Worker may retry the whole checkpoint; the message names
+ * git's own reason and ROOT, never a file's content.
+ */
+function refusalForCheckpoint(failure: CheckpointError): MachineRefusal {
+  switch (failure.code) {
+    case "invalid-run-id":
+      return new MachineRefusal("invalid_request", failure.message);
+    case "not-a-work-tree":
+    case "git-failed":
+    case "missing-object":
+      return new MachineRefusal("internal", failure.message);
+  }
+  const unreachable: never = failure.code;
+  return unreachable;
+}
+
+/**
+ * Checkpoint one Run's working tree and answer with its metadata.
+ *
+ * @param operation - The Run id and the optional commit time.
+ * @param root - The canonical ROOT; the checkpoint snapshots it as a work tree.
+ * @param identity - The root's dev / ino recorded at start; a replaced root fails closed.
+ * @param signal - The request's deadline.
+ * @returns The checkpoint's metadata only ({@link CheckpointResult}); the pack is fetched again
+ * by the upload, which needs its bytes and nothing else in the answer.
+ * @throws {MachineRefusal} `invalid_request` for an unusable Run id, `internal` for a replaced
+ * root or a git failure, `deadline_exceeded` once the deadline passes.
+ *
+ * @remarks
+ * The commit is made through `@hns/workspace`'s `checkpointRun`: a private index, a parent-less
+ * commit, and a compare-and-swap on `refs/hns/checkpoints/<runId>`. The user's branch, HEAD,
+ * and index are not touched, and the same Run asked twice answers the same commit with
+ * `created: false`. The bytes go back to disk as a pack and are `objectCount` objects; the
+ * answer does not carry them, so a pack may be up to the upload limit without making the JSON
+ * answer large.
+ *
+ * A pack larger than the upload limit is not refused here: the Run's checkpoint is made and
+ * valid, and the Worker decides that the mirror is `skipped` with `too_large` (D106). The
+ * upload route refuses to receive such a pack, so nothing partial is ever stored.
+ *
+ * // TODO(0243): the vendored `@hns/core` in this worktree predates the prepare answer's
+ * // `packBytes` / `maxBlobBytes`. They are sent because the operation measures them and
+ * // {@link CheckpointResult} requires them; drop this once the dependency is the one that
+ * // has them, which also makes {@link parseCheckpointResult} accept the answer.
+ */
+async function checkpointPath(
+  operation: CheckpointRequest,
+  root: string,
+  identity: RootIdentity | undefined,
+  signal: AbortSignal,
+): Promise<CheckpointResult> {
+  signal.throwIfAborted();
+  let checkpoint: Checkpoint;
+  try {
+    checkpoint = await withCheckpointLock(root + "\0" + operation.runId, async () => {
+      await assertRootIdentity(root, identity);
+      return await checkpointRun({
+        root,
+        runId: operation.runId,
+        committedAt: operation.committedAt,
+      });
+    });
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (error instanceof MachineRefusal) throw error;
+    if (error instanceof CheckpointError) throw refusalForCheckpoint(error);
+    throw error;
+  }
+  signal.throwIfAborted();
+  // TODO(0243): the vendored `@hns/core` in this worktree predates `packBytes` /
+  // `maxBlobBytes` in the prepare answer's schema (`CheckpointRecord` has them; the prepare
+  // result does not). The operation measures both and must report them, so they are set here
+  // through the contract's result type; when the dependency is the one that has the fields, this
+  // becomes the plain object literal the other fields already are, and `parseCheckpointResult`
+  // accepts the answer as it is.
+  const prepare = {
+    runId: checkpoint.runId,
+    ref: checkpoint.ref,
+    commit: checkpoint.commit,
+    packKey: checkpoint.packKey,
+    objectCount: checkpoint.objectCount,
+    created: checkpoint.created,
+  } satisfies Omit<CheckpointResult, "packBytes" | "maxBlobBytes">;
+  const measured = {
+    ...prepare,
+    packBytes: checkpoint.packBytes,
+    maxBlobBytes: checkpoint.maxBlobBytes,
+  };
+  // SAFETY: measured has every field of the prepare answer, the two added ones included, and
+  // their types are the contract's (non-negative integers from the pack's own measurements).
+  return measured as CheckpointResult;
+}
+
+/**
+ * Refuse when ROOT is no longer the directory the agent started on.
+ *
+ * @param root - The canonical ROOT.
+ * @param identity - The dev / ino recorded at start; undefined skips the check.
+ * @throws {MachineRefusal} `internal` when the directory cannot be read or was replaced.
+ *
+ * @remarks
+ * A write checks this through `applyVersionedWrite`; a checkpoint commits with git in ROOT, so
+ * it checks the same way (INV-02). A replaced ROOT would otherwise snapshot a directory the
+ * operator did not point the agent at.
+ */
+async function assertRootIdentity(root: string, identity: RootIdentity | undefined): Promise<void> {
+  if (identity === undefined) return;
+  const current = await stat(root).catch(() => undefined);
+  if (current === undefined || current.dev !== identity.dev || current.ino !== identity.ino) {
+    throw new MachineRefusal("internal", "ROOT is not the directory the agent started on");
+  }
 }
 
 /**

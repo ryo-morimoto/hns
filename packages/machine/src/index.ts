@@ -1,5 +1,10 @@
 export { startMachineAgent } from "./agent.ts";
-export type { MachineAgent, MachineAgentOptions } from "./agent.ts";
+export type {
+  CheckpointPackSink,
+  CheckpointPackUpload,
+  MachineAgent,
+  MachineAgentOptions,
+} from "./agent.ts";
 export { ConnectionGate } from "./connection.ts";
 export type { Admission } from "./connection.ts";
 export { containInRoot, normalizeRelative } from "./containment.ts";

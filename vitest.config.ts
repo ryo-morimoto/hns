@@ -7,8 +7,14 @@ import { doctest } from "vite-plugin-doctest";
 // `npm test -w @hns/store` scoped to that package instead of the whole repo.
 const source = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 
+/** One path alias: a module pattern and the source file it resolves to. */
+interface SourceAlias {
+  readonly find: RegExp;
+  readonly replacement: string;
+}
+
 // Tests import packages by name; resolve them to src so a test run never needs a build first.
-const alias = [
+const alias: readonly SourceAlias[] = [
   { find: /^@hns\/core$/, replacement: source("./packages/core/src/index.ts") },
   {
     find: /^@hns\/core\/graphql$/,
@@ -25,6 +31,12 @@ const alias = [
     replacement: source("./packages/store/src/conversation-index/index.ts"),
   },
   { find: /^@hns\/workspace$/, replacement: source("./packages/workspace/src/index.ts") },
+  {
+    // The checkpoint's subpath runs git; without this alias it falls back to a dist build, and a
+    // test would then exercise whatever the last build produced instead of the source.
+    find: /^@hns\/workspace\/checkpoint$/,
+    replacement: source("./packages/workspace/src/checkpoint.ts"),
+  },
   {
     find: /^@hns\/workspace\/sandbox$/,
     replacement: source("./packages/workspace/src/sandbox.ts"),
@@ -45,18 +57,14 @@ const alias = [
 // Two projects per package: the in-process tests a commit runs, and the
 // integration tests that spawn a helper, a daemon, or bubblewrap. A scenario
 // runs in exactly one project.
-const packageProjects = (name: string, extra: Record<string, unknown> = {}) => [
+const packageProjects = (name: string) => [
   {
     extends: true,
     test: {
       name,
-      include: [
-        `packages/${name}/src/**/*.test.ts`,
-        `packages/${name}/src/**/*.test.tsx`,
-      ],
+      include: [`packages/${name}/src/**/*.test.ts`, `packages/${name}/src/**/*.test.tsx`],
       includeSource: [`packages/${name}/src/**/*.{ts,tsx}`],
       exclude: ["**/integration/**"],
-      ...extra,
     },
   },
   {
@@ -64,7 +72,6 @@ const packageProjects = (name: string, extra: Record<string, unknown> = {}) => [
     test: {
       name: `${name}-integration`,
       include: [`packages/${name}/test/integration/**/*.test.{ts,tsx}`],
-      ...extra,
     },
   },
 ];
@@ -88,14 +95,30 @@ export default defineConfig({
       ...packageProjects("agent"),
       ...packageProjects("machine"),
       ...packageProjects("server"),
-      ...packageProjects("web", {
-        environment: "jsdom",
-        setupFiles: ["packages/web/test/setup.ts"],
-      }).map((project) => ({
-        ...project,
-        // The web project compiles graphql tags with the same babel plugin the bundle uses.
+      // The web project runs in a DOM with its test setup; the relay plugin compiles its graphql
+      // tags with the same one the bundle uses.
+      {
+        extends: true,
         plugins: [relay()],
-      })),
+        test: {
+          name: "web",
+          include: ["packages/web/src/**/*.test.{ts,tsx}"],
+          includeSource: ["packages/web/src/**/*.{ts,tsx}"],
+          exclude: ["**/integration/**"],
+          environment: "jsdom",
+          setupFiles: ["packages/web/test/setup.ts"],
+        },
+      },
+      {
+        extends: true,
+        plugins: [relay()],
+        test: {
+          name: "web-integration",
+          include: ["packages/web/test/integration/**/*.test.{ts,tsx}"],
+          environment: "jsdom",
+          setupFiles: ["packages/web/test/setup.ts"],
+        },
+      },
       { extends: true, test: { name: "tools", include: ["tools/**/*.test.ts"] } },
     ],
   },

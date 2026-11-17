@@ -32,8 +32,10 @@
  * The contract restore is expected to use, so a change here is visible as a
  * change to a public shape: {@link checkpointRun} takes the workspace root and
  * the Run id, and returns {@link Checkpoint} — the commit, its ref, the R2 key
- * `checkpoints/<commit>.pack`, and the pack bytes. Restore reads that pack back
- * with {@link readCheckpointPack} from `./objects`. A consumer that needs a
+ * `checkpoints/<commit>.pack`, the pack bytes, and the pack's size and largest
+ * blob, which are what the machine's `checkpoint` operation reports as its
+ * metadata (0244). Restore reads that pack back with
+ * {@link readCheckpointPack} from `./objects`. A consumer that needs a
  * different input or a different split (for example, uploading here instead of
  * returning bytes) must change this subpath, and that is a public-surface change.
  */
@@ -143,6 +145,20 @@ export interface Checkpoint {
   readonly pack: Uint8Array;
   /** How many distinct objects the pack holds. */
   readonly objectCount: number;
+  /**
+   * The pack's size in bytes: `pack.byteLength`, measured here so a caller
+   * that sends the pack does not measure it a second way.
+   */
+  readonly packBytes: number;
+  /**
+   * The largest blob in the pack.
+   *
+   * @remarks
+   * The mirror reads it against Artifacts' 32 MiB per-file limit (D106): one
+   * blob over the limit skips the mirror even when the whole pack fits. It is 0
+   * for a pack without a blob, which only an empty tree can produce.
+   */
+  readonly maxBlobBytes: number;
   /** False when the ref already pointed at a checkpoint, so no commit was made. */
   readonly created: boolean;
 }
@@ -358,6 +374,17 @@ const readObjects = async (root: string, commit: string): Promise<GitObject[]> =
   return parseBatch(output);
 };
 
+/** The largest blob among the objects a pack holds. */
+const largestBlob = (objects: readonly GitObject[]): number => {
+  let largest = 0;
+  for (const object of objects) {
+    if (object.type === "blob" && object.content.byteLength > largest) {
+      largest = object.content.byteLength;
+    }
+  }
+  return largest;
+};
+
 /** Turn a commit into the checkpoint value, rebuilding the deterministic pack. */
 const buildCheckpoint = async (
   root: string,
@@ -375,6 +402,8 @@ const buildCheckpoint = async (
     packKey: checkpointPackKey(commit),
     pack: pack.bytes,
     objectCount: pack.objects.length,
+    packBytes: pack.bytes.byteLength,
+    maxBlobBytes: largestBlob(objects),
     created,
   };
 };
@@ -383,7 +412,8 @@ const buildCheckpoint = async (
  * Snapshot the working tree as a checkpoint commit and move its Run ref.
  *
  * @param options - The workspace root, the Run id, and an optional commit time.
- * @returns The commit, its ref, and the pack bytes to upload for it.
+ * @returns The commit, its ref, and the pack bytes to upload for it, with the
+ * pack's size and its largest blob measured for the caller.
  * @throws {@link CheckpointError} `invalid-run-id` for an unusable id,
  * `not-a-work-tree` when the root is outside git, and `git-failed` /
  * `missing-object` when git cannot produce the closure. The ref is not moved in

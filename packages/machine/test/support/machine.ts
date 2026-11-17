@@ -7,6 +7,7 @@ import { connect } from "node:net";
 import type { Socket } from "node:net";
 import { bodyHash, parseResponseBody, startMachineAgent } from "../../src/index.ts";
 import type {
+  CheckpointPackUpload,
   ControlPlaneKeys,
   Limits,
   MachineAgent,
@@ -26,25 +27,61 @@ export interface AgentPaths {
   readonly base: string;
 }
 
-/** One request to send, with the fields a scenario may want to bend. */
-interface MachineCall {
+/**
+ * One request to send, with the fields a scenario may want to bend.
+ *
+ * @remarks
+ * Mutable: a scenario helper starts from the plain request and sets only the field it is
+ * bending, so a call that leaves a field unset is the one an honest client would send.
+ */
+export interface MachineCall {
   readonly body: string;
   /** The body the signature covers, when a scenario signs one body and sends another. */
-  readonly signedBody?: string | undefined;
+  signedBody?: string | undefined;
   readonly connection?: string | undefined;
   /** A positive decimal string, as the header carries it. */
   readonly seq?: string | undefined;
   readonly timestamp?: number | undefined;
   readonly nonce?: string | undefined;
-  readonly machineId?: string | undefined;
+  machineId?: string | undefined;
   readonly method?: string | undefined;
-  readonly path?: string | undefined;
+  /** The route to send to and sign for. */
+  path?: string | undefined;
   /** The key to sign with, when a scenario presents another signer. */
-  readonly signingKey?: KeyObject | undefined;
+  signingKey?: KeyObject | undefined;
   /** Send no signature headers at all. */
-  readonly unsigned?: boolean | undefined;
+  unsigned?: boolean | undefined;
   /** The correlation header; it is not part of the signed message. */
   readonly requestId?: string | undefined;
+  /**
+   * Send a body that is not JSON: the raw bytes, and the media type to label them with.
+   *
+   * @remarks
+   * A pack upload is the only body the agent reads that is not JSON. `body` is still what the
+   * signature covers unless `signedBody` overrides it, so a scenario can sign one pack and
+   * send another.
+   */
+  readonly rawBody?: { readonly bytes: Uint8Array; readonly contentType: string } | undefined;
+  /**
+   * A header `fetch` would not send as written, for a raw request.
+   *
+   * @remarks
+   * `fetch` writes the `content-length` of the body it is given and replaces one given by hand,
+   * so a request whose declared framing must differ from its body (a length over the limit with
+   * no body, a missing or non-numeric length) is written on a socket through
+   * {@link rawCall}. The signature is computed exactly as {@link call} does it.
+   */
+  raw?: { readonly header: string; readonly value: string | undefined } | undefined;
+  /**
+   * Bytes to send that the signature does not cover.
+   *
+   * @remarks
+   * `rawBody` is what is signed; this is what travels. A scenario that signs one body and sends
+   * another uses it, which `signedBody` cannot express once either body is not text.
+   */
+  readonly sentBody?: Uint8Array | undefined;
+  /** The declared `content-length`, when it is not the body's own. */
+  readonly declaredLength?: string | undefined;
 }
 
 /** What the agent answered, already parsed at the boundary. */
@@ -74,8 +111,10 @@ async function callMachine(
   const timestamp = String(call.timestamp ?? Date.now());
   const nonce = call.nonce ?? randomUUID();
   const machineId = call.machineId ?? call.defaultMachineId;
-  const signed = new TextEncoder().encode(call.signedBody ?? call.body);
-  const headers = new Headers({ "content-type": "application/json" });
+  // A copy on a plain ArrayBuffer: what fetch accepts as a BodyInit, and what was signed.
+  const raw = call.rawBody === undefined ? undefined : new Uint8Array(call.rawBody.bytes);
+  const signed = raw ?? new TextEncoder().encode(call.signedBody ?? call.body);
+  const headers = new Headers({ "content-type": call.rawBody?.contentType ?? "application/json" });
   if (call.requestId !== undefined) headers.set("x-request-id", call.requestId);
   if (call.unsigned !== true) {
     const signature = signRequest(
@@ -89,10 +128,15 @@ async function callMachine(
     headers.set("x-hns-nonce", nonce);
     headers.set("x-hns-signature", signature);
   }
+  const sent = call.sentBody === undefined ? undefined : new Uint8Array(call.sentBody);
+  const body = sent ?? raw ?? new TextEncoder().encode(call.body);
+  if (call.raw !== undefined) {
+    return await rawCall({ origin: call.origin, method, path, headers, body, framing: call.raw });
+  }
   const response = await fetch(call.origin + path, {
     method,
     headers,
-    body: method === "GET" ? null : new TextEncoder().encode(call.body),
+    body: method === "GET" ? null : body,
     redirect: "error",
   });
   return {
@@ -100,6 +144,109 @@ async function callMachine(
     headers: response.headers,
     body: parseResponseBody(await response.text()),
   };
+}
+
+/**
+ * Write one signed request on a socket, with its headers exactly as given.
+ *
+ * @param request - The origin, the method, the path, the signed headers, the body, and the one
+ * header that differs from what the body would imply.
+ * @returns The status, headers, and parsed body.
+ *
+ * @remarks
+ * The body is written after the header, so a request declaring more than it sends is answered
+ * on the header alone (the agent refuses over the limit before it reads) or on the short body
+ * (the agent reads what arrived and refuses the mismatch). The answer is chunked, so the frames
+ * are joined before the body is parsed.
+ */
+async function rawCall(request: {
+  readonly origin: string;
+  readonly method: string;
+  readonly path: string;
+  readonly headers: Headers;
+  readonly body: Uint8Array;
+  readonly framing: { readonly header: string; readonly value: string | undefined };
+}): Promise<MachineAnswer> {
+  const url = new URL(request.origin);
+  const socket = connect({ host: url.hostname, port: Number(url.port) });
+  await new Promise<void>((resolve, reject) => {
+    socket.once("connect", () => resolve());
+    socket.once("error", reject);
+  });
+  // The socket's own error is expected when the agent cuts the connection: the refusal is what
+  // the answer carries, and a client that keeps sending after it is what made the error.
+  socket.on("error", () => undefined);
+  const lines: string[] = [];
+  request.headers.forEach((value, name) => {
+    if (name !== request.framing.header) lines.push(name + ": " + value);
+  });
+  // A value of undefined writes no header at all, which is the "declared nothing" case.
+  if (request.framing.value !== undefined) {
+    lines.push(request.framing.header + ": " + request.framing.value);
+  }
+  socket.write(request.method + " " + request.path + " HTTP/1.1\r\nhost: " + url.host + "\r\n");
+  socket.write(lines.join("\r\n") + "\r\n\r\n");
+  // A body longer than the length written is half-sent: the agent answers on what it declared
+  // and closes, and continuing to send into the closed socket is not part of the scenario.
+  const declared = Number(request.framing.value);
+  const sent =
+    Number.isSafeInteger(declared) && declared >= 0
+      ? request.body.subarray(0, Math.min(declared, request.body.byteLength))
+      : request.body;
+  socket.write(sent);
+  const text = await readAll(socket);
+  const separator = text.indexOf("\r\n\r\n");
+  const status = Number(/^HTTP\/1\.1 ([0-9]{3})/u.exec(text)?.[1] ?? "0");
+  // Node's HTTP parser answers a malformed request by closing the connection and, by default,
+  // writing no response at all; the client then sees a closed socket. Such an answer is a
+  // refusal the caller has to treat as one, so it is surfaced with a status of 0 rather than
+  // thrown.
+  const chunks = separator === -1 ? "" : text.slice(separator + 4);
+  // Node's HTTP parser answers a malformed request by closing the connection and, by default,
+  // writing no response at all; the client then sees an empty answer. Such an answer is a
+  // refusal the caller has to treat as one, so it is surfaced with a status of 0 rather than
+  // thrown.
+  if (text === "") {
+    return {
+      status: 0,
+      headers: new Headers(),
+      body: {
+        ok: false,
+        code: "invalid_request",
+        message: "the connection closed before an answer",
+      },
+    };
+  }
+  const parsed = decodeChunks(chunks);
+  try {
+    return { status, headers: new Headers(), body: parseResponseBody(parsed) };
+  } catch {
+    return {
+      status,
+      headers: new Headers(),
+      body: { ok: false, code: "invalid_request", message: parsed },
+    };
+  }
+}
+
+/**
+ * Join the data frames of a chunked body.
+ *
+ * @param raw - Everything after the header block, still chunk-framed.
+ * @returns The joined body text; text that is not chunked is returned as it is.
+ */
+function decodeChunks(raw: string): string {
+  let offset = 0;
+  let body = "";
+  for (;;) {
+    const line = raw.indexOf("\r\n", offset);
+    if (line === -1) return body === "" ? raw : body;
+    const size = Number.parseInt(raw.slice(offset, line).trim(), 16);
+    if (!Number.isSafeInteger(size) || size < 0) return body === "" ? raw : body;
+    if (size === 0) return body;
+    body += raw.slice(line + 2, line + 2 + size);
+    offset = line + 2 + size + 2;
+  }
 }
 
 /** A running agent and the ways a test drives it. */
@@ -124,6 +271,8 @@ export interface AgentSetup {
   readonly machineId?: string | undefined;
   /** Where the agent's fs log lines go; defaults to stderr. */
   readonly onLog?: MachineLogSink | undefined;
+  /** Where an accepted checkpoint pack goes; unset refuses every upload. */
+  readonly onCheckpointPack?: ((upload: CheckpointPackUpload) => Promise<void>) | undefined;
 }
 
 /**
@@ -143,6 +292,9 @@ export async function withAgent(
   await mkdir(root);
   const pair: ControlPlaneKeyPair = generateControlPlaneKey();
   const machineId = setup.machineId ?? MACHINE_ID;
+  // The sink is optional: only a scenario that receives a checkpoint pack passes one.
+  const sink =
+    setup.onCheckpointPack === undefined ? {} : { onCheckpointPack: setup.onCheckpointPack };
   const agent = await startMachineAgent({
     root,
     machineId,
@@ -151,6 +303,7 @@ export async function withAgent(
     limits: setup.limits ?? {},
     // Integration tests are otherwise silent; a scenario that proves the log passes a sink.
     onLog: setup.onLog ?? (() => undefined),
+    ...sink,
   });
   const signingKey = setup.signingKey ?? pair.privateKey;
   try {

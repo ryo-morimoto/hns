@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `checkpointRun` reports the pack's size (`packBytes`) and its largest blob (`maxBlobBytes`) beside the bytes, so
+  a caller sending the pack and a mirror deciding whether Artifacts can take it measure once (0244).
+
 ## 0.1.0
 
 - Workspace: versioned read/write, a journal, recovery, the audit trail, and the change log.

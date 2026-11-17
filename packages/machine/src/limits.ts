@@ -7,8 +7,17 @@
  * limit.
  */
 export interface Limits {
-  /** Wall-clock budget for one request, body included. */
+  /** Wall-clock budget for one JSON operation, body included. */
   readonly timeoutMs: number;
+  /**
+   * Wall-clock budget for one pack upload, body included.
+   *
+   * @remarks
+   * A checkpoint's pack is tens of MiB over a tunnel, so it does not share {@link timeoutMs}
+   * with the JSON operations (0244). It shares the concurrency slots, though: the upload holds
+   * one of the {@link maxConcurrency} slots while it runs, exactly as a JSON operation does.
+   */
+  readonly packUploadTimeoutMs: number;
   /** Requests handled at once; the rest are refused as busy. */
   readonly maxConcurrency: number;
   /** Bytes in one request body. */
@@ -17,9 +26,16 @@ export interface Limits {
   readonly maxResponseBytes: number;
 }
 
-/** The defaults for an agent: 30 seconds, eight at once, 16 MiB in, 256 KiB out. */
+/** Pack uploads share the agent's own default with {@link Limits.timeoutMs}. */
+const DEFAULT_PACK_UPLOAD_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * The defaults for an agent: 30 seconds for an operation, five minutes for a pack, eight at once,
+ * 16 MiB in, 256 KiB out.
+ */
 export const DEFAULT_LIMITS: Limits = {
   timeoutMs: 30_000,
+  packUploadTimeoutMs: DEFAULT_PACK_UPLOAD_TIMEOUT_MS,
   maxConcurrency: 8,
   maxRequestBytes: 16 * 1024 * 1024,
   maxResponseBytes: 256 * 1024,
@@ -43,6 +59,10 @@ function positiveInteger(name: string, value: number): number {
 export function resolveLimits(overrides?: Partial<Limits>): Limits {
   return {
     timeoutMs: positiveInteger("timeoutMs", overrides?.timeoutMs ?? DEFAULT_LIMITS.timeoutMs),
+    packUploadTimeoutMs: positiveInteger(
+      "packUploadTimeoutMs",
+      overrides?.packUploadTimeoutMs ?? DEFAULT_LIMITS.packUploadTimeoutMs,
+    ),
     maxConcurrency: positiveInteger(
       "maxConcurrency",
       overrides?.maxConcurrency ?? DEFAULT_LIMITS.maxConcurrency,

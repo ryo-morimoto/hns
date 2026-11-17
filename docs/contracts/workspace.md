@@ -29,8 +29,9 @@
 - `checkpointRun({ root, runId, committedAt? })` は一時 index に作業ツリーを足し、parent の無い commit を作り、`refs/hns/checkpoints/<runId>` を CAS で進める。ユーザーの HEAD / index / worktree は触らない。
 - 除外は `.gitignore` に加え、tracked の `.hns` / `.env*` / 資格情報名 / `node_modules`（名前ベース。**内容は走査しない**）。
 - 同じ `runId` は `created: false` で既存 commit を返す。pack は commit の object closure から作る。
+- 結果は commit / ref / `checkpoints/<commit>.pack` と pack の bytes、加えて **`packBytes`**（pack のサイズ）と **`maxBlobBytes`**（pack 中の最大 blob）。どちらも machine の `checkpoint` operation が metadata として Worker に返し（0244）、mirror は `maxBlobBytes` を Artifacts の 32MiB/file と、`packBytes` を 64MiB/push と比べる（D106）。
 - 呼ぶのは Run の終了・中断・lease 解放・SIGTERM。crash は対象外（durability §3.3）。
-- restore は 0155（未実装）。この契約の入出力（commit / ref / packKey / pack bytes、読み戻しは `readCheckpointPack`）を変えるときは、公開面の変更になる。
+- restore は 0155（未実装）。この契約の入出力（commit / ref / packKey / pack bytes / packBytes / maxBlobBytes、読み戻しは `readCheckpointPack`）を変えるときは、公開面の変更になる。
 
 ## 変わったとき
 

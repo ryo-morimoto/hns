@@ -3,7 +3,8 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { realpath, stat } from "node:fs/promises";
 import * as v from "valibot";
-import { MACHINE_RPC_PATH } from "@hns/core";
+import { MAX_CHECKPOINT_PACK_BYTES, MACHINE_RPC_PATH } from "@hns/core";
+import type { CheckpointPackUploadResult, JsonValue } from "@hns/core";
 import { Denied, FileFailure } from "@hns/workspace";
 import type { RootIdentity } from "@hns/workspace";
 import { ConnectionGate } from "./connection.ts";
@@ -15,7 +16,13 @@ import { runOperation } from "./operations.ts";
 import { MachineRefusal, refusalStatus } from "./refusal.ts";
 import { RequestVerifier } from "./signature.ts";
 import type { ControlPlaneKeys } from "./control-plane.ts";
-import { parseOperation, parseSignedHeaders } from "./wire.ts";
+import {
+  MACHINE_PACK_CONTENT_TYPE,
+  PACK_RESPONSE_OP,
+  checkpointPackRunId,
+  parseOperation,
+  parseSignedHeaders,
+} from "./wire.ts";
 import type { Operation, OperationName, RefusalBody, SuccessBody } from "./wire.ts";
 
 /** The only address the agent ever listens on: cloudflared connects from here. */
@@ -45,6 +52,17 @@ export interface MachineAgentOptions {
    * `x-request-id` header, which is not signed and never used for authentication.
    */
   readonly onLog?: MachineLogSink | undefined;
+  /**
+   * Where an accepted checkpoint pack goes.
+   *
+   * @remarks
+   * The agent makes checkpoints and accepts their packs, and this receives the bytes once the
+   * request is authenticated. Unset means the machine has no destination for a pack yet (the
+   * Worker's half is 0245), so every upload is refused with `internal` rather than accepted
+   * into nothing. The sink is the machine's only outbound seam for a pack and never sees a
+   * secret: the bytes are the repository's content, not a token.
+   */
+  readonly onCheckpointPack?: ((upload: CheckpointPackUpload) => Promise<void>) | undefined;
 }
 
 /** A running agent. */
@@ -69,7 +87,31 @@ interface AgentContext {
   readonly gate: ConnectionGate;
   readonly inFlight: InFlight;
   readonly onLog: MachineLogSink;
+  /** Where an accepted checkpoint pack goes; set from {@link MachineAgentOptions.onCheckpointPack}. */
+  readonly checkpointPacks: CheckpointPackSink | undefined;
 }
+
+/**
+ * The bytes one checkpoint pack upload delivered.
+ *
+ * @remarks
+ * The agent forwards the bytes and what it learned about the route; it does not write them.
+ * `receivedBytes` equals `bytes.byteLength`, which is what the upload answers with.
+ */
+export interface CheckpointPackUpload {
+  readonly runId: string;
+  readonly bytes: Uint8Array;
+}
+
+/**
+ * Where the agent hands a checkpoint pack.
+ *
+ * @remarks
+ * The pack was authenticated before this is called: its signature covers the pack route and the
+ * pack's own bytes. The receiver decides where the bytes go and what the answer says; a
+ * receiver that fails is answered as `internal`, never as a success.
+ */
+export type CheckpointPackSink = (upload: CheckpointPackUpload) => Promise<void>;
 
 /** The address Node reports after a successful listen. */
 const BoundAddressSchema: v.GenericSchema<unknown, AddressInfo> = v.object({
@@ -118,6 +160,7 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     gate: new ConnectionGate(),
     inFlight: new InFlight(limits.maxConcurrency),
     onLog: options.onLog ?? writeMachineLog,
+    checkpointPacks: options.onCheckpointPack,
   };
   const server = createServer();
   server.on("request", (request: IncomingMessage, response: ServerResponse): void => {
@@ -224,14 +267,23 @@ async function handleRequest(
     logRequest(request, response, context, started, fsPath, op);
     return;
   }
-  if (request.url !== MACHINE_RPC_PATH) {
-    sendRefusal(response, new MachineRefusal("not_found", "the agent answers /rpc only"));
+  // The route is read with any query string removed: the signature covers the whole path.
+  const packRunId = checkpointPackRunId(pathWithoutQuery(request.url));
+  if (request.url !== MACHINE_RPC_PATH && packRunId === undefined) {
+    sendRefusal(
+      response,
+      new MachineRefusal("not_found", "the agent answers /rpc and a checkpoint's pack route"),
+    );
     logRequest(request, response, context, started, fsPath, op);
     return;
   }
   if (!context.inFlight.enter()) {
     sendRefusal(response, new MachineRefusal("busy", "too many requests are in flight"));
     logRequest(request, response, context, started, fsPath, op);
+    return;
+  }
+  if (packRunId !== undefined) {
+    await servePackUpload(request, response, context, packRunId, started, fsPath);
     return;
   }
   const deadline = new AbortController();
@@ -241,7 +293,12 @@ async function handleRequest(
     const body = await Promise.race([readBody(request, context.limits.maxRequestBytes), expired]);
     const headers = parseSignedHeaders(request.headers);
     await Promise.race([
-      context.verifier.verify({ method: request.method, path: request.url, headers, body }),
+      context.verifier.verify({
+        method: request.method ?? "POST",
+        path: request.url ?? MACHINE_RPC_PATH,
+        headers,
+        body,
+      }),
       expired,
     ]);
     const admission = context.gate.admit(headers.connection, Number(headers.seq));
@@ -261,7 +318,9 @@ async function handleRequest(
       deadline.signal,
       context.identity,
     );
-    sendJson(response, { ok: true, op, result }, context.limits);
+    // SAFETY: every OperationResult member is a closed object of strings, numbers, and booleans,
+    // which is what JsonValue is; the operations build them and no field is a Uint8Array.
+    sendJson(response, { ok: true, op, result: result as JsonValue }, context.limits);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     sendRefusal(response, asRefusal(error));
@@ -269,6 +328,128 @@ async function handleRequest(
     clearTimeout(timer);
     context.inFlight.leave();
     logRequest(request, response, context, started, fsPath, op);
+  }
+}
+
+/** A request target without its query string, as the route reads it. */
+function pathWithoutQuery(url: string | undefined): string {
+  if (url === undefined) return "";
+  const query = url.indexOf("?");
+  return query === -1 ? url : url.slice(0, query);
+}
+
+/**
+ * Serve one signed checkpoint pack upload.
+ *
+ * @param request - The incoming request, already holding a concurrency slot.
+ * @param response - The response to write.
+ * @param context - The root, bounds, verifier, and pack sink.
+ * @param runId - The Run the route names.
+ * @param started - Epoch milliseconds before the request was read.
+ * @param fsPath - The request path as the log line reports it.
+ *
+ * @remarks
+ * The order refuses as much as possible before a byte of the body is kept. The media type and
+ * the declared length are read first: a length over {@link MAX_CHECKPOINT_PACK_BYTES} is
+ * answered `too_large` without reading the body at all, so nothing partial is ever stored and a
+ * client that keeps sending is cut off by the connection closing. The body is read to its
+ * declared length under the pack deadline, the signature is verified over the bytes that
+ * arrived, and only then does the sink see them.
+ *
+ * The signature covers the method, the pack route, and the sha256 of the body
+ * ({@link signatureMessage}). It does **not** cover `content-type` or `content-length`: those are
+ * checked here before the body is read, and the receiver re-hashes the bytes before it stores
+ * them (0245), so a header changed in transit cannot make a different or short body pass for
+ * the signed one.
+ */
+async function servePackUpload(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: AgentContext,
+  runId: string,
+  started: number,
+  fsPath: string,
+): Promise<void> {
+  const deadline = new AbortController();
+  const timer = setTimeout(
+    () => deadline.abort(deadlineRefusal()),
+    context.limits.packUploadTimeoutMs,
+  );
+  const expired = deadlineExceeded(deadline.signal);
+  try {
+    const mediaType = request.headers["content-type"];
+    if (mediaType !== MACHINE_PACK_CONTENT_TYPE) {
+      throw new MachineRefusal(
+        "invalid_request",
+        "a pack upload must be " + MACHINE_PACK_CONTENT_TYPE,
+      );
+    }
+    const declared = request.headers["content-length"];
+    if (declared === undefined || !/^[0-9]{1,15}$/u.test(declared)) {
+      throw new MachineRefusal(
+        "invalid_request",
+        "a pack upload must declare a content-length in bytes",
+      );
+    }
+    const length = Number(declared);
+    if (length > MAX_CHECKPOINT_PACK_BYTES) {
+      throw new MachineRefusal(
+        "too_large",
+        "a pack of " +
+          String(length) +
+          " bytes is over the " +
+          String(MAX_CHECKPOINT_PACK_BYTES) +
+          " byte limit",
+      );
+    }
+    // A plain Uint8Array, not the Buffer fetch hands the socket: the sink receives bytes, and a
+    // Buffer's own view would follow every copy of the buffer, not the pack.
+    const body = new Uint8Array(
+      await Promise.race([readBody(request, MAX_CHECKPOINT_PACK_BYTES), expired]),
+    );
+    if (body.byteLength !== length) {
+      throw new MachineRefusal(
+        "invalid_request",
+        "the pack body does not match its content-length",
+      );
+    }
+    const headers = parseSignedHeaders(request.headers);
+    await Promise.race([
+      context.verifier.verify({
+        method: request.method ?? "POST",
+        path: request.url ?? "",
+        headers,
+        body,
+      }),
+      expired,
+    ]);
+    const admission = context.gate.admit(headers.connection, Number(headers.seq));
+    if (admission.kind === "stale") {
+      throw new MachineRefusal(
+        "stale_connection",
+        `a newer connection (seq ${admission.floor}) is current`,
+      );
+    }
+    const sink = context.checkpointPacks;
+    if (sink === undefined) {
+      throw new MachineRefusal("internal", "the machine has no destination for a checkpoint pack");
+    }
+    await Promise.race([sink({ runId, bytes: body }), expired]);
+    const result: CheckpointPackUploadResult = { runId, receivedBytes: body.byteLength };
+    const text = JSON.stringify({ ok: true, op: PACK_RESPONSE_OP, result });
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(text, "utf8"),
+      connection: "keep-alive",
+    });
+    response.end(text);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    sendRefusal(response, asRefusal(error));
+  } finally {
+    clearTimeout(timer);
+    context.inFlight.leave();
+    logRequest(request, response, context, started, fsPath, undefined);
   }
 }
 
@@ -286,6 +467,8 @@ async function handleRequest(
  */
 function logPathOf(operation: Operation): string {
   if (operation.op === "health") return "/";
+  // A checkpoint names a Run, not a file; the log shows it below ROOT like any other path.
+  if (operation.op === "checkpoint") return "/" + operation.runId;
   // A write names a project and a file; the log shows the resolved path, like a read does.
   const project = operation.op === "write" ? operation.projectRoot : "";
   try {

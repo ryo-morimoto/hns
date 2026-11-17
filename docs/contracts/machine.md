@@ -4,7 +4,7 @@
 
 ## 経路
 
-- サーバ → machine は **1 つのルート `/rpc`**（`MACHINE_RPC_PATH`）。署名がこのパスを含むので、別のパスは受け付けない。
+- サーバ → machine は **`/rpc`**（`MACHINE_RPC_PATH`）と、checkpoint の pack だけの **`/rpc/checkpoint/<runId>/pack`**。署名がこのパスを含むので、ほかのパスは受け付けない。pack のルートは runId を含むので、ある Run 用に署名した pack を別の Run のパスへ送ると署名が合わない。
 - 認証は **Worker 側の control-plane 鍵で署名**し、machine が enrollment で配られた公開鍵で検証する（D100）。device 鍵は machine → Worker の向き（[auth](auth.md)）。
 
 ## 署名
@@ -24,6 +24,10 @@
 
 - **health / stat / read / list** は読み取りのみ。**write** は版付き（`expectedVersion` 必須）で、機械が現在の版を**再計算**して比べる（INV-03）。一致しなければ `conflict`、書いていなければ `denied`。
 - write は同一親の temp に書いて fsync し、rename してから再ハッシュする。path 単位で直列化する。
+- **checkpoint**（0244）は `{ "op": "checkpoint", "runId", "committedAt"? }` を受け、作業ツリーを parent の無い commit にして `refs/hns/checkpoints/<runId>` を CAS で進め（`@hns/workspace` の `checkpointRun`）、**metadata だけ**を返す: runId / ref / commit / packKey / objectCount / packBytes / maxBlobBytes / created（0243 の `CheckpointPrepareResult`）。pack はこの応答に入らない。同じ `runId` の再実行は同じ commit と `created: false` を返し、machine は同じ runId の checkpoint を直列化して二重 commit を作らない。
+- **pack 転送**（0244）は `POST /rpc/checkpoint/<runId>/pack`、`content-type: application/x-git-pack`、`content-length` 必須、最大 **64MiB**（`MAX_CHECKPOINT_PACK_BYTES`。Artifacts の push 上限で、Worker の request 上限ではない）。署名は既存の 6 ヘッダで、`bodyHash` は **pack のバイト列**。成功は `{ ok: true, op: "pack", result: { runId, receivedBytes } }`、失敗は既存の refusal（`too_large` 413 / `invalid_request` 400 / `unauthorized` 401）。`content-length` が無い・数でない・負は `invalid_request`、64MiB 超は**本文を読む前に** `too_large` で、部分受信もしない（チャンクは保持しない）。
+- **署名が content-type / content-length を覆わない**。どちらも本文を読む前に検証し、`content-length` と実バイトの一致を見てから署名を確かめるが、転送中の差し替えは原理的に見えない。よって受け口（0245）は、受け取った pack の sha256 が署名済みの `bodyHash` と一致することを**必ず**確かめ、一致しない pack は R2 に置かない。
+- checkpoint（git）と pack upload は**deadline を分ける**（`timeoutMs` と `packUploadTimeoutMs`。既定 5 分）。**同時実行枠（`maxConcurrency`）は共有**する: pack の転送中は 1 枠を使い、上限に達していれば JSON の operation は待たずに `busy`（429）で返る。
 - 上限（`maxResponseBytes` など）は refusal の `too_large` / `deadline_exceeded` で返し、**fail closed**。
 
 ## 変わったとき

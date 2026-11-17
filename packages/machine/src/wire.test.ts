@@ -1,8 +1,21 @@
 import { expect, test } from "vitest";
 import type { IncomingHttpHeaders } from "node:http";
-import { SIGNED_HEADER_BY_FIELD } from "@hns/core";
+import * as v from "valibot";
+import {
+  CHECKPOINT_PACK_CONTENT_TYPE,
+  MAX_CHECKPOINT_PACK_BYTES,
+  SIGNED_HEADER_BY_FIELD,
+  fitsCheckpointPack,
+} from "@hns/core";
+import type { CheckpointPrepareResult, JsonValue } from "@hns/core";
 import { MachineRefusal } from "./refusal.ts";
 import {
+  MACHINE_PACK_CONTENT_TYPE,
+  PACK_RESPONSE_OP,
+  checkpointPackPath,
+  checkpointPackRunId,
+  parseCheckpointPackResult,
+  parseCheckpointResult,
   parseHealthResult,
   parseListResult,
   parseOperation,
@@ -11,6 +24,18 @@ import {
   parseSignedHeaders,
   parseStatResult,
 } from "./wire.ts";
+
+/** A received JSON value, recursively, so untrusted text is parsed rather than asserted. */
+const JsonValueSchema: v.GenericSchema<unknown, JsonValue> = v.lazy(() =>
+  v.union([
+    v.null(),
+    v.boolean(),
+    v.number(),
+    v.string(),
+    v.array(JsonValueSchema),
+    v.record(v.string(), JsonValueSchema),
+  ]),
+);
 
 const SIGNATURE = "A".repeat(86);
 
@@ -133,4 +158,119 @@ test("a response body is parsed at the boundary", () => {
     parseResponseBody(JSON.stringify({ ok: false, code: "made-up", message: "x" })),
   ).toThrow();
   expect(() => parseStatResult({ exists: true, kind: "socket", size: 1, mtimeMs: 0 })).toThrow();
+});
+
+/** A checkpoint prepare answer, as the machine sends it. */
+const prepare: CheckpointPrepareResult = {
+  runId: "run-1",
+  ref: "refs/hns/checkpoints/run-1",
+  commit: "1".repeat(40),
+  packKey: "checkpoints/" + "1".repeat(40) + ".pack",
+  objectCount: 4,
+  packBytes: 512,
+  maxBlobBytes: 128,
+  created: true,
+};
+
+// Catches: the checkpoint operation missing from the wire schema, or its time arriving as a
+// string or a fraction of a second and being rounded by the machine instead of refused.
+test("a checkpoint operation names its Run and an optional commit time", () => {
+  const encode = (value: JsonValue): Uint8Array => new TextEncoder().encode(JSON.stringify(value));
+  expect(parseOperation(encode({ op: "checkpoint", runId: "run-1" }))).toStrictEqual({
+    op: "checkpoint",
+    runId: "run-1",
+  });
+  expect(
+    parseOperation(encode({ op: "checkpoint", runId: "run-1", committedAt: 1_700_000_000 })),
+  ).toStrictEqual({ op: "checkpoint", runId: "run-1", committedAt: 1_700_000_000 });
+  expect(
+    parseOperation(encode({ op: "checkpoint", runId: "run-1", committedAt: 0 })),
+  ).toStrictEqual({ op: "checkpoint", runId: "run-1", committedAt: 0 });
+  const malformed: readonly JsonValue[] = [
+    { op: "checkpoint" },
+    { op: "checkpoint", runId: "" },
+    { op: "checkpoint", runId: "run-1", committedAt: "1700000000" },
+    { op: "checkpoint", runId: "run-1", committedAt: 1.5 },
+    { op: "checkpoint", runId: "run-1", committedAt: -1 },
+  ];
+  for (const body of malformed) {
+    expect(() => parseOperation(encode(body))).toThrow(MachineRefusal);
+  }
+});
+
+// Catches: a checkpoint answer that gained the pack\u0027s bytes. The result is the checkpoint
+// contract\u0027s prepare answer, where no field can hold a pack, and it is parsed at the boundary so
+// a field added later is refused rather than read as if it were still the old shape.
+test("a checkpoint answer is metadata only", () => {
+  // The answer travels as JSON text; parsing it yields the JsonValue the agent's answer carries.
+  const wire = parseJsonValue(JSON.stringify(prepare));
+  expect(parseCheckpointResult(wire)).toStrictEqual(prepare);
+  expect(() =>
+    parseCheckpointResult(parseJsonValue(JSON.stringify({ ...prepare, objectCount: -1 }))),
+  ).toThrow();
+  expect(() =>
+    parseCheckpointResult(parseJsonValue(JSON.stringify({ ...prepare, commit: "" }))),
+  ).toThrow();
+  const upload = parseCheckpointPackResult(
+    parseJsonValue(JSON.stringify({ runId: "run-1", receivedBytes: 512 })),
+  );
+  expect(upload).toStrictEqual({ runId: "run-1", receivedBytes: 512 });
+  expect(() =>
+    parseCheckpointPackResult(parseJsonValue(JSON.stringify({ runId: "run-1" }))),
+  ).toThrow();
+});
+
+/** Parse untrusted text into a JSON value, which is the shape an answer's `result` arrives in. */
+function parseJsonValue(text: string): JsonValue {
+  return v.parse(JsonValueSchema, JSON.parse(text));
+}
+
+// Catches: an answer envelope that cannot carry a pack upload, so the caller would read a
+// successful upload as an unknown response.
+test("a pack upload answers with its own success shape", () => {
+  const body = parseResponseBody(
+    JSON.stringify({
+      ok: true,
+      op: PACK_RESPONSE_OP,
+      result: { runId: "run-1", receivedBytes: 3 },
+    }),
+  );
+  expect(body.ok).toBe(true);
+  if (!body.ok) throw new Error("expected a success");
+  expect(body.op).toBe("pack");
+  expect(parseCheckpointPackResult(body.result)).toStrictEqual({
+    runId: "run-1",
+    receivedBytes: 3,
+  });
+  expect(() =>
+    parseResponseBody(JSON.stringify({ ok: true, op: "pack", result: {} })),
+  ).not.toThrow();
+});
+
+// Catches: the pack route read loosely, so a path that is not one Run\u0027s pack could reach the
+// upload, or a Run id carrying a separator could name a nested path.
+test("the pack route names one Run and reads back", () => {
+  expect(checkpointPackPath("run-1")).toBe("/rpc/checkpoint/run-1/pack");
+  expect(checkpointPackRunId(checkpointPackPath("run-1"))).toBe("run-1");
+  for (const path of [
+    "/rpc",
+    "/rpc/checkpoint//pack",
+    "/rpc/checkpoint/run-1",
+    "/rpc/checkpoint/run-1/pack/",
+    "/rpc/checkpoint/run-1/other",
+    "/rpc/checkpoint/run-1/run-2/pack",
+    "/other/checkpoint/run-1/pack",
+  ]) {
+    expect(checkpointPackRunId(path), path).toBeUndefined();
+  }
+});
+
+// Catches: the pack bound or media type drifting from the checkpoint contract\u0027s, which the
+// Worker\u0027s receiver and the mirror also read.
+test("the pack bound is the checkpoint contract\u0027s 64 MiB", () => {
+  expect(MACHINE_PACK_CONTENT_TYPE).toBe(CHECKPOINT_PACK_CONTENT_TYPE);
+  expect(MACHINE_PACK_CONTENT_TYPE).toBe("application/x-git-pack");
+  expect(MAX_CHECKPOINT_PACK_BYTES).toBe(64 * 1024 * 1024);
+  expect(fitsCheckpointPack(MAX_CHECKPOINT_PACK_BYTES)).toBe(true);
+  expect(fitsCheckpointPack(MAX_CHECKPOINT_PACK_BYTES + 1)).toBe(false);
 });
