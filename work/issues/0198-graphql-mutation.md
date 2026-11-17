@@ -1,6 +1,6 @@
 # 0198: GraphQL の Mutation 面（書き込みの骨格）
 
-status: open
+status: done
 priority: now
 design: agreed
 design-ref: D077
@@ -113,3 +113,12 @@ packages/server/test/graphql/
 - 2026-11-17: 第2波の後に lead が `next` から `now` へ。Query しか無い GraphQL に書き込みの骨格を足す最優先の前提。
 - 2026-11-17: 実装。core の `buildSchema(query, mutation?)` / `buildSdl(mutation?)`、server の `mutations/`（module 契約・集約・`MutationFailure`）と `GraphQLContext.session`、handler の mutation 許可。fixture mutation で parse → validate → execute → union の契約テストを追加。
 - 2026-11-17: `npm run check` exit 0（lint / fmt / codegen / typecheck / 120 files・729 tests / build / deploy dry-run / knip、38 秒）。codegen の再生成で `packages/web/schema.graphql` と relay の artifact に差分なし。受入は 0127 の実例を除いて充足（レビュー待ち）。
+## Result
+
+- verdict: **PASS**（reviewer-0198、blocking 0）
+- reviewer: reviewer-0198（この変更を書いていない別エージェント）
+- HEAD: bd33178（main に ff 統合）
+- 受入: 7/7。最初の実例（createProject）は 0127 が持ち、0198 はその骨格まで（D080）。
+- 確認: buildSchema(query, mutation?) / buildSdl(mutation?) の任意 Mutation、Mutation 未指定の golden 一致、Mutation が無い間は root を出さない（getMutationType undefined）。feature module の集約・同名 field の拒否・context.session の認可。MutationFailure を QueryFailure と分けたことで既定 SDL は不変（codegen 差分なし）。handler は bytes → depth/complexity → validate → execute、union 200 / 要求不正 400 / 上限は Query と同じ。fixture createNote の契約テスト。
+- 非 blocking（低 8、follow-up）: nullable な root field の resolver throw が 200 + errors（0127 の module 契約で NonNull を必須にするか 500）/ default schema に MutationFailure が無いことの直接断言 / complexity 上限のテストが binding でない（maxComplexity: 1）/ AC の「入力不正」の文言 / fixture の TSDoc に issue 番号 / core・server の CHANGELOG 未更新 / buildSdl の型構築の二重化 / fixture を test/support に置くかの根拠。
+- 未確認: 0127 の実 mutation と D1 write、cf dev の port 競合 flake。
