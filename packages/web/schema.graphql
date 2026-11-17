@@ -205,6 +205,7 @@ type Mutation {
   decidePolicy(input: DecidePolicyInput!): DecidePolicyResult!
   registerMachine(input: RegisterMachineInput!): RegisterMachineResult!
   revokeMachine(id: String!): RevokeMachineResult!
+  requestGrant(input: RequestGrantInput!): RequestGrantResult!
 }
 
 union CreateProjectResult = CreateProjectPayload | MutationFailure
@@ -292,4 +293,43 @@ union RevokeMachineResult = RevokeMachinePayload | MutationFailure
 
 type RevokeMachinePayload {
   machine: Machine!
+}
+
+union RequestGrantResult = RequestGrantPayload | MutationFailure
+
+type RequestGrantPayload {
+  policyRevision: Int!
+  grant: GrantView!
+}
+
+type GrantView {
+  grantId: String!
+  workspaceId: String!
+  sessionId: String!
+  machineId: String!
+  toolId: String!
+  toolVersion: String!
+  manifestHash: String!
+  scopeKind: String!
+  scopeRoots: String!
+  scopeNetwork: String!
+  scopeWritable: String!
+  issuedAt: String!
+  expiresAt: String!
+  epoch: Int!
+  maxCalls: Int!
+  maxBytes: Int!
+  alg: String!
+  keyId: String!
+  signature: String!
+}
+
+input RequestGrantInput {
+  projectId: String!
+  machineId: String!
+  toolId: String!
+  toolVersion: String
+  maxBytes: Int
+  runId: String
+  manifestHash: String
 }

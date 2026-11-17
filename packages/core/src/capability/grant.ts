@@ -33,12 +33,16 @@ import type { DenialCode, PolicyDecision, SignedGrant, ToolCall, ToolManifest } 
  *    (`grant_algorithm_mismatch`).
  * 3. **signature** — `signature` must be the base64url signature over `JCS(payload)`
  *    (`grant_invalid`).
- * 4. **expiry** — `issuedAt` must not be after `now`, and `expiresAt` must be after it
+ * 4. **revocation** — a grant the caller lists in `revokedGrants` is `grant_revoked`. It is
+ *    checked **before** expiry on purpose: a grant the issuer took back must not be reported as one
+ *    that merely ran out, however long the machine waited to check it, or an audit would read a
+ *    revocation as a stale grant. Only when the caller passes no set does this step not run.
+ * 5. **expiry** — `issuedAt` must not be after `now`, and `expiresAt` must be after it
  *    (`grant_expired`).
- * 5. **epoch** — `payload.epoch` must not be older than `lastEpoch` (`epoch_stale`).
- * 6. **manifest** — `manifestHash`, `toolId`, and `toolVersion` must agree with the call and its
+ * 6. **epoch** — `payload.epoch` must not be older than `lastEpoch` (`epoch_stale`).
+ * 7. **manifest** — `manifestHash`, `toolId`, and `toolVersion` must agree with the call and its
  *    manifest (`manifest_mismatch`).
- * 7. **scope** — the call must fit the grant's scope (`path_outside_root`, `command_not_allowed`,
+ * 8. **scope** — the call must fit the grant's scope (`path_outside_root`, `command_not_allowed`,
  *    `egress_denied`, `scope_exceeded`, `unsupported`); `exact` must name this call's `callHash`
  *    (`scope_exceeded`).
  *
@@ -114,6 +118,18 @@ export interface AuthorizeCallInput {
   readonly callHash: string;
   /** The newest epoch this machine has accepted; a grant older than it is `epoch_stale`. */
   readonly lastEpoch?: number | undefined;
+  /**
+   * The grant ids the caller has learned are revoked, or `undefined` when it knows nothing.
+   *
+   * @remarks
+   * A revocation is the issuer taking a grant back **while it is still live** (the run the grant was
+   * bound to ended, for instance), so it is `grant_revoked`, not `grant_expired`: the two are
+   * different facts and an audit must be able to tell them apart (`DENIAL_CODES`). The list is
+   * the caller's state, like `lastEpoch`: this function has no store of its own. `undefined` means
+   * the caller has no revocation information, and then the check does not run — a machine that has
+   * not been told about revocations must not pretend it has.
+   */
+  readonly revokedGrants?: ReadonlySet<string> | undefined;
   /** The active policy revision and hash the machine has. They are copied into an `allow` so the
    * audit row names the revision the grant was issued under; an allow without them is impossible. */
   readonly activePolicy?: { readonly revision: number; readonly hash: string } | undefined;
@@ -238,6 +254,9 @@ export async function authorizeCall(input: AuthorizeCallInput): Promise<PolicyDe
   }
   if (!(await signatureVerifies(grant, input.key))) {
     return denyOf("grant_invalid", "the grant signature does not verify", input);
+  }
+  if (input.revokedGrants?.has(grant.payload.grantId) === true) {
+    return denyOf("grant_revoked", "the grant was revoked by its issuer", input);
   }
   const now = input.now.getTime();
   if (Date.parse(grant.payload.issuedAt) > now || Date.parse(grant.payload.expiresAt) <= now) {

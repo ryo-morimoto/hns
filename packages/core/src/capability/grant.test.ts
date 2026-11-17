@@ -237,6 +237,33 @@ test("a grant outside its window is grant_expired", async () => {
   });
 });
 
+// Catches: a revoked grant reported as expired (or accepted), so an auditor reads a grant the issuer
+// took back as one that merely went stale — and a caller told "expired" retries a dead grant.
+test("a grant the caller lists as revoked is grant_revoked, and that code wins over expiry", async () => {
+  const grant = await signedGrant();
+  const revoked = new Set([grant.payload.grantId]);
+  expect(await authorizeCall(await inputFor({ grant, revokedGrants: revoked }))).toMatchObject({
+    outcome: "deny",
+    code: "grant_revoked",
+  });
+  // Still live, and a different grant id in the set: the grant is allowed.
+  expect(
+    (await authorizeCall(await inputFor({ grant, revokedGrants: new Set(["other"]) }))).outcome,
+  ).toBe("allow");
+  // No set means the caller knows nothing about revocations, and the check does not run.
+  expect((await authorizeCall(await inputFor({ grant }))).outcome).toBe("allow");
+  // A revoked grant that has also run out is refused for being revoked, not for expiry.
+  const stale = await signedGrant({
+    issuedAt: isoTimestamp("2026-01-01T00:00:00.000Z"),
+    expiresAt: isoTimestamp("2026-01-01T00:01:00.000Z"),
+  });
+  expect(
+    await authorizeCall(
+      await inputFor({ grant: stale, revokedGrants: new Set([stale.payload.grantId]) }),
+    ),
+  ).toMatchObject({ outcome: "deny", code: "grant_revoked" });
+});
+
 // Catches: a grant issued under a policy revision the machine has already passed, so a revoked
 // capability keeps working until its TTL.
 test("a grant older than the last epoch is epoch_stale", async () => {

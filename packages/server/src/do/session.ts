@@ -23,8 +23,11 @@ import {
   type LiveUpgradeResponseFactory,
 } from "../ws.ts";
 import { LEGACY_SESSION_NAME } from "../session-name.ts";
+import { grantSigner, type GrantSigner } from "../capability/signing.ts";
 import { armWake } from "./alarm.ts";
 import { auditEventIds, auditSink, createPolicyAudit, type PolicyAudit } from "./audit.ts";
+import { createSqliteGrantRecorder, openGrantTables } from "./grant-store.ts";
+import { createGrantPlane, type GrantPlane } from "./session-grants.ts";
 import { modelsFor } from "./models.ts";
 import { SessionIndex } from "./session-index.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
@@ -59,6 +62,24 @@ export interface SessionDependencies {
   readonly now?: (() => number) | undefined;
   /** Builds the 101 response; Node tests inject a factory because its Response refuses 101. */
   readonly upgradeResponse?: LiveUpgradeResponseFactory | undefined;
+}
+
+/**
+ * The conversation whose run an RPC ended, or undefined.
+ *
+ * @param path - The internal path.
+ * @param method - The method the request used.
+ * @param status - The answer's status.
+ * @returns The conversation id of a successful `POST /rpc/conversations/<id>/abort`.
+ *
+ * @remarks
+ * An abort is how a run is stopped, and stopping it ends the run. A refused abort (an unknown
+ * conversation) ended nothing and revokes nothing.
+ */
+function abortedConversation(path: string, method: string, status: number): string | undefined {
+  if (method !== "POST" || status < 200 || status >= 300) return undefined;
+  const match = /^\/rpc\/conversations\/([^/]+)\/abort$/u.exec(path);
+  return match?.[1];
 }
 
 /** Whether a Session RPC path is the turn route (one conversation's message send). */
@@ -137,6 +158,7 @@ export class Session {
   #obs: ObsStore | undefined;
   #audit: PolicyAudit | undefined;
   #index: SessionIndex | undefined;
+  #grants: GrantPlane | undefined;
   #session: AgentSession | undefined;
   #closed = false;
 
@@ -155,6 +177,87 @@ export class Session {
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
+  /**
+   * Open the grant plane: the ledger, the issuance audit, and the control-plane signer.
+   *
+   * @returns The plane; a Session with no usable signer still has one that refuses every request.
+   *
+   * @remarks
+   * The signer is the control-plane key (0148's, the same the Worker signs machine requests with).
+   * A missing, malformed, or unusable key does **not** stop the object — conversations do not need a
+   * grant — but the plane it builds issues nothing: every request is refused, which is the fail-closed
+   * answer the issue asks for when WebCrypto cannot sign (`grant_algorithm_mismatch` /
+   * `unavailable` at the key, a deny at the request). The tables are the object's own SQLite.
+   *
+   * @throws Whatever opening the tables throws: a grant surface with no table would be a grant with no
+   * record, so the object stops here instead.
+   */
+  async #openGrantPlane(): Promise<GrantPlane> {
+    // The tables' transaction serializes the audit's chain and the ledger's write with each other.
+    const tables = openGrantTables(this.#state.storage);
+    const name = this.#state.id?.name ?? LEGACY_SESSION_NAME;
+    const ids = auditEventIds(name);
+    let signer: GrantSigner | undefined;
+    const seed = this.#env.HNS_CONTROL_PLANE_KEY;
+    if (seed !== undefined && seed.length > 0) {
+      const imported = await grantSigner({ seed });
+      signer = imported.ok ? imported.signer : undefined;
+      if (!imported.ok) console.error("session grant signer unavailable", imported.code);
+    }
+    const recorder = createSqliteGrantRecorder({
+      ledger: tables.ledger,
+      audit: tables.audit,
+      transaction: (run) => this.#state.storage.transaction(run),
+      eventId: () => "grant:" + ids.next(),
+    });
+    return createGrantPlane({
+      signer,
+      recorder,
+      workspaceId: name,
+      sessionId: name,
+      now: this.#now,
+      eventId: () => ids.next(),
+    });
+  }
+
+  /**
+   * Revoke the grants a run held, because the run ended.
+   *
+   * @param runId - The conversation whose run ended.
+   * @returns The ids revoked; never throws (the revocation is best effort on the abort path, and a
+   * grant that outlives its run still ends at its own expiry, which is at most 60 seconds).
+   *
+   * @remarks
+   * The abort path is the one the agent's own `abort` reaches: the run it ended held grants bound to
+   * its conversation id, and they are revoked here so a machine refuses them as `grant_revoked` from
+   * the moment the abort returns.
+   */
+  async #revokeRun(runId: string): Promise<readonly string[]> {
+    const grants = this.#grants;
+    if (grants === undefined) return [];
+    try {
+      return await grants.revokeRun(runId);
+    } catch (error) {
+      console.error("session grant revoke failed", error instanceof Error ? error.name : "unknown");
+      return [];
+    }
+  }
+
+  /** Revoke every run's grants when the object closes; the conversations it knows are the runs. */
+  #revokeRuns(session: AgentSession): void {
+    void (async () => {
+      try {
+        const conversations = await session.listConversations();
+        for (const conversation of conversations) await this.#revokeRun(String(conversation.id));
+      } catch (error) {
+        console.error(
+          "session grant revoke failed",
+          error instanceof Error ? error.name : "unknown",
+        );
+      }
+    })();
+  }
+
   async #initialize(): Promise<void> {
     try {
       // Fail closed first: without the control database there is no cost gauge and no index, so
@@ -167,6 +270,9 @@ export class Session {
       // cannot be opened stops the object here (docs/capability.md §8). It is the object's own SQLite,
       // beside the harness's prefixed tables, and not D1 (D049).
       this.#audit = createPolicyAudit(this.#state.storage);
+      // Fail closed as well: a grant is a capability, and one handed out with no record of it must
+      // not exist (docs/capability.md §5, §9). The tables share this object's SQLite, not D1.
+      this.#grants = await this.#openGrantPlane();
       try {
         // The event table shares the Session's SQLite but not the harness prefix. A failed
         // open must not stop conversations: observation is a side effect, not a precondition.
@@ -243,6 +349,8 @@ export class Session {
       }
       void session.closed.then((end) => {
         this.#closed = true;
+        // The close is the end of every run in the object, so no grant bound to one may outlive it.
+        this.#revokeRuns(session);
         if (end.kind === "failed") this.#state.abort("harness failed");
       });
       await armWake(this.#state.storage, session.wake(), Date.now());
@@ -303,6 +411,7 @@ export class Session {
       response = await handleSessionRpc(request, session, {
         cost: this.#cost,
         audit: this.#audit,
+        grants: this.#grants,
         onRequestId: (id) => {
           turnRequestId = id;
         },
@@ -386,6 +495,10 @@ export class Session {
     // A successful turn's DO hop is the agent event (same request id), so the row is not
     // written twice. A refused turn wrote no agent event and still gets its `do.rpc` line,
     // so a trace can see that the request reached the object and stopped there.
+    // A run that ended revokes the grants it held: the abort route is the one a run's end reaches
+    // the object through, so a grant bound to that conversation ends as the abort returns.
+    const aborted = abortedConversation(path, request.method, response.status);
+    if (aborted !== undefined) void this.#revokeRun(aborted);
     const turn = isTurn(path);
     if (turn && response.status >= 200 && response.status < 300) {
       if (turnRequestId !== undefined && this.#agentRequestIds.delete(turnRequestId)) {

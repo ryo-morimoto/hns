@@ -17,6 +17,7 @@ test("every denial code has a retry and ends a switch in never", () => {
       case "manifest_mismatch":
       case "grant_invalid":
       case "grant_expired":
+      case "grant_revoked":
       case "grant_algorithm_mismatch":
       case "grant_replayed":
       case "counter_exhausted":
@@ -37,6 +38,14 @@ test("every denial code has a retry and ends a switch in never", () => {
   expect(seen).toStrictEqual([...DENIAL_CODES]);
 });
 
+// Catches: an expiry and a revocation collapsed into one code, so an audit cannot tell a grant that
+// ran out from one the issuer took back while it was still live.
+test("an expiry and a revocation are different codes, and only the expiry is retryable", () => {
+  expect(DENIAL_CODES).toContain("grant_revoked");
+  expect(retryOf("grant_expired")).toBe("retry");
+  expect(retryOf("grant_revoked")).toBe("never");
+});
+
 // Catches: a retry table that drifts from docs/capability.md §7, so a model is told an unrecoverable
 // denial is retryable (or the reverse).
 test("the retry table is the one the contract documents", () => {
@@ -47,6 +56,7 @@ test("the retry table is the one the contract documents", () => {
     manifest_mismatch: "never",
     grant_invalid: "never",
     grant_expired: "retry",
+    grant_revoked: "never",
     grant_algorithm_mismatch: "never",
     grant_replayed: "never",
     counter_exhausted: "never",

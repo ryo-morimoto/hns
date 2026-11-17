@@ -1,6 +1,7 @@
 import { GraphQLObjectType, type GraphQLFieldConfigMap } from "graphql";
 import type { GraphQLContext } from "../context.ts";
 import { createProjectModule } from "./create-project.ts";
+import { requestGrantModule } from "./grants.ts";
 import { machinesModule } from "./machines.ts";
 import { policyModule } from "../policy/schema.ts";
 
@@ -39,6 +40,7 @@ export const MUTATION_MODULES: readonly MutationModule[] = [
   createProjectModule(),
   policyModule(),
   machinesModule(),
+  requestGrantModule(),
 ];
 
 /**

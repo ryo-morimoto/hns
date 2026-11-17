@@ -415,6 +415,7 @@ function refusalWording(decision: PolicyDecision): string {
     manifest_mismatch: "the tool's contract does not match the one the call named",
     grant_invalid: "the grant is not valid",
     grant_expired: "the grant has expired",
+    grant_revoked: "the grant was revoked before its expiry",
     grant_algorithm_mismatch: "the grant's key does not match its algorithm",
     grant_replayed: "the grant was already used",
     counter_exhausted: "the grant's budget is spent",

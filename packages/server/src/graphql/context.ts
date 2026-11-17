@@ -22,6 +22,10 @@ import { projectFor, storeFor, StoreUnavailableError } from "../edge/store.ts";
 import { QueryReadError } from "./failures.ts";
 import { probeAll } from "../machines/probe.ts";
 import { policyFaceOver, type PolicyFace } from "./policy/face.ts";
+import { grantPortOver, type GrantPort } from "./grants.ts";
+
+/** A grant request as GraphQL carries it (0224); the port's input, re-exported for the mutation. */
+export type { GrantRequestRead, GrantRequestResult } from "./grants.ts";
 
 /**
  * The reads one GraphQL request performs.
@@ -137,6 +141,15 @@ export interface GraphQLContext {
   readonly reads: GraphQLReads;
   readonly writes: GraphQLWrites;
   /**
+   * The grant port: `requestGrant` asks a session object for one capability grant (0224).
+   *
+   * @remarks
+   * The production port reads the active policy from D1, checks the project and the machine, and
+   * forwards the request to the session object. A test replaces it with a fake that records what it
+   * was asked, so the resolver's own checks are testable without a Durable Object.
+   */
+  readonly grants: GrantPort;
+  /**
    * The policy service's operations, as the policy fields call them.
    *
    * @remarks
@@ -167,6 +180,8 @@ export interface GraphQLContextOptions {
    * production caller (`handler.ts`) passes undefined explicitly to mean "the default".
    */
   readonly policy: PolicyFace | undefined;
+  /** Replace the grant port; production builds it over the request's D1 and the SESSION binding. */
+  readonly grants?: GrantPort | undefined;
   readonly maxRows: number;
   readonly maxRowsPerList: number;
   /**
@@ -370,12 +385,24 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
   const reads = defaultReads(options.env, options.requestId, options.signal);
   const writes = defaultWrites(options.env, options.requestId);
   const policy = options.policy ?? defaultPolicy(options.env, options.requestId);
+  const grants =
+    options.grants ??
+    grantPortOver({
+      env: options.env,
+      requestId: options.requestId,
+      policy,
+      machines: reads.machines,
+      project: reads.project,
+      store: () => storeWith(options.env, options.requestId),
+      signal: options.signal ?? new AbortController().signal,
+    });
   const readOverrides = options.reads ?? {};
   const writeOverrides = options.writes ?? {};
   return {
     requestId: options.requestId,
     session: options.session,
     policy,
+    grants,
     budget: createRowBudget(options.maxRows),
     maxRowsPerList: options.maxRowsPerList,
     reads: {

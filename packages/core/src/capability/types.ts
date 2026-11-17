@@ -307,6 +307,11 @@ export interface PolicyDiff {
  * @remarks
  * A denial is a value, never an exception. {@link DENIAL_RETRY} says whether the caller may retry,
  * which is the only thing a model is told besides the message.
+ *
+ * `grant_expired` and `grant_revoked` are **two codes on purpose**: an expiry is the grant's
+ * lifetime running out, which a fresh grant fixes, while a revocation is the issuer taking the
+ * grant away while it is still live (the run it was bound to ended, for instance). An auditor or a
+ * detector reads the two apart, so a revoked grant is never reported as a stale one.
  */
 export const DENIAL_CODES = [
   "policy_denied",
@@ -315,6 +320,7 @@ export const DENIAL_CODES = [
   "manifest_mismatch",
   "grant_invalid",
   "grant_expired",
+  "grant_revoked",
   "grant_algorithm_mismatch",
   "grant_replayed",
   "counter_exhausted",
@@ -345,6 +351,9 @@ export const DENIAL_RETRY = {
   manifest_mismatch: "never",
   grant_invalid: "never",
   grant_expired: "retry",
+  // The issuer took this grant away; the same grant never comes back, and the caller must ask for
+  // a new one (which a run that ended cannot).
+  grant_revoked: "never",
   grant_algorithm_mismatch: "never",
   grant_replayed: "never",
   counter_exhausted: "never",

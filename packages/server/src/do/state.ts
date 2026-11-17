@@ -52,4 +52,14 @@ export interface SessionEnv {
   readonly HNS_ENV?: string | undefined;
   readonly HNS_MODEL?: string | undefined;
   readonly DB?: D1Binding | undefined;
+  /**
+   * The control-plane Ed25519 seed (base64url, 32 bytes) grants are signed with (0224).
+   *
+   * @remarks
+   * The **same** key the Worker signs machine requests with (0148): a grant is verified by the machine
+   * with the public half it enrolled with, so there is no second key to distribute. The Session reads
+   * it only to sign a grant; a missing or malformed value means no grant is issued (fail closed), not
+   * a crash. Never logged.
+   */
+  readonly HNS_CONTROL_PLANE_KEY?: string | undefined;
 }

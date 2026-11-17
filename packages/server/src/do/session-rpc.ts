@@ -18,6 +18,8 @@ import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
 import { AUDIT_MAX_LIMIT, denialOf, type AuditRow, type PolicyAudit } from "./audit.ts";
+import type { GrantPlane } from "./session-grants.ts";
+import { handleGrantsRpc } from "./session-grants-rpc.ts";
 import { ModelUnavailableError } from "./models.ts";
 
 /** The closed failure codes of the internal Session RPC. */
@@ -45,6 +47,17 @@ export interface SessionRpcDependencies {
    * not write a second `do.rpc` row. Called before the send; a refused turn still gets no skip.
    */
   readonly onRequestId?: ((requestId: string | undefined) => void) | undefined;
+  /**
+   * The object's grant plane, for `POST /rpc/grants` (0224).
+   *
+   * @remarks
+   * Absent means the route answers `unavailable` rather than an empty success: a caller must not read
+   * "no grant" as "you hold no capability". The edge never forwards this route; only the Worker's own
+   * `requestGrant` mutation does, after it verified the person and the machine.
+   */
+  readonly grants?: GrantPlane | undefined;
+  /** The edge's per-request budgets, for the grant body. */
+  readonly limits?: { readonly maxBodyBytes: number } | undefined;
 }
 
 /**
@@ -311,6 +324,18 @@ export async function handleSessionRpc(
   if (segments[0] === "rpc" && segments[1] === "policy" && segments[2] === "audit") {
     try {
       return await handleAuditRpc(request, url, dependencies.audit);
+    } catch (error) {
+      if (error instanceof Error) console.error("session rpc failed", error.name);
+      return failure("internal", "Unexpected Session failure.");
+    }
+  }
+  if (segments[0] === "rpc" && segments[1] === "grants" && segments.length === 2) {
+    try {
+      return await handleGrantsRpc(
+        request,
+        dependencies.grants,
+        dependencies.limits ?? DEFAULT_LIMITS,
+      );
     } catch (error) {
       if (error instanceof Error) console.error("session rpc failed", error.name);
       return failure("internal", "Unexpected Session failure.");
