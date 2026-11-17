@@ -210,6 +210,34 @@ export const MachineWriteRequestSchema: v.GenericSchema<unknown, MachineWriteReq
 export const MACHINE_WRITE_UNKNOWN_REASONS = MUTATION_UNKNOWN_REASONS;
 
 /**
+ * The closed set of refusals a machine agent can answer with.
+ *
+ * @remarks
+ * A refusal is an expected answer, not a bug: the caller is unauthenticated, the request is a
+ * replay, the path is outside ROOT, or a limit is reached. The code is the contract; the
+ * message is diagnostic. The machine agent's implementation is the same list; a parity test
+ * pins the two, so a code added on one side without the other fails loudly.
+ */
+export const MACHINE_REFUSALS = [
+  "unauthorized",
+  "stale_request",
+  "replayed",
+  "stale_connection",
+  "invalid_request",
+  "path_denied",
+  "forbidden",
+  "not_found",
+  "busy",
+  "too_large",
+  "deadline_exceeded",
+  "method_not_allowed",
+  "internal",
+] as const;
+
+/** One refusal a machine may answer with (one member of {@link MACHINE_REFUSALS}). */
+export type MachineRefusalCode = (typeof MACHINE_REFUSALS)[number];
+
+/**
  * What the machine answers for a write: the mutation result plus the resolved path.
  *
  * @remarks

@@ -1,26 +1,16 @@
+import { MACHINE_REFUSALS } from "@hns/core";
+
 /**
  * The closed set of refusals a machine agent can answer with.
  *
  * @remarks
  * A refusal is an expected answer, not a bug: the caller is unauthenticated,
  * the request is a replay, the path is outside ROOT, or a limit is reached.
- * The code is the contract; the message is diagnostic.
+ * The code is the contract; the message is diagnostic. The list is the core model's
+ * ({@link MACHINE_REFUSALS}), which the Journal's stored reasons are derived from too, so the
+ * worker, this agent, and the Journal read one vocabulary.
  */
-export const REFUSAL_CODES = [
-  "unauthorized",
-  "stale_request",
-  "replayed",
-  "stale_connection",
-  "invalid_request",
-  "path_denied",
-  "forbidden",
-  "not_found",
-  "busy",
-  "too_large",
-  "deadline_exceeded",
-  "method_not_allowed",
-  "internal",
-] as const;
+export const REFUSAL_CODES = MACHINE_REFUSALS;
 
 /** One member of the closed refusal vocabulary. */
 export type RefusalCode = (typeof REFUSAL_CODES)[number];

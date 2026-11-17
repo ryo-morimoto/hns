@@ -1,6 +1,7 @@
 import * as v from "valibot";
 import { expect, test } from "vitest";
 import {
+  MACHINE_REFUSALS,
   MACHINE_REQUEST_VERSION,
   MACHINE_RPC_PATH,
   MACHINE_WRITE_UNKNOWN_REASONS,
@@ -14,7 +15,7 @@ import {
   MachineWriteResultSchema,
   signatureMessage,
 } from "./machine.ts";
-import type { RequestSignature, SignedHeaders } from "./machine.ts";
+import type { MachineRefusalCode, RequestSignature, SignedHeaders } from "./machine.ts";
 
 const writeRequest = {
   op: "write",
@@ -148,4 +149,25 @@ test("the signed fields come from one header-to-field map", () => {
   const { signature: _signature, ...fields } = sample;
   const signed: RequestSignature = { ...fields, method: "POST", path: "/rpc", bodyHash: "00" };
   expect(Object.keys(signed)).toStrictEqual([...SIGNED_FIELDS, "method", "path", "bodyHash"]);
+});
+// Catches: a refusal the machine answers with and the Journal cannot store (or the reverse), which
+// would make a denied write unreadable after a restart.
+test("the machine's refusal codes are the core model's one list", () => {
+  expect(MACHINE_REFUSALS).toStrictEqual([
+    "unauthorized",
+    "stale_request",
+    "replayed",
+    "stale_connection",
+    "invalid_request",
+    "path_denied",
+    "forbidden",
+    "not_found",
+    "busy",
+    "too_large",
+    "deadline_exceeded",
+    "method_not_allowed",
+    "internal",
+  ]);
+  const code: MachineRefusalCode = "path_denied";
+  expect(MACHINE_REFUSALS).toContain(code);
 });

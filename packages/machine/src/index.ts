@@ -12,7 +12,10 @@ export { machineEntry, requestIdOf, writeMachineLog } from "./log.ts";
 export type { MachineLogInput, MachineLogSink } from "./log.ts";
 export { runOperation } from "./operations.ts";
 export type { OperationResult } from "./operations.ts";
-export { MachineRefusal, REFUSAL_CODES, refusalStatus } from "./refusal.ts";
+// The list is the core model's (the Journal's stored reasons are derived from the same one);
+// re-exported so a caller importing the agent's surface reads one vocabulary.
+export { MACHINE_REFUSALS as REFUSAL_CODES } from "@hns/core";
+export { MachineRefusal, refusalStatus } from "./refusal.ts";
 export type { RefusalCode } from "./refusal.ts";
 export {
   bodyHash,
