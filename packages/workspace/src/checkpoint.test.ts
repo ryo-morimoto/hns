@@ -25,9 +25,34 @@ async function directory(): Promise<string> {
   return path;
 }
 
-/** Run git in a directory and return its stdout. */
+/**
+ * Run git in a directory, with the caller's repository-location variables removed.
+ *
+ * @param root - The directory git runs in.
+ * @param args - The subcommand and its arguments.
+ * @param input - Bytes for git's stdin.
+ * @returns git's stdout.
+ *
+ * @remarks
+ * A commit hook exports `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` for the repository being
+ * committed, and an inherited value would make a throwaway repository under /tmp resolve to that
+ * one: `git init` would write nothing and `git add` would stage files in the real tree. The
+ * checkpoint itself clears the same variables for the same reason.
+ */
 function git(root: string, args: readonly string[], input?: Uint8Array): string {
+  const env = { ...process.env };
+  for (const name of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+  ]) {
+    delete env[name];
+  }
   return execFileSync("git", ["-C", root, ...args], {
+    env,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
     ...(input === undefined ? { input: "" } : { input }),
@@ -38,6 +63,12 @@ function git(root: string, args: readonly string[], input?: Uint8Array): string 
 async function repository(): Promise<string> {
   const root = await directory();
   git(root, ["init", "-q"]);
+  // A probe first: a repository that is not this directory means git was redirected, and every
+  // later assertion would be measuring the wrong tree.
+  const toplevel = git(root, ["rev-parse", "--show-toplevel"]).trim();
+  if (toplevel !== root) {
+    throw new Error("git resolved " + root + " to " + toplevel + " (an inherited GIT_* variable)");
+  }
   git(root, ["config", "user.email", "hns@example.com"]);
   git(root, ["config", "user.name", "hns"]);
   git(root, ["config", "commit.gpgsign", "false"]);
