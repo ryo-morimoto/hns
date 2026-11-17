@@ -83,8 +83,19 @@ test("the worker binds the object store bucket", () => {
 test("the harness worker declares no provider credential", () => {
   const worker = workerFor(deploymentFor("development", undefined, undefined));
   const names = Object.keys(worker.env);
-  expect(names.filter((name) => /KEY|TOKEN|PROVIDER/u.test(name))).toStrictEqual([]);
+  // The control-plane key authenticates Worker -> machine (D100), not a model provider; the
+  // provider keys stay in the gateway Worker.
+  expect(names.filter((name) => /KEY|TOKEN|PROVIDER/u.test(name))).toStrictEqual([
+    "HNS_CONTROL_PLANE_KEY",
+  ]);
   expect(names).toContain("HNS_SESSION_SECRET");
+});
+
+// Catches: the Workspace object signing machine requests from an undeclared secret.
+test("the worker declares the machine URL and control-plane key", () => {
+  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  expect(worker.env.HNS_AGENT_URL).toStrictEqual({ type: "text", value: "http://127.0.0.1:8788" });
+  expect(worker.env.HNS_CONTROL_PLANE_KEY).toStrictEqual({ type: "secret" });
 });
 
 // Catches: the harness losing its only path to a model (the gateway service binding).

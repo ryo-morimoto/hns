@@ -21,7 +21,11 @@ export const workerFor = (deployment: Deployment) => ({
   env: {
     HNS_ENV: bindings.text(deployment.env),
     HNS_SESSION_SECRET: bindings.secret(),
+    // The machine's origin; the Workspace object calls it through the tunnel.
     HNS_AGENT_URL: bindings.text(deployment.agentUrl),
+    // The control-plane key the Worker signs machine requests with (D100). The public half is
+    // enrolled on the machine; the registry that supplies both is 0148's.
+    HNS_CONTROL_PLANE_KEY: bindings.secret(),
     HNS_MODEL: bindings.text(deployment.model),
     SESSION: bindings.durableObject({
       worker: deployment.workerName,
