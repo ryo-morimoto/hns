@@ -74,3 +74,9 @@ touches: packages/agent/src/capability.ts, packages/agent/src/tools.ts, packages
 ## Log
 
 - 2026-11-17: 作成（D091）。
+
+## 申し送り（0221 の Result より）
+
+- **0220 の契約（N1）**: `ToolCallAuditEvent` / `ToolResultAuditEvent` の `callHash` / `argsHash` を**拒否時のみ optional** にし、`docs/capability.md` §3 に「呼び出しが成立していない行は hash を持たない」と書く。現状は `HashSchema` が 64 hex を要求するため、拒否行（`path_outside_root` / `unsupported` / 引数不正）が parse できない。0221 は拒否行に hash を書かない（空文字も書かない）ことを選び、契約との差は `AuditRow` + `toAuditEvent` のコメントで明示している。担当は 0220 の契約の所有者。
+- **0220 の flake（N7）**: `packages/core/src/capability/grant.test.ts:202`（「a signature that does not verify is grant_invalid」）が**並列負荷で 1/2〜1/4 落ちる**（単独では 3+/3 pass）。0221 は `packages/core` を 1 バイトも変えていない。**0220 宛の issue として切り出す**（統合前の gate が不安定なため）。
+- **観測と監査の `decision`**: 受入 7 は「tool.call / tool.result に decision」だが、契約の `ToolCallAuditEvent` に `decision` が無いため、**観測イベントは tool.result のみ**（N6）、監査は拒否時の `decision` を持つ。契約を広げるかは N1 と同じ 0220 の判断。
