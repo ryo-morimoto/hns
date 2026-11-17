@@ -4,7 +4,7 @@
 
 D049 の「レーン」（L0〜L9）は**設計の所有単位**で、製品のどの部分を誰が持つかを表す。ここで言う変更レーンは
 **実行の単位**で、いま同時に流している変更（1 issue / 1 ブランチ / 1 owner）を表す。同じ語だが軸が違う。
-設計レーンは BOARD、実行レーンは [work/LANES.md](../work/LANES.md) に分ける。
+設計レーンは BOARD、実行レーンは [work/LANES.md](../../work/LANES.md) に分ける。
 
 ## 原則
 
@@ -72,7 +72,7 @@ Little's law は、系の中の変更数 `L` が、到着率 `λ` と滞在時�
 
 ### レーンの状態
 
-[work/LANES.md](../work/LANES.md) に、少なくとも次を書く。
+[work/LANES.md](../../work/LANES.md) に、少なくとも次を書く。
 
 | 列 | 意味 |
 | --- | --- |
@@ -91,7 +91,7 @@ Little's law は、系の中の変更数 `L` が、到着率 `λ` と滞在時�
 4. **終了**: レーンの状態、レビュー待ち、統合待ち、競合、翌日の統合順を BOARD に戻す。
 
 `npm run check` は build を test の前に含む。レーンでは事前に `npm run build` を実行しない。事前 build は
-check の build と合わせて build を二重に走らせ、full check を約 12s 伸ばす（[計測](../work/reviews/2026-11-18-measurements.md)）。
+check の build と合わせて build を二重に走らせ、full check を約 12s 伸ばす（[計測](../../work/reviews/2026-11-18-measurements.md)）。
 
 ### 統合の順番
 

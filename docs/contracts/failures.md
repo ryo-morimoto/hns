@@ -1,6 +1,6 @@
 # 契約: 失敗（failure）
 
-2026-11-18 / L6 M2。**この面の契約の正本**。実装は [status.ts](../packages/server/src/failures/status.ts#L95) の `FAILURE_STATUS`、型は `FailureCodeOf<S>`。docs とコードの TSDoc はここを指す。
+2026-11-18 / L6 M2。**この面の契約の正本**。実装は [status.ts](../../packages/server/src/failures/status.ts) の `FAILURE_STATUS`、型は `FailureCodeOf<S>`。docs とコードの TSDoc はここを指す。
 
 ## 形
 

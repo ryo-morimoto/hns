@@ -1,202 +1,58 @@
 # AGENTS.md
 
-## Project Structure
+hns は、複数のマシンの AI エージェントを 1 つの UI から運用するセルフホストのプラットフォーム。npm workspaces のモノレポ。
 
-hns is an npm-workspaces monorepo: a self-hosted platform for operating AI agents on several machines from one UI.
+このファイルは**ルーティングだけ**。作業の前に、その作業に必要な文書を読む。規範は `docs/procedures/`、契約は `docs/contracts/`、不変条件は `docs/invariants.md` にあり、ここには置かない。
 
-### Key Directories
+## 最初に決めること
 
-- `packages/` — product code, one package per capability
-  - `packages/core` — the model (`src/types.ts`, `src/codecs.ts`), its GraphQL projection (`src/graphql/`), workflow state transitions (`src/workflow.ts`)
-  - `packages/store` — SQLite row schemas and `parse*` functions that produce the public model
-  - existing: `workspace`, `agent`, `machine`, `server`, `web` (see [docs/packages.md](docs/packages.md))
-- `work/` — remaining work and history
-  - `work/poc/` — the integrated PoC app (plain JS). **Not product code.** Do not add features here
-  - `work/BOARD.md`, `work/issues/` — the backlog and per-issue notes
-- `docs/` — flat specs: architecture decisions, auth, safety, observability, packages, type review
-- `.githooks/` — `pre-commit`, `pre-push` and `pre-merge-commit` run the gate (`tools/gate/`) through prek, so the hooks see the staged content, not the working tree
+- **着手してよいのは `priority: now` の issue だけ**。`now` は `design: agreed` かつ依存が満たされている。agent が自分で昇格しない（[BOARD.md](work/BOARD.md)）。
+- 1 issue = 1 branch = 1 worktree。**変更レーンは最大 3 本**（[parallel-change.md](docs/procedures/parallel-change.md)）。
+- 完了は「`npm run check` が通り、**この変更を書いていない agent が PASS**」の両方。片方だけでは完了でない（[review.md](docs/procedures/review.md)）。
+- **push しない**。commit はローカルに留める。共有ファイル（`work/BOARD.md`・`work/LANES.md`・`docs/decisions.md`・他レーンの issue）は、その所有者の commit が落ち着くまで触らない。
 
-### Architecture Notes
+## どの文書を読むか
 
-- Target package graph: `server → agent / store / workspace → core`; `web → core`. Never the other way
-- GraphQL is the one app contract (`@hns/core/graphql` generates the SDL from the model). REST is not declared in advance: the issue that implements a REST face adds its schema, auth, and handler together (D059)
-- Conversation runtime is pi-durable 1.5.0 (external, pinned). We compose it, not fork it
-- Persistence is D1 for control data and DO SQLite for runtime state; there is no ORM
-- Types are the source of truth; valibot schemas are typed against them (`v.GenericSchema<unknown, T>`)
-- Product code is TypeScript strict. The PoC is JavaScript and stays that way
-- Workflow / automation state transitions live only in `packages/core/src/workflow.ts`
+| 何を決めるか | 読むもの |
+| --- | --- |
+| 何を作るか・優先度 | [work/BOARD.md](work/BOARD.md)、担当 issue |
+| モジュール境界・型の置き場 | [docs/packages.md](docs/packages.md)、[docs/architecture.md](docs/architecture.md) |
+| 面の契約（失敗・ファイル・Journal・観測） | [docs/contracts/](docs/contracts/README.md) |
+| 不変条件（破ったら間違い） | [docs/invariants.md](docs/invariants.md) |
+| 設計の規則とその条件 | [docs/design.md](docs/design.md) |
+| テストの書き方・層 | [docs/procedures/testing.md](docs/procedures/testing.md) |
+| 並行変更・レーン | [docs/procedures/parallel-change.md](docs/procedures/parallel-change.md) |
+| レビューの観点 | [docs/procedures/review.md](docs/procedures/review.md) |
+| 工程・リリース | [docs/procedures/process.md](docs/procedures/process.md) |
+| なぜこうなったか | [docs/decisions.md](docs/decisions.md) |
+| 型のレビュー・TypeScript の流儀 | [docs/type-review.md](docs/type-review.md)、[docs/typescript.md](docs/typescript.md) |
 
-## Quick Start
+## 実行
+
+`nix develop` の中で動かす（Node 26 は `flake.nix` が固定）。
 
 ```bash
 nix develop
 npm install
-npm run check
+npm run check        # 全 stage（lint / fmt / codegen / typecheck / build / test / deploy / knip）
+npm run gate         # staged の範囲だけ（commit 前）
+npm test -w @hns/store
 ```
 
-Node 26 is pinned by `flake.nix`. Run anything that needs `node`/`npm` inside `nix develop` (or prefix it with `nix develop --command`).
+- `npm run check` は `build` を含む。**レーンで事前に `npm run build` をしない**。
+- worktree では `node_modules` の解決がメイン checkout を向く。build / typecheck / codegen の前に [process.md](docs/procedures/process.md) の「並行変更」の手順を読む。
 
-`npm run gate` is the commit gate: it reads the staged paths, selects the packages they can break (dependency closure), and runs lint → fmt → typecheck → unit tests on just those. `npm run gate pre-push` runs every stage over every package, including the integration tests, `build`, and `knip`. The hooks call it through `prek`, which hides unstaged changes while they run, after `git config core.hooksPath .githooks` (one line per clone; commit inside `nix develop`). `npm run check` runs the same gate with `--all`.
-Building is not proof of correctness; types and tests are.
+## 守ること（短く）
 
-## Build Commands
+- **型が正本**。`any` を書かない。`as` は根拠コメント付きで最小に。unions は閉じ、`switch` は `never` で終える。
+- **`unknown` は parse するまで `unknown`**。DB 行・HTTP body・環境変数は境界で valibot に通す。
+- **失敗は型付き**。GraphQL は union、REST は閉じた failure union。想定内の失敗と欠陥（500）を混ぜない。
+- **秘密を出さない**。鍵は `~/.config/hns/`。ログはパスと status だけ。
+- **fail closed**。認可・sandbox・root の同一性は、確かめられなければ拒否する。
+- 既存の guard / helper を探してから書く。新しい抽象は 2 つ目の利用者が出てから。
+- 生成物（SDL・relay・`deploy/assets`）は手で編集せず、生成コマンドで作り直す。
 
-| Command                       | What it does                                                     |
-| ----------------------------- | ---------------------------------------------------------------- |
-| `npm run gate`                | the commit gate for what is staged                               |
-| `npm run check`               | the gate over every package, every stage                         |
-| `npm run gate pre-push`       | the push gate: everything, including integration tests and build |
-| `npm run gate <stage>`        | one stage: `lint`, `fmt`, `typecheck`, `test`, `build`, `deploy`, `knip` |
-| `npm test -w @hns/store`      | tests for one package                                            |
-| `npm run build -w @hns/store` | `dist/` for one package                                          |
-| `npm run docs:api`           | TypeDoc API docs into `docs/api/` (outside the gate)             |
-| `npm run lint`                | the gate's lint stage over every package                         |
-| `npm run fmt`                 | oxfmt, in place                                                  |
+## 補足
 
-Run these inside `nix develop`.
-
-## Development
-
-### Coding Patterns and Best Practices
-
-Each rule's condition and source links are in [docs/design.md](docs/design.md).
-
-**Types**
-
-- **The model is the source of truth.** `packages/core/src/types.ts` comes first; valibot schemas are written to fit it (`v.GenericSchema<unknown, T>`). A mismatch must fail to compile. Do not derive types from schemas
-- **No `any`.** `any` switches the checker off for every value that flows through it. Take `unknown` and parse it. If a third-party type is genuinely `any`, cast once at the edge into a named type and keep it out of public signatures
-- **Assertions need evidence.** `as` does nothing at runtime. Never assert on untrusted data. Where an assertion is unavoidable, put `// SAFETY: <invariant>` immediately before it (enforced by anti-slop)
-- **Optional, `null`, and absent are different.** `?:` means the key is missing, `null` means the value is missing. `exactOptionalPropertyTypes` is on; write `?: T | undefined`
-- **Brands are for confusable ids.** Brand a value only when the same primitive crosses scopes and mixing it up would break something. There is no fixed list; when adding one, name the mix-up it prevents (current examples: `ProjectId`, `ConversationId`)
-- **Unions are closed; `switch` is exhaustive.** Status and event vocabularies are `const` arrays with derived unions. Every `switch` lists every member and ends in `never`. Do not use `default` to absorb the rest
-
-**Validation**
-
-- **`unknown` stays `unknown` until parsed.** HTTP bodies, DB rows, environment variables, and JSON are external. Parse once at the boundary; trust the type inside. `satisfies` is not runtime validation
-- **Storage shapes never leave their package.** `archived: 0 | 1`, JSON strings, and sequence numbers stay inside `store`. Return the public model after `parse*`
-- **Invalid stored data fails loudly.** Unknown enum values and missing fields throw (valibot's `ValiError`). Never fall back to a default; a corrupt row must surface
-
-**Errors**
-
-- **Expected failures are typed.** GraphQL returns errors as unions (0176); a REST face parses and returns its own closed failure union. Do not add new string `error` fields; make it something the caller can branch on
-- **Throw `Error`, not values.** A thrown string or object loses the stack and every `instanceof` check downstream. Unexpected failures are `Error` subclasses
-- **Await every promise.** Write `void` with a reason when you intentionally ignore one. Catch only the kind you expect and let the rest through
-
-**Safety**
-
-- **Secrets never enter the repo or logs.** Keys live in `~/.config/hns/`. Event logs keep the path and status, never bodies, headers, or tokens
-- **Authorization is checked at the boundary.** Never trust UI state or an id sent by the client. Mutations check the caller and the owner at the boundary
-- **Never trust input for paths or commands.** Normalize paths and confirm they stay under the workspace root. Run commands through the sandbox (bubblewrap); if the sandbox is unavailable, do not offer exec
-- **Fail closed.** Authentication, sandbox availability, and root identity are verified or refused. A check that cannot run is a denial
-
-**Code**
-
-- **Inline comments explain why, not what.** TSDoc on exported APIs and important internal functions is the contract (see Testing). Inline comments stay two or three lines, hard ceiling five; longer reasoning goes to a docstring, README, or decision. Do not restate the same fact in several places
-- **Reuse existing guards and helpers.** Reimplementation is the most common AI-authored defect. Look in `packages/core` and the package you are editing first
-- **New abstractions need two call sites.** Build for what exists, not for a guessed future
-- **Match the surrounding code.** Naming, structure, and comment density come from the adjacent file. The type, validation, and safety rules above win over local style
-- **Edit generated files by regenerating them.** Keep headers and regeneration commands intact
-
-### Package Structure
-
-Each package follows the pi layout:
-
-```
-packages/store/
-├── package.json       # name, exports with the "source" condition, files, scripts
-├── tsconfig.json      # strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes, customConditions: ["source"]
-├── tsconfig.build.json
-├── src/               # includes unit tests (*.test.ts)
-├── test/              # integration, support, fixtures
-├── README.md
-└── CHANGELOG.md
-```
-
-- **Dependencies are one-way.** Allowed edges and where types live are in [docs/packages.md](docs/packages.md)
-- **The public surface is `exports`.** Never deep-import another package's `src/`; internal types stay internal
-- **A new dependency needs a recorded reason.** One line in a decision; exact pin; if the standard library can do it, use that
-- **Static imports over dynamic.** Use `import()` only for a cycle, code splitting, or genuinely conditional loading
-
-To add a package: create the directory above, depend on `@hns/core` at the **same version**, run `npm install`, and add tests and a README. Update [docs/packages.md](docs/packages.md) and add a decision if the boundary changes.
-
-### Running the PoC App
-
-```bash
-work/poc/install.sh   # once, inside the dev shell; installs the PoC dependencies
-node work/poc/app/serve.mjs /path/to/workspace
-# PROVIDER=ollama|opencode|faux  MODEL_ID=...  STATE_DIR=...  (prints the URL with a token)
-```
-
-The PoC is for manual checks only. New product work goes into `packages/`.
-
-## Testing
-
-### Writing Tests - Required Practices
-
-- **Start from test analysis.** Derive test conditions from the issue's goal, acceptance criteria, docs, and contracts. Record `## テスト条件` and `## テスト設計` in the issue (Example Mapping + Given/When/Then). Test design is a separate step from writing code
-- **Choose the lowest layer that can prove the behavior.** One scenario runs in exactly one layer
-- **Tests live next to the code.** Unit tests are `packages/<pkg>/src/<module>.test.ts`; integration is `packages/<pkg>/test/integration/`; E2E is `e2e/`. In-source (`if (import.meta.vitest)`) and TSDoc `@example` doctests are for small, pure functions and public contracts
-- **Use Vitest `expect` for assertions; `node:assert` is allowed.** For type narrowing, use `node:assert` or `expect.assert(...)`; matcher calls do not narrow types
-- **A test names the regression it catches.** Write `// Catches: <bug>` for regression tests. Do not put issue numbers in tests, code, or TODO comments
-- Cover failure paths: invalid input, illegal transitions, conflicts, unknown enum values
-- Test behavior, not implementation: no assertions on internal helper names, log wording, or CSS. One behavior per test; a test that passes when the logic is broken is not a test
-- **TSDoc declares the contract.** Exported APIs and important internal functions document preconditions, invariants, errors, and examples. Tests prove them
-- **The issue and TSDoc are the only test-management artifacts; tests are the proof**
-- **Make sure the test runs.** Vitest 5 (`vitest run`); the full discipline is in [docs/testing.md](docs/testing.md)
-
-### How to run tests
-
-```bash
-npm test -w @hns/store   # that package's unit + integration tests
-npm run gate test        # unit tests of the staged packages
-npm run check            # everything
-```
-
-Inside `nix develop`. Tests use Vitest; the layers and rules are in [docs/testing.md](docs/testing.md).
-
-### Test Structure
-
-Tests live next to the code they prove. Unit tests are `packages/<pkg>/src/<module>.test.ts`; a test that needs another process (rooted helper, pi-env daemon, bubblewrap, a child process) lives in `packages/<pkg>/test/integration/`. E2E is `e2e/` and is not part of `npm run check`. There is no shared fixture package: each package keeps its builders in `test/support/`, and each test creates its own temporary database or directory.
-
-Browser tests (PoC only) look for Chromium; if it is missing they skip. Set `HNS_CHROME` to override the binary.
-
-TSDoc contracts and doctests are part of the test discipline ([docs/testing.md](docs/testing.md)).
-
-## Review
-
-- **The goal is a change that safely fulfills its contract, not a perfect diff.** Judge behavior over appearance, evidence over suspicion, this change's regressions over pre-existing problems, and signal over volume
-- **Independent review after implementation, before commit.** Your own reading is not review. A change in scope is done when `npm run check` passes _and_ an agent that wrote none of the code returns `PASS`. The procedure is [docs/review.md](docs/review.md); read only the invariant files the change touches
-- **Only regressions block.** What this change made worse is blocking; what pre-dates it becomes an issue, not a blocker (definition: [docs/review.md](docs/review.md)). Ask for the smallest correction that restores the contract
-- **A fix is re-reviewed.** The fix diff is where new defects enter (hns shipped two in one round). The reviewer checks the fix against the boundary schemas and docs it touched
-- **Record it.** Verdict, reviewer, HEAD, and blocking findings go in the issue's `## Result` before it is marked `done`
-
-## Linting & Formatting
-
-- **oxlint** with the vendored [anti-slop](https://github.com/dmmulroy/anti-slop) rules (`tools/oxlint/anti-slop/`). Read a rule before disabling it; record every edit to the vendored copy in `UPSTREAM.md`
-- **oxfmt** owns whitespace. `require-readable-spacing` is disabled because the two disagree
-- `npm run lint` / `npm run fmt`; the pre-commit hook runs the gate (`tools/gate/`), scoped to the staged packages
-- Type checks run per workspace (`tsrs --noEmit`, D044); declaration emit is `tsdown` for the library packages (D057)
-
-## Commit Guidelines
-
-- One purpose per commit. Do not mix formatting or unrelated refactors
-- Message: `area: summary` (for example `store: parse rows with valibot`)
-- **Do not push.** Commits stay local until the user asks
-
-## Additional Resources
-
-Read on demand — not every session:
-
-| When                                          | What                                                               |
-| --------------------------------------------- | ------------------------------------------------------------------ |
-| Requirements and scope                        | `README.md`, `ARCH.md`                                             |
-| Research, requirements, tech selection, gates | `docs/process.md`                                                  |
-| UI/UX and agentic workspace examples          | `docs/design/interface.md` (before) / `docs/review/ux.md` (review) |
-| Package boundaries and where types live       | `docs/packages.md`                                                 |
-| Why a decision was made                       | `docs/decisions.md` (append-only)                                  |
-| Stack, tooling, AI-slop gates                 | `docs/engineering.md`                                              |
-| How to review a type                          | `docs/type-review.md`                                              |
-| How to review a finished slice                | `docs/review.md` (checks; sources linked per item)                 |
-| Design rules, conditions and sources          | `docs/design.md` (read before designing)                           |
-| Comparison with the golden examples           | `docs/typescript.md`                                               |
-| Current backlog                               | `work/BOARD.md`, `work/issues/`。着手は `priority: now` だけ       |
+- 要件と全体像: [README.md](README.md)、[ARCH.md](ARCH.md)。
+- PoC（`work/poc/`）は製品コードではない。機能を足さない。

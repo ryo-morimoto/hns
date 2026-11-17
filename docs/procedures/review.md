@@ -1,21 +1,21 @@
 # レビュー（実装後）
 
 2026-11-07 / D040・D041。`npm run check` は「壊れていない」ことの証明ではない。独立した目で、変更が契約を
-安全に満たすかを確かめる。原則は [AGENTS.md](../AGENTS.md) の Review。進行（対象・渡すもの・直し方・記録）は
-[process.md](review/process.md)。**reviewer は process.md と eval.md を読まない**（author 用と、観点の変更時だけ）。
+安全に満たすかを確かめる。原則は [AGENTS.md](../../AGENTS.md) の Review。進行（対象・渡すもの・直し方・記録）は
+[process.md](../review/process.md)。**reviewer は process.md と eval.md を読まない**（author 用と、観点の変更時だけ）。
 
 不変条件は条件で分ける。変更が触るものだけ読み、触っていない領域は読まない（common は常に）。
 
 | 条件                                              | 不変条件                                                                                      |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 常に                                              | [common.md](review/common.md) — 失敗の形・型、schema、docs の主張、テスト、抽象、修正そのもの |
-| パス・コマンド・秘密・sandbox・認可・既定値・降格 | [security.md](review/security.md)                                                             |
-| 永続化・書込・再送・並行・上限                    | [persistence.md](review/persistence.md)                                                       |
-| wire / schema / signature / イベント名 / 互換     | [contracts.md](review/contracts.md)                                                           |
-| 画面・操作・状態・文言（UI/UX）                   | [ux.md](review/ux.md)                                                                         |
-| 観点を足す・削るときだけ                          | [eval.md](review/eval.md)                                                                     |
+| 常に                                              | [common.md](../review/common.md) — 失敗の形・型、schema、docs の主張、テスト、抽象、修正そのもの |
+| パス・コマンド・秘密・sandbox・認可・既定値・降格 | [security.md](../review/security.md)                                                             |
+| 永続化・書込・再送・並行・上限                    | [persistence.md](../review/persistence.md)                                                       |
+| wire / schema / signature / イベント名 / 互換     | [contracts.md](../review/contracts.md)                                                           |
+| 画面・操作・状態・文言（UI/UX）                   | [ux.md](../review/ux.md)                                                                         |
+| 観点を足す・削るときだけ                          | [eval.md](../review/eval.md)                                                                     |
 
-観点の根拠は [design.md](design.md) の各項目（原典リンク付き。設計時の命令もそこにある）。迷ったら diff のファイル名で決める（`sandbox` → security、`journal` / `store` / `migrate` → persistence、
+観点の根拠は [design.md](../design.md) の各項目（原典リンク付き。設計時の命令もそこにある）。迷ったら diff のファイル名で決める（`sandbox` → security、`journal` / `store` / `migrate` → persistence、
 `graphql` / `core/types` → contracts）。
 
 ## 手順
@@ -45,7 +45,7 @@
 ## reviewer に渡す文
 
 ```text
-docs/review.md を読み、常に common.md、変更が触る領域の不変条件ファイルだけ読んでください。
+docs/procedures/review.md を読み、常に common.md、変更が触る領域の不変条件ファイルだけ読んでください。
 <base>..HEAD を独立レビューし、author の説明は正解として扱わず diff と実行結果で確かめること。
 判定と blocking は review.md のとおり。今回の変更と無関係な既存の問題は issue 候補として分けること。
 指摘は「重大度 / file:line / 観測（実行結果か経路） / 修正案 / blocking か」で。最後に PASS / FAIL / BLOCKED と未確認事項を書く。

@@ -1,7 +1,7 @@
 # テスト
 
 2026-11-10 / D056・D057。`npm run check` の一部。テストの分析・設計・コードの管理を1箇所に固定する。
-設計の判断は [design.md](design.md)、レビューは [review.md](review.md)、記録は [decisions.md](decisions.md) と work/ に置く。
+設計の判断は [design.md](../design.md)、レビューは [review.md](review.md)、記録は [decisions.md](../decisions.md) と work/ に置く。
 
 ## 原則
 
@@ -16,9 +16,9 @@
 ### テストベース
 
 - issue の Goal / 受入条件
-- [workspace.md](workspace.md) / [auth.md](auth.md) / [durability.md](durability.md) / [safety.md](safety.md) / [observability.md](observability.md) / [automation.md](automation.md)
+- [workspace.md](../workspace.md) / [auth.md](auth.md) / [durability.md](../durability.md) / [safety.md](safety.md) / [observability.md](../observability.md) / [automation.md](automation.md)
 - 契約（型・valibot schema・HTTP / GraphQL の形）
-- リスク、[findings](../work/findings/README.md)、過去のレビュー
+- リスク、[findings](../../work/findings/README.md)、過去のレビュー
 
 ### Example Mapping
 
@@ -167,7 +167,7 @@ e2e/                                      # Playwright。pages / fixtures / jour
 
 - `npm run check` = 全パッケージに oxlint → oxfmt → tsrs → `vitest run`（integration 含む）→ build → knip。
 - コミット時は `npm run gate` が、ステージ済みのパスから選んだパッケージに lint → fmt → typecheck → **unit テスト**を回す。
-- push 時は `npm run gate pre-push` が全パッケージに全段階（integration・build・knip を含む）を回す。定義は [tools/gate/stages.ts](../tools/gate/stages.ts)、選別は [tools/gate/select.ts](../tools/gate/select.ts)。
+- push 時は `npm run gate pre-push` が全パッケージに全段階（integration・build・knip を含む）を回す。定義は [tools/gate/stages.ts](../../tools/gate/stages.ts)、選別は [tools/gate/select.ts](../../tools/gate/select.ts)。
 - CI も同じコマンド。テストのためだけの別ランナー・別設定を作らない。
 - E2E は `npm run check` に入れない。`npm run test:e2e` で 3 構成を回し、CI は 0041 の後に別ジョブ（PR はスモーク × 3 構成、nightly は全部 × 3 構成）にする（0043 / D101）。
 

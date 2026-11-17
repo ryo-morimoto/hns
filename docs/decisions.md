@@ -319,7 +319,7 @@ D026 の Vitest を維持し、node:test から移行した（124 tests）。Vit
 `vitest.config.ts` の `projects` でパッケージを分ける。層は unit / contract / repository / API / E2E。
 永続化はモックせず実 SQLite、HTTP は `fastify.inject`、E2E は Playwright だけ。
 アサーションは `node:assert/strict` に統一し、`expect` は使わない。flaky はリトライしない。
-Trigger.dev / Medusa / Twenty / Payload / Effect の層分けを参考にした（[testing.md](testing.md)）。
+Trigger.dev / Medusa / Twenty / Payload / Effect の層分けを参考にした（[testing.md](procedures/testing.md)）。
 
 ## D039: 会話ランタイムは pi-durable 一択とし、pi-agent-core は採用しない
 
@@ -344,7 +344,7 @@ date: 2026-11-07 · by: agent · issue: -
 
 `npm run check` は型・整形・テストの整合しか見ない。2026-11-07 のレビュー3回で、ゲート緑のまま
 root 外への任意書き込み（C-1）と watcher の未処理 reject（C-2）が出た。レビューは任意ではなく、
-実装の一部として通す。判断原則は [AGENTS.md](../AGENTS.md) の Review、手順と判定は [review.md](review.md)、
+実装の一部として通す。判断原則は [AGENTS.md](../AGENTS.md) の Review、手順と判定は [review.md](procedures/review.md)、
 不変条件は [review/](review/)。判定は PASS / FAIL / BLOCKED、blocking は**この変更で生まれた**重大・高・中。
 低は blocking にしない。前からある問題は diff が悪化させた場合だけで、再現も経路の提示もできない指摘は blocking にしない。
 指摘として成立するかは再現か経路で決まり、blocking かは重大度と provenance で決まる。
@@ -372,7 +372,7 @@ D040 の観点表は1ファイル 113 行・約 9KB になり、reviewer は変�
 毎回読んでいた。観点を足すほど悪化するので、3層に分ける。
 
 - **原則**は [AGENTS.md](../AGENTS.md) の Review。常に文脈にある。
-- **手順と判定**は [review.md](review.md)。reviewer が毎回読む（3.8KB）。
+- **手順と判定**は [review.md](procedures/review.md)。reviewer が毎回読む（3.8KB）。
 - **不変条件**は条件別の [review/](review/)。常に common（1.7KB）と、変更が触る領域だけ（security / persistence
   各 1.3KB、contracts 0.9KB）。観点の採否は eval（0.9KB、変更時だけ）。
 - **進行と記録**は [process.md](review/process.md)（2.0KB）。author が読む。reviewer には渡さない。
@@ -431,12 +431,12 @@ X の記事（2026-11-04）に倣い、`npm run check` の型検査を [tsrs](ht
 - tsrs が未対応の構文で落ちたときは tsc に戻す。ゲートを止めない。
 - 既存 4 パッケージと web の型検査が tsrs で通ることを確認して切り替えた。
 
-## D045: 調査・要件・技術選定の進め方を docs/process.md に置く
+## D045: 調査・要件・技術選定の進め方を docs/procedures/process.md に置く
 
 date: 2026-11-07 · by: agent · issue: -
 
 工程の判断（何を作るか、どこまで決めて進むか、何を買うか）が会話と issue に散っていて、後から前提を辿れなかった。
-[process.md](process.md) に、段階と出口、ゲート判定（Go / 条件付き Go / Limited Go / Hold）、未確定の状態と台帳、
+[process.md](procedures/process.md) に、段階と出口、ゲート判定（Go / 条件付き Go / Limited Go / Hold）、未確定の状態と台帳、
 調査の手順（問題文・三層・代表1件の比較）、全体像（体験・概念・システム）、技術選定（変更コスト×不確実性、買う→借りる→作る、
 試作と実用の区別、決定と保留の記録）を置く。設計の判断は design.md、実装後の検証は review.md、決定は decisions に残す。
 
@@ -795,7 +795,7 @@ date: 2026-11-10 · by: user · issue: —
   結合で壊れる（merge skew）ため、統合後の確認を省かない。
 - レーンが外部待ち・依存待ちで止まったら、4本目を足さず、そのレーンを入れ替える。
 - レーン数は速度の指標にしない。リードタイム、レビュー待ち、統合待ち、競合、統合後の失敗で見る。
-- 詳細と出典は [parallel-change.md](parallel-change.md)。
+- 詳細と出典は [parallel-change.md](procedures/parallel-change.md)。
 
 採用しなかったもの: レーン数を固定の目標にする（ボトルネックを隠す）、issue を跨ぐ共有ブランチ
 （merge skew とレビュー単位の曖昧化）、依存が未マージのまま3本目を開くこと（先回りと手戻り）。
@@ -951,7 +951,7 @@ date: 2026-11-16 · by: user · issue: 0195
 
 date: 2026-11-16 · by: user · issue: 0195
 
-レビューを意図・設計・実装・結果の4層に分ける。既存 [review.md](review.md) は実装層の規程として維持する。
+レビューを意図・設計・実装・結果の4層に分ける。既存 [review.md](procedures/review.md) は実装層の規程として維持する。
 
 | 層 | 主担当 | 成果物 |
 | --- | --- | --- |
@@ -1444,3 +1444,100 @@ D099 の Chromium 前提（ブラウザは Chromium だけ、認証は CDP + sha
 **調査**: [work/research/e2e-browser-matrix.md](../work/research/e2e-browser-matrix.md)。**履歴**: [work/research/e2e-testing.md](../work/research/e2e-testing.md) の PR 60 秒 / nightly 8 分は D099 時点のもの。D101 が 90 秒 / 12 分に置き換える。
 
 前提が変わる条件: Playwright が PRF を cross-browser API に出す、Firefox の mobile emulation が実機と乖離しすぎる、PR p50 が 90 秒を超える、または Firefox の flake 率が許容できないとき。
+
+
+
+
+
+## D102: Office のエンジンは ibisOffice のみとし、LibreOffice のフォールバックを持たない
+
+date: 2026-11-17 · by: user · issue: 0236
+
+MS 互換の見た目を製品の武器にするため、エンジンを ibisOffice に一本化する。変換の広さ（ODF/CSV 等）は捨てる。
+スパイクで、docx/xlsx/pptx の PDF 化・PNG 化・往復・最小の編集が GPU 無し・bwrap 内で通ることを確認した
+（[ibisoffice-spike](../work/research/ibisoffice-spike/README.md)）。
+
+- **配布**: pack（バイナリ・フォント・fonts.conf・X11・mesa lavapipe + vulkan-loader）を同梱する（0235）。
+- **ライセンス**: AGPL-3.0-only + §7(b)。LICENSE / NOTICE / 対応ソース / About の「Powered by ibisOffice」を配布物に含める。
+- **対象外**: ODF / CSV / HTML / 旧形式への変換。変換は PDF のみ。
+- **必須の同梱物**: CJK フォント（IPAex / Noto）、fontconfig、libxcb / libxkbcommon / libxkbcommon-x11、ソフトウェア Vulkan（PNG 用）。
+- **エンジンは自己防衛しない**: timeout・メモリ上限・事前スキャンは machine 側の封筒で持つ（0236）。
+
+**代替案**: LibreOffice を併用する（変換の広さは得られるが、AGPL と MPL の 2 系統・2 つの品質基準・2 つの障害対応を持つ）、
+商用ライセンスだけを買う（コストと交渉が読めない）、エンジンを利用者に任せる（「動かない」の切り分けが利用者に移る）。
+
+前提が変わる条件: ibisOffice のヘッドレス API が公開されないまま 2 四半期改善しない、または AGPL の履行が配布形態と両立しないとき。
+
+## D103: プレビューと派生は machine のキャッシュに置き、既存の Session 認可で配信する
+
+date: 2026-11-17 · by: user · issue: 0237
+
+派生（プレビュー PDF・PNG）はユーザーのワークスペースに書かず、machine の `~/.cache/hns/office/` に
+「版 + 操作 + パラメータ」のキーで置く。配信は GraphQL の Session 認可のストリームで行い、署名 URL を作らない。
+
+- **キー**: `(workspaceId, path, version)` + operation + params。内容ハッシュは重複排除にだけ使う。
+- **寿命**: TTL 7 日 / 合計 2 GB / LRU。起動時に前プロセスの残骸を掃除する。
+- **表示**: PDF.js で PDF を描く（追加依存なし）。エージェントの目視 QA は同じエンジンの PNG。
+- **成果物**: ユーザーが求めた PDF は通常のワークスペースファイルとして書く（キャッシュに入れない）。
+
+**根拠**: 既製品（WOPI/Collabora、ONLYOFFICE、Box、Nextcloud、DSH office-kit）の収束点
+（[office-preview-design](../work/research/office-preview-design.md)）。
+
+**代替案**: ワークスペース内の隠しディレクトリ（バックアップに乗るが一覧・エディタ・journal から除外する規則が要る）、
+クラウドのオブジェクトストレージ（共有できるがインフラとコストが増える）。
+
+前提が変わる条件: 複数マシン・複数端末での共有が要件になったとき、または 2 GB の枠が実務で足りないとき。
+
+## D104: Trail を主単位にし、Task/カンバンを置き換える
+
+date: 2026-11-17 · by: user · issue: -
+
+Trail モデル v1（[設計](../work/research/trail-model-v1.md) / [批判](../work/research/trail-model-critiques.md) / [選択肢](../work/research/trail-open-questions-options.md)）を採用する。**Task と併存させず、Task を Trail に置き換える**。カンバンは作らない。
+
+- **単位**: Trail（意図）→ Change（base..head）→ SessionLink / Finding / Decision / Gate。状態は draft / active / in_review / merged / observing / closed / abandoned。blocked は状態にしない。
+- **添付**: feedback / metric / eval / note を型付き・追記専用で持つ。occurred_at と recorded_at、provenance、supersedes。JSON の袋にしない。
+- **session**: 既定は redaction 済み summary。全文は R2 に保存し、明示 reveal + 理由 + 監査 + TTL 30 日。プロジェクト設定で全文保存をオフにできる。**repo には入れない**。
+- **metric**: 相関として表示し、experiment_id / variant / hypothesis がある時だけ因果を言う。**metric をゲートにしない**。
+- **observing**: merge 後に 14 日固定。reopen は手動（理由必須）。自動 reopen は Phase 2 の opt-in。
+- **保持**: TTL クラス（transcript 30 日 / summary・findings 1 年 / feedback・metric 2 年 / Trail・Decision は無期限）。削除は payload 削除 + tombstone。
+- **複数人**: いまは owner-only。ターゲットはプロジェクト役割（owner / approver / editor / viewer）+ 承認ポリシー。フル RBAC / SSO / 組織階層はやらない。README の「チーム向け RBAC」を「フル RBAC / SSO / 組織階層」に狭める。
+
+移行は 0004 で trails 系テーブルを追加し、tasks から backfill。GraphQL の Task / TaskStatus を削除し、Sidebar を Trail 一覧に替える。tasks テーブルは読み取りを止めて残す（削除は INV-12 の見直し後に別途決める）。
+
+**代替案**: Task 拡張（カンバン廃止と両立しない）、Trail 併存（二重 status と二重 UI）、metric ゲート（Goodhart と誤判定）、owner-only を恒久（2 人目で作り直し）。
+
+前提が変わる条件: 2 人目の実ユーザー、multi-repo の同時 merge、実験基盤の運用開始、保持に関する法務要件、または Trail の状態遷移が Project/Task の語彙と衝突するとき。
+
+## D105: 実行層はマシン + bwrap を維持し、インフラを複雑にする変更は two-way door にする
+
+date: 2026-11-17 · by: user · issue: -
+
+- **実行層（E1）**: マシン + bwrap を維持する。Cloudflare Sandbox / 外部 sandbox は今は採らない。untrusted コードの隔離やマルチテナントが要件になった時に再検討する。
+- **複雑化の原則**: インフラ・システムアーキテクチャを複雑にする変更は **two-way door** として扱い、製品体験のインパクトとコストの証拠を出してから、最小の可逆な形で試す。単純化は即行してよい。
+- **保存層（S1）**: R2 を正本のまま。Artifacts は必要時に「オンデマンド publish（B'）」だけを足す。自動ミラー（B）と正本化（C）は、持ち帰り・オフライン review・restore / GC のコスト・multi-repo のトリガーが出るまで決めない。
+- **S2 / S3 / 保持**: repo 粒度・32MiB 超の規約・保持の数値は今決めない。1GB 接近、32MiB 失敗、複数 repo の時に決める。checkpoint が 32MiB で失敗したら R2 に逃がし、黙って落とさない。
+- レビューは保存層に依存しない（D104）。
+
+代替案: B（今ミラー）、C（Artifacts 正本）、D（Forgejo 正本）。いずれも複雑化のコストが現時点の体験インパクトを上回るため保留。
+
+前提が変わる条件: オフライン review / 持ち帰りの要望、restore + GC の実装コストがミラーを上回る、multi-repo、untrusted 実行。
+
+## D106: git remote とオフライン review は Artifacts B（R2 正本 + ミラー）で取る
+
+date: 2026-11-17 · by: user · issue: -
+
+- **正本は R2 のまま**。run 終わりの checkpoint を Artifacts にも push する（dual write）。push の失敗は R2 の checkpoint の ack を壊さない（非同期・再送）。
+- **ref**: `refs/heads/hns/run/<id>`。commit id は DO に持ち、binding の log / readTree / readFile は commit で読む。
+- **token**: Workspace DO が repo 単位の短命 write token を発行。UI は binding で読み、token を持たない。
+- **repo**: workspace = repo。名前は不透明な id、namespace は環境ごと。遅延作成。
+- **上限**: 32MiB/file または 64MiB/push を超える run はミラーを skip し、review は machine fallback（後で A' か LFS）。1GB 接近は世代 repo（D2 のトリガー）。
+- **review**: binding で base / head を読む。Review データは DO/D1 のまま（二重保存しない）。
+- **two-way**: ミラーを止めれば R2 に戻る。
+- **非目標**: Artifacts 正本（C）、bit fork、dgit、LFS の設計を今やる。
+- **見直し**: push p95、ミラー失敗率、1GB、beta の変更。C は計測後。
+
+代替案: A'（R2 read path のみ）、C（Artifacts 正本）、bit の read-only spike、dgit。git remote を要件にしたため B を採る。
+
+前提が変わる条件: push p95 が checkpoint を遅らせる、ミラー失敗が常態化する、1GB に頻繁に達する、または Artifacts の beta が破壊的変更を入れるとき。
+
+

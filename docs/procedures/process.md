@@ -1,8 +1,8 @@
 # 開発プロセス（調査 → 要件 → 技術選定 → 設計 → リリース）
 
 2026-11-07 / D045。工程の境界を明確にし、未確定が残っていても合理的に前へ進むための進め方。
-ゲートは停止装置ではなく、**次に進む範囲・残す課題・制約を決める場**。設計の判断は [design.md](design.md)、
-実装後の検証は [review.md](review.md)、記録は [decisions.md](decisions.md) と work/ に置く。
+ゲートは停止装置ではなく、**次に進む範囲・残す課題・制約を決める場**。設計の判断は [design.md](../design.md)、
+実装後の検証は [review.md](review.md)、記録は [decisions.md](../decisions.md) と work/ に置く。
 
 ## 原則
 
@@ -35,32 +35,32 @@ relay 設定で `relay-compiler` を回し、**出力の enum 名が worktree �
 
 ## 完了・記録・成果
 
-完了は Result の追記ではなく、1 issue 1 レコードで表す（[D067](decisions.md)）。置き場とスキーマは [0195](../work/issues/0195-work-record-contract.md) で決める（YAML は D067）。done level はレコードから導出する。
+完了は Result の追記ではなく、1 issue 1 レコードで表す（[D067](../decisions.md)）。置き場とスキーマは [0195](../../work/issues/0195-work-record-contract.md) で決める（YAML は D067）。done level はレコードから導出する。
 
 - 成果は四半期のテーゼと Moat 台帳で見る（D068）。週次デモ30分、月次キルリストを置く。
 - レビューは意図・設計・実装・結果の4層に分ける（D069）。月次で指摘をルール・テスト・eval・decisions に蒸留する。
 - 製品のループは外部に開く（D070）。hns は判断と記録を持ち、観測は OutcomeSource から参照する。
 
-詳細は [work/proposals](../work/proposals/) にある。
+詳細は [work/proposals](../../work/proposals/) にある。
 
 ## 何を使うか（早見）
 
 | 状況                                | 使うもの                                       |
 | ----------------------------------- | ---------------------------------------------- |
-| 作るか作らないか迷う                | [design/abstraction.md](design/abstraction.md) |
-| 境界・責務・公開面を決める          | [design/boundary.md](design/boundary.md)       |
-| 公開 API・型・エラーを決める        | [design/contract.md](design/contract.md)       |
-| 保存・再送・並行・上限を決める      | [design/data.md](design/data.md)               |
-| HTTP のルート・一覧・エラーを決める | [design/http.md](design/http.md)               |
-| 認可・秘密・sandbox を決める        | [design/security.md](design/security.md)       |
-| 画面・操作・状態を決める            | [design/interface.md](design/interface.md)     |
+| 作るか作らないか迷う                | [design/abstraction.md](../design/abstraction.md) |
+| 境界・責務・公開面を決める          | [design/boundary.md](../design/boundary.md)       |
+| 公開 API・型・エラーを決める        | [design/contract.md](../design/contract.md)       |
+| 保存・再送・並行・上限を決める      | [design/data.md](../design/data.md)               |
+| HTTP のルート・一覧・エラーを決める | [design/http.md](../design/http.md)               |
+| 認可・秘密・sandbox を決める        | [design/security.md](../design/security.md)       |
+| 画面・操作・状態を決める            | [design/interface.md](../design/interface.md)     |
 | 次に進んでよいか判断する            | ゲート判定票（このファイル）                   |
 | 決めていないことがある              | issue の `## 未確定`（台帳）                   |
 | 技術を選ぶ                          | 比較表（代表1件）→ decisions に決定            |
-| 決めたことを残す                    | [decisions.md](decisions.md)（D番号）          |
+| 決めたことを残す                    | [decisions.md](../decisions.md)（D番号）          |
 | 実装が終わった                      | [review.md](review.md) の索引 → 触る領域       |
-| 画面を変えた                        | [review/ux.md](review/ux.md)                   |
-| 観点を足す・削る                    | [review/eval.md](review/eval.md)               |
+| 画面を変えた                        | [review/ux.md](../review/ux.md)                   |
+| 観点を足す・削る                    | [review/eval.md](../review/eval.md)               |
 | 並行して変更を流す・レーンを増やす  | [parallel-change.md](parallel-change.md)       |
 
 ## 段階と出口
@@ -203,6 +203,6 @@ relay 設定で `relay-compiler` を回し、**出力の enum 名が worktree �
 
 提供資料の原文は work/research に置き、書き換えない。
 
-- [new_system_development_process.md](../work/research/new_system_development_process.md) — 段階・ゲート・未確定の管理
-- [product_system_design_playbook_ja.md](../work/research/product_system_design_playbook_ja.md) — 調査・全体像・変更コスト・買う/作る・テンプレート
-- [requirements-design-state-v0.3.md](../work/research/requirements-design-state-v0.3.md) — 要件の状態・ADR・未決の記録例
+- [new_system_development_process.md](../../work/research/new_system_development_process.md) — 段階・ゲート・未確定の管理
+- [product_system_design_playbook_ja.md](../../work/research/product_system_design_playbook_ja.md) — 調査・全体像・変更コスト・買う/作る・テンプレート
+- [requirements-design-state-v0.3.md](../../work/research/requirements-design-state-v0.3.md) — 要件の状態・ADR・未決の記録例

@@ -1,12 +1,12 @@
 # 設計
 
 2026-11-07 / D042。設計判断の根拠と、設計時に守ることを領域ごとに置く。**設計の前に読み、レビューの前に該当領域だけ読む。**
-原則は AGENTS.md、進め方（調査・要件・技術選定・ゲート）は [process.md](process.md)、レビューの手順は [review.md](review.md)。ここは「条件 → 命令 → 補足 → Ref」の形で、判断を実行できる形にしたもの。
+原則は AGENTS.md、進め方（調査・要件・技術選定・ゲート）は [process.md](procedures/process.md)、レビューの手順は [review.md](procedures/review.md)。ここは「条件 → 命令 → 補足 → Ref」の形で、判断を実行できる形にしたもの。
 
 各項目の **条件**は「この形を見たら」、**命令**は「どうする」、**補足**は理由と例外、**Ref** は出典。
 原典と hns の統合判断（2回で抽象化、blocking の定義、優先度を作らない）は、補足に `hns:` と書いて区別する。
-矛盾したときの優先順は、AGENTS.md（常時の原則）→ ここ（設計時の展開）→ [review.md](review.md)（検査）。
-テストは [testing.md](testing.md)、観測は [observability.md](observability.md)、認証の詳細は [auth.md](auth.md)。ここは設計の判断だけを置く。
+矛盾したときの優先順は、AGENTS.md（常時の原則）→ ここ（設計時の展開）→ [review.md](procedures/review.md)（検査）。
+テストは [testing.md](procedures/testing.md)、観測は [observability.md](observability.md)、認証の詳細は [auth.md](auth.md)。ここは設計の判断だけを置く。
 
 ## 読む順
 
@@ -46,5 +46,5 @@
   [designing with types](https://fsharpforfunandprofit.com/series/designing-with-types/) は Minsky の言い回しの解説。
   [KISS](https://en.wikipedia.org/wiki/KISS_principle) は標語で単一原典がない。
 - **[Liskov & Wing 1994](https://dl.acm.org/doi/10.1145/197320.197383)** は API 契約と SOLID の両方で引く（同じ原典）。
-- **優先度は文献にない。** hns: P0/P1/P2 は作らず、重大 / 高 / 中 / 低 と blocking の定義（[review.md](review.md)）で決める。
+- **優先度は文献にない。** hns: P0/P1/P2 は作らず、重大 / 高 / 中 / 低 と blocking の定義（[review.md](procedures/review.md)）で決める。
 - **PAGNI は機密を無条件に保存しない。** hns: 何を残すか、アクセス制御、保存期間は [security.md](design/security.md) で決める。

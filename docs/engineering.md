@@ -18,7 +18,7 @@
 | Lint / Format | **oxlint + oxfmt** + [anti-slop](https://github.com/dmmulroy/anti-slop)（vendored）         | 速い。ルールをリポジトリ内で持って読み、自分たちで変えられる                         | ESLint + Prettier（遅い）、Biome（ルールの拡張性） |
 | パッケージ    | **npm workspaces**（`packages/*` + `apps/*`）                                               | [pi](https://github.com/earendil-works/pi) と同じ構成。workspace 参照が素直          | pnpm（今のところ利点より設定が増える）             |
 
-テストの分析・設計・配置・TSDoc / doctest は [testing.md](testing.md)。設計・型・API の規律は [design.md](design.md)。
+テストの分析・設計・配置・TSDoc / doctest は [testing.md](procedures/testing.md)。設計・型・API の規律は [design.md](design.md)。
 
 ## 2. コード構造
 
@@ -89,7 +89,7 @@ npm 依存ではなく**コピー**として持つ。読んで、必要なら自
 - `TODO` は内容を書く（issue 番号はコードに書かない。issue 側からパスを参照する）。
 - `@ts-expect-error` は理由を同じ行に書く（issue 番号は書かない）。
 - 例外・握りつぶしは「なぜ無視してよいか」をコメントで残す。
-- エージェントが書いたコードも同じゲートを通す。レビューは [review.md](review.md) の手順（契約 → 振る舞い → 証拠）で行う。
+- エージェントが書いたコードも同じゲートを通す。レビューは [review.md](procedures/review.md) の手順（契約 → 振る舞い → 証拠）で行う。
 
 ## 配備
 

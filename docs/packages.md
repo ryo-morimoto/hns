@@ -26,7 +26,7 @@
 
 | パッケージ       | 責任（公開するもの）                                                                              | 依存                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `@hns/core`      | モデル（`types.ts`・`codecs.ts`）と、その射影。`./graphql` で SDL を起こす                   | —（id の検証に valibot、`./graphql` に graphql） |
+| `@hns/core`      | モデル（`types.ts`・`codecs.ts`）と、その射影。`./graphql` で SDL、`./capability` でツール呼び出しの契約 | —（id の検証に valibot、`./graphql` に graphql） |
 | `@hns/record`    | 仕事の記録の schema・done level の導出・YAML・CLI                                          | core, valibot, yaml                   |
 | `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離                                 | core, pi-durable/env                  |
 | `@hns/agent`     | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode）。`./session` は Worker-safe な複数会話 runtime | core, workspace, pi-durable, pi-ai    |
@@ -98,7 +98,7 @@ REST は事前に宣言しない（D059）。GraphQL に載せない面（passke
 
 ## exports の切り方
 
-- `@hns/core`: `.`（モデルと検証）、`./graphql`（モデルから起こした SDL。web の bundle には入れない）。
+- `@hns/core`: `.`（モデルと検証）、`./graphql`（モデルから起こした SDL。web の bundle には入れない）、`./capability`（ツール呼び出しの契約。web は import しない。0220 で追加）。
 - `@hns/workspace`: `.`（Workspace）、`./sandbox`（ExecutionEnv デコレータ）、`./objects`（git object 互換の R2 ストア）。
 - `@hns/store`: `.`（D1 のリポジトリ。Worker はこれをそのまま import する。`node:sqlite` を持たない）、
   `./identity`（認証・秘密）。exec を使わないアプリが bubblewrap に依存しないようにする。
