@@ -1,7 +1,7 @@
 # 0154: checkpoint commit（refs/hns・Run 境界）
 
-status: open
-priority: next
+status: done
+priority: now
 design: agreed
 design-ref: docs/durability.md §5
 depends-on: 0153, 0156
@@ -83,9 +83,20 @@ unit ではなく integration に置く理由: checkpoint は git の子プロ�
 - ユーザーの commit / push。
 - merge / rebase の支援。
 
+## Result
+
+- verdict: **PASS**（reviewer-0154、blocking 0）
+- reviewer: reviewer-0154（この変更を書いていない別エージェント）
+- HEAD: 88764a5（rebase 後。main に ff 統合）
+- 受入: 6/6。`npm run check` exit 0（605 tests / 106 files、34.4s。既知の cf dev inspector 9229 flake は再実行で green。隠していない）
+- 確認: 一時 index + git add -A → write-tree → parent なし commit-tree、refs/hns/checkpoints/<runId> は update-ref の CAS。既存 ref は created:false で既存 commit、同時 2 回でも ref 更新 1 回。tracked の .env / .hns も git rm --cached で除外（名前ベース。内容は走査しないと明記）。pack は rev-list --objects の closure から作り、index-pack → cat-file -e / rev-list の集合一致、commit 1 個。ユーザーの HEAD / index / worktree は不変。author / 日時を固定。@hns/workspace/checkpoint の subpath で root entry に node: を入れない。
+- 非 blocking（低 8、follow-up）: submodule は gitlink のみで内容を含まない（文言の修正）/ git rm --cached による dangling blob（add 時点の pathspec 除外が望ましい）/ docs/packages に ./checkpoint が無い・Log の C1–C9 表記 / TSDoc の issue 番号 / resolveRoot が ENOENT も not-a-work-tree に丸める / committedAt の検証順と RangeError が型付き失敗でない / 決定性の直接テストが無い / readRef が全エラーを「ref なし」にする。
+
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-17: 0153（R2）と 0169（watermark）が main に入ったので lead が `next` から `now` へ。design agreed・依存充足のため着手。
 - 2026-11-17: テスト条件（C1–C9）・テスト設計（T1–T9）・Design を追加。touches を実装に合わせた: テストは vitest の include 外（`test/` 直下）なので `test/integration/checkpoint.test.ts`、加えて `package.json` の `./checkpoint` export、`tsdown.config.ts`、README。
 - 2026-11-17: 実装。`packages/workspace/src/checkpoint.ts` で一時 `GIT_INDEX_FILE` に `git add -A` → 除外 pathspec を `git rm --cached` → `write-tree` → parent なしの `commit-tree`。`refs/hns/checkpoints/<runId>` は既存なら `created: false` で返し、無ければ pack を作ってから `update-ref` の CAS で進める。返すのは commit / ref / pack bytes / `checkpoints/<commit>.pack`。除外は `.hns`・`.env` / `.env.*`・資格情報名・`node_modules` で、tracked にも効く（一時 index から落とす）。`@hns/workspace/checkpoint` の subpath export にし、root entry / Worker bundle に Node の import を出さない。実 git の integration 8 本（作業ツリーとユーザー ref の不変、再実行と同時実行の冪等、tracked の除外、run ごとの ref、pack の `index-pack` と closure、空の作業ツリー、不正 runId / 非 git、サブディレクトリ root）。`npm run check` exit 0（605 tests / 106 files）。独立レビュー待ち。
 - 2026-11-17: 再実行時に `server-integration` の cf dev harness（`gateway/budget`、`session-do`）が wrangler inspector proxy の socket 衝突（`Address already in use (socket "direct:1:default")`）で intermittent に落ちた。workspace の変更を含まない `server-integration` 単独でも 2 回中 1 回再現したため、このレーンの回帰ではない（cf dev を並列に起動する既存 harness の flake）。最終の `npm run check` は green。
+- 2026-11-17: reviewer-0154 PASS（blocking 0）。main へ ff 統合（88764a5）。統合後の main gate は 1 回目が同じ inspector flake で test 段が落ち、再実行で exit 0（605 tests）。
