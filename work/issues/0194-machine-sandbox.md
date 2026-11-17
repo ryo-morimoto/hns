@@ -1,7 +1,7 @@
 # 0194: machine の sandbox・hide・env 純度（0147 から分割）
 
 status: open
-priority: next
+priority: now
 design: agreed
 design-ref: D095
 depends-on: 0147
