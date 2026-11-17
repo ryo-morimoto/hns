@@ -48,3 +48,14 @@
 
 - `index.*`（rebuilt / drain.failed / state.failed / legacy_rows）を `ObsLogEntry` で書くと、D1 障害時のテスト環境では 1 ターンで 1 行増える。cost の行数上限（`ROWS_PER_TURN = 10`）と測定窓の定義を L4 で決める: (a) 観測行を窓の外にする、(b) 上限を 11 にする、(c) 障害時は観測を落とす。あわせて `deploy/limits/RESULTS.md` の数値を更新する。
 - L3 は語彙・表・写像・型の整理まで。sink は付けない。
+
+## L3 と L5 の切り分け（lead 判断）
+
+- L3（server）: 語彙・status 表・写像・GraphQL の invalid_request 改名と failureType・型の整理まで。`index.*` の sink は付けない。`session-cost.test.ts` の 10 行は変えない。
+- L4（server / store のデータ層）に申し送り: `index.*` を ObsLogEntry で書くと D1 障害時に 1 ターン 1 行増える。測定窓の定義（観測行を外す / 上限 11 / 障害時は落とす）と `deploy/limits/RESULTS.md` の更新。
+
+## L5（workspace / machine）完了 — 7ce8626
+
+- `ExpectedVersion` の別名を削除し、core の `AbsentVersion` に統一（grep 0、公開面から消えた）。journal は `MUTATION_UNKNOWN_REASONS` から引く。checkpoint の exports は将来の利用者のため残す（互換を理由にしない）。knip entry の削除で hint 2 → 1（残りは `.agents/**` の意図的 ignore）。store の `import type` で bare import 警告 0。918 tests。
+- reviewer PASS。低: checkpoint の @remarks 2 連、tsdown のコメント、docs/workspace の expectedVersion（L6）、journal の reason unit、knip の dist 依存、store の deploy 警告の環境差。
+- 判断: `.agents/**` の knip ignore は L6 で消す（knip が exit 0 で hint 0 になることを check で 1 回確認してから）。machine の `SIGNED_HEADERS` / `SignedHeaders` の再公開は残し、「core の写し」と TSDoc に明記する（削除は語彙単一化の再設計後）。
