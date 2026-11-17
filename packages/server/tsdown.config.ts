@@ -1,7 +1,9 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/graphql/index.ts"],
+  // The edge and the checkpoint face are mounted by a worker other than the deploy's own
+  // entrypoint (the checkpoint integration test builds exactly that), so they are entries.
+  entry: ["src/index.ts", "src/graphql/index.ts", "src/edge/handler.ts", "src/checkpoint/face.ts"],
   format: ["esm"],
   platform: "neutral",
   root: "src",

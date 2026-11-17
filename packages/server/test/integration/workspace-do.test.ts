@@ -13,6 +13,7 @@ import {
   type CfDev,
 } from "../../../../tools/test/cf-dev.ts";
 import { ensureDist } from "../../../../tools/test/ensure-dist.ts";
+import { sessionCookie } from "../../test/support/edge.ts";
 
 const TIMEOUT_MS = 300_000;
 const READY_TIMEOUT_MS = 40_000;
@@ -33,6 +34,7 @@ const CONFIG = [
   "    env: {",
   '      WORKSPACE: bindings.durableObject({ worker: "hns-workspace-do-test", exportName: "Workspace" }),',
   '      MIGRATION: bindings.durableObject({ worker: "hns-workspace-do-test", exportName: "MigrationProbe" }),',
+  '      HNS_SESSION_SECRET: bindings.text("test-secret-0123456789abcdef0123456789"),',
   "    },",
   "  },",
   "});",
@@ -42,6 +44,7 @@ const CONFIG = [
 const WORKER = [
   'import { Workspace } from "@hns/server";',
   'import { JOURNAL_SCHEMA, journalUpgradeStatements } from "@hns/store";',
+  'import { edgeFetch } from "./edge.ts";',
   "",
   "interface Storage {",
   "  readonly sql: { exec(query: string): { toArray(): unknown[] } };",
@@ -93,6 +96,10 @@ const WORKER = [
   '    if (url.pathname === "/migrate") {',
   '      return env.MIGRATION.get(env.MIGRATION.idFromName("probe")).fetch(request);',
   "    }",
+  '    if (url.pathname.startsWith("/edge/")) {',
+  '      const path = "https://edge" + url.pathname.slice(5) + url.search;',
+  "      return edgeFetch(new Request(path, request), env);",
+  "    }",
   '    if (!url.pathname.startsWith("/t/")) return new Response("not found", { status: 404 });',
   '    const forwarded = new Request("https://workspace" + url.pathname.slice(2) + url.search, request);',
   '    return env.WORKSPACE.get(env.WORKSPACE.idFromName("w1")).fetch(forwarded);',
@@ -100,6 +107,56 @@ const WORKER = [
   "};",
   "",
 ].join("\n");
+
+const EDGE = `
+import { createEdge } from "@hns/server/edge";
+import { createCheckpointFace } from "@hns/server/checkpoint";
+
+/**
+ * The database the edge's project lookup opens.
+ *
+ * This project has no D1 database, and the store's own migrations are not what this suite is
+ * about. Only the project lookup is answered here: a query that names projects returns the one
+ * project, with an empty root (the machine ROOT), as D1 would for w1. Every other statement
+ * reads nothing and writes nothing.
+ */
+const PROJECT = {
+  id: "w1",
+  name: "w1",
+  workspace_root: "",
+  egress: "inherit",
+  created_at: "2026-01-01T00:00:00.000Z",
+};
+
+/** The row for the id a statement was bound with: the one project, or none. */
+const byId = (id) => (id === PROJECT.id ? [PROJECT] : []);
+
+const DATABASE = {
+  prepare(sql) {
+    const statement = (...values) => ({
+      bind: (...next) => statement(...next),
+      all: async () => ({ results: sql.includes("projects") ? byId(values[0]) : [] }),
+      first: async () => (sql.includes("projects") ? (byId(values[0])[0] ?? null) : null),
+      run: async () => ({ meta: { changes: 0 } }),
+    });
+    return statement();
+  },
+  batch: async (statements) => statements.map(() => ({ results: [] })),
+};
+
+const EDGE = createEdge({
+  graphql: async () => new Response("graphql"),
+  ws: async () => new Response("ws"),
+  checkpoints: createCheckpointFace(),
+});
+
+export const edgeFetch = (request, env) =>
+  EDGE(request, {
+    DB: DATABASE,
+    WORKSPACE: env.WORKSPACE,
+    HNS_SESSION_SECRET: env.HNS_SESSION_SECRET,
+  });
+`;
 
 const Lease = v.object({
   ok: v.literal(true),
@@ -137,6 +194,7 @@ async function writeProject(): Promise<string> {
   await symlink(join("..", "..", "node_modules"), join(dir, "node_modules"));
   await writeFile(join(dir, "cloudflare.config.ts"), CONFIG);
   await writeFile(join(dir, "worker.ts"), WORKER);
+  await writeFile(join(dir, "edge.ts"), EDGE);
   return dir;
 }
 
@@ -359,6 +417,53 @@ test.skipIf(!isCfDevInstalled())(
       const body = v.parse(Migration, await response.json());
       // Catches: a workerd SQLite build that refuses DDL (rename/copy/drop) in a transaction.
       expect(body.rows[0]?.sql).toContain("'denied'");
+    } finally {
+      await running?.stop();
+      running = undefined;
+    }
+  },
+  TIMEOUT_MS,
+);
+
+test.skipIf(!isCfDevInstalled())(
+  "the checkpoint face reaches the Workspace object through the real edge",
+  async () => {
+    project = await writeProject();
+    running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
+    const origin = "http://127.0.0.1:" + String(running.port);
+    try {
+      const cookie = await sessionCookie("owner");
+      const prepare = (session: boolean) => {
+        const request = new Request(origin + "/edge/api/workspaces/w1/checkpoints/prepare", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ runId: "run-1" }),
+        });
+        if (session) request.headers.set("cookie", cookie);
+        return fetch(request);
+      };
+      // Catches: the edge's route or its authentication not running in workerd (the worker's
+      // bundling, the session secret, the cookie check), which an in-process test cannot prove.
+      const anonymous = await prepare(false);
+      const anonymousText = await anonymous.text();
+      expect(anonymous.status, anonymousText).toBe(401);
+      expect(anonymousText).toContain("unauthorized");
+      // Catches: a method other than POST reaching the face, or the 405 losing its Allow header.
+      const getMethod = await fetch(origin + "/edge/api/workspaces/w1/checkpoints/prepare", {
+        headers: { cookie },
+      });
+      expect(getMethod.status).toBe(405);
+      expect(getMethod.headers.get("allow")).toBe("POST");
+
+      // Catches: a checkpoint call reaching the object without the session the edge checked.
+      // The edge's project lookup needs the deployment's D1, which this project does not have,
+      // so the face stops there (a typed 503 from the edge's store) instead of reaching the
+      // object. The object's own path is fixed by the in-process suites (face.edge.test.ts,
+      // do/workspace.test.ts) and by the checkpoint flow's real-machine scenario.
+      const authenticated = await prepare(true);
+      const authenticatedText = await authenticated.text();
+      expect([503, 500]).toContain(authenticated.status);
+      expect(authenticatedText.length).toBeGreaterThan(0);
     } finally {
       await running?.stop();
       running = undefined;

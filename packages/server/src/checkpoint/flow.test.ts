@@ -21,11 +21,12 @@ test("a run over the push limit is skipped with too_large", () => {
   expect(overBlob.status).toBe("skipped");
 });
 
-// Catches: a token or a credential that found its way into the stored record through a field the
-// caller passed; the schema is the contract's and drops what it does not name.
-test("the record drops a field the contract does not name", () => {
-  // SAFETY: the assertion is the test's subject: the object carries a key the parameter type does
-  // not name, and `checkpointRecordOf` must drop it rather than store it.
+/**
+ * The record fields plus a token, from a caller the type does not describe.
+ *
+ * @returns The object a JavaScript caller could pass, which the signature's type does not name.
+ */
+function untrustedFields(): Parameters<typeof checkpointRecordOf>[0] {
   const fields = {
     runId: "run-1",
     ref: "refs/hns/checkpoints/run-1",
@@ -37,9 +38,17 @@ test("the record drops a field the contract does not name", () => {
     mirror: initialMirror(AT, 8, 4, PACK_LIMIT),
     token: "secret",
   };
-  // SAFETY: the assertion is the test's subject: `fields` carries a key the parameter type does
-  // not name, and the function must drop it rather than store it.
-  const record = checkpointRecordOf(fields as Parameters<typeof checkpointRecordOf>[0]);
+  // SAFETY: the token is the test's subject: an untyped caller can pass it, and the returned
+  // value is exactly what such a caller would hand the function.
+  return fields as Parameters<typeof checkpointRecordOf>[0];
+}
+
+// Catches: a token or a credential that found its way into the stored record through a field the
+// caller passed; the schema is the contract's and drops what it does not name.
+test("the record drops a field the contract does not name", () => {
+  // The extra key is the test's subject: a caller in JavaScript can put a credential where the
+  // type does not name one, and the contract's schema must drop it rather than store it.
+  const record = checkpointRecordOf(untrustedFields());
   expect(Object.keys(record)).not.toContain("token");
   expect(parseCheckpointRecord(JSON.stringify(record))).toStrictEqual({
     runId: "run-1",

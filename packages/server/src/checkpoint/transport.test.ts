@@ -1,5 +1,7 @@
+import { CheckpointPackUploadResultSchema } from "@hns/core";
 import { checkpointPackKey } from "@hns/workspace/objects";
 import { expect, expectTypeOf, test } from "vitest";
+import * as v from "valibot";
 import {
   PACK_MAX_BYTES,
   PackRejectedError,
@@ -48,7 +50,17 @@ test("a pack exactly at the limit is stored and one byte more is not", async () 
   const transport = new R2PackTransport(bucket, 8);
   const atLimit = new Uint8Array(8);
   const stored = await transport.upload("run-1", checkpointPackKey(COMMIT), atLimit);
-  expect(stored).toStrictEqual({ status: "stored", packKey: checkpointPackKey(COMMIT) });
+  expect(stored).toStrictEqual({
+    runId: "run-1",
+    receivedBytes: 8,
+    packKey: checkpointPackKey(COMMIT),
+    stored: true,
+  });
+  // The contract's answer is part of what the transport returns, so the wire and the store agree.
+  expect(v.parse(CheckpointPackUploadResultSchema, stored)).toStrictEqual({
+    runId: "run-1",
+    receivedBytes: 8,
+  });
   expect(bucket.puts).toStrictEqual([checkpointPackKey(COMMIT)]);
   expect(await transport.has(checkpointPackKey(COMMIT))).toBe(true);
 
@@ -67,8 +79,8 @@ test("a second upload of the same key writes nothing", async () => {
   const key = checkpointPackKey(COMMIT);
   const first = await transport.upload("run-1", key, new Uint8Array([1, 2, 3]));
   const second = await transport.upload("run-1", key, new Uint8Array([1, 2, 3]));
-  expect(first.status).toBe("stored");
-  expect(second.status).toBe("present");
+  expect(first.stored).toBe(true);
+  expect(second.stored).toBe(false);
   expect(bucket.puts).toStrictEqual([key]);
 });
 

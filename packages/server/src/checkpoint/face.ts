@@ -18,10 +18,12 @@ import { ProjectParamSchema } from "../project-id.ts";
  *
  * - `POST /api/workspaces/<workspaceId>/checkpoints/prepare` — the machine's checkpoint,
  *   metadata only.
- * - `POST /api/workspaces/<workspaceId>/checkpoints/<runId>/pack` — the machine's signed pack:
- *   `application/x-git-pack`, a declared length, and no more than 64 MiB, refused before the
- *   body is read. The bytes and the signed headers are forwarded unchanged, so the object's
- *   checks are made against exactly what arrived.
+ * - `POST /api/workspaces/<workspaceId>/checkpoints/<runId>/pack` — the machine's signed pack.
+ *   The face reads the declared length and refuses one over 64 MiB **before the body is read**;
+ *   the bytes and the signed headers are forwarded unchanged, so the object's checks are made
+ *   against exactly what arrived. The media type and the signature are the object's decisions,
+ *   not the face's: the edge reads the body as bytes, the object answers `415` for a body that is
+ *   not `application/x-git-pack`, and it verifies the device signature and the body hash.
  * - `POST /api/workspaces/<workspaceId>/checkpoints/complete` — the watermark and the record.
  *
  * A successful answer is the object's envelope unchanged (`ok: true` and its result), and a
@@ -156,9 +158,8 @@ async function forwardPack(
   runId: string,
 ): Promise<Response> {
   const path = new URL(request.request.url).pathname;
-  // The media type was decided before the body was read: the edge's JSON body reader refuses
-  // anything that is not `application/json` with the same 415, so a pack path cannot reach here
-  // with another type. The declared length is re-checked against the pack limit here.
+  // Only the size is decided here, and before a byte is kept; the object decides the media type
+  // (`415`), the signature, and whether the bytes are the ones that were signed.
   const declared = request.request.headers.get("content-length");
   if (declared === null || !/^[0-9]{1,15}$/u.test(declared)) {
     return problem("invalid_request", "A pack upload must declare a content-length.", path);

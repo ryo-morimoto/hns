@@ -324,14 +324,16 @@ async function route(
   }
   const checkpoints = CHECKPOINTS_PATH.exec(path);
   if (checkpoints !== null) {
-    if (request.method !== "POST") {
-      const response = problem("method_not_allowed", "Only POST is allowed on this path.", path);
-      response.headers.set("allow", "POST");
-      return response;
-    }
     const session = await authenticate(request, env);
     if (session === null) {
       return problem("unauthorized", "A valid session cookie is required.", path);
+    }
+    if (request.method !== "POST") {
+      // Authenticated first, so an anonymous caller learns nothing about the face's shape:
+      // every method is a 401 without a session, as it is for every other face (D059).
+      const response = problem("method_not_allowed", "Only POST is allowed on this path.", path);
+      response.headers.set("allow", "POST");
+      return response;
     }
     if (dependencies.checkpoints === undefined) {
       return problem("unavailable", "The checkpoint face is not configured.", path);
@@ -400,6 +402,11 @@ export function createEdge(
       if (error instanceof DeadlineError) {
         response = problem("timeout", "The request exceeded the configured deadline.", path);
       } else {
+        console.error(
+          "DEBUGEDGE",
+          String(error),
+          error instanceof Error ? String(error.stack) : "",
+        );
         console.error(
           "edge: unhandled request",
           requestId,

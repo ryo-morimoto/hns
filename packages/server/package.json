@@ -21,6 +21,16 @@
       "source": "./src/graphql/index.ts",
       "types": "./dist/graphql/index.d.ts",
       "import": "./dist/graphql/index.js"
+    },
+    "./edge": {
+      "source": "./src/edge/handler.ts",
+      "types": "./dist/edge/handler.d.ts",
+      "import": "./dist/edge/handler.js"
+    },
+    "./checkpoint": {
+      "source": "./src/checkpoint/face.ts",
+      "types": "./dist/checkpoint/face.d.ts",
+      "import": "./dist/checkpoint/face.js"
     }
   },
   "scripts": {

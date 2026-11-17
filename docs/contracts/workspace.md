@@ -43,6 +43,10 @@ Worker は checkpoint を 3 つの RPC に分けて Workspace DO に渡す（`/r
 - **complete** は pack が R2 にあることを確かめてから、**watermark の書き込みと `CheckpointRecord`（mirror: pending、packBytes、maxBlobBytes）を 1 トランザクション**で書く。pack が無い complete は 409。ack を失った complete の再送は記録済みの答えを返す。
 - **mirror** は ack の後に非同期（`/rpc/checkpoint/mirror`）。遷移は core の遷移表に従い、失敗しても checkpoint の答えは変わらない。Artifacts への push は 0246。
 - 呼び手（Run 終了・中断・lease 解放・SIGTERM のどれが prepare を起動するか）は未確定（U-01、Session 側）。
+- **面**: `POST /api/workspaces/<workspaceId>/checkpoints/(prepare|complete|<runId>/pack)`。edge は全メソッドで認証を先に通し（未認証は 401）、POST 以外は 405 + `allow: POST`、face 未配線は 503、未知の workspace は 404。pack の media type と署名は DO が決める（face は長さだけ先に見る）。
+- **machine の選択**: checkpoint は**現在の lease 保持者**へ送る（lease が移った後も前の machine へ行かない）。lease が無ければ記録済みの machine。
+- **machine の失敗**: status は `denied`（400）または `unavailable`（503）で、machine の refusal code を message に残す。
+- **検証**: workerd の runtime pool（`@cloudflare/vitest-pool-workers`）は導入していない。edge の経路は `createEdge` を通す in-process のテスト、実 workerd の DO と face の配線は `cf dev` の integration（`workspace-do.test.ts`）で確かめる。
 
 ## 変わったとき
 

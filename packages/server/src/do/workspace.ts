@@ -752,14 +752,6 @@ export class Workspace {
   }
 
   /**
-   * Write the checkpoint watermark and truncate what the checkpoint absorbed.
-   *
-   * @remarks
-   * The checkpoint flow (0154) calls this from the Worker; the object stays the serialization
-   * point for the Journal. A watermark that would move backwards, or pass an intent with no
-   * outcome, is refused with 409 instead of losing reconciliation evidence.
-   */
-  /**
    * Route one checkpoint RPC.
    *
    * @param request - The request.
@@ -825,7 +817,7 @@ export class Workspace {
     this.#claimWorkspace(input.workspaceId);
     const files = this.#files;
     if (files === undefined) return failure("unavailable", "The machine is not configured.");
-    const machineId = this.#meta("machine_id");
+    const machineId = this.#checkpointMachine();
     if (machineId === undefined) return failure("unavailable", "The workspace has no machine yet.");
 
     const stored = this.#checkpointRow(input.runId);
@@ -849,9 +841,15 @@ export class Workspace {
     if (!answer.ok) {
       // The failure and its code, never the answer's body: enough to see which hop failed.
       console.error("workspace: machine checkpoint failed", answer.failure, answer.detail);
-      return answer.failure === "unavailable"
-        ? failure("unavailable", "The machine did not answer the checkpoint.")
-        : failure("denied", "The machine did not make the checkpoint.");
+      if (answer.failure === "unavailable") {
+        return failure("unavailable", "The machine did not answer the checkpoint.");
+      }
+      // The machine's own refusal code is kept in the message, so a caller can tell a busy
+      // machine from one that refused the Run; the status stays the definite `denied` (400).
+      return failure(
+        "denied",
+        "The machine did not make the checkpoint: " + (answer.refusal ?? "refused"),
+      );
     }
     const prepare = answer.result;
     if (prepare.runId !== input.runId || prepare.packKey !== checkpointPackKey(prepare.commit)) {
@@ -937,7 +935,7 @@ export class Workspace {
         runId: runIdParsed.output,
         packKey: outcome.packKey,
         receivedBytes: bytes.byteLength,
-        stored: outcome.status === "stored",
+        stored: outcome.stored,
       }),
     );
   }
@@ -1082,6 +1080,20 @@ export class Workspace {
     return json({ ok: true, checkpoint: updated });
   }
 
+  /**
+   * The machine a checkpoint goes to: the current lease holder, else the workspace's machine.
+   *
+   * @returns The machine id, or undefined when the workspace has never had one.
+   *
+   * @remarks
+   * The lease holder first: a checkpoint belongs to the machine that is working on the
+   * workspace now, and the recorded machine is the last holder, which a lease that moved has
+   * made stale. When no lease is held the recorded machine is the only answer there is.
+   */
+  #checkpointMachine(): string | undefined {
+    return this.#lease()?.machineId ?? this.#meta("machine_id");
+  }
+
   /** The watermark's seq, or 0 before the first checkpoint. */
   #watermarkOf(): number {
     return this.#journal.watermark()?.throughSeq ?? 0;
@@ -1117,8 +1129,20 @@ export class Workspace {
       runId,
     )[0];
     if (row === undefined) return undefined;
-    const parsed = v.parse(CheckpointRowSchema, row);
-    return { runId: parsed.run_id, prepare: parsed.prepare, record: parsed.record };
+    // A row this build cannot read is a refusal a caller can act on (prepare again), not a 500:
+    // the checkpoint is not acknowledged from a value that did not parse.
+    const parsed = v.safeParse(CheckpointRowSchema, row);
+    if (!parsed.success) {
+      throw new CheckpointRefusedError(
+        "conflict",
+        "the stored checkpoint is not readable: prepare the Run again",
+      );
+    }
+    return {
+      runId: parsed.output.run_id,
+      prepare: parsed.output.prepare,
+      record: parsed.output.record,
+    };
   }
 
   /** Keep the machine's prepare answer, without replacing a finished checkpoint. */
@@ -1147,6 +1171,14 @@ export class Workspace {
     return await packs.has(packKey);
   }
 
+  /**
+   * Write the checkpoint watermark and truncate what the checkpoint absorbed.
+   *
+   * @remarks
+   * The checkpoint flow (0154) calls this from the Worker; the object stays the serialization
+   * point for the Journal. A watermark that would move backwards, or pass an intent with no
+   * outcome, is refused with 409 instead of losing reconciliation evidence.
+   */
   async #watermark(request: Request): Promise<Response> {
     const body = await bodyOf(request);
     if (!body.ok) return body.response;

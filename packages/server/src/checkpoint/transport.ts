@@ -1,4 +1,4 @@
-import { MAX_CHECKPOINT_PACK_BYTES } from "@hns/core";
+import { MAX_CHECKPOINT_PACK_BYTES, type CheckpointPackUploadResult } from "@hns/core";
 
 /**
  * The pack receiving port: give the checkpoint path one pack of bytes, without HTTP details.
@@ -107,10 +107,22 @@ export interface PackBucket {
   head(key: string): Promise<{ readonly key: string } | null>;
 }
 
-/** What one upload did to the store. */
-export type PackStoreOutcome =
-  | { readonly status: "stored"; readonly packKey: string }
-  | { readonly status: "present"; readonly packKey: string };
+/**
+ * What one upload did to the store: the checkpoint contract's upload answer, and whether this
+ * call wrote the pack.
+ *
+ * @remarks
+ * The contract's answer ({@link CheckpointPackUploadResult}) is what the machine was promised:
+ * the Run and the bytes received. `stored` is what only this side knows: false means the key
+ * already held the pack, so a retry costs no write. Callers parse the answer with the contract's
+ * schema; `stored` is extra, so the wire answer and this value cannot drift.
+ */
+export interface PackStoreOutcome extends CheckpointPackUploadResult {
+  /** The key the pack is at, which is the commit's key from the prepare answer. */
+  readonly packKey: string;
+  /** Whether this call wrote the pack; false when the key already held it. */
+  readonly stored: boolean;
+}
 
 /** A pack was offered that the transport must not store. */
 export class PackRejectedError extends Error {
@@ -180,14 +192,14 @@ export class R2PackTransport implements CheckpointPackTransport {
   }
 
   async upload(runId: string, packKey: string, bytes: Uint8Array): Promise<PackStoreOutcome> {
-    void runId;
     if (bytes.byteLength === 0) {
       throw new PackRejectedError("invalid_request", "a checkpoint pack is never empty");
     }
     assertPackFits(bytes.byteLength, this.maxBytes);
-    if ((await this.#bucket.head(packKey)) !== null) return { status: "present", packKey };
+    const answer: CheckpointPackUploadResult = { runId, receivedBytes: bytes.byteLength };
+    if ((await this.#bucket.head(packKey)) !== null) return { ...answer, packKey, stored: false };
     const stored = await this.#bucket.put(packKey, bytes);
     if (stored === null) throw new Error("the object store refused " + packKey);
-    return { status: "stored", packKey };
+    return { ...answer, packKey, stored: true };
   }
 }
