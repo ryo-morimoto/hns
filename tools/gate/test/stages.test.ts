@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import type { PackageInfo } from "../select.ts";
-import { stageNamed, stagesFor } from "../stages.ts";
+import { stageNamed, stages, stagesFor } from "../stages.ts";
 
 // Catches: build or knip sneaking back into the commit hook.
 test("build and knip only run before a push", () => {
@@ -17,11 +17,18 @@ test("build and knip only run before a push", () => {
     "fmt",
     "codegen",
     "typecheck",
-    "test",
     "build",
+    "test",
     "deploy",
     "knip",
   ]);
+});
+
+// Catches: build moving back after test, which leaves a fresh worktree without dist/ and
+// makes the cf dev integration tests time out.
+test("build runs before the integration tests use dist", () => {
+  const names = stages.map((stage) => stage.name);
+  expect(names.indexOf("build")).toBeLessThan(names.indexOf("test"));
 });
 
 // Catches: a hook running a stage that no hook owns.

@@ -38,8 +38,9 @@ const dirs = (packages: PackageInfo[]): string[] => packages.map((pkg) => `packa
 /** Packages whose documents or model the GraphQL artifacts derive from. */
 const CODEGEN_PACKAGES = ["web", "core", "server"];
 
-// Order matters: cheap checks fail first. Build and knip only run before a push,
-// because a commit should be fast and declaration emit is not proof of correctness.
+// Order matters: cheap checks fail first, and build runs before test. The cf dev
+// integration tests bundle packages from dist/, so on a fresh worktree the build must
+// land before them; a commit still skips building because it runs the unit tests only.
 export const stages: readonly Stage[] = [
   {
     name: "lint",
@@ -118,6 +119,12 @@ export const stages: readonly Stage[] = [
     },
   },
   {
+    name: "build",
+    hooks: ["pre-push"],
+    run: ({ root, packages }) =>
+      packages.map((pkg) => ({ cwd: root, argv: ["npm", "run", "build", "-w", pkg.name] })),
+  },
+  {
     name: "test",
     hooks: ["pre-commit", "pre-push"],
     run: ({ root, packages, tier }) => [
@@ -130,12 +137,6 @@ export const stages: readonly Stage[] = [
             : [binary(root, "vitest"), "run", ...packages.flatMap((pkg) => ["--project", pkg.dir])],
       },
     ],
-  },
-  {
-    name: "build",
-    hooks: ["pre-push"],
-    run: ({ root, packages }) =>
-      packages.map((pkg) => ({ cwd: root, argv: ["npm", "run", "build", "-w", pkg.name] })),
   },
   {
     name: "deploy",
