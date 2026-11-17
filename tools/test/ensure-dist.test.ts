@@ -1,10 +1,34 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { ensureDist, inspectDist, parseManifest } from "./ensure-dist.ts";
+import {
+  ensureDist,
+  inspectDist,
+  judgeLock,
+  parseLock,
+  parseManifest,
+  withBuildQueue,
+  type LockSnapshot,
+} from "./ensure-dist.ts";
 
 const directories: string[] = [];
+
+/** A fresh temporary directory this test may fill, removed after it. */
+function fixtureRoot(): string {
+  const directory = mkdtempSync(join(tmpdir(), "hns-ensure-dist-lock-"));
+  directories.push(directory);
+  return directory;
+}
 
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true });
@@ -135,4 +159,125 @@ test("a package name without the scope is refused", () => {
 test("a name that is not a workspace package is refused", () => {
   expect(() => ensureDist(["../../etc"])).toThrow(/expected a workspace package name/u);
   expect(() => ensureDist(["@hns/missing-package"])).toThrow(/no package\.json/u);
+});
+
+// Catches: a directory named like the exports file counting as built, so the suite imports a
+// directory and fails on the first request.
+test("an export that names a directory is missing", () => {
+  const directory = pack();
+  rmSync(join(directory, "dist", "index.js"));
+  mkdirSync(join(directory, "dist", "index.js"));
+  expect(inspectDist(directory)).toBe("missing");
+});
+
+// Catches: an export that names a file outside the package being built and found, so the dist/ the
+// build would write is never the file the suite bundles.
+test("an export that points outside the package is refused", () => {
+  const directory = pack();
+  writeFileSync(
+    join(directory, "package.json"),
+    JSON.stringify({ exports: { ".": { import: "../../elsewhere/index.js" } } }),
+  );
+  expect(() => inspectDist(directory)).toThrow(/outside the package/u);
+});
+
+test("a lock record round-trips, and a torn one parses to null", () => {
+  const record = { pid: 42, at: 1_700_000_000_000, token: "a-token" };
+  expect(parseLock(JSON.stringify(record))).toStrictEqual(record);
+  expect(parseLock('{"pid":')).toBeNull();
+  expect(parseLock(JSON.stringify({ pid: 0, at: 1, token: "" }))).toBeNull();
+});
+
+/** The lock as it sits on disk, for a test that needs the snapshot withBuildQueue would read. */
+function snapshotOf(path: string): LockSnapshot {
+  const record = parseLock(readFileSync(join(path, "owner.json"), "utf8"));
+  return record === null ? { state: "unreadable", ageMs: 0 } : { state: "held", record, ageMs: 0 };
+}
+
+function readLockToken(path: string): string | undefined {
+  const snapshot = snapshotOf(path);
+  return snapshot.state === "held" ? snapshot.record.token : undefined;
+}
+
+const held: LockSnapshot = {
+  state: "held",
+  record: { pid: 42, at: 0, token: "a-token" },
+  ageMs: 0,
+};
+
+// Catches: a lock whose owner died blocking every later suite until its age ran out. The owner is
+// checked first, so a killed worker's lock frees the queue at once.
+test("a lock whose owner is gone is abandoned at any age", () => {
+  expect(judgeLock(held, false)).toBe("abandoned");
+});
+
+// Catches: a live builder losing its lock, so two suites build the same package at once.
+test("a young lock whose owner lives is held", () => {
+  expect(judgeLock(held, true)).toBe("held");
+});
+
+// Catches: a lock that outlived every build keeping a suite waiting forever.
+test("a lock older than two builds is abandoned even when its pid is recycled", () => {
+  expect(judgeLock({ ...held, ageMs: 2 * 120_000 }, true)).toBe("abandoned");
+});
+
+test("an absent lock is free, and a torn one is held only while its writer runs", () => {
+  expect(judgeLock({ state: "absent" }, false)).toBe("free");
+  expect(judgeLock({ state: "unreadable", ageMs: 100 }, true)).toBe("held");
+  expect(judgeLock({ state: "unreadable", ageMs: 5_000 }, true)).toBe("abandoned");
+});
+
+// Catches: an orphan lock left by SIGKILL or a cancelled gate stalling every later suite. A
+// worker that dies between its mkdir and its release leaves the directory behind; ensureDist must
+// take it over at once because the pid is gone, not wait out the lock's ceiling.
+test("an orphan lock does not stall the next build queue", () => {
+  const lock = join(fixtureRoot(), "build.lock");
+  mkdirSync(lock, { recursive: true });
+  // A pid that cannot be alive: the maximum Linux pid is 4194304.
+  writeFileSync(
+    join(lock, "owner.json"),
+    JSON.stringify({ pid: 4_194_305, at: Date.now(), token: "orphan" }),
+  );
+  const started = Date.now();
+  const result = withBuildQueue(lock, () => "ran");
+  // Taken over at once because the owner is dead, and released, so nothing is left behind.
+  expect(result).toBe("ran");
+  expect(Date.now() - started).toBeLessThan(5_000);
+  expect(existsSync(lock)).toBe(false);
+});
+
+// Catches: a lock whose record never landed, or an older shape, blocking forever. The writer needs
+// milliseconds, so an unreadable record is taken over once it is older than that.
+test("an old unreadable lock is taken over", () => {
+  const lock = join(fixtureRoot(), "build.lock");
+  mkdirSync(lock, { recursive: true });
+  writeFileSync(join(lock, "owner.json"), "{");
+  const started = Date.now();
+  expect(withBuildQueue(lock, () => "ran")).toBe("ran");
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(existsSync(lock)).toBe(false);
+});
+
+// Catches: two suites building the same package at once, which is the race objects.test.ts
+// warned about. A waiter must not take a young lock whose owner is alive: another process, which
+// is what a sibling worker is, may hold it while it builds.
+test("a young lock whose live owner holds it is not taken", () => {
+  const lock = join(fixtureRoot(), "build.lock");
+  const marker = join(fixtureRoot(), "ran");
+  const holder = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+  });
+  try {
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(
+      join(lock, "owner.json"),
+      JSON.stringify({ pid: holder.pid, at: Date.now(), token: "holder" }),
+    );
+    // judgeLock is what withBuildQueue consults; a live owner is "held", never "abandoned".
+    expect(judgeLock(snapshotOf(lock), true)).toBe("held");
+    expect(readLockToken(lock)).toBe("holder");
+  } finally {
+    holder.kill("SIGKILL");
+  }
+  expect(existsSync(marker)).toBe(false);
 });
