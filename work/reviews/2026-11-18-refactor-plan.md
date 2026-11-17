@@ -97,3 +97,14 @@
 - **journal**: 語彙は core の `MACHINE_REFUSALS` 1 つ（machine は再エクスポート、store は `satisfies` で
   一致を型で縛る）。二重実装は A 案で整理: DO（server/do/journal.ts）が唯一の実装で、store は行 schema・
   parser・key・語彙だけ。このレーンでは reason の union 化と境界の TSDoc に留めた。
+
+## L4（server / store のデータ層と安全）完了 — bfbb829
+
+- migration 0006 で D1 の `events` / `usage_log` を DROP（正本へは移行しない。リリース前のユーザー確定）。store の `events` / `usage` repo（292 行）と未使用の書き込み API、core の `Event` / `Metrics` / `NamedCount` / `StatusCount` を削除。**+973 / −1454、53 files**。
+- fail-closed: `HNS_ENV !== "dev"` かつ `DB` 無しで Session を開かない（503 / abort）。dev の除外は docs に。ログに binding の値は出さない。
+- sink: 成功 drain は `obs_events` に 1 行、**失敗 drain は 0 行**（測定を汚さない）。`session-cost.test.ts` の 10 行はこの commit で変えず green。drain は索引を先に読んで変更の無い行を書かない（10 → 11 になった原因を実測で特定して解消）。
+- 索引: `conversations_page (project_id, updated_at DESC, id DESC)` の通常索引。EXPLAIN が 1 ページ目・after ありで `USING INDEX`、`TEMP B-TREE` なし。未索引行も一覧から落ちない。
+- journal: `MACHINE_REFUSALS` を core、machine は再エクスポート、store は型で一致（依存なし）。denied / audit の reason を union に。二重実装は A（DO が唯一の実装）。
+- gate: worktree / main とも全 stage green（52s / 929 tests、integration 含む）。
+- reviewer の低: (1) drain が turn に 2 往復乗る（read と upsert を 1 batch に）(2) `workflows.ts` の TSDoc が削除済み `createRun` を語る (3) `indexed_at` を read して捨てている (4) upsert 失敗で markIndexed される (5) `turnEnded` の TSDoc が before / after 逆 (6) hook 失敗の stage 名 (7) `turnEnded` のテスト無し (8) `docs/limits.md` の PoC 節が `usage_log` のまま。
+- plan の表現（NB9）は指摘どおり直す: 「10 行と RESULTS.md はこの commit で変えていない・10 行が green」。
