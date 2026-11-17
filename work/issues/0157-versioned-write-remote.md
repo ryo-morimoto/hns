@@ -205,9 +205,9 @@ read / list / stat の形は変えない（後方互換）。**非対称の理�
 
 - verdict: 未実施（独立レビュー待ち。この issue は done にしない）
 - reviewer: —（実装を書いていない agent を lead が割り当てる）
-- HEAD: a71d89f（コード。README とこの記録は別 commit）
+- HEAD: db9e895
 - 受入: 7/7。証拠は「テスト設計」の各行に対応するテスト。
-- ゲート: `npm run check` exit 0（688 tests / 36.0s 前後、lint 0 warnings / fmt / codegen / typecheck / test（統合と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。
-- 計測: 保存 20 回の p50 19.1–20.0ms / p95 29.2–34.5ms（cf dev + 実 machine + 実 fs、127.0.0.1。目標は e2e p95 ≤ 1s、DO 側 ≤ 150ms）。tunnel 越しは未計測（0148 / 0167）。
+- ゲート: 最終 HEAD で `npm run check` exit 0（688 tests / 35.8s、lint 0 warnings / fmt / codegen / typecheck / test（統合と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。
+- 計測: 保存 20 回の p50 19.1–20.0ms / p95 29.2–34.5ms（cf dev + 実 machine + 実 fs、127.0.0.1。3 回の実行。目標は e2e p95 ≤ 1s、DO 側 ≤ 150ms）。tunnel 越しは未計測（0148 / 0167）。
 - 実経路で確認したこと: workerd の WebCrypto で Ed25519 署名が動き、machine が control-plane 公開鍵で検証する（D100 の向き）。`x-request-id` は署名対象外のまま machine の `fs.op` ログに届く。machine 停止で read 503 / write unknown。
 - 非 blocking（follow-up）: tunnel 越しの p95 と実機の machine 喪失（0167）/ machine registry と鍵の配布・rotation（0148）/ UI の unknown・conflict・externalChange 表示（0106）/ machine の read は projectRoot を分離しない（DO の検証 + ROOT containment。理由は Design）/ knip の configuration hint（`.agents/**` と workspace の rooted-helper entry）は本変更の前後どちらでも出る設定メモ。/ 保存経路の `operationId` は REST の利用者（0106）が作る前提で、面は空文字を拒否するだけ。
