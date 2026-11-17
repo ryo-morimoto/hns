@@ -181,11 +181,6 @@ function refusalForCheckpoint(failure: CheckpointError): MachineRefusal {
  * A pack larger than the upload limit is not refused here: the Run's checkpoint is made and
  * valid, and the Worker decides that the mirror is `skipped` with `too_large` (D106). The
  * upload route refuses to receive such a pack, so nothing partial is ever stored.
- *
- * // TODO(0243): the vendored `@hns/core` in this worktree predates the prepare answer's
- * // `packBytes` / `maxBlobBytes`. They are sent because the operation measures them and
- * // {@link CheckpointResult} requires them; drop this once the dependency is the one that
- * // has them, which also makes {@link parseCheckpointResult} accept the answer.
  */
 async function checkpointPath(
   operation: CheckpointRequest,
@@ -211,28 +206,16 @@ async function checkpointPath(
     throw error;
   }
   signal.throwIfAborted();
-  // TODO(0243): the vendored `@hns/core` in this worktree predates `packBytes` /
-  // `maxBlobBytes` in the prepare answer's schema (`CheckpointRecord` has them; the prepare
-  // result does not). The operation measures both and must report them, so they are set here
-  // through the contract's result type; when the dependency is the one that has the fields, this
-  // becomes the plain object literal the other fields already are, and `parseCheckpointResult`
-  // accepts the answer as it is.
-  const prepare = {
+  return {
     runId: checkpoint.runId,
     ref: checkpoint.ref,
     commit: checkpoint.commit,
     packKey: checkpoint.packKey,
     objectCount: checkpoint.objectCount,
-    created: checkpoint.created,
-  } satisfies Omit<CheckpointResult, "packBytes" | "maxBlobBytes">;
-  const measured = {
-    ...prepare,
     packBytes: checkpoint.packBytes,
     maxBlobBytes: checkpoint.maxBlobBytes,
+    created: checkpoint.created,
   };
-  // SAFETY: measured has every field of the prepare answer, the two added ones included, and
-  // their types are the contract's (non-negative integers from the pack's own measurements).
-  return measured as CheckpointResult;
 }
 
 /**

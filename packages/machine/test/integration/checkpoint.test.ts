@@ -4,10 +4,11 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   CHECKPOINT_PACK_CONTENT_TYPE,
-  MAX_CHECKPOINT_PACK_BYTES,
   CheckpointPackUploadResultSchema,
+  CheckpointPrepareResultSchema,
+  MAX_CHECKPOINT_PACK_BYTES,
 } from "@hns/core";
-import type { JsonValue } from "@hns/core";
+import type { CheckpointPrepareResult, JsonValue } from "@hns/core";
 import { checkpointPackPath, parseCheckpointResult, parseResponseBody } from "../../src/index.ts";
 import type { CheckpointPackUpload, RefusalCode } from "../../src/index.ts";
 import { generateControlPlaneKey } from "../support/control-plane.ts";
@@ -26,16 +27,6 @@ import type { AgentFixture, MachineAnswer, MachineCall } from "../support/machin
  * and the "Worker" are separate HTTP clients of the same agent.
  */
 
-/**
- * The fields the checkpoint operation must answer with, from 0243's prepare answer.
- *
- * @remarks
- * This worktree's `@hns/core` resolves to the main checkout's copy, which predates
- * `packBytes` / `maxBlobBytes` in that schema (0243 added them to `CheckpointRecord` first).
- * The operation sends them and the test asserts them here; once the dependency matches, the
- * assertion and the operation's TODO(0243) can both go, and `parseCheckpointResult` accepts the
- * answer itself.
- */
 /** A received JSON value, recursively, so the answer is parsed rather than asserted. */
 const JsonValueSchema: v.GenericSchema<unknown, JsonValue> = v.lazy(() =>
   v.union([
@@ -48,6 +39,7 @@ const JsonValueSchema: v.GenericSchema<unknown, JsonValue> = v.lazy(() =>
   ]),
 );
 
+/** The fields the checkpoint operation answers with, from 0243's prepare answer. */
 const METADATA_KEYS = [
   "runId",
   "ref",
@@ -59,17 +51,8 @@ const METADATA_KEYS = [
   "created",
 ] as const;
 
-/** The metadata of a checkpoint answer, checked against 0243's field list. */
-interface CheckpointMetadata {
-  readonly runId: string;
-  readonly ref: string;
-  readonly commit: string;
-  readonly packKey: string;
-  readonly objectCount: number;
-  readonly packBytes: number;
-  readonly maxBlobBytes: number;
-  readonly created: boolean;
-}
+/** The metadata of a checkpoint answer, as the checkpoint contract names it. */
+type CheckpointMetadata = CheckpointPrepareResult;
 
 /** The refusal code of an answer that must have been refused. */
 function codeOf(answer: MachineAnswer): RefusalCode {
@@ -77,31 +60,15 @@ function codeOf(answer: MachineAnswer): RefusalCode {
   return answer.body.code;
 }
 
-/** One field of the checkpoint answer, as this worktree's schema still names it. */
-const MetadataFieldSchema = v.intersect([
-  v.object({
-    runId: v.pipe(v.string(), v.minLength(1)),
-    ref: v.pipe(v.string(), v.minLength(1)),
-    commit: v.pipe(v.string(), v.minLength(1)),
-    packKey: v.pipe(v.string(), v.minLength(1)),
-    objectCount: v.pipe(v.number(), v.integer(), v.minValue(0)),
-    created: v.boolean(),
-  }),
-  // The two measured fields, which this worktree's `@hns/core` build does not name yet.
-  v.object({
-    packBytes: v.pipe(v.number(), v.integer(), v.minValue(0)),
-    maxBlobBytes: v.pipe(v.number(), v.integer(), v.minValue(0)),
-  }),
-]);
-
-/** The checkpoint answer's metadata, parsed from the wire; a field the contract does not name fails. */
+/** The checkpoint answer's metadata, parsed by the contract's own schema (0243). */
 function metadataOf(answer: MachineAnswer): CheckpointMetadata {
   if (!answer.body.ok) throw new Error(`expected a result, got ${answer.body.code}`);
   if (answer.body.op !== "checkpoint") throw new Error("expected a checkpoint answer");
-  // The field list is checked on what arrived; the parse then proves each field's type.
+  // The field list is checked on what arrived, so a field added to the answer is visible here
+  // rather than being dropped by the contract's schema; the parse then proves each field's type.
   const result = v.parse(v.record(v.string(), JsonValueSchema), answer.body.result);
   expect(Object.keys(result).sort()).toStrictEqual([...METADATA_KEYS].sort());
-  return v.parse(MetadataFieldSchema, result);
+  return v.parse(CheckpointPrepareResultSchema, result);
 }
 
 /** The checkpoint operation's body. */
