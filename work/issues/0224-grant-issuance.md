@@ -1,6 +1,6 @@
 # 0224: Session DO の capability grant を発行・署名する
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §5, §9, §10
@@ -17,16 +17,16 @@ per-call の DO 認可は 28ms かかる。権限を毎回聞かずに、かつ�
 
 ## Acceptance criteria
 
-- [ ] `issueGrant(input)` が `GrantRequest` と policy snapshot を valibot で parse し、`ToolPolicy.scope` を grant の scope にする
-- [ ] grant の `toolId` / `toolVersion` / `manifestHash` / `machineId` / `sessionId` を request と一致させ、不一致は `manifest_mismatch`
-- [ ] `expiresAt` は `issuedAt + ttl`（30..60 秒）。`maxCalls` は policy の値。`nonce` と `grantId` は UUID。`epoch` は snapshot の revision
-- [ ] Phase 1 は Ed25519 固定。Workers の WebCrypto で sign/verify を実測し、不可なら grant を発行せず fail closed。alg と鍵の不一致は `grant_algorithm_mismatch`
-- [ ] 署名は control-plane の鍵（0148 の Worker→machine 署名と同じ鍵）で行い、公開鍵は 0148 の `GET /api/machines/keys` で配る。grant 用に別鍵を作らない。鍵のローテーションは Phase 2
-- [ ] grant 応答に公開鍵を同梱しない（machine は設定の鍵で検証する）
-- [ ] ポリシーが拒否したら grant を発行せず、`PolicyDecision` を返す
-- [ ] Phase 1 は `exact` scope の要求を `unsupported` で拒否する（承認フローは Phase 2）
-- [ ] `GrantLedger` の interface（`record(grant)` / `revoke(grantId)`）を定義し、DO SQLite 実装は 0226 に渡す
-- [ ] `npm test -w @hns/server` と typecheck が通る
+- [x] `issueGrant(input)` が `GrantRequest` と policy snapshot を valibot で parse し、`ToolPolicy.scope` を grant の scope にする
+- [x] grant の `toolId` / `toolVersion` / `manifestHash` / `machineId` / `sessionId` を request と一致させ、不一致は `manifest_mismatch`
+- [x] `expiresAt` は `issuedAt + ttl`（30..60 秒）。`maxCalls` は policy の値。`nonce` と `grantId` は UUID。`epoch` は snapshot の revision
+- [x] Phase 1 は Ed25519 固定。Workers の WebCrypto で sign/verify を実測し、不可なら grant を発行せず fail closed。alg と鍵の不一致は `grant_algorithm_mismatch`
+- [x] 署名は control-plane の鍵（0148 の Worker→machine 署名と同じ鍵）で行い、公開鍵は 0148 の `GET /api/machines/keys` で配る。grant 用に別鍵を作らない。鍵のローテーションは Phase 2
+- [x] grant 応答に公開鍵を同梱しない（machine は設定の鍵で検証する）
+- [x] ポリシーが拒否したら grant を発行せず、`PolicyDecision` を返す
+- [x] Phase 1 は `exact` scope の要求を `unsupported` で拒否する（承認フローは Phase 2）
+- [x] `GrantLedger` の interface（`record(grant)` / `revoke(grantId)`）を定義し、DO SQLite 実装は 0226 に渡す
+- [x] `npm test -w @hns/server` と typecheck が通る
 
 ## テスト条件
 
@@ -76,3 +76,13 @@ per-call の DO 認可は 28ms かかる。権限を毎回聞かずに、かつ�
 ## Log
 
 - 2026-11-17: 作成（D091）。発行元を Workspace DO から Session DO に変更（D1 を DO から読まない）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0224。blocking 0 / 低 7。未検出の mutation 2 件は統合前にテストで塞いだ）
+- HEAD: b6a736b（main に ff 統合）。gate は exit 0（1353 tests / 1354、main で 65.3s。1 回目は test 段で落ち、再実行で green）。
+- 確認: 承認済み policy revision から `issueGrant` が `SignedGrant` を作り、**control-plane 鍵（Ed25519）で署名して自己検証してから返す**（不可なら発行しない）。`keyId` は公開鍵の fingerprint。**policyHash を再計算**し、`tool_disabled` / `exact` は発行しない / manifest 不一致 / TTL 30–60・maxCalls・maxBytes・期限の範囲 / alg 不一致を拒否。`maxBytes` は manifest の上限に clamp し、**未指定は manifest の上限**。
+- **失効**: `DENIAL_CODES` に `grant_revoked` を足し、**期限より先に判定**（期限切れと区別）。run 束縛の grant は abort / close で revoke し、**失敗は `grant.revoke_failed` を監査と観測に残す**。
+- **境界**: Session DO の `POST /rpc/grants` は公開 route でなく、Worker が **session token と subject** を提示して一致を検査（不一致は `forbidden_internal`/401）。**Worker は `@hns/agent` を import しない**（manifest の解決は object 側）。
+- 実経路: 実 D1 の revision → 発行 → 実 WebCrypto で `authorizeCall` allow → 承認で revision 2 に進むと `path_outside_root` → run の revoke で `grant_revoked`。mutation 5 種 + 追加 4 種の検出。
+- 非 blocking / follow-up: **project / machine の所有権は認可に使っていない**（認証済みなら誰でも任意の project を名指せる。`docs/contracts/auth.md` に明記。follow-up: `isMine` を resolver の認可に使う）/ GraphQL の scope が string のまま（契約の union を写す）/ 実運用の起動点は GraphQL の `requestGrant` のみで、**agent の自動発行は 0226**。
