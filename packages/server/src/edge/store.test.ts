@@ -30,3 +30,20 @@ test("a project is read from the database and a missing id is undefined", async 
 test("a missing database is an unavailable error", async () => {
   await expect(projectFor(envWith(), id("p1"))).rejects.toThrow(StoreUnavailableError);
 });
+
+// Catches: a corrupt row rounded into an outage, which a caller would retry forever.
+test("a corrupt project row is a validation error, not an outage", async () => {
+  const database = openFakeD1();
+  const seeded = await openStore({ d1: database.db });
+  await seeded.close();
+  database.exec(
+    "INSERT INTO projects (id, name, workspace_root, created_at) VALUES ('bad', 'bad', '../outside', '2026-01-01T00:00:00.000Z')",
+  );
+  try {
+    const failure = projectFor({ DB: database.db }, id("bad"));
+    await expect(failure).rejects.toThrow(v.ValiError);
+    await expect(failure).rejects.not.toThrow(StoreUnavailableError);
+  } finally {
+    database.close();
+  }
+});

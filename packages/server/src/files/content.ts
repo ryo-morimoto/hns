@@ -4,7 +4,7 @@ import { readBody } from "../edge/body.ts";
 import type { DurableObjectStub, WorkerEnv } from "../edge/env.ts";
 import type { FilesRequest } from "../edge/handler.ts";
 import type { EdgeLimits } from "../edge/limits.ts";
-import { projectFor } from "../edge/store.ts";
+import { projectFor, StoreUnavailableError } from "../edge/store.ts";
 import { ProjectParamSchema } from "../project-id.ts";
 
 /**
@@ -89,8 +89,9 @@ type ResolvedRoot =
  * @internal
  * @remarks
  * The workspace id is the project id (D080 F2). A malformed id is a 400, an absent project a
- * 404, and a store that cannot be read a 503: an outage must not read as "no such project".
- * Nothing is forwarded to the Workspace object before this resolves.
+ * 404, and a store that cannot be read a 503: an outage must not read as "no such project". A
+ * corrupt row is not caught here, so it reaches the edge as a defect (500). Nothing is forwarded
+ * to the Workspace object before this resolves.
  */
 async function resolveRoot(
   lookup: ProjectRootLookup,
@@ -109,11 +110,8 @@ async function resolveRoot(
   try {
     root = await lookup(request.env, parsed.output);
   } catch (error) {
-    console.error(
-      "files: project read failed",
-      request.requestId,
-      error instanceof Error ? error.name : "unknown",
-    );
+    if (!(error instanceof StoreUnavailableError)) throw error;
+    console.error("files: project read failed", request.requestId, error.name);
     return {
       ok: false,
       code: "unavailable",

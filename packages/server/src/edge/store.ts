@@ -1,5 +1,6 @@
 import { openStore, type D1Binding, type Store } from "@hns/store";
 import type { Project, ProjectId } from "@hns/core";
+import * as v from "valibot";
 import type { WorkerEnv } from "./env.ts";
 
 /** The control database is not configured or could not be opened. */
@@ -19,6 +20,7 @@ const STORES = new WeakMap<D1Binding, Promise<Store>>();
  * @returns The shared store; the caller does not close it.
  * @throws StoreUnavailableError when the binding is missing or the open fails. A rejected open
  * is dropped from the cache so the next request retries.
+ * @throws ValiError when the stored default project is corrupt; that is a defect, not an outage.
  *
  * @remarks
  * `openStore` applies migrations, so opening once per isolate is what keeps a request from
@@ -42,6 +44,9 @@ async function openOnce(db: D1Binding): Promise<Store> {
     return await openStore({ d1: db });
   } catch (error) {
     STORES.delete(db);
+    // A corrupt row means the data disagrees with the model; rounding it into "the database is
+    // unavailable" would turn a defect into a retryable 503. It stays a ValiError (a 500).
+    if (error instanceof v.ValiError) throw error;
     throw new StoreUnavailableError("The database could not be opened.", { cause: error });
   }
 }
@@ -53,6 +58,7 @@ async function openOnce(db: D1Binding): Promise<Store> {
  * @param projectId - The project's raw id, already parsed.
  * @returns The project, or undefined when no row has that id.
  * @throws StoreUnavailableError when the database is missing or cannot be opened.
+ * @throws ValiError when a stored project row is corrupt.
  *
  * @remarks
  * The one project lookup the faces share, so `/ws`, the file face, and the GraphQL resolvers
@@ -64,5 +70,12 @@ export async function projectFor(
   projectId: ProjectId,
 ): Promise<Project | undefined> {
   const store = await storeFor(env);
-  return await store.projects.get(projectId);
+  try {
+    return await store.projects.get(projectId);
+  } catch (error) {
+    // A read that failed is an outage (the caller may retry); a row that failed to parse is a
+    // defect and stays a ValiError.
+    if (error instanceof v.ValiError) throw error;
+    throw new StoreUnavailableError("The project could not be read.", { cause: error });
+  }
 }

@@ -6,7 +6,7 @@ import { httpEntry } from "../obs/log.ts";
 import { ProjectParamSchema } from "../project-id.ts";
 import { LEGACY_SESSION_NAME, sessionNameFor } from "../session-name.ts";
 import { withRequestIdHeader } from "./correlation.ts";
-import { projectFor } from "./store.ts";
+import { projectFor, StoreUnavailableError } from "./store.ts";
 import {
   createEdge,
   type EdgeRequest,
@@ -61,9 +61,9 @@ type SessionNameResult =
  * @remarks
  * A missing `project` keeps the legacy default object, so a client that predates project
  * switching still reaches its conversations. An explicit project is verified in D1 **before**
- * `idFromName`, so an unknown or empty project never creates a Session object (D080). The
- * lookup failing is `unavailable`, not `not_found`: an unreadable database must not read as
- * "the project does not exist".
+ * `idFromName`, so an unknown or empty project never creates a Session object (D080). An
+ * unreadable database is `unavailable`, not `not_found`; a corrupt row is not caught here, so
+ * it reaches the edge as a defect (500) instead of a retryable outage.
  */
 export async function resolveSessionName(
   env: WorkerEnv,
@@ -78,7 +78,8 @@ export async function resolveSessionName(
   let project: Project | undefined;
   try {
     project = await lookup(env, parsed.output);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof StoreUnavailableError)) throw error;
     return { ok: false, code: "unavailable", message: "The project could not be read." };
   }
   if (project === undefined) {

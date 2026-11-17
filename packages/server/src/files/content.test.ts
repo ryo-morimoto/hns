@@ -1,8 +1,11 @@
 import { expect, test } from "vitest";
+import { openStore } from "@hns/store";
 import * as v from "valibot";
+import { openFakeD1 } from "../../test/support/d1.ts";
 import { fakeMachine, versionOfText, type FakeMachine } from "../../test/support/machine.ts";
 import { openSqliteState, type TestSqliteState } from "../../test/support/sqlite.ts";
 import { Workspace } from "../do/workspace.ts";
+import { StoreUnavailableError } from "../edge/store.ts";
 import type { DurableObjectId, DurableObjectNamespace, DurableObjectStub } from "../edge/env.ts";
 import type { FilesRequest } from "../edge/handler.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
@@ -440,7 +443,7 @@ test("a failed project lookup is a 503", async () => {
     get: () => ({ fetch: (request: Request) => workspace.fetch(request) }),
   };
   const handler = createFilesFace({
-    projectRoot: () => Promise.reject(new Error("db down")),
+    projectRoot: () => Promise.reject(new StoreUnavailableError("db down")),
   });
   try {
     const response = await handler(
@@ -460,6 +463,43 @@ test("a failed project lookup is a 503", async () => {
     expect(await response.json()).toMatchObject({ code: "unavailable" });
   } finally {
     opened.close();
+  }
+});
+
+// Catches: a corrupt project row rounded into a retryable 503 instead of a defect (the edge
+// answers 500 for a thrown error; the point here is that the face does not catch it).
+test("a corrupt project row is not reported as an outage", async () => {
+  const database = openFakeD1();
+  const seeded = await openStore({ d1: database.db });
+  await seeded.close();
+  database.exec(
+    "INSERT INTO projects (id, name, workspace_root, created_at) VALUES ('bad', 'bad', '../outside', '2026-01-01T00:00:00.000Z')",
+  );
+  const handler = createFilesFace();
+  const namespace: DurableObjectNamespace = {
+    idFromName: (name: string) => ({ name }),
+    get: (): DurableObjectStub => {
+      throw new Error("the Workspace object must not be addressed for a corrupt project");
+    },
+  };
+  try {
+    await expect(
+      handler(
+        {
+          request: new Request("https://hns.test/api/workspaces/bad/files?path=a.txt", {
+            headers: { "x-request-id": "request-1" },
+          }),
+          env: { DB: database.db, WORKSPACE: namespace },
+          session: { subject: "owner", expiresAt: Date.now() + 60_000 },
+          requestId: "request-1",
+          signal: new AbortController().signal,
+          workspaceId: "bad",
+        },
+        DEFAULT_LIMITS,
+      ),
+    ).rejects.toThrow();
+  } finally {
+    database.close();
   }
 });
 

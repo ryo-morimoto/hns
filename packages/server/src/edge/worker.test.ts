@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import worker, { resolveSessionName, type ProjectLookup } from "./worker.ts";
+import { StoreUnavailableError } from "./store.ts";
 import { project } from "../../test/support/graphql.ts";
 import { assetsWith, envWith, sessionCookie, sessionWith } from "../../test/support/edge.ts";
 
@@ -130,9 +131,16 @@ test("an unknown project is refused before any object is addressed", async () =>
 // Catches: an unreadable database reported as "no such project", hiding an outage.
 test("a failed project lookup is unavailable, not not_found", async () => {
   const resolved = await resolveSessionName(envWith(), "p1", () =>
-    Promise.reject(new Error("db down")),
+    Promise.reject(new StoreUnavailableError("db down")),
   );
   expect(resolved).toMatchObject({ ok: false, code: "unavailable" });
+});
+
+// Catches: a corrupt project row rounded into a retryable outage instead of a defect.
+test("a project lookup defect is not turned into an outage", async () => {
+  await expect(
+    resolveSessionName(envWith(), "p1", () => Promise.reject(new Error("corrupt row"))),
+  ).rejects.toThrow(/corrupt row/u);
 });
 
 // Catches: a path or an empty string used as a Durable Object name.
