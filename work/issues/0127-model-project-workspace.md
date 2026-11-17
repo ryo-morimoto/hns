@@ -1,6 +1,6 @@
 # 0127: Project と Workspace root の関連
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D080
@@ -248,7 +248,7 @@ C14 は 0157 / 0194 の執行側の受入で、0127 は model / API / DO / fixtu
 - 2026-11-17: ゲートで cf dev の inspector port（9229 固定）競合を踏んだため、`session-do.test.ts` と `workspace-do.test.ts` の起動に cost / gateway と同じ 1 回 retry を入れた（server/test の scaffold。製品コードは変えない）。machine の `remote-write.test.ts` は touches 外なのでそのまま。
 ## Result
 
-**レビュー BLOCKED（blocking 1）→ 修正済み、再レビュー待ち（done にしない）。** reviewer はこの変更を書いていない別エージェントが [docs/review.md](../../docs/review.md) で行い、verdict / HEAD / blocking をここに書く。
+**verdict: PASS**（review round 1: BLOCKED 1（未知 project で Session DO を作る）→ 修正 → 再レビュー PASS）。reviewer は reviewer-0127（この変更を書いていない別エージェント）。HEAD: 7a98b4d（main に ff 統合）。gate: exit 0（806 tests / 124 files、main で 46.6s）。
 
 - review round 1: BLOCKED。blocking 1 = `Query.conversations` が未知の projectId で Session DO を作る。修正内容は Log（2026-11-17 の BLOCKED / 低・中）を参照。blocking の再現テストは C15 / T12（`packages/server/src/graphql/handler.test.ts` の "conversations for an unknown project never address a Session object"）。修正前はこのテストで fake SESSION の `ids` に id が載り、`requests` が 1 件になる（現コードでは両方空）。修正後は `projectFor` の存在確認が `invalid_argument` を返し、DO に触れない。
 
