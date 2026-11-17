@@ -75,6 +75,18 @@ test("the production worker forwards the observability API with the request id",
   expect(response.headers.get("x-request-id")).toBe("caller-3");
 });
 
+// Catches: the observability API 404ing or crashing when the SESSION binding is absent.
+test("the observability API fails closed without a session binding", async () => {
+  const cookie = await sessionCookie("owner");
+  const response = await worker.fetch(
+    new Request(BASE + "/api/metrics", { headers: { cookie } }),
+    envWith(),
+  );
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ code: "unavailable" });
+  expect(response.headers.get("x-request-id")).not.toBeNull();
+});
+
 test("the production worker fails closed when the session binding is missing", async () => {
   const cookie = await sessionCookie("owner");
   const response = await worker.fetch(
