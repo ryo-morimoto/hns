@@ -12,6 +12,7 @@ import type { JournalOutcomeEntry } from "@hns/store";
 import * as v from "valibot";
 import { readBody } from "../edge/body.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
+import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
 import { Journal, JournalWatermarkError, type JournalBucket } from "./journal.ts";
 import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
 
@@ -21,15 +22,8 @@ const DEFAULT_LEASE_TTL_MS = 60_000;
 const LEASE_ACTIONS = ["acquire", "renew", "release"] as const;
 type LeaseAction = (typeof LEASE_ACTIONS)[number];
 
-/** The closed failure codes that are not lease refusals. */
-type WorkspaceRpcCode =
-  | "invalid_request"
-  | "not_found"
-  | "conflict"
-  | "denied"
-  | "payload_too_large"
-  | "unavailable"
-  | "internal";
+/** The closed failure codes of the Workspace RPC; lease refusals are rows of the same table. */
+type WorkspaceRpcCode = FailureCodeOf<"workspace-rpc">;
 
 /** The slice of `DurableObjectState` the Workspace uses. */
 export interface WorkspaceState {
@@ -253,14 +247,20 @@ function json<T>(body: T, status = 200): Response {
   });
 }
 
-/** A typed protocol failure. */
-function failure(code: WorkspaceRpcCode, message: string, status: number): Response {
-  return json({ ok: false, code, message }, status);
+/**
+ * A typed protocol failure.
+ *
+ * @remarks
+ * The status comes from the server's one table (`failures/status.ts`); the caller names the code.
+ */
+function failure(code: WorkspaceRpcCode | LeaseRefusal, message: string): Response {
+  const body = { ok: false, code, message };
+  return json(body, failureStatus("workspace-rpc", code));
 }
 
 /** A refusal from the closed lease vocabulary. */
 function refusal(code: LeaseRefusal): Response {
-  return json({ ok: false, code, message: "The write is refused: " + code }, 409);
+  return failure(code, "The write is refused: " + code);
 }
 
 /**
@@ -276,20 +276,17 @@ async function bodyOf(
 > {
   const body = await readBody(request, DEFAULT_LIMITS.maxBodyBytes);
   if (!body.ok) {
-    const status = body.code === "payload_too_large" ? 413 : 415;
-    return {
-      ok: false,
-      response: failure("invalid_request", "The request body was refused.", status),
-    };
+    // The body's own refusal: too large is a 413, a wrong media type a 415.
+    return { ok: false, response: failure(body.code, "The request body was refused.") };
   }
   if (body.text.length === 0) {
-    return { ok: false, response: failure("invalid_request", "A JSON body is required.", 400) };
+    return { ok: false, response: failure("invalid_request", "A JSON body is required.") };
   }
   try {
     return { ok: true, value: JSON.parse(body.text) };
   } catch (error) {
     if (error instanceof SyntaxError) {
-      return { ok: false, response: failure("invalid_request", "The body is not JSON.", 400) };
+      return { ok: false, response: failure("invalid_request", "The body is not JSON.") };
     }
     throw error;
   }
@@ -386,19 +383,19 @@ export class Workspace {
     try {
       await this.#ready;
     } catch {
-      return failure("unavailable", "The Workspace could not be opened.", 503);
+      return failure("unavailable", "The Workspace could not be opened.");
     }
     try {
       return await this.#route(request);
     } catch (error) {
       if (error instanceof WorkspaceIdentityError) {
-        return failure("invalid_request", "The request names a different workspace.", 400);
+        return failure("invalid_request", "The request names a different workspace.");
       }
       if (error instanceof WorkspaceProjectError) {
-        return failure("invalid_request", "The request names a different project root.", 400);
+        return failure("invalid_request", "The request names a different project root.");
       }
       console.error("workspace rpc failed", error instanceof Error ? error.name : "unknown");
-      return failure("internal", "Unexpected Workspace failure.", 500);
+      return failure("internal", "Unexpected Workspace failure.");
     }
   }
 
@@ -406,43 +403,43 @@ export class Workspace {
     const url = new URL(request.url);
     const segments = url.pathname.split("/").filter((segment) => segment !== "");
     if (segments[0] !== "rpc") {
-      return failure("not_found", "No Workspace RPC route matches this path.", 404);
+      return failure("not_found", "No Workspace RPC route matches this path.");
     }
     const face = segments[1];
     if (face === "apply") {
       if (segments.length !== 2) {
-        return failure("not_found", "No Workspace RPC route matches this path.", 404);
+        return failure("not_found", "No Workspace RPC route matches this path.");
       }
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.", 405);
+        return failure("invalid_request", "Only POST is allowed here.");
       }
       return await this.#apply(request);
     }
     if (face === "read") {
       if (segments.length !== 2) {
-        return failure("not_found", "No Workspace RPC route matches this path.", 404);
+        return failure("not_found", "No Workspace RPC route matches this path.");
       }
       if (request.method !== "GET") {
-        return failure("invalid_request", "Only GET is allowed here.", 405);
+        return failure("invalid_request", "Only GET is allowed here.");
       }
       return await this.#read(url, request);
     }
     if (face === "journal") {
       if (segments.length !== 3 || segments[2] !== "watermark") {
-        return failure("not_found", "No Workspace RPC route matches this path.", 404);
+        return failure("not_found", "No Workspace RPC route matches this path.");
       }
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.", 405);
+        return failure("invalid_request", "Only POST is allowed here.");
       }
       return await this.#watermark(request);
     }
     if (face === "lease") {
       const action = segments[2];
       if (segments.length !== 3 || !isLeaseAction(action)) {
-        return failure("not_found", "No Workspace RPC route matches this path.", 404);
+        return failure("not_found", "No Workspace RPC route matches this path.");
       }
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.", 405);
+        return failure("invalid_request", "Only POST is allowed here.");
       }
       switch (action) {
         case "acquire":
@@ -453,14 +450,14 @@ export class Workspace {
           return await this.#release(request);
       }
     }
-    return failure("not_found", "No Workspace RPC route matches this path.", 404);
+    return failure("not_found", "No Workspace RPC route matches this path.");
   }
 
   async #acquire(request: Request): Promise<Response> {
     const body = await bodyOf(request);
     if (!body.ok) return body.response;
     const parsed = v.safeParse(AcquireSchema, body.value);
-    if (!parsed.success) return failure("invalid_request", "Invalid lease input.", 400);
+    if (!parsed.success) return failure("invalid_request", "Invalid lease input.");
     const { workspaceId, machineId } = parsed.output;
     const outcome: AcquireOutcome = await this.#state.storage.transaction(async () => {
       this.#claimWorkspace(workspaceId);
@@ -486,7 +483,7 @@ export class Workspace {
     const body = await bodyOf(request);
     if (!body.ok) return body.response;
     const parsed = v.safeParse(RenewSchema, body.value);
-    if (!parsed.success) return failure("invalid_request", "Invalid lease input.", 400);
+    if (!parsed.success) return failure("invalid_request", "Invalid lease input.");
     const outcome: RenewOutcome = await this.#state.storage.transaction(async () => {
       this.#assertWorkspace(parsed.output.workspaceId);
       const nowMs = this.#clock();
@@ -505,7 +502,7 @@ export class Workspace {
     const body = await bodyOf(request);
     if (!body.ok) return body.response;
     const parsed = v.safeParse(RenewSchema, body.value);
-    if (!parsed.success) return failure("invalid_request", "Invalid lease input.", 400);
+    if (!parsed.success) return failure("invalid_request", "Invalid lease input.");
     const outcome: MutationOutcome = await this.#state.storage.transaction(async () => {
       this.#assertWorkspace(parsed.output.workspaceId);
       const nowMs = this.#clock();
@@ -544,16 +541,16 @@ export class Workspace {
     const body = await bodyOf(request);
     if (!body.ok) return body.response;
     const parsed = v.safeParse(ApplySchema, body.value);
-    if (!parsed.success) return failure("invalid_request", "Invalid apply input.", 400);
+    if (!parsed.success) return failure("invalid_request", "Invalid apply input.");
     const input = parsed.output;
     const path = parsePath(input.path);
     const projectRoot = parseProjectRoot(input.projectRoot);
     if (path === undefined || projectRoot === undefined) {
-      return failure("invalid_request", "Invalid path.", 400);
+      return failure("invalid_request", "Invalid path.");
     }
     const content = bytesOfBase64(input.content);
     if (content === undefined) {
-      return failure("invalid_request", "The content is not base64.", 400);
+      return failure("invalid_request", "The content is not base64.");
     }
     const gate: ApplyGate = await this.#state.storage.transaction(async () => {
       this.#claimWorkspace(input.workspaceId);
@@ -576,7 +573,7 @@ export class Workspace {
     // a missing binding is not an intent anyone has to reconcile.
     const files = this.#files;
     if (files === undefined) {
-      return failure("unavailable", "The machine is not configured.", 503);
+      return failure("unavailable", "The machine is not configured.");
     }
 
     const appended = await this.#journal.appendIntent({
@@ -589,11 +586,11 @@ export class Workspace {
       return await this.#settledResponse(appended.entry, projectRoot);
     if (appended.status === "denied") {
       // The id names one attempt: another body under it is a refusal, not a version conflict.
-      return failure("denied", "The operation id is already used for another write.", 400);
+      return failure("denied", "The operation id is already used for another write.");
     }
     const contentHash = appended.entry.body?.hash;
     if (contentHash === undefined) {
-      return failure("internal", "The intent records no content.", 500);
+      return failure("internal", "The intent records no content.");
     }
 
     const answer = await files.write(
@@ -632,7 +629,7 @@ export class Workspace {
 
     const result = answer.result;
     if (result.operationId !== input.operationId) {
-      return failure("internal", "The machine answered a different operation.", 500);
+      return failure("internal", "The machine answered a different operation.");
     }
     const settled = await this.#journal.settle(
       {
@@ -679,7 +676,7 @@ export class Workspace {
     if (!body.ok) return body.response;
     const parsed = v.safeParse(WatermarkSchema, body.value);
     if (!parsed.success) {
-      return failure("invalid_request", "Invalid journal watermark input.", 400);
+      return failure("invalid_request", "Invalid journal watermark input.");
     }
     this.#assertWorkspace(parsed.output.workspaceId);
     try {
@@ -687,7 +684,7 @@ export class Workspace {
       return json({ ok: true, watermark: written.watermark, truncated: written.truncated });
     } catch (error) {
       if (error instanceof JournalWatermarkError) {
-        return failure("conflict", error.message, 409);
+        return failure("conflict", error.message);
       }
       throw error;
     }
@@ -714,12 +711,12 @@ export class Workspace {
   async #readOnce(url: URL, request: Request): Promise<Response> {
     const files = this.#files;
     if (files === undefined) {
-      return failure("unavailable", "The machine is not configured.", 503);
+      return failure("unavailable", "The machine is not configured.");
     }
     const path = parsePath(url.searchParams.get("path") ?? "");
     const projectRoot = parseProjectRoot(url.searchParams.get("projectRoot") ?? "");
     if (path === undefined || projectRoot === undefined) {
-      return failure("invalid_request", "Invalid path.", 400);
+      return failure("invalid_request", "Invalid path.");
     }
     // The binding is checked before the machine, so a sibling project never reaches it; it is
     // written only after a successful read.
@@ -728,7 +725,7 @@ export class Workspace {
       return this.#meta("machine_id");
     });
     if (machineId === undefined) {
-      return failure("unavailable", "The workspace has no machine yet.", 503);
+      return failure("unavailable", "The workspace has no machine yet.");
     }
     const answer = await files.read(
       { path: projectRoot === "" ? path : projectRoot + "/" + path },
@@ -743,10 +740,10 @@ export class Workspace {
       // failure, so the caller can tell "create it" from "the machine is unreachable". A file
       // beyond the read bound is its own answer, not a missing one.
       if (answer.failure === "too_large") {
-        return failure("payload_too_large", "The file is larger than the read limit.", 413);
+        return failure("payload_too_large", "The file is larger than the read limit.");
       }
-      if (answer.failure === "denied") return failure("not_found", "The file cannot be read.", 404);
-      return failure("unavailable", "The machine did not answer.", 503);
+      if (answer.failure === "denied") return failure("not_found", "The file cannot be read.");
+      return failure("unavailable", "The machine did not answer.");
     }
     const version = answer.result.version;
     const externalChange: boolean = await this.#state.storage.transaction(async () => {
@@ -959,7 +956,13 @@ function asLease(lease: StoredLease): WorkspaceLease {
 function isLeaseAction(value: string | undefined): value is LeaseAction {
   return value !== undefined && LEASE_ACTIONS.some((action) => action === value);
 }
-/** The HTTP status a recorded outcome answers with, when it is not the 200 success. */
+/**
+ * The HTTP status a recorded outcome answers with.
+ *
+ * @remarks
+ * An applied, conflicted, or undecided outcome is the operation's own record, so it answers 200
+ * with a `MutationResult`; only a recorded denial is a failure, and its status is the table's.
+ */
 function outcomeStatus(entry: JournalOutcomeEntry): number {
   switch (entry.status) {
     case "applied":
@@ -967,7 +970,7 @@ function outcomeStatus(entry: JournalOutcomeEntry): number {
     case "unknown":
       return 200;
     case "denied":
-      return 400;
+      return failureStatus("workspace-rpc", "denied");
   }
 }
 
@@ -1014,9 +1017,9 @@ function outcomeResponse(entry: JournalOutcomeEntry): Response {
       // A refused-write outcome carries the machine's refusal code; a size refusal has its own
       // status so a caller can distinguish "too big" from "not allowed".
       if (entry.reason === "too_large") {
-        return failure("payload_too_large", "The write is larger than the machine accepts.", 413);
+        return failure("payload_too_large", "The write is larger than the machine accepts.");
       }
-      return failure("denied", entry.reason ?? "denied", outcomeStatus(entry));
+      return failure("denied", entry.reason ?? "denied");
     }
   }
 }

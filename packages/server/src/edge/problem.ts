@@ -1,30 +1,7 @@
-/** The closed set of HTTP failures the edge can return on purpose. */
-export type EdgeErrorCode =
-  | "unauthorized"
-  | "invalid_request"
-  | "not_found"
-  | "upgrade_required"
-  | "method_not_allowed"
-  | "payload_too_large"
-  | "unsupported_media_type"
-  | "not_implemented"
-  | "unavailable"
-  | "timeout"
-  | "internal";
+import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
 
-const STATUS: Record<EdgeErrorCode, number> = {
-  unauthorized: 401,
-  invalid_request: 400,
-  not_found: 404,
-  upgrade_required: 426,
-  method_not_allowed: 405,
-  payload_too_large: 413,
-  unsupported_media_type: 415,
-  not_implemented: 501,
-  unavailable: 503,
-  timeout: 504,
-  internal: 500,
-};
+/** The closed set of HTTP failures the edge can return on purpose. */
+export type EdgeErrorCode = FailureCodeOf<"edge">;
 
 const TITLE: Record<EdgeErrorCode, string> = {
   unauthorized: "Unauthorized",
@@ -59,20 +36,22 @@ interface ProblemBody {
  * @returns A `application/problem+json` response with `cache-control: no-store`.
  *
  * @remarks
- * The response does not include the correlation id; the edge adds `x-request-id` to every
- * response after the handler returns.
+ * The status comes from the server's one table (`failures/status.ts`), not from the caller. The
+ * response does not include the correlation id; the edge adds `x-request-id` to every response
+ * after the handler returns.
  */
 export function problem(code: EdgeErrorCode, detail: string, instance: string): Response {
+  const status = failureStatus("edge", code);
   const body: ProblemBody = {
     type: "about:blank",
     title: TITLE[code],
-    status: STATUS[code],
+    status,
     detail,
     instance,
     code,
   };
   return new Response(JSON.stringify(body), {
-    status: STATUS[code],
+    status,
     headers: {
       "content-type": "application/problem+json; charset=utf-8",
       "cache-control": "no-store",

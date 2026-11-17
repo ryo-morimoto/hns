@@ -16,16 +16,11 @@ import {
 import { readBody } from "../edge/body.ts";
 import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
+import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
 import { ModelUnavailableError } from "./models.ts";
 
 /** The closed failure codes of the internal Session RPC. */
-type SessionRpcCode =
-  | "invalid_request"
-  | "not_found"
-  | "unavailable"
-  | "limit_exceeded"
-  | "limit_unavailable"
-  | "internal";
+type SessionRpcCode = FailureCodeOf<"session-rpc">;
 
 /** The injections the Session's transport gives the RPC; production passes its cost gate. */
 export interface SessionRpcDependencies {
@@ -117,7 +112,6 @@ function limitOf(
       response: failure(
         "invalid_request",
         "limit must be an integer between 1 and " + String(maximum) + ".",
-        400,
       ),
     };
   }
@@ -132,10 +126,16 @@ function json<T>(body: T, status = 200): Response {
   });
 }
 
-/** A typed failure. */
-function failure(code: SessionRpcCode, message: string, status: number): Response {
+/**
+ * A typed failure.
+ *
+ * @remarks
+ * The status comes from the server's one table (`failures/status.ts`); the caller names the code
+ * and nothing else.
+ */
+function failure(code: SessionRpcCode, message: string): Response {
   const body: SessionRpcFailure = { ok: false, code, message };
-  return json(body, status);
+  return json(body, failureStatus("session-rpc", code));
 }
 
 /** Read and parse a JSON body, or return the failure to send. */
@@ -147,20 +147,17 @@ async function bodyOf(
 > {
   const body = await readBody(request, DEFAULT_LIMITS.maxBodyBytes);
   if (!body.ok) {
-    const status = body.code === "payload_too_large" ? 413 : 415;
-    return {
-      ok: false,
-      response: failure("invalid_request", "The request body was refused.", status),
-    };
+    // The body's own refusal: too large is a 413, a wrong media type a 415.
+    return { ok: false, response: failure(body.code, "The request body was refused.") };
   }
   if (body.text.length === 0) {
-    return { ok: false, response: failure("invalid_request", "A JSON body is required.", 400) };
+    return { ok: false, response: failure("invalid_request", "A JSON body is required.") };
   }
   try {
     return { ok: true, value: JSON.parse(body.text) };
   } catch (error) {
     if (error instanceof SyntaxError) {
-      return { ok: false, response: failure("invalid_request", "The body is not JSON.", 400) };
+      return { ok: false, response: failure("invalid_request", "The body is not JSON.") };
     }
     throw error;
   }
@@ -169,16 +166,16 @@ async function bodyOf(
 /** Map an expected session failure to the RPC envelope. */
 function failureOf(error: Error): Response | undefined {
   if (error instanceof InvalidConversationIdError) {
-    return failure("invalid_request", error.message, 400);
+    return failure("invalid_request", error.message);
   }
   if (error instanceof ConversationNotFoundError) {
-    return failure("not_found", error.message, 404);
+    return failure("not_found", error.message);
   }
   if (error instanceof ModelUnavailableError) {
-    return failure("unavailable", error.message, 503);
+    return failure("unavailable", error.message);
   }
   if (error instanceof v.ValiError) {
-    return failure("invalid_request", "The request did not match the session contract.", 400);
+    return failure("invalid_request", "The request did not match the session contract.");
   }
   return undefined;
 }
@@ -206,7 +203,7 @@ export async function handleSessionRpc(
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter((segment) => segment !== "");
   if (segments[0] !== "rpc" || segments[1] !== "conversations") {
-    return failure("not_found", "No Session RPC route matches this path.", 404);
+    return failure("not_found", "No Session RPC route matches this path.");
   }
   const id = segments[2];
   const tail = segments[3];
@@ -216,7 +213,7 @@ export async function handleSessionRpc(
         const body = await bodyOf(request);
         if (!body.ok) return body.response;
         const parsed = v.safeParse(CreateSchema, body.value);
-        if (!parsed.success) return failure("invalid_request", "Invalid conversation input.", 400);
+        if (!parsed.success) return failure("invalid_request", "Invalid conversation input.");
         const base = { title: parsed.output.title };
         const withProject =
           parsed.output.projectId === undefined
@@ -235,21 +232,21 @@ export async function handleSessionRpc(
         const conversations = await session.listConversations(limit.value);
         return json({ ok: true, conversations });
       }
-      return failure("invalid_request", "Only GET and POST are allowed here.", 405);
+      return failure("invalid_request", "Only GET and POST are allowed here.");
     }
     if (tail === undefined) {
       if (request.method !== "GET") {
-        return failure("invalid_request", "Only GET is allowed here.", 405);
+        return failure("invalid_request", "Only GET is allowed here.");
       }
       const conversation = await session.getConversation(id);
       if (conversation === undefined) {
-        return failure("not_found", "No conversation has this id.", 404);
+        return failure("not_found", "No conversation has this id.");
       }
       return json({ ok: true, conversation });
     }
     if (tail === "transcript") {
       if (request.method !== "GET") {
-        return failure("invalid_request", "Only GET is allowed here.", 405);
+        return failure("invalid_request", "Only GET is allowed here.");
       }
       const limit = limitOf(url, MAX_TRANSCRIPT_PAGE);
       if (!limit.ok) return limit.response;
@@ -258,22 +255,22 @@ export async function handleSessionRpc(
     }
     if (tail === "messages") {
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.", 405);
+        return failure("invalid_request", "Only POST is allowed here.");
       }
       const body = await bodyOf(request);
       if (!body.ok) return body.response;
       const parsed = v.safeParse(SendSchema, body.value);
-      if (!parsed.success) return failure("invalid_request", "Invalid message input.", 400);
+      if (!parsed.success) return failure("invalid_request", "Invalid message input.");
       const cost = dependencies.cost;
       if (cost !== undefined) {
         try {
           await cost.admit(new Date());
         } catch (error) {
           if (error instanceof CostLimitError) {
-            return failure("limit_exceeded", refusalMessage(error.budget), 429);
+            return failure("limit_exceeded", refusalMessage(error.budget));
           }
           if (error instanceof CostGaugeUnavailableError) {
-            return failure("limit_unavailable", "The monthly cost limits could not be read.", 503);
+            return failure("limit_unavailable", "The monthly cost limits could not be read.");
           }
           throw error;
         }
@@ -304,19 +301,19 @@ export async function handleSessionRpc(
     }
     if (tail === "abort") {
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.", 405);
+        return failure("invalid_request", "Only POST is allowed here.");
       }
       const aborted = await session.abort(id);
-      if (!aborted) return failure("not_found", "No conversation has this id.", 404);
+      if (!aborted) return failure("not_found", "No conversation has this id.");
       return json({ ok: true });
     }
-    return failure("not_found", "No Session RPC route matches this path.", 404);
+    return failure("not_found", "No Session RPC route matches this path.");
   } catch (error) {
     if (error instanceof Error) {
       const expected = failureOf(error);
       if (expected !== undefined) return expected;
       console.error("session rpc failed", error.name);
     }
-    return failure("internal", "Unexpected Session failure.", 500);
+    return failure("internal", "Unexpected Session failure.");
   }
 }

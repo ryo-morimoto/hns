@@ -44,44 +44,45 @@ export class MachineRefusal extends Error {
 }
 
 /**
+ * The machine's status for each refusal code.
+ *
+ * @remarks
+ * The machine cannot import the server (the dependency runs server → machine), so this is the
+ * machine's side of the server's one table (`@hns/server` `failures/status.ts`): `unauthorized`,
+ * `invalid_request`, `forbidden`, `not_found`, `method_not_allowed`, `internal`, and
+ * `too_large` are the server's `payload_too_large` row by another spelling. The rest
+ * (`stale_request`, `replayed`, `stale_connection`, `path_denied`, `busy`,
+ * `deadline_exceeded`) are the machine's own: the server never answers them. The parity test
+ * fixes every value to the one the switch below replaced, and `docs/observability.md` lists
+ * them once. Adding a code without a status is a compile error rather than a silent 500.
+ */
+const REFUSAL_STATUS = {
+  unauthorized: 401,
+  // A replay or a stale connection is a conflict with the state the machine holds.
+  stale_request: 401,
+  replayed: 409,
+  stale_connection: 409,
+  invalid_request: 400,
+  path_denied: 400,
+  forbidden: 403,
+  not_found: 404,
+  busy: 429,
+  too_large: 413,
+  deadline_exceeded: 408,
+  method_not_allowed: 405,
+  internal: 500,
+} as const satisfies Record<RefusalCode, number>;
+
+/**
  * The HTTP status that carries a refusal code.
  *
  * @param code - A member of the closed refusal vocabulary.
  * @returns 400, 401, 403, 404, 405, 408, 409, 413, 429, or 500.
  *
  * @remarks
- * Every member is listed here, so adding a code without a status is a compile
- * error rather than a silent 500.
+ * Every member is listed in {@link REFUSAL_STATUS}, so adding a code without a
+ * status is a compile error rather than a silent 500.
  */
 export function refusalStatus(code: RefusalCode): number {
-  switch (code) {
-    case "unauthorized":
-      return 401;
-    case "stale_request":
-      return 401;
-    case "replayed":
-      return 409;
-    case "stale_connection":
-      return 409;
-    case "invalid_request":
-      return 400;
-    case "path_denied":
-      return 400;
-    case "forbidden":
-      return 403;
-    case "not_found":
-      return 404;
-    case "busy":
-      return 429;
-    case "too_large":
-      return 413;
-    case "deadline_exceeded":
-      return 408;
-    case "method_not_allowed":
-      return 405;
-    case "internal":
-      return 500;
-  }
-  const unreachable: never = code;
-  return unreachable;
+  return REFUSAL_STATUS[code];
 }

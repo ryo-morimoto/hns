@@ -4,6 +4,7 @@ import { readBody } from "../edge/body.ts";
 import type { DurableObjectStub, WorkerEnv } from "../edge/env.ts";
 import type { FilesRequest } from "../edge/handler.ts";
 import type { EdgeLimits } from "../edge/limits.ts";
+import { failureStatus } from "../failures/status.ts";
 import { projectFor, StoreUnavailableError } from "../edge/store.ts";
 import { ProjectParamSchema } from "../project-id.ts";
 
@@ -76,12 +77,7 @@ export interface FilesFaceOptions {
 /** The root for this request, or the refusal to answer with. */
 type ResolvedRoot =
   | { readonly ok: true; readonly root: string }
-  | {
-      readonly ok: false;
-      readonly code: FilesFailure;
-      readonly message: string;
-      readonly status: number;
-    };
+  | { readonly ok: false; readonly code: FilesFailure; readonly message: string };
 
 /**
  * Find the root of the project the request names.
@@ -99,12 +95,7 @@ async function resolveRoot(
 ): Promise<ResolvedRoot> {
   const parsed = v.safeParse(ProjectParamSchema, request.workspaceId);
   if (!parsed.success) {
-    return {
-      ok: false,
-      code: "invalid_request",
-      message: "The workspace id is not valid.",
-      status: 400,
-    };
+    return { ok: false, code: "invalid_request", message: "The workspace id is not valid." };
   }
   let root: string | undefined;
   try {
@@ -112,15 +103,10 @@ async function resolveRoot(
   } catch (error) {
     if (!(error instanceof StoreUnavailableError)) throw error;
     console.error("files: project read failed", request.requestId, error.name);
-    return {
-      ok: false,
-      code: "unavailable",
-      message: "The project could not be read.",
-      status: 503,
-    };
+    return { ok: false, code: "unavailable", message: "The project could not be read." };
   }
   if (root === undefined) {
-    return { ok: false, code: "not_found", message: "No project has this id.", status: 404 };
+    return { ok: false, code: "not_found", message: "No project has this id." };
   }
   return { ok: true, root };
 }
@@ -136,9 +122,47 @@ function json(body: FilesBody, status = 200): Response {
   });
 }
 
-/** A failure of this face. */
-function fail(code: FilesFailure, message: string, status: number): Response {
-  return json({ ok: false, code, message }, status);
+/**
+ * The status of a save the machine could not decide.
+ *
+ * @remarks
+ * Not a row of the server's table: no code in the table is "I do not know whether it landed", so
+ * the face states the number here, once, beside the only branch that uses it.
+ * @internal
+ */
+const UNKNOWN_SAVE_STATUS = 504;
+
+/**
+ * The status a files failure answers with.
+ *
+ * @remarks
+ * The seven table codes and the three lease refusals are rows of the server's one table; `lease`
+ * is the face's name for a lease refusal the workspace named, and `unknown` is the machine's
+ * undecided save (504, so a caller reconciles by reading). No other number is written here.
+ * @internal
+ */
+function statusOf(code: FilesFailure): number {
+  switch (code) {
+    case "invalid_request":
+    case "unsupported_media_type":
+    case "payload_too_large":
+    case "not_found":
+    case "denied":
+    case "unavailable":
+    case "internal":
+      return failureStatus("files", code);
+    case "lease":
+      return failureStatus("files", "lease_not_held");
+    case "unknown":
+      return UNKNOWN_SAVE_STATUS;
+    case "conflict":
+      return failureStatus("files", "conflict");
+  }
+}
+
+/** A failure of this face; the status comes from the table, never from the caller. */
+function fail(code: FilesFailure, message: string): Response {
+  return json({ ok: false, code, message }, statusOf(code));
 }
 
 /** A failure envelope from the Workspace object. */
@@ -224,25 +248,28 @@ function workspaceFailure(code: string, message: string): Response {
   const leaseRefusal = LEASE_REFUSALS.find((refusal) => refusal === code);
   if (leaseRefusal !== undefined) {
     // The workspace is not writable right now; this is not a version conflict.
-    return json({ ok: false, code: "lease", reason: leaseRefusal }, 409);
+    return json(
+      { ok: false, code: "lease", reason: leaseRefusal },
+      failureStatus("files", leaseRefusal),
+    );
   }
   switch (code) {
     case "invalid_request":
-      return fail("invalid_request", message, 400);
+      return fail("invalid_request", message);
     case "not_found":
-      return fail("not_found", message, 404);
+      return fail("not_found", message);
     case "conflict":
-      return fail("conflict", message, 409);
+      return fail("conflict", message);
     case "denied":
-      return fail("denied", message, 400);
+      return fail("denied", message);
     case "payload_too_large":
-      return fail("payload_too_large", message, 413);
+      return fail("payload_too_large", message);
     case "unavailable":
-      return fail("unavailable", message, 503);
+      return fail("unavailable", message);
     case "internal":
-      return fail("internal", message, 500);
+      return fail("internal", message);
   }
-  return fail("internal", "Unexpected workspace failure.", 500);
+  return fail("internal", "Unexpected workspace failure.");
 }
 
 /**
@@ -282,13 +309,13 @@ export function createFilesFace(
   const lookup = options.projectRoot ?? projectRootFromStore;
   return async function files(request: FilesRequest, limits: EdgeLimits): Promise<Response> {
     const resolved = await resolveRoot(lookup, request);
-    if (!resolved.ok) return fail(resolved.code, resolved.message, resolved.status);
+    if (!resolved.ok) return fail(resolved.code, resolved.message);
     const root = resolved.root;
     const stub = workspaceStub(request.env, request.workspaceId);
     if (stub === undefined) {
       // This face's failures are its own union, not the edge's problem+json (that is for
       // authentication and the method, which the edge answers before calling here).
-      return fail("unavailable", "The workspace binding is not configured.", 503);
+      return fail("unavailable", "The workspace binding is not configured.");
     }
     const url = new URL(request.request.url);
     const headers = new Headers({ "content-type": "application/json" });
@@ -298,18 +325,18 @@ export function createFilesFace(
       const body = await readBody(request.request, limits.maxBodyBytes);
       if (!body.ok) {
         return body.code === "payload_too_large"
-          ? fail("payload_too_large", "The request body exceeds the configured limit.", 413)
-          : fail("unsupported_media_type", "The request body must be application/json.", 415);
+          ? fail("payload_too_large", "The request body exceeds the configured limit.")
+          : fail("unsupported_media_type", "The request body must be application/json.");
       }
       let raw: unknown;
       try {
         raw = JSON.parse(body.text.length === 0 ? "null" : body.text);
       } catch {
-        return fail("invalid_request", "The write body is not JSON.", 400);
+        return fail("invalid_request", "The write body is not JSON.");
       }
       const parsed = v.safeParse(WriteInput, raw);
       if (!parsed.success) {
-        return fail("invalid_request", "The write body is not valid.", 400);
+        return fail("invalid_request", "The write body is not valid.");
       }
       const input = parsed.output;
       const forwarded = new Request("https://workspace.internal/rpc/apply", {
@@ -328,24 +355,21 @@ export function createFilesFace(
       const answer = await stub.fetch(forwarded);
       const envelope = await bodyOf(answer, ApplyAnswer);
       if (envelope === undefined) {
-        return fail("internal", "The workspace did not answer.", 500);
+        return fail("internal", "The workspace did not answer.");
       }
       if (!envelope.ok) return workspaceFailure(envelope.code, envelope.message);
       const result = v.safeParse(RpcResult, envelope.result);
-      if (!result.success) return fail("internal", "The workspace result is not valid.", 500);
+      if (!result.success) return fail("internal", "The workspace result is not valid.");
       const value = result.output;
       switch (value.status) {
         case "applied":
-          return json(
-            {
-              ok: true,
-              status: "applied",
-              operationId: value.operationId,
-              path: input.path,
-              version: value.version,
-            },
-            200,
-          );
+          return json({
+            ok: true,
+            status: "applied",
+            operationId: value.operationId,
+            path: input.path,
+            version: value.version,
+          });
         case "conflict":
           return json(
             {
@@ -355,7 +379,7 @@ export function createFilesFace(
               path: input.path,
               currentVersion: value.currentVersion,
             },
-            409,
+            statusOf("conflict"),
           );
         case "unknown":
           return json(
@@ -366,7 +390,7 @@ export function createFilesFace(
               path: input.path,
               reason: value.reason,
             },
-            504,
+            statusOf("unknown"),
           );
       }
     }
@@ -374,9 +398,9 @@ export function createFilesFace(
     const query = v.safeParse(ReadQuery, {
       path: url.searchParams.get("path") ?? undefined,
     });
-    if (!query.success) return fail("invalid_request", "The read query is not valid.", 400);
+    if (!query.success) return fail("invalid_request", "The read query is not valid.");
     if (url.searchParams.has("projectRoot")) {
-      return fail("invalid_request", "The project root is not a request parameter.", 400);
+      return fail("invalid_request", "The project root is not a request parameter.");
     }
     const parameters = new URLSearchParams({
       projectRoot: root,
@@ -390,12 +414,12 @@ export function createFilesFace(
     const answer = await stub.fetch(forwarded);
     const envelope = await bodyOf(answer, ReadAnswer);
     if (envelope === undefined) {
-      return fail("internal", "The workspace did not answer.", 500);
+      return fail("internal", "The workspace did not answer.");
     }
     if (!envelope.ok) return workspaceFailure(envelope.code, envelope.message);
     const text = fromBase64(envelope.content);
     if (text === undefined) {
-      return fail("unsupported_media_type", "The file is not UTF-8 text.", 415);
+      return fail("unsupported_media_type", "The file is not UTF-8 text.");
     }
     return json({
       ok: true,
