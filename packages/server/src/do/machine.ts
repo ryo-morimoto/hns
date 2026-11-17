@@ -1,4 +1,5 @@
 import {
+  CheckpointPrepareResultSchema,
   MACHINE_REFUSALS,
   MACHINE_RPC_PATH,
   MachineReadResultSchema,
@@ -7,6 +8,7 @@ import {
   signatureMessage,
 } from "@hns/core";
 import type {
+  CheckpointPrepareResult,
   MachineReadResult,
   MachineRefusalCode,
   MachineWriteRequest,
@@ -14,6 +16,7 @@ import type {
   RequestSignature,
 } from "@hns/core";
 import * as v from "valibot";
+import { checkpointRequestBody } from "../checkpoint/agent-wire.ts";
 
 /**
  * The connection id this Worker presents for its machine calls.
@@ -139,6 +142,20 @@ export interface MachineFiles {
     request: { readonly path: string },
     call: MachineCall,
   ): Promise<MachineFilesAnswer<MachineReadResult>>;
+  /**
+   * Make (or find) one Run's checkpoint and report its metadata.
+   *
+   * @remarks
+   * The machine commits the Run's tree to `refs/hns/checkpoints/<runId>` and answers the
+   * checkpoint contract's prepare result: the commit, the pack's key, and the sizes. The pack is
+   * not in the answer; it arrives at the Workspace as a signed binary request and is stored
+   * before the checkpoint is recorded. A failure here is the machine not having made a
+   * checkpoint, so the caller records nothing and acknowledges nothing.
+   */
+  checkpoint(
+    request: { readonly runId: string },
+    call: MachineCall,
+  ): Promise<MachineFilesAnswer<CheckpointPrepareResult>>;
 }
 
 /**
@@ -341,6 +358,15 @@ export function createSignedMachineFiles(
         return { ok: true, result: v.parse(MachineReadResultSchema, answer.result) };
       } catch {
         return { ok: false, failure: "unavailable", detail: "unparseable read result" };
+      }
+    },
+    async checkpoint(request, call) {
+      const answer = await send(checkpointRequestBody(request.runId), call);
+      if (!answer.ok) return answer;
+      try {
+        return { ok: true, result: v.parse(CheckpointPrepareResultSchema, answer.result) };
+      } catch {
+        return { ok: false, failure: "unavailable", detail: "unparseable checkpoint result" };
       }
     },
   };

@@ -5,6 +5,13 @@ import * as v from "valibot";
 /** Values the Durable Object SQL binding accepts and returns. */
 type SqlValue = ArrayBuffer | string | number | null;
 
+/** The DO binding's values as `node:sqlite` accepts them: a blob as its bytes. */
+function sqlBindings(
+  bindings: readonly (ArrayBuffer | string | number | null)[],
+): (Uint8Array | string | number | null)[] {
+  return bindings.map((value) => (value instanceof ArrayBuffer ? new Uint8Array(value) : value));
+}
+
 /** The part of `DurableObjectState` the unit layer models. */
 export interface TestSqliteState {
   readonly storage: DurableObjectSqliteStorage;
@@ -14,6 +21,13 @@ export interface TestSqliteState {
 /** An open in-memory state and its closer. */
 export interface OpenSqliteState {
   readonly state: TestSqliteState;
+  /** Run a statement outside the object, for setup (a table another issue owns) and assertions. */
+  sql(query: string, ...bindings: readonly (ArrayBuffer | string | number | null)[]): void;
+  /** Read rows outside the object, for an assertion about what was stored. */
+  rows(
+    query: string,
+    ...bindings: readonly (ArrayBuffer | string | number | null)[]
+  ): Record<string, SqlValue>[];
   close(): void;
 }
 
@@ -22,9 +36,17 @@ type SqlRowValue = null | number | bigint | string | Uint8Array;
 
 /** One node:sqlite value in the DO binding's shape: blobs as ArrayBuffer, the rest as-is. */
 function normalize(value: SqlRowValue): SqlValue {
-  return value instanceof Uint8Array
-    ? new Uint8Array(value).buffer
-    : v.parse(v.union([v.null(), v.string(), v.number()]), value);
+  // node:sqlite hands a BLOB back as a Uint8Array with ArrayBuffer storage; the binding hands the
+  // object an ArrayBuffer. A Uint8Array that views another array's storage (a slice of a pooled
+  // buffer) is still the blob, so the test copies those too, as the binding does.
+  if (value instanceof Uint8Array) {
+    return value.buffer instanceof ArrayBuffer &&
+      value.byteOffset === 0 &&
+      value.byteLength === value.buffer.byteLength
+      ? value.buffer
+      : new Uint8Array(value).buffer;
+  }
+  return v.parse(v.union([v.null(), v.string(), v.number()]), value);
 }
 
 /** One node:sqlite row in the DO binding's shape: integers and text as-is, blobs as ArrayBuffer. */
@@ -96,5 +118,17 @@ export function openSqliteState(): OpenSqliteState {
       return run();
     },
   };
-  return { state, close: () => db.close() };
+  return {
+    state,
+    sql(query, ...bindings) {
+      db.prepare(query).run(...sqlBindings(bindings));
+    },
+    rows(query, ...bindings) {
+      return db
+        .prepare(query)
+        .all(...sqlBindings(bindings))
+        .map(toRow);
+    },
+    close: () => db.close(),
+  };
 }

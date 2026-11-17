@@ -129,12 +129,14 @@ export function envWith(
     readonly assets?: AssetFetcher;
     readonly session?: DurableObjectNamespace;
     readonly db?: D1Binding;
+    readonly workspace?: DurableObjectNamespace;
     readonly secret?: string;
   } = {},
 ): WorkerEnv {
   return {
     ASSETS: options.assets,
     SESSION: options.session,
+    WORKSPACE: options.workspace,
     DB: options.db,
     HNS_SESSION_SECRET: options.secret ?? TEST_SECRET,
   };

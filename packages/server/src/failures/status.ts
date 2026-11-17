@@ -88,7 +88,11 @@ type FailureRow =
  * when the transport has no HTTP answer, which is every GraphQL-only row.
  */
 export const FAILURE_STATUS = {
-  unauthorized: { status: 401, transport: "http", surfaces: ["edge"] },
+  unauthorized: {
+    status: 401,
+    transport: "http",
+    surfaces: ["edge", "workspace-rpc"],
+  },
   // REST and the files face: the HTTP request itself is wrong. GraphQL says the same word for an
   // argument of a field being wrong; neither face answers with the other's meaning.
   invalid_request: {

@@ -25,6 +25,19 @@ export interface FilesRequest extends EdgeRequest {
   readonly workspaceId: string;
 }
 
+/**
+ * The checkpoint faces additionally receive the workspace their path names and the edge's
+ * budgets.
+ *
+ * @remarks
+ * The budgets travel because a pack is refused by its declared length before it is read, and the
+ * limit is the edge's (the checkpoint contract's 64 MiB), not a second number the face picks.
+ */
+export interface CheckpointRequest extends EdgeRequest {
+  readonly workspaceId: string;
+  readonly limits: EdgeLimits;
+}
+
 /** One finished request, as the observability log records it. */
 export interface EdgeResponseEvent {
   readonly requestId: string;
@@ -55,6 +68,15 @@ export interface HandlerDependencies {
    * crashing, and so an edge test that does not exercise the face needs no stub.
    */
   readonly files?: ((request: FilesRequest, limits: EdgeLimits) => Promise<Response>) | undefined;
+  /**
+   * The checkpoint face (REST): prepare, the machine's signed pack, and complete, forwarded to
+   * the Workspace object.
+   *
+   * @remarks
+   * Optional, like every face, so a missing binding is a 503 instead of a crash. The pack's
+   * bytes are forwarded unchanged; the object authenticates them.
+   */
+  readonly checkpoints?: ((request: CheckpointRequest) => Promise<Response>) | undefined;
   /** Called once per request; production forwards the entry to the Session object. */
   readonly onResponse?: ((event: EdgeResponseEvent, env: WorkerEnv) => void) | undefined;
 }
@@ -64,6 +86,9 @@ export type EdgeFetch = (request: Request, env: WorkerEnv) => Promise<Response>;
 
 /** The files content face: `/api/workspaces/<workspaceId>/files`. */
 const FILES_PATH = /^\/api\/workspaces\/([^/]+)\/files$/u;
+
+/** The checkpoint face: `/api/workspaces/<workspaceId>/checkpoints/...`. */
+const CHECKPOINTS_PATH = /^\/api\/workspaces\/([^/]+)\/checkpoints(?:\/|$)/u;
 
 /** The cache policy for Vite's content-hashed files under `/assets`. */
 const ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
@@ -296,6 +321,30 @@ async function route(
       },
       limits,
     );
+  }
+  const checkpoints = CHECKPOINTS_PATH.exec(path);
+  if (checkpoints !== null) {
+    if (request.method !== "POST") {
+      const response = problem("method_not_allowed", "Only POST is allowed on this path.", path);
+      response.headers.set("allow", "POST");
+      return response;
+    }
+    const session = await authenticate(request, env);
+    if (session === null) {
+      return problem("unauthorized", "A valid session cookie is required.", path);
+    }
+    if (dependencies.checkpoints === undefined) {
+      return problem("unavailable", "The checkpoint face is not configured.", path);
+    }
+    return dependencies.checkpoints({
+      request,
+      env,
+      session,
+      requestId,
+      signal,
+      workspaceId: checkpoints[1] ?? "",
+      limits,
+    });
   }
   if (path === "/api/events" || path === "/api/metrics") {
     if (request.method !== "GET") return methodNotAllowed("GET", path);

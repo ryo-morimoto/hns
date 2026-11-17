@@ -1,15 +1,33 @@
 import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import {
   ABSENT_VERSION,
+  CHECKPOINT_PACK_CONTENT_TYPE,
+  CheckpointPrepareResultSchema,
   MACHINE_WRITE_UNKNOWN_REASONS,
+  MIRROR_FAILURES,
+  MIRROR_STATUSES,
   OperationIdSchema,
   isoTimestamp,
+  type CheckpointPrepareResult,
+  type CheckpointRecord,
   type LeaseRefusal,
   type MutationResult,
   type WorkspaceLease,
 } from "@hns/core";
 import type { JournalOutcomeEntry } from "@hns/store";
+import { checkpointPackKey } from "@hns/workspace/objects";
 import * as v from "valibot";
+import {
+  checkpointRecordOf,
+  CheckpointRefusedError,
+  initialMirror,
+  nextMirror,
+  packUploadAnswer,
+  parseCheckpointRecord,
+} from "../checkpoint/flow.ts";
+import { signedHeadersOf } from "../checkpoint/agent-wire.ts";
+import { BODY_HASH_HEADER, sha256Hex, verifyDeviceRequest } from "../checkpoint/signature.ts";
+import { R2PackTransport, type PackBucket } from "../checkpoint/transport.ts";
 import { readBody } from "../edge/body.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
@@ -46,6 +64,15 @@ export interface WorkspaceOptions {
    * is present the file faces fail closed (503) instead of falling back to a local write.
    */
   readonly files?: MachineFiles | undefined;
+  /**
+   * Where checkpoint packs go; defaults to the `OBJECTS` bucket.
+   *
+   * @remarks
+   * A seam like `files`: the unit layer supplies a fake bucket that counts writes, production
+   * supplies the R2 binding. Absent (and no `OBJECTS`) means the checkpoint path fails closed:
+   * a pack endpoint answers `unavailable` instead of dropping the bytes.
+   */
+  readonly packs?: PackBucket | undefined;
 }
 
 /**
@@ -59,7 +86,7 @@ export interface WorkspaceOptions {
  */
 export interface WorkspaceBindings {
   /** The bucket for journal bodies over 256KB. */
-  readonly OBJECTS?: JournalBucket | undefined;
+  readonly OBJECTS?: (JournalBucket & PackBucket) | undefined;
   /** The machine agent's origin (`http://127.0.0.1:<port>` in dev). */
   readonly HNS_AGENT_URL?: string | undefined;
   /**
@@ -133,6 +160,41 @@ const WatermarkSchema = v.object({
   workspaceId: NonEmptyText,
   throughSeq: v.pipe(v.number(), v.integer(), v.minValue(0)),
 });
+
+/** A Run id: the segment the machine's pack route also requires. */
+const RunIdSchema = v.pipe(NonEmptyText, v.regex(/^[^/\s]+$/u));
+
+const CheckpointPrepareSchema = v.object({ workspaceId: NonEmptyText, runId: RunIdSchema });
+const CheckpointCompleteSchema = v.object({
+  workspaceId: NonEmptyText,
+  runId: RunIdSchema,
+  throughSeq: v.pipe(v.number(), v.integer(), v.minValue(0)),
+});
+const CheckpointMirrorSchema = v.object({
+  workspaceId: NonEmptyText,
+  runId: RunIdSchema,
+  status: v.picklist(MIRROR_STATUSES),
+  failure: v.optional(v.picklist(MIRROR_FAILURES)),
+});
+
+/** A stored checkpoint: its Run, the machine's prepare answer (JSON), and its record (JSON). */
+const CheckpointRowSchema = v.object({
+  run_id: NonEmptyText,
+  prepare: v.string(),
+  record: v.nullable(v.string()),
+});
+
+/** One Run's stored checkpoint, decoded from its row. */
+interface StoredCheckpoint {
+  readonly runId: string;
+  /** The machine's prepare answer, as stored JSON. */
+  readonly prepare: string;
+  /** The checkpoint record as stored JSON, or null before `complete`. */
+  readonly record: string | null;
+}
+
+/** The machine registry's device key, as the `machines` row holds it (0148). */
+const MachineKeyRowSchema = v.object({ public_key: v.instance(ArrayBuffer) });
 
 const MetaRowSchema = v.object({ value: v.string() });
 const EpochTextSchema = v.pipe(
@@ -332,6 +394,8 @@ export class Workspace {
   readonly #leaseTtlMs: number;
   readonly #journal: Journal;
   readonly #files: MachineFiles | undefined;
+  /** Where packs go; undefined fails the checkpoint path closed at the RPC. */
+  readonly #packs: R2PackTransport | undefined;
   /** The queue that serializes the calls which can decide the project binding. */
   #bindingQueue: Promise<void> = Promise.resolve();
   readonly #ready: Promise<void>;
@@ -354,6 +418,8 @@ export class Workspace {
       bucket: options.OBJECTS,
     });
     this.#files = options.files ?? machineFilesFrom(options);
+    const packs = options.packs ?? options.OBJECTS;
+    this.#packs = packs === undefined ? undefined : new R2PackTransport(packs);
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -366,6 +432,11 @@ export class Workspace {
     );
     this.#exec(
       "CREATE TABLE IF NOT EXISTS workspace_version (path TEXT PRIMARY KEY, version TEXT NOT NULL)",
+    );
+    // One row per Run: the prepare answer the pack was sent for, and the record once the
+    // checkpoint is complete. The pack's key lives here, never in a caller's hands.
+    this.#exec(
+      "CREATE TABLE IF NOT EXISTS checkpoint_run (run_id TEXT PRIMARY KEY, prepare TEXT NOT NULL, record TEXT)",
     );
     await this.#journal.ensureSchema();
   }
@@ -394,6 +465,14 @@ export class Workspace {
       }
       if (error instanceof WorkspaceProjectError) {
         return failure("invalid_request", "The request names a different project root.");
+      }
+      if (error instanceof CheckpointRefusedError) {
+        return failure(error.code, "The checkpoint was refused.");
+      }
+      if (error instanceof JournalWatermarkError) {
+        // The truncation the checkpoint asked for would lose reconciliation evidence, which
+        // is a refusal the caller can act on (complete the pending write), not a defect.
+        return failure("conflict", error.message);
       }
       console.error("workspace rpc failed", error instanceof Error ? error.name : "unknown");
       return failure("internal", "Unexpected Workspace failure.");
@@ -433,6 +512,9 @@ export class Workspace {
         return failure("method_not_allowed", "Only POST is allowed here.");
       }
       return await this.#watermark(request);
+    }
+    if (face === "checkpoint") {
+      return await this.#checkpointRoute(request, segments);
     }
     if (face === "lease") {
       const action = segments[2];
@@ -677,6 +759,394 @@ export class Workspace {
    * point for the Journal. A watermark that would move backwards, or pass an intent with no
    * outcome, is refused with 409 instead of losing reconciliation evidence.
    */
+  /**
+   * Route one checkpoint RPC.
+   *
+   * @param request - The request.
+   * @param segments - The path's segments below `/rpc`.
+   * @returns The answer; a refusal is a row of the server's failure table.
+   *
+   * @remarks
+   * - `POST /rpc/checkpoint/prepare` — the machine's checkpoint, metadata only.
+   * - `POST /rpc/checkpoint/:runId/pack` — a machine-signed binary pack, stored before the
+   *   answer. The route's Run id is the one the machine signed, so a pack made for one Run
+   *   cannot be handed to another.
+   * - `POST /rpc/checkpoint/complete` — the watermark and the record, in one transaction.
+   * - `POST /rpc/checkpoint/mirror` — the push's outcome, after the checkpoint was answered.
+   */
+  async #checkpointRoute(request: Request, segments: readonly string[]): Promise<Response> {
+    const action = segments[2];
+    if (segments.length === 3 && (action === "prepare" || action === "complete")) {
+      if (request.method !== "POST") {
+        return failure("method_not_allowed", "Only POST is allowed here.");
+      }
+      return action === "prepare"
+        ? await this.#checkpointPrepare(request)
+        : await this.#checkpointComplete(request);
+    }
+    if (segments.length === 3 && action === "mirror") {
+      if (request.method !== "POST") {
+        return failure("method_not_allowed", "Only POST is allowed here.");
+      }
+      return await this.#checkpointMirror(request);
+    }
+    if (segments.length === 4 && segments[3] === "pack" && action !== undefined) {
+      if (request.method !== "POST") {
+        return failure("method_not_allowed", "Only POST is allowed here.");
+      }
+      return await this.#checkpointPack(request, action);
+    }
+    return failure("not_found", "No Workspace RPC route matches this path.");
+  }
+
+  /**
+   * Ask the machine for one Run's checkpoint and keep its metadata.
+   *
+   * @param request - The prepare RPC: the workspace and the Run.
+   * @returns `{ ok: true, checkpoint, watermark }`: the machine's prepare result and the seq the
+   * Journal is truncated through so far.
+   *
+   * @remarks
+   * The answer is metadata only: the commit, the pack's key, and the sizes, which the machine
+   * reports before its pack is sent. The object keeps the answer, so the pack endpoint keys the
+   * pack by it (never by a caller's claim) and `complete` builds the record from it.
+   *
+   * A machine that did not make a checkpoint is a typed failure, never a defect and never an
+   * acknowledged checkpoint: nothing is written and the caller learns the checkpoint did not
+   * happen. A Run whose record is already complete answers its recorded checkpoint, so a retried
+   * prepare does not ask the machine again.
+   */
+  async #checkpointPrepare(request: Request): Promise<Response> {
+    const body = await bodyOf(request);
+    if (!body.ok) return body.response;
+    const parsed = v.safeParse(CheckpointPrepareSchema, body.value);
+    if (!parsed.success) return failure("invalid_request", "Invalid checkpoint input.");
+    const input = parsed.output;
+    this.#claimWorkspace(input.workspaceId);
+    const files = this.#files;
+    if (files === undefined) return failure("unavailable", "The machine is not configured.");
+    const machineId = this.#meta("machine_id");
+    if (machineId === undefined) return failure("unavailable", "The workspace has no machine yet.");
+
+    const stored = this.#checkpointRow(input.runId);
+    if (stored !== undefined && stored.record !== null) {
+      const record = parseCheckpointRecord(stored.record);
+      return json({
+        ok: true,
+        checkpoint: prepareAnswerOf(record),
+        watermark: this.#watermarkOf(),
+      });
+    }
+
+    const answer = await files.checkpoint(
+      { runId: input.runId },
+      {
+        machineId,
+        requestId: request.headers.get("x-request-id") ?? "",
+        signal: request.signal,
+      },
+    );
+    if (!answer.ok) {
+      // The failure and its code, never the answer's body: enough to see which hop failed.
+      console.error("workspace: machine checkpoint failed", answer.failure, answer.detail);
+      return answer.failure === "unavailable"
+        ? failure("unavailable", "The machine did not answer the checkpoint.")
+        : failure("denied", "The machine did not make the checkpoint.");
+    }
+    const prepare = answer.result;
+    if (prepare.runId !== input.runId || prepare.packKey !== checkpointPackKey(prepare.commit)) {
+      // The answer must be the contract's: a key that is not the commit's would store a pack
+      // restore never looks for.
+      return failure("internal", "The machine answered a different checkpoint.");
+    }
+    this.#putCheckpointPrepare(prepare);
+    return json({ ok: true, checkpoint: prepare, watermark: this.#watermarkOf() });
+  }
+
+  /**
+   * Store one machine-signed pack under the key its prepare answer gave.
+   *
+   * @param request - The pack upload.
+   * @param runId - The Run the route names.
+   * @returns `{ ok: true, runId, packKey, receivedBytes, stored }`, or a typed failure.
+   *
+   * @remarks
+   * The order refuses before it keeps anything. The media type and the declared length are read
+   * first, so a body over the limit is refused **before a byte of it is kept**. The body is read
+   * to exactly its declared length. The device signature is verified over those bytes with the
+   * machine's enrolled key. The sha256 the machine signed is compared with the sha256 of the
+   * bytes the object received, so neither a header nor a body changed in transit can pass. The
+   * size must be the prepare answer's `packBytes`, because a differently sized pack is a
+   * different pack and restore would fail. Only then does the store see the bytes, and the pack
+   * is stored before the upload is acknowledged (the store, then the object).
+   *
+   * A pack is accepted only for a Run that prepared, so a pack cannot seed a checkpoint whose
+   * commit the object does not know.
+   */
+  async #checkpointPack(request: Request, runId: string): Promise<Response> {
+    const runIdParsed = v.safeParse(RunIdSchema, runId);
+    if (!runIdParsed.success) return failure("invalid_request", "The Run id is not valid.");
+    const packs = this.#packs;
+    if (packs === undefined) {
+      return failure("unavailable", "The checkpoint store is not configured.");
+    }
+    if (request.headers.get("content-type") !== CHECKPOINT_PACK_CONTENT_TYPE) {
+      return failure(
+        "unsupported_media_type",
+        "A pack upload must be " + CHECKPOINT_PACK_CONTENT_TYPE + ".",
+      );
+    }
+    const declared = request.headers.get("content-length");
+    if (declared === null || !/^[0-9]{1,15}$/u.test(declared)) {
+      return failure("invalid_request", "A pack upload must declare a content-length in bytes.");
+    }
+    if (Number(declared) > packs.maxBytes) {
+      // The same bound the machine refuses at, read before the body: nothing partial is kept.
+      return failure("payload_too_large", "The pack is larger than the checkpoint limit.");
+    }
+    const read = await readPackBody(request, packs.maxBytes);
+    if (!read.ok) {
+      return read.code === "too_large"
+        ? failure("payload_too_large", "The pack is larger than the checkpoint limit.")
+        : failure("invalid_request", "The pack body is not complete.");
+    }
+    const bytes = read.bytes;
+    if (bytes.byteLength !== Number(declared)) {
+      return failure("invalid_request", "The pack body does not match its content-length.");
+    }
+    const row = this.#checkpointRow(runIdParsed.output);
+    if (row === undefined) {
+      return failure("conflict", "The Run has no prepared checkpoint for this pack.");
+    }
+    const prepare = parsePrepareRow(row.prepare);
+    const unsigned = await this.#refuseUnsignedPack(request, bytes);
+    if (unsigned !== undefined) return unsigned;
+    const signedHash = request.headers.get(BODY_HASH_HEADER) ?? "";
+    if (signedHash !== (await sha256Hex(bytes))) {
+      // The machine's inbound verifier checked the hash it signed; the object checks the same
+      // hash against the bytes it holds, so neither a header nor a body changed in transit can
+      // pass for the signed pack.
+      return failure("unauthorized", "The pack does not carry the bytes that were signed.");
+    }
+    if (bytes.byteLength !== prepare.packBytes) {
+      return failure("invalid_request", "The pack is not the size the checkpoint reported.");
+    }
+    const outcome = await packs.upload(runIdParsed.output, prepare.packKey, bytes);
+    return json(
+      packUploadAnswer({
+        runId: runIdParsed.output,
+        packKey: outcome.packKey,
+        receivedBytes: bytes.byteLength,
+        stored: outcome.status === "stored",
+      }),
+    );
+  }
+
+  /**
+   * Verify a pack's device signature, or answer the refusal.
+   *
+   * @param request - The pack upload, for its headers.
+   * @param bytes - The body that was read.
+   * @returns The failure response, or undefined when the signature verified.
+   *
+   * @remarks
+   * The key is the machine's enrolled device key (D100), the public half of the key the machine
+   * signs its requests with. The `machines` row that holds it belongs to the machine registry
+   * (0148), which has not landed: the object reads the row when it exists and otherwise refuses
+   * every pack. An unenrolled machine therefore cannot store a pack, and no pack is ever stored
+   * unverified.
+   */
+  async #refuseUnsignedPack(request: Request, bytes: Uint8Array): Promise<Response | undefined> {
+    const headers = signedHeadersOf(request.headers);
+    if (headers === undefined) return failure("unauthorized", "The pack upload is not signed.");
+    const rawKey = this.#deviceKey(headers.machineId);
+    const publicKey = rawKey === undefined ? undefined : new Uint8Array(rawKey);
+    if (publicKey === undefined) {
+      return failure("unauthorized", "The machine has no enrolled key.");
+    }
+    const verified = await verifyDeviceRequest(
+      { headers, method: "POST", path: requestPathOf(request), body: bytes },
+      publicKey,
+    );
+    return verified ? undefined : failure("unauthorized", "The pack signature did not verify.");
+  }
+
+  /**
+   * Complete one Run's checkpoint: move the watermark and write the record.
+   *
+   * @param request - The complete RPC: the workspace, the Run, and the seq the pack includes.
+   * @returns `{ ok: true, checkpoint, watermark }`: the record and the seq the Journal is
+   * truncated through.
+   *
+   * @remarks
+   * The watermark and the record commit in **one transaction**, so a crash cannot leave the
+   * Journal truncated without the record of what it was truncated to. That pair is what restore
+   * needs; a truncated Journal with no record would be a checkpoint that cannot be resolved.
+   *
+   * The pack must be in the store, which is checked rather than assumed. A complete whose ack
+   * was lost is answered from the record the first attempt wrote. When the watermark already
+   * covers the seq but no record exists, the pack is still the proof: without it the call is
+   * refused rather than acknowledged, so an acknowledgement never stands without its pack.
+   */
+  async #checkpointComplete(request: Request): Promise<Response> {
+    const body = await bodyOf(request);
+    if (!body.ok) return body.response;
+    const parsed = v.safeParse(CheckpointCompleteSchema, body.value);
+    if (!parsed.success) return failure("invalid_request", "Invalid checkpoint input.");
+    const input = parsed.output;
+    this.#assertWorkspace(input.workspaceId);
+    const packs = this.#packs;
+    if (packs === undefined) {
+      return failure("unavailable", "The checkpoint store is not configured.");
+    }
+    const row = this.#checkpointRow(input.runId);
+    if (row === undefined) {
+      return failure("conflict", "The Run has no prepared checkpoint.");
+    }
+    if (row.record !== null) {
+      // Already complete: the recorded checkpoint is the answer to every retry.
+      return json({
+        ok: true,
+        checkpoint: parseCheckpointRecord(row.record),
+        watermark: this.#watermarkOf(),
+      });
+    }
+    const prepare = parsePrepareRow(row.prepare);
+    const current = this.#watermarkOf();
+    if (input.throughSeq < current) {
+      throw new CheckpointRefusedError(
+        "conflict",
+        "the watermark never decreases: " + String(current),
+      );
+    }
+    if ((await this.#hasPack(prepare.packKey)) === false) {
+      throw new CheckpointRefusedError("conflict", "the pack is not in the store yet");
+    }
+
+    const mirror = initialMirror(
+      this.#clock(),
+      prepare.packBytes,
+      prepare.maxBlobBytes,
+      packs.maxBytes,
+    );
+    const record = checkpointRecordOf({ ...prepare, mirror });
+    const written = await this.#state.storage.transaction(async () => {
+      const watermark = this.#journal.writeWatermarkInTransaction(input.throughSeq);
+      this.#putCheckpointRecord(input.runId, record);
+      return watermark;
+    });
+    return json({ ok: true, checkpoint: record, watermark: written.watermark.throughSeq });
+  }
+
+  /**
+   * Record the mirror state a push reached.
+   *
+   * @param request - The mirror RPC: the workspace, the Run, the status, and its failure.
+   * @returns The updated checkpoint record, or a typed failure.
+   *
+   * @remarks
+   * The push (0246) calls this after the checkpoint was acknowledged, so its outcome never
+   * changes the checkpoint's answer. The core transition table decides whether the move is
+   * allowed: `failed` may go back to `pending` on a retry, and `mirrored` and `skipped` never
+   * move. The record, never the token, is what is stored.
+   */
+  async #checkpointMirror(request: Request): Promise<Response> {
+    const body = await bodyOf(request);
+    if (!body.ok) return body.response;
+    const parsed = v.safeParse(CheckpointMirrorSchema, body.value);
+    if (!parsed.success) return failure("invalid_request", "Invalid checkpoint input.");
+    const input = parsed.output;
+    this.#assertWorkspace(input.workspaceId);
+    const row = this.#checkpointRow(input.runId);
+    if (row === undefined || row.record === null) {
+      return failure("not_found", "The Run has no completed checkpoint.");
+    }
+    const record = parseCheckpointRecord(row.record);
+    const next = nextMirror(
+      record.mirror,
+      { status: input.status, failure: input.failure },
+      this.#clock(),
+    );
+    if (next === undefined) {
+      throw new CheckpointRefusedError(
+        "conflict",
+        "the mirror does not move from " + record.mirror.status + " to " + input.status,
+      );
+    }
+    const updated = checkpointRecordOf({ ...record, mirror: next });
+    this.#exec(
+      "UPDATE checkpoint_run SET record = ? WHERE run_id = ?",
+      JSON.stringify(updated),
+      input.runId,
+    );
+    return json({ ok: true, checkpoint: updated });
+  }
+
+  /** The watermark's seq, or 0 before the first checkpoint. */
+  #watermarkOf(): number {
+    return this.#journal.watermark()?.throughSeq ?? 0;
+  }
+
+  /**
+   * The machine's enrolled device key, or undefined when the registry has none.
+   *
+   * @param machineId - The machine the signed request names.
+   * @returns The raw 32-byte Ed25519 public key, as the blob column holds it.
+   *
+   * @remarks
+   * The row is the machine registry's (0148): `machines.public_key` is the raw key. The query
+   * names the column so a database without the table fails the lookup rather than the request:
+   * no row is no key, which the pack path refuses.
+   */
+  #deviceKey(machineId: string): ArrayBuffer | undefined {
+    let row: Row | undefined;
+    try {
+      row = this.#all("SELECT public_key FROM machines WHERE id = ?", machineId)[0];
+    } catch {
+      return undefined;
+    }
+    if (row === undefined) return undefined;
+    const parsed = v.safeParse(MachineKeyRowSchema, row);
+    return parsed.success ? parsed.output.public_key : undefined;
+  }
+
+  /** The stored checkpoint row, or undefined when the Run has not prepared. */
+  #checkpointRow(runId: string): StoredCheckpoint | undefined {
+    const row = this.#all(
+      "SELECT run_id, prepare, record FROM checkpoint_run WHERE run_id = ?",
+      runId,
+    )[0];
+    if (row === undefined) return undefined;
+    const parsed = v.parse(CheckpointRowSchema, row);
+    return { runId: parsed.run_id, prepare: parsed.prepare, record: parsed.record };
+  }
+
+  /** Keep the machine's prepare answer, without replacing a finished checkpoint. */
+  #putCheckpointPrepare(prepare: CheckpointPrepareResult): void {
+    this.#exec(
+      "INSERT INTO checkpoint_run (run_id, prepare, record) VALUES (?, ?, NULL) ON CONFLICT(run_id) DO UPDATE SET prepare = excluded.prepare WHERE checkpoint_run.record IS NULL",
+      prepare.runId,
+      JSON.stringify(prepare),
+    );
+  }
+
+  /** Write the record once: a completed checkpoint is not rewritten. */
+  #putCheckpointRecord(runId: string, record: CheckpointRecord): void {
+    this.#exec(
+      "INSERT INTO checkpoint_run (run_id, prepare, record) VALUES (?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET prepare = excluded.prepare, record = COALESCE(checkpoint_run.record, excluded.record)",
+      runId,
+      JSON.stringify(prepareAnswerOf(record)),
+      JSON.stringify(record),
+    );
+  }
+
+  /** Whether the store holds the pack under the key. */
+  async #hasPack(packKey: string): Promise<boolean> {
+    const packs = this.#packs;
+    if (packs === undefined) return false;
+    return await packs.has(packKey);
+  }
+
   async #watermark(request: Request): Promise<Response> {
     const body = await bodyOf(request);
     if (!body.ok) return body.response;
@@ -713,7 +1183,13 @@ export class Workspace {
     return await this.#serializedByBinding(async () => await this.#readOnce(url, request));
   }
 
-  /** One read, run under the binding queue when the workspace has no project yet. */
+  /**
+   * Read one file from the machine.
+   *
+   * @param url - The read RPC's projectRoot and path.
+   * @param request - The request, for its correlation id and deadline.
+   * @returns The base64 bytes and their version; 503 when the machine is unreachable.
+   */
   async #readOnce(url: URL, request: Request): Promise<Response> {
     const files = this.#files;
     if (files === undefined) {
@@ -1046,4 +1522,93 @@ function machineFilesFrom(bindings: WorkspaceBindings): MachineFiles | undefined
   const controlPlaneKey = bindings.HNS_CONTROL_PLANE_KEY;
   if (agentUrl === undefined || controlPlaneKey === undefined) return undefined;
   return createSignedMachineFiles({ agentUrl, controlPlaneKey });
+}
+
+/**
+ * The prepare answer a completed checkpoint's record implies.
+ *
+ * @param record - The stored record.
+ * @returns The same metadata the machine answered, with `created: false` because the checkpoint
+ *   already existed when the record was written.
+ *
+ * @remarks
+ * A retried prepare answers from the record rather than asking the machine: the commit is fixed
+ * and the Run is already checkpointed, so `created` can only be false.
+ */
+function prepareAnswerOf(record: CheckpointRecord): CheckpointPrepareResult {
+  return {
+    runId: record.runId,
+    ref: record.ref,
+    commit: record.commit,
+    packKey: record.packKey,
+    objectCount: record.objectCount,
+    packBytes: record.packBytes,
+    maxBlobBytes: record.maxBlobBytes,
+    created: false,
+  };
+}
+
+/**
+ * Parse a stored prepare answer.
+ *
+ * @param text - The JSON the row holds.
+ * @returns The machine's prepare answer.
+ * @throws ValiError when the row does not hold one.
+ */
+function parsePrepareRow(text: string): CheckpointPrepareResult {
+  // The row's text is untrusted: valibot parses it, and the schema decides its shape.
+  return v.parse(CheckpointPrepareResultSchema, JSON.parse(text));
+}
+
+/** The request path as the signer wrote it: the pathname and the query, in that order. */
+function requestPathOf(request: Request): string {
+  const url = new URL(request.url);
+  return url.pathname + url.search;
+}
+
+/** What reading a pack body did. */
+type PackBodyRead =
+  | { readonly ok: true; readonly bytes: Uint8Array }
+  | { readonly ok: false; readonly code: "too_large" | "incomplete" };
+
+/**
+ * Read a pack body, streamed, up to the limit.
+ *
+ * @param request - The pack upload whose body is read.
+ * @param maxBytes - The limit; a body that passes it is cut off and the read fails.
+ * @returns The bytes, or the closed failure. `too_large` is a body that kept sending past the
+ * limit (a declared length it does not honour); `incomplete` is a stream that ended in error.
+ *
+ * @remarks
+ * The limit is enforced while the stream is read, so a body that lies about its length is cut
+ * off instead of being kept whole. The caller compares the total with the declared length; this
+ * function only guarantees that no more than the limit is ever held.
+ */
+async function readPackBody(request: Request, maxBytes: number): Promise<PackBodyRead> {
+  const stream = request.body;
+  if (stream === null) return { ok: true, bytes: new Uint8Array(0) };
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, code: "too_large" };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, code: "incomplete" };
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, bytes };
 }

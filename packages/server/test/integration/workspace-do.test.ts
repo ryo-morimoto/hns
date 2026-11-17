@@ -294,6 +294,60 @@ const Migration = v.object({
 });
 
 test.skipIf(!isCfDevInstalled())(
+  "the Workspace DO opens an existing object with the checkpoint table added",
+  async () => {
+    project = await writeProject();
+    running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
+    const firstPort = running.port;
+    try {
+      await call(firstPort, "POST", "/t/rpc/journal/watermark", Watermark, {
+        workspaceId: "w1",
+        throughSeq: 2,
+      });
+      await running.stop();
+      running = undefined;
+      running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
+      const secondPort = running.port;
+
+      // Catches: an object that cannot open over its own storage after the checkpoint table was
+      // added, or a checkpoint call answering with an unhandled failure instead of a typed one.
+      // No machine is configured here, so prepare must fail closed (503) after reaching the gate.
+      const prepared = await send(secondPort, "POST", "/t/rpc/checkpoint/prepare", {
+        workspaceId: "w1",
+        runId: "run-1",
+      });
+      expect(prepared.status).toBe(503);
+      expect(v.parse(Conflict, JSON.parse(prepared.text)).code).toBe("unavailable");
+      // The edge refuses a non-pack media type before the object is reached, and the object
+      // refuses a pack with no declared length after it (the edge passed the empty JSON body).
+      const pack = await fetch(
+        "http://127.0.0.1:" + String(secondPort) + "/t/rpc/checkpoint/run-1/pack",
+        {
+          method: "POST",
+          headers: { "content-type": "text/plain", "content-length": "1" },
+          body: "x",
+        },
+      );
+      const packText = await pack.text();
+      // The deployment's OBJECTS binding is not in this project, so the pack path fails closed
+      // with a typed 503 instead of accepting bytes it cannot store.
+      expect(pack.status, packText).toBe(503);
+      expect(v.parse(Conflict, JSON.parse(packText)).code).toBe("unavailable");
+      // The object still serves its existing faces: the restart kept the watermark.
+      const lower = await send(secondPort, "POST", "/t/rpc/journal/watermark", {
+        workspaceId: "w1",
+        throughSeq: 1,
+      });
+      expect(lower.status).toBe(409);
+    } finally {
+      await running?.stop();
+      running = undefined;
+    }
+  },
+  TIMEOUT_MS,
+);
+
+test.skipIf(!isCfDevInstalled())(
   "the journal table is rebuilt from the previous DDL inside a transaction",
   async () => {
     project = await writeProject();

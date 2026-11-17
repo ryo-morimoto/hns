@@ -1,8 +1,25 @@
-import { IsoTimestampSchema, LEASE_REFUSALS, operationId, type LeaseRefusal } from "@hns/core";
+import {
+  CheckpointPrepareResultSchema,
+  CheckpointRecordSchema,
+  IsoTimestampSchema,
+  LEASE_REFUSALS,
+  MAX_CHECKPOINT_PACK_BYTES,
+  operationId,
+  type CheckpointPrepareResult,
+  type LeaseRefusal,
+} from "@hns/core";
+import { checkpointPackKey } from "@hns/workspace/objects";
 import type { JournalOutcomeEntry } from "@hns/store";
 import { expect, test } from "vitest";
 import * as v from "valibot";
+import {
+  BODY_HASH_HEADER,
+  deviceKeyFromSeed,
+  sha256Hex,
+  signDeviceHeaders,
+} from "../../test/support/device.ts";
 import { base64Of, fakeMachine, versionOfText } from "../../test/support/machine.ts";
+import type { PackBucket } from "../checkpoint/transport.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { Journal } from "./journal.ts";
 import { Workspace } from "./workspace.ts";
@@ -43,10 +60,48 @@ const ApplyOk = v.object({
 const Denied = v.object({ ok: v.literal(false), code: v.literal("denied") });
 const ProtocolFailure = v.object({ ok: v.literal(false), code: v.string() });
 
+/** A bucket in memory that records every write, the way the object store does. */
+interface FakePackBucket extends PackBucket {
+  readonly puts: string[];
+  /** Make the next put fail as an unavailable store would (the bucket throws). */
+  failNextPut(): void;
+  /** The bytes under a key, or undefined. */
+  bytes(key: string): Uint8Array | undefined;
+}
+
+function fakePackBucket(): FakePackBucket {
+  const objects = new Map<string, Uint8Array>();
+  const puts: string[] = [];
+  let failPut = false;
+  return {
+    puts,
+    failNextPut() {
+      failPut = true;
+    },
+    bytes(key) {
+      return objects.get(key);
+    },
+    put(key, value) {
+      if (failPut) {
+        failPut = false;
+        return Promise.reject(new Error("the object store is unavailable"));
+      }
+      puts.push(key);
+      objects.set(key, new Uint8Array(value));
+      return Promise.resolve({ key, size: value.byteLength });
+    },
+    head(key) {
+      const value = objects.get(key);
+      return Promise.resolve(value === undefined ? null : { key, size: value.byteLength });
+    },
+  };
+}
+
 interface Harness {
   readonly workspace: Workspace;
   readonly journal: Journal;
   readonly machine: ReturnType<typeof fakeMachine>;
+  readonly packs: FakePackBucket;
   advance(ms: number): void;
   close(): void;
 }
@@ -55,7 +110,8 @@ function harness(options: { readonly machine?: boolean } = {}): Harness {
   let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
   const opened = openSqliteState();
   const machine = fakeMachine();
-  const settings = { now: () => nowMs, leaseTtlMs: 1_000 };
+  const packs = fakePackBucket();
+  const settings = { now: () => nowMs, leaseTtlMs: 1_000, packs };
   const workspace =
     options.machine === false
       ? new Workspace(opened.state, settings)
@@ -65,6 +121,7 @@ function harness(options: { readonly machine?: boolean } = {}): Harness {
     workspace,
     journal,
     machine,
+    packs,
     advance(ms) {
       nowMs += ms;
     },
@@ -786,6 +843,430 @@ test("an oversized body is a 413", async () => {
     );
     expect(response.status).toBe(413);
     expect(v.parse(ProtocolFailure, await response.json()).code).toBe("payload_too_large");
+  } finally {
+    h.close();
+  }
+});
+
+/** The checkpoint RPC answer: the prepare result, or the record complete wrote. */
+const CheckpointOk = v.object({
+  ok: v.literal(true),
+  checkpoint: v.unknown(),
+  watermark: v.number(),
+});
+/** The mirror RPC answer: the updated record. */
+const MirrorOk = v.object({ ok: v.literal(true), checkpoint: v.unknown() });
+const PackOk = v.object({
+  ok: v.literal(true),
+  runId: v.string(),
+  packKey: v.string(),
+  receivedBytes: v.number(),
+  stored: v.boolean(),
+});
+
+/** A row as the object's SQL binding returns it. */
+type SqlValue = ArrayBuffer | string | number | null;
+
+/** A row's SQL runner, as the test state exposes it for setup. */
+type SqlRunner = (
+  query: string,
+  ...bindings: readonly (ArrayBuffer | string | number | null)[]
+) => void;
+
+/**
+ * Seed the machine registry's table the way enrollment would.
+ *
+ * @param sql - The test state's SQL runner.
+ * @param machineId - The machine the key belongs to.
+ * @param publicKey - The raw 32-byte Ed25519 device key.
+ *
+ * @remarks
+ * The `machines` table is the machine registry's (0148, not landed here). The object reads it
+ * when it exists and refuses every pack when it does not, so this is the only setup the
+ * checkpoint path needs and its absence is a case the tests cover too.
+ */
+function enrollMachine(sql: SqlRunner, machineId: string, publicKey: Uint8Array): void {
+  sql("CREATE TABLE IF NOT EXISTS machines (id TEXT PRIMARY KEY, public_key BLOB NOT NULL)");
+  const bytes = new Uint8Array(publicKey);
+  sql("INSERT OR REPLACE INTO machines (id, public_key) VALUES (?, ?)", machineId, bytes.buffer);
+}
+
+/** Prepare one Run and return the machine's answer. */
+async function prepare(h: Harness, runId: string, workspaceId = "w1") {
+  const response = await h.workspace.fetch(post("/rpc/checkpoint/prepare", { workspaceId, runId }));
+  expect(response.status, await response.clone().text()).toBe(200);
+  return v.parse(CheckpointOk, await response.json());
+}
+
+/** Build the signed pack request the machine forwards. */
+async function packRequest(
+  runId: string,
+  bytes: Uint8Array,
+  key: Awaited<ReturnType<typeof deviceKeyFromSeed>>,
+  overrides: { readonly bodyHash?: string; readonly contentType?: string } = {},
+): Promise<Request> {
+  const path = "/rpc/checkpoint/" + runId + "/pack";
+  const headers = await signDeviceHeaders(
+    { machineId: "m1", method: "POST", path, body: bytes },
+    key,
+  );
+  if (overrides.bodyHash !== undefined) headers[BODY_HASH_HEADER] = overrides.bodyHash;
+  return new Request("https://workspace" + path, {
+    method: "POST",
+    headers: {
+      ...headers,
+      "content-type": overrides.contentType ?? "application/x-git-pack",
+      "content-length": String(bytes.byteLength),
+    },
+    body: new Uint8Array(bytes),
+  });
+}
+
+/** A harness whose object has the machine enrolled, so a signed pack can verify. */
+interface CheckpointHarness {
+  readonly workspace: Workspace;
+  readonly journal: Journal;
+  readonly machine: ReturnType<typeof fakeMachine>;
+  readonly packs: FakePackBucket;
+  readonly sql: SqlRunner;
+  readonly key: Awaited<ReturnType<typeof deviceKeyFromSeed>>;
+  /** Read the object's real tables, for an assertion about what was stored. */
+  rows(query: string, ...bindings: readonly (string | number)[]): Record<string, SqlValue>[];
+  advance(ms: number): void;
+  readonly close: () => void;
+}
+
+async function harnessWithEnrolledMachine(
+  key?: Awaited<ReturnType<typeof deviceKeyFromSeed>>,
+): Promise<CheckpointHarness> {
+  let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+  const opened = openSqliteState();
+  const machine = fakeMachine();
+  const packs = fakePackBucket();
+  const workspace = new Workspace(opened.state, {
+    now: () => nowMs,
+    leaseTtlMs: 1_000,
+    packs,
+    files: machine,
+  });
+  const journal = new Journal(opened.state.storage, { now: () => nowMs });
+  const deviceKey = key ?? (await deviceKeyFromSeed(7));
+  enrollMachine(opened.sql, "m1", deviceKey.publicKey);
+  return {
+    workspace,
+    journal,
+    machine,
+    packs,
+    sql: opened.sql,
+    key: deviceKey,
+    rows: opened.rows,
+    advance(ms) {
+      nowMs += ms;
+    },
+    close: opened.close,
+  };
+}
+
+/** A deterministic pack of `size` bytes: distinct bytes, so a byte-identity check means something. */
+function packBytes(size: number): Uint8Array {
+  const bytes = new Uint8Array(size);
+  for (let index = 0; index < size; index += 1) bytes[index] = (index * 7 + 3) % 251;
+  return bytes;
+}
+
+/** The pack key a prepare answer names; the test asserts it rather than computes it. */
+function packKeyOf(prepare: CheckpointPrepareResult): string {
+  return checkpointPackKey(prepare.commit);
+}
+
+/** How many checkpoint rows a Run has (0 or 1 by the table's primary key). */
+function checkpointRows(h: CheckpointHarness, runId: string): number {
+  return h.rows("SELECT run_id FROM checkpoint_run WHERE run_id = ?", runId).length;
+}
+
+/** The stored record's text for a Run, or null when complete has not written it. */
+function checkpointRecordOfRun(h: CheckpointHarness, runId: string): string | null {
+  const row = h.rows("SELECT record FROM checkpoint_run WHERE run_id = ?", runId)[0];
+  if (row === undefined || row.record === undefined || row.record === null) return null;
+  return String(row.record);
+}
+
+// C1: Catches a checkpoint acknowledged without its pack in the store, or the watermark moving
+// before the record that says what it covers.
+test("prepare, pack, and complete put the pack in the store and move the watermark", async () => {
+  const h = await harnessWithEnrolledMachine();
+  try {
+    const { workspace, machine, packs, key } = h;
+    await acquire(workspace, leaseBody());
+    const prepared = await prepare(h, "run-1");
+    const checkpoint = v.parse(CheckpointPrepareResultSchema, prepared.checkpoint);
+    expect(checkpoint).toMatchObject({ runId: "run-1", created: true, packBytes: 8 });
+    expect(machine.checkpoints).toStrictEqual(["run-1"]);
+    expect(packKeyOf(checkpoint)).toBe(checkpointPackKey(checkpoint.commit));
+    expect((await h.journal.read()).entries.length).toBe(0);
+
+    const bytes = packBytes(8);
+    const uploaded = await workspace.fetch(await packRequest("run-1", bytes, key));
+    expect(uploaded.status, await uploaded.clone().text()).toBe(200);
+    const answer = v.parse(PackOk, await uploaded.json());
+    expect(answer).toStrictEqual({
+      ok: true,
+      runId: "run-1",
+      packKey: checkpointPackKey(checkpoint.commit),
+      receivedBytes: 8,
+      stored: true,
+    });
+    // The bytes in the store are the bytes that were sent, byte for byte.
+    expect([...(packs.bytes(checkpointPackKey(checkpoint.commit)) ?? [])]).toStrictEqual([
+      ...bytes,
+    ]);
+
+    const completed = await workspace.fetch(
+      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 5 }),
+    );
+    expect(completed.status, await completed.clone().text()).toBe(200);
+    const done = v.parse(CheckpointOk, await completed.json());
+    expect(done.watermark).toBe(5);
+    const record = v.parse(CheckpointRecordSchema, done.checkpoint);
+    expect(record).toMatchObject({
+      runId: "run-1",
+      commit: checkpoint.commit,
+      packKey: checkpointPackKey(checkpoint.commit),
+      packBytes: 8,
+      maxBlobBytes: 4,
+      mirror: { status: "pending" },
+    });
+    expect(h.journal.watermark()?.throughSeq).toBe(5);
+  } finally {
+    h.close();
+  }
+});
+
+// C2: Catches a retried upload writing the pack a second time (a second Class A write) or
+// answering with a different key.
+test("a retried pack upload stores nothing a second time", async () => {
+  const h = await harnessWithEnrolledMachine();
+  try {
+    const { workspace, packs, key } = h;
+    await acquire(workspace, leaseBody());
+    const checkpoint = v.parse(
+      CheckpointPrepareResultSchema,
+      (await prepare(h, "run-1")).checkpoint,
+    );
+    const bytes = packBytes(8);
+    const first = await workspace.fetch(await packRequest("run-1", bytes, key));
+    const second = await workspace.fetch(await packRequest("run-1", bytes, key));
+    expect(v.parse(PackOk, await first.json()).stored).toBe(true);
+    const again = v.parse(PackOk, await second.json());
+    expect(again.stored).toBe(false);
+    expect(again.packKey).toBe(checkpointPackKey(checkpoint.commit));
+    expect(packs.puts).toStrictEqual([checkpointPackKey(checkpoint.commit)]);
+  } finally {
+    h.close();
+  }
+});
+
+// C3: Catches a pack stored without a valid device signature, over the limit, or whose bytes are
+// not the ones the machine signed (the three ways a different pack could reach R2).
+test("an unsigned, oversized, or altered pack is refused and never stored", async () => {
+  const h = await harnessWithEnrolledMachine();
+  try {
+    const { workspace, packs, key } = h;
+    await acquire(workspace, leaseBody());
+    await prepare(h, "run-1");
+    const bytes = packBytes(8);
+
+    // Unsigned: the same request without the six signed headers.
+    const unsigned = await workspace.fetch(
+      new Request("https://workspace/rpc/checkpoint/run-1/pack", {
+        method: "POST",
+        headers: { "content-type": "application/x-git-pack", "content-length": "8" },
+        body: new Uint8Array(bytes),
+      }),
+    );
+    expect(unsigned.status).toBe(401);
+
+    // Signed by a key the machine is not enrolled with.
+    const intruder = await deviceKeyFromSeed(99);
+    const forged = await workspace.fetch(await packRequest("run-1", bytes, intruder));
+    expect(forged.status).toBe(401);
+
+    // The bytes are the signed ones but the machine's repeated hash names other bytes: a header
+    // changed in transit must not make the object store a pack the signature does not cover.
+    const altered = await workspace.fetch(
+      await packRequest("run-1", bytes, key, { bodyHash: sha256Hex(new Uint8Array(8)) }),
+    );
+    expect(altered.status).toBe(401);
+
+    // Over the limit: the declared length is refused before the body is read.
+    const over = await workspace.fetch(
+      new Request("https://workspace/rpc/checkpoint/run-1/pack", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-git-pack",
+          "content-length": String(MAX_CHECKPOINT_PACK_BYTES + 1),
+        },
+        body: "",
+      }),
+    );
+    expect(over.status).toBe(413);
+    expect(v.parse(ProtocolFailure, await over.json()).code).toBe("payload_too_large");
+    expect(packs.puts).toStrictEqual([]);
+  } finally {
+    h.close();
+  }
+});
+
+// C4: Catches complete acknowledging a checkpoint whose pack never reached the store, or a
+// watermark left moved with no record after the store failed.
+test("complete without the pack is refused, and the watermark does not move", async () => {
+  const h = await harnessWithEnrolledMachine();
+  try {
+    const { workspace } = h;
+    await acquire(workspace, leaseBody());
+    await prepare(h, "run-1");
+    const refused = await workspace.fetch(
+      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 5 }),
+    );
+    expect(refused.status).toBe(409);
+    expect(v.parse(ProtocolFailure, await refused.json()).code).toBe("conflict");
+    expect(h.journal.watermark()).toBeUndefined();
+    expect(await checkpointRecordOfRun(h, "run-1")).toBeNull();
+  } finally {
+    h.close();
+  }
+});
+
+// C4 (retry): Catches a retried complete writing a second record or a second truncation.
+test("a retried complete answers the recorded checkpoint", async () => {
+  const h = await harnessWithEnrolledMachine();
+  try {
+    const { workspace, key } = h;
+    await acquire(workspace, leaseBody());
+    await prepare(h, "run-1");
+    await workspace.fetch(await packRequest("run-1", packBytes(8), key));
+    const first = v.parse(
+      CheckpointOk,
+      await (
+        await workspace.fetch(
+          post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 5 }),
+        )
+      ).json(),
+    );
+    const retried = v.parse(
+      CheckpointOk,
+      await (
+        await workspace.fetch(
+          post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 5 }),
+        )
+      ).json(),
+    );
+    expect(retried.checkpoint).toStrictEqual(first.checkpoint);
+    expect(retried.watermark).toBe(5);
+    expect(await checkpointRows(h, "run-1")).toBe(1);
+  } finally {
+    h.close();
+  }
+});
+
+// Catches a machine that did not make a checkpoint being answered as if it had: prepare must
+// return a typed failure and write nothing.
+test("a failed machine checkpoint is a refusal and records no checkpoint", async () => {
+  const h = await harnessWithEnrolledMachine();
+  try {
+    const { workspace, machine } = h;
+    await acquire(workspace, leaseBody());
+    machine.checkpointNext("fail");
+    const response = await workspace.fetch(
+      post("/rpc/checkpoint/prepare", { workspaceId: "w1", runId: "run-1" }),
+    );
+    expect(response.status).toBe(503);
+    expect(v.parse(ProtocolFailure, await response.json()).code).toBe("unavailable");
+    expect(await checkpointRows(h, "run-1")).toBe(0);
+  } finally {
+    h.close();
+  }
+});
+
+// Catches the mirror's failure reaching the checkpoint's answer: a push that failed is recorded
+// on the checkpoint, and the checkpoint stays answered.
+test("a failed mirror is recorded and does not fail the checkpoint", async () => {
+  const h = await harnessWithEnrolledMachine();
+  try {
+    const { workspace, key } = h;
+    await acquire(workspace, leaseBody());
+    await prepare(h, "run-1");
+    await workspace.fetch(await packRequest("run-1", packBytes(8), key));
+    await workspace.fetch(
+      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 5 }),
+    );
+    const moved = await workspace.fetch(
+      post("/rpc/checkpoint/mirror", {
+        workspaceId: "w1",
+        runId: "run-1",
+        status: "failed",
+        failure: "network",
+      }),
+    );
+    expect(moved.status, await moved.clone().text()).toBe(200);
+    const record = v.parse(
+      CheckpointRecordSchema,
+      v.parse(MirrorOk, await moved.json()).checkpoint,
+    );
+    expect(record.mirror).toMatchObject({ status: "failed", failure: "network" });
+    // A retry moves failed back to pending; the checkpoint's answer was never touched.
+    const retried = await workspace.fetch(
+      post("/rpc/checkpoint/mirror", { workspaceId: "w1", runId: "run-1", status: "pending" }),
+    );
+    expect(retried.status, await retried.clone().text()).toBe(200);
+    const mirrored = await workspace.fetch(
+      post("/rpc/checkpoint/mirror", { workspaceId: "w1", runId: "run-1", status: "mirrored" }),
+    );
+    expect(mirrored.status, await mirrored.clone().text()).toBe(200);
+    // Mirrored is terminal: the table refuses a move back to failed.
+    const again = await workspace.fetch(
+      post("/rpc/checkpoint/mirror", { workspaceId: "w1", runId: "run-1", status: "failed" }),
+    );
+    expect(again.status).toBe(409);
+    expect(h.journal.watermark()?.throughSeq).toBe(5);
+  } finally {
+    h.close();
+  }
+});
+// C4: Catches a complete that writes the record and then leaves the watermark untouched when the
+// truncation refuses (a pending intent below the seq): the record would claim a checkpoint whose
+// Journal was not moved, and restore could not tell which entries it covers.
+test("a complete whose watermark cannot move leaves no record", async () => {
+  const h = await harnessWithEnrolledMachine();
+  try {
+    const { workspace, key, machine } = h;
+    await acquire(workspace, leaseBody());
+    // An intent with no outcome is the evidence a watermark may not pass (INV-04): the machine
+    // answers nothing, so the write stays pending.
+    machine.failNext();
+    // An undecided write is recorded as `unknown`, which is settled evidence: it does not block
+    // the watermark. A pending intent is made by a crash between the intent and the outcome, so
+    // the test writes that shape directly.
+    const pendingWrite = await workspace.fetch(
+      post("/rpc/apply", applyBody({ path: "pending.txt" })),
+    );
+    expect(pendingWrite.status).toBe(200);
+    const pending = h.journal.appendIntent({
+      operationId: operationId("op-pending"),
+      path: "pending.txt",
+      expectedVersion: "absent",
+    });
+    expect((await pending).status).toBe("appended");
+    await prepare(h, "run-1");
+    const bytes = packBytes(8);
+    const uploaded = await workspace.fetch(await packRequest("run-1", bytes, key));
+    expect(uploaded.status, await uploaded.clone().text()).toBe(200);
+    const refused = await workspace.fetch(
+      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 100 }),
+    );
+    expect(refused.status).toBe(409);
+    expect(h.journal.watermark()).toBeUndefined();
+    expect(await checkpointRecordOfRun(h, "run-1")).toBeNull();
   } finally {
     h.close();
   }

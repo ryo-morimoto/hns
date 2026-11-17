@@ -41,6 +41,12 @@ const alias: readonly SourceAlias[] = [
     find: /^@hns\/workspace\/sandbox$/,
     replacement: source("./packages/workspace/src/sandbox.ts"),
   },
+  {
+    // The pack's key is the object store's, so the Workspace object reads it from there rather
+    // than spelling `checkpoints/<commit>.pack` a second time.
+    find: /^@hns\/workspace\/objects$/,
+    replacement: source("./packages/workspace/src/objects.ts"),
+  },
   { find: /^@hns\/agent$/, replacement: source("./packages/agent/src/index.ts") },
   {
     find: /^@hns\/agent\/session$/,

@@ -33,6 +33,17 @@
 - 呼ぶのは Run の終了・中断・lease 解放・SIGTERM。crash は対象外（durability §3.3）。
 - restore は 0155（未実装）。この契約の入出力（commit / ref / packKey / pack bytes / packBytes / maxBlobBytes、読み戻しは `readCheckpointPack`）を変えるときは、公開面の変更になる。
 
+### 調停（Workspace DO、0245）
+
+Worker は checkpoint を 3 つの RPC に分けて Workspace DO に渡す（`/rpc/checkpoint/prepare` / `/rpc/checkpoint/<runId>/pack` / `/rpc/checkpoint/complete`）。pack は JSON に載せない。
+
+- **prepare** は machine の `checkpoint` operation を control-plane 鍵で署名して呼び、metadata（`CheckpointPrepareResult`）を得る。DO はその答えを `checkpoint_run` 表に残す。machine が checkpoint を作らなかった場合は型付きの失敗（`denied` / `503`）で、何も書かず ack もしない。
+- **pack** は machine が **device 鍵**で署名した binary。順序は content-type → `content-length`（64MiB 超は本文を読む前に 413）→ 本文を宣言長まで読む → device 署名を body に対して検証 → `x-hns-body-hash` と実バイトの sha256 を照合 → prepare の `packBytes` と一致 → R2 の `checkpoints/<commit>.pack` に put。key は prepare の commit から決め、クライアントの申告は使わない。既存 key は head で見て put しない（再送は put 回数を増やさない）。
+- **署名の向き**: machine → Worker は device 鍵（`machines.public_key`、0148 が持つ）。Worker → machine は control-plane 鍵。署名メッセージは両方向で同じ `signatureMessage`（method・path・bodyHash を含む）。content-type / content-length は署名の外なので、pack は実バイトの hash で照合する。
+- **complete** は pack が R2 にあることを確かめてから、**watermark の書き込みと `CheckpointRecord`（mirror: pending、packBytes、maxBlobBytes）を 1 トランザクション**で書く。pack が無い complete は 409。ack を失った complete の再送は記録済みの答えを返す。
+- **mirror** は ack の後に非同期（`/rpc/checkpoint/mirror`）。遷移は core の遷移表に従い、失敗しても checkpoint の答えは変わらない。Artifacts への push は 0246。
+- 呼び手（Run 終了・中断・lease 解放・SIGTERM のどれが prepare を起動するか）は未確定（U-01、Session 側）。
+
 ## 変わったとき
 
 版の語彙・apply の段・checkpoint の形を変えるなら、このファイルと `files.ts` / `checkpoint.ts` の TSDoc を同時に。INV-03 / INV-04 を弱めるには決定の追記が要る。

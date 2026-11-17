@@ -1,5 +1,6 @@
 import { ProjectIdSchema, type Project } from "@hns/core";
 import * as v from "valibot";
+import { createCheckpointFace } from "../checkpoint/face.ts";
 import { createFilesFace } from "../files/content.ts";
 import { createGraphQLFace } from "../graphql/index.ts";
 import { httpEntry } from "../obs/log.ts";
@@ -167,6 +168,7 @@ const dependencies: HandlerDependencies = {
   ws: forwardToSession,
   obs: forwardObs,
   files: createFilesFace(),
+  checkpoints: createCheckpointFace(),
   onResponse: recordResponse,
 };
 

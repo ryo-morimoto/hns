@@ -659,38 +659,53 @@ export class Journal {
    * referenced are left for the retention GC.
    */
   async writeWatermark(throughSeq: number): Promise<WatermarkWrite> {
+    return await this.#storage.transaction(async () =>
+      this.writeWatermarkInTransaction(throughSeq),
+    );
+  }
+
+  /**
+   * Write the checkpoint watermark inside the caller's transaction.
+   *
+   * @param throughSeq - Every entry at or below this sequence is in the checkpoint.
+   * @returns The watermark and how many settled entries were deleted.
+   * @throws RangeError when `throughSeq` is not a non-negative integer.
+   * @throws {@link JournalWatermarkError} when the watermark would move backwards or pass an
+   * intent that has no outcome.
+   *
+   * @remarks
+   * The Workspace object calls this from the transaction that also writes the checkpoint record,
+   * so the sequence truncation, the watermark, and the record commit together: a crash cannot
+   * leave the Journal truncated without the record of what it was truncated to. The checks are
+   * the same as {@link writeWatermark}'s, which wraps this.
+   */
+  writeWatermarkInTransaction(throughSeq: number): WatermarkWrite {
     if (!Number.isSafeInteger(throughSeq) || throughSeq < 0) {
       throw new RangeError("the journal watermark must be a non-negative integer");
     }
-    const written: WatermarkWrite = await this.#storage.transaction(async () => {
-      const current = this.#watermark();
-      if (current !== undefined && throughSeq < current.throughSeq) {
-        throw new JournalWatermarkError(
-          "the journal watermark never decreases: " + String(current.throughSeq),
-        );
-      }
-      const pending = this.#firstPendingIntent(throughSeq);
-      if (pending !== undefined) {
-        throw new JournalWatermarkError(
-          "the watermark would pass an unsettled intent at seq " + String(pending),
-        );
-      }
-      const watermark: JournalWatermark = {
-        throughSeq,
-        at: isoTimestamp(new Date(this.#clock()).toISOString()),
-      };
-      this.#setMeta("watermark", JSON.stringify(watermark));
-      const settled = this.#all(
-        "SELECT seq FROM journal WHERE seq <= ? AND kind IN ('intent', 'outcome')",
-        throughSeq,
+    const current = this.#watermark();
+    if (current !== undefined && throughSeq < current.throughSeq) {
+      throw new JournalWatermarkError(
+        "the journal watermark never decreases: " + String(current.throughSeq),
       );
-      this.#exec(
-        "DELETE FROM journal WHERE seq <= ? AND kind IN ('intent', 'outcome')",
-        throughSeq,
+    }
+    const pending = this.#firstPendingIntent(throughSeq);
+    if (pending !== undefined) {
+      throw new JournalWatermarkError(
+        "the watermark would pass an unsettled intent at seq " + String(pending),
       );
-      return { watermark, truncated: settled.length };
-    });
-    return written;
+    }
+    const watermark: JournalWatermark = {
+      throughSeq,
+      at: isoTimestamp(new Date(this.#clock()).toISOString()),
+    };
+    this.#setMeta("watermark", JSON.stringify(watermark));
+    const settled = this.#all(
+      "SELECT seq FROM journal WHERE seq <= ? AND kind IN ('intent', 'outcome')",
+      throughSeq,
+    );
+    this.#exec("DELETE FROM journal WHERE seq <= ? AND kind IN ('intent', 'outcome')", throughSeq);
+    return { watermark, truncated: settled.length };
   }
 
   /**

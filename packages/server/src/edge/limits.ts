@@ -1,3 +1,5 @@
+import { MAX_CHECKPOINT_PACK_BYTES } from "@hns/core";
+
 /** The per-request budgets the edge enforces. */
 export interface EdgeLimits {
   /** Request body size in bytes, counted after decoding. */
@@ -8,6 +10,14 @@ export interface EdgeLimits {
   readonly maxRowsPerRequest: number;
   /** Rows a single list resolver may return. */
   readonly maxRowsPerList: number;
+  /**
+   * The largest checkpoint pack a request may carry: the checkpoint contract's 64 MiB.
+   *
+   * @remarks
+   * Separate from {@link maxBodyBytes} because a pack is a binary body the machine sends, not a
+   * JSON request a browser sends; the two are bounded by different contracts.
+   */
+  readonly maxPackBytes: number;
 }
 
 /**
@@ -24,6 +34,7 @@ export const DEFAULT_LIMITS: EdgeLimits = {
   maxRequestMs: 10_000,
   maxRowsPerRequest: 500,
   maxRowsPerList: 100,
+  maxPackBytes: MAX_CHECKPOINT_PACK_BYTES,
 };
 
 /** A per-request row counter shared by resolvers. */

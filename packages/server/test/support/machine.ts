@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import type {
+  CheckpointPrepareResult,
   MachineReadResult,
   MachineRefusalCode,
   MachineWriteRequest,
   MachineWriteResult,
 } from "@hns/core";
+import { checkpointPackKey } from "@hns/workspace/objects";
 import type { MachineCall, MachineFiles, MachineFilesAnswer } from "../../src/do/machine.ts";
 
 /** The sha256 version of some text, in the spelling the workspace uses. */
@@ -45,6 +47,25 @@ export interface FakeMachine extends MachineFiles {
   denyNext(refusal: MachineRefusalCode): void;
   /** Make the next answer a too-large refusal (the file or the body is beyond the bound). */
   tooLargeNext(): void;
+  /** The checkpoint answers this fake gave, in order. */
+  readonly checkpoints: string[];
+  /**
+   * What the next checkpoint answers, or `"fail"` for a transport failure.
+   *
+   * @remarks
+   * The checkpoint is a metadata answer (the commit, the pack's key, the sizes), so the fake
+   * builds it without a repository. A test that needs a particular commit or size sets it here.
+   */
+  checkpointNext(answer: FakeCheckpoint | "fail"): void;
+}
+
+/** What the fake machine's checkpoint answers with, apart from the identity it fills in. */
+interface FakeCheckpoint {
+  readonly commit: string;
+  readonly objectCount?: number;
+  readonly packBytes?: number;
+  readonly maxBlobBytes?: number;
+  readonly created?: boolean;
 }
 
 /**
@@ -57,6 +78,8 @@ export function fakeMachine(): FakeMachine {
   const raw = new Map<string, string>();
   const writes: FakeWrite[] = [];
   const reads: string[] = [];
+  const checkpoints: string[] = [];
+  let checkpoint: FakeCheckpoint | "fail" | undefined;
   let failNext = false;
   let denial: MachineRefusalCode | undefined;
   let tooLarge = false;
@@ -83,6 +106,10 @@ export function fakeMachine(): FakeMachine {
   return {
     writes,
     reads,
+    checkpoints,
+    checkpointNext(answer) {
+      checkpoint = answer;
+    },
     seed(path, content) {
       files.set(path, content);
       raw.delete(path);
@@ -202,6 +229,39 @@ export function fakeMachine(): FakeMachine {
           content: bytes.toString("base64"),
         },
       };
+    },
+    async checkpoint(
+      request: { readonly runId: string },
+      _call: MachineCall,
+    ): Promise<MachineFilesAnswer<CheckpointPrepareResult>> {
+      checkpoints.push(request.runId);
+      return await serialized(() => {
+        if (checkpoint === "fail") {
+          checkpoint = undefined;
+          return failure("unavailable", "test transport failure");
+        }
+        const answer = checkpoint;
+        checkpoint = undefined;
+        // A deterministic commit per Run, so a test knows the key before it asks.
+        const commit =
+          answer?.commit ??
+          createHash("sha1")
+            .update("checkpoint:" + request.runId)
+            .digest("hex");
+        return {
+          ok: true as const,
+          result: {
+            runId: request.runId,
+            ref: "refs/hns/checkpoints/" + request.runId,
+            commit,
+            packKey: checkpointPackKey(commit),
+            objectCount: answer?.objectCount ?? 1,
+            packBytes: answer?.packBytes ?? 8,
+            maxBlobBytes: answer?.maxBlobBytes ?? 4,
+            created: answer?.created ?? true,
+          },
+        };
+      });
     },
   };
 }
