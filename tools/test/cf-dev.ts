@@ -57,7 +57,35 @@ const FILE_MODE = 0o600;
 const DIR_MODE = 0o700;
 
 /** Whether the cf CLI is installed, so a suite can skip instead of failing where it is not. */
-export const isCfDevInstalled = (): boolean => existsSync(CF);
+/**
+ * A requirement the release gate makes mandatory.
+ *
+ * @remarks
+ * Locally, a missing `cf` or `bubblewrap` skips the suites that need it, which is convenient on a
+ * machine without the tools. In CI that skip is a hole: the job is green while the integration
+ * tier did not run. When the matching environment variable is set (`HNS_REQUIRE_CF`,
+ * `HNS_REQUIRE_BWRAP`), a missing tool is a failure instead of a skip.
+ */
+export const requireTool = (name: "cf" | "bwrap", installed: boolean, why: string): boolean => {
+  const required = process.env[name === "cf" ? "HNS_REQUIRE_CF" : "HNS_REQUIRE_BWRAP"] === "1";
+  if (installed) return true;
+  if (required) throw new Error(name + " is required here but unavailable: " + why);
+  return false;
+};
+
+/** Whether `cf` (cloudflare dev) is installed; throws when the release gate requires it. */
+export const isCfDevInstalled = (): boolean =>
+  requireTool("cf", existsSync(CF), "cf not found at " + CF);
+
+/**
+ * Whether bubblewrap is available; throws when the release gate requires it.
+ *
+ * @param available - The sandbox probe's verdict (`detectSandbox`).
+ * @param why - The probe's reason, for the failure message.
+ * @returns The same verdict, so a suite can write `if (!requireBwrap(status.available, status.reason)) skip`.
+ */
+export const requireBwrap = (available: boolean, why: string): boolean =>
+  requireTool("bwrap", available, why);
 
 /** How to start one cf dev. */
 export interface CfDevOptions {

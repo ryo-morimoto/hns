@@ -16,6 +16,7 @@ import {
   resolveShell,
 } from "../../src/sandbox.ts";
 import type { SandboxReport } from "../../src/sandbox.ts";
+import { requireBwrap } from "../../../../tools/test/cf-dev.ts";
 
 const base = await mkdtemp(join(tmpdir(), "hns-sandbox-"));
 
@@ -132,8 +133,9 @@ test("exec is refused when the sandbox is unavailable", async () => {
 
 test("exec runs inside the root and cannot write outside", async (t) => {
   const status = await detected();
-  if (!status.available) {
-    t.skip("bubblewrap is unavailable: " + status.reason);
+  const why = status.available ? "" : status.reason;
+  if (!requireBwrap(status.available, why)) {
+    t.skip("bubblewrap is unavailable: " + why);
     return;
   }
   const connection = new Connection({ command: [localDaemon()] });
@@ -173,8 +175,9 @@ test("exec runs inside the root and cannot write outside", async (t) => {
 // Catches: bash inherited the server's environment, so API keys were visible to the agent.
 test("the sandbox clears the server environment and points HOME at the root", async (t) => {
   const status = await detected();
-  if (!status.available) {
-    t.skip("bubblewrap is unavailable: " + status.reason);
+  const why = status.available ? "" : status.reason;
+  if (!requireBwrap(status.available, why)) {
+    t.skip("bubblewrap is unavailable: " + why);
     return;
   }
   const root = join(base, "root-env");
@@ -196,8 +199,10 @@ test("the sandbox clears the server environment and points HOME at the root", as
 // Catches: the read-only root bind exposed the key files to the agent's shell.
 test("a hidden directory is masked inside the sandbox", async (t) => {
   const status = await detected();
-  if (!status.available) {
-    t.skip("bubblewrap is unavailable: " + status.reason);
+  // A ready probe has no reason; the skip message needs one either way.
+  const why = status.available ? "" : status.reason;
+  if (!requireBwrap(status.available, why)) {
+    t.skip("bubblewrap is unavailable: " + why);
     return;
   }
   const root = join(base, "root-hide");

@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { AgentEvent } from "../../src/index.ts";
 import { sandboxStatus, withAgent } from "../support.ts";
+import { requireBwrap } from "../../../../tools/test/cf-dev.ts";
 
 interface Outcome {
   readonly ok: boolean;
@@ -24,8 +25,9 @@ const resultsFor = (events: readonly AgentEvent[], tool: string): Outcome[] =>
 // Catches: the bash tool escaping the workspace root through the sandbox.
 test("bash runs inside the root and cannot write outside it", async (t) => {
   const status = await sandboxStatus();
-  if (!status.available) {
-    t.skip("bubblewrap is unavailable: " + status.reason);
+  const why = status.available ? "" : status.reason;
+  if (!requireBwrap(status.available, why)) {
+    t.skip("bubblewrap is unavailable: " + why);
     return;
   }
   await withAgent(async ({ agent, events, root, faux }) => {
@@ -48,8 +50,9 @@ test("bash runs inside the root and cannot write outside it", async (t) => {
 // Catches: bash was registered bare, so only the workspace tools emitted observations.
 test("read_file, write_file, and bash each report a call and a result", async (t) => {
   const status = await sandboxStatus();
-  if (!status.available) {
-    t.skip("bubblewrap is unavailable: " + status.reason);
+  const why = status.available ? "" : status.reason;
+  if (!requireBwrap(status.available, why)) {
+    t.skip("bubblewrap is unavailable: " + why);
     return;
   }
   await withAgent(async ({ agent, events, faux, workspace }) => {
@@ -84,8 +87,9 @@ test("read_file, write_file, and bash each report a call and a result", async (t
 // Catches: a command that exited nonzero was recorded as a success.
 test("a nonzero exit is a failed tool result", async (t) => {
   const status = await sandboxStatus();
-  if (!status.available) {
-    t.skip("bubblewrap is unavailable: " + status.reason);
+  const why = status.available ? "" : status.reason;
+  if (!requireBwrap(status.available, why)) {
+    t.skip("bubblewrap is unavailable: " + why);
     return;
   }
   await withAgent(async ({ agent, events, faux }) => {
@@ -107,8 +111,9 @@ test("a nonzero exit is a failed tool result", async (t) => {
 // Catches: an execution that threw left its call without a result.
 test("a command that times out still reports a failed result", async (t) => {
   const status = await sandboxStatus();
-  if (!status.available) {
-    t.skip("bubblewrap is unavailable: " + status.reason);
+  const why = status.available ? "" : status.reason;
+  if (!requireBwrap(status.available, why)) {
+    t.skip("bubblewrap is unavailable: " + why);
     return;
   }
   await withAgent(async ({ agent, events, faux }) => {
