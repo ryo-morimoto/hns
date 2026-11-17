@@ -45,10 +45,13 @@ test("a tree entry names one of the object kinds a reviewer reads", () => {
   const entry: ReviewTreeEntry = {
     path: "src/a.ts",
     kind: "blob",
+    mode: "100644",
     object: "1".repeat(40),
     size: 12,
   };
   expect(v.parse(ReviewTreeEntrySchema, entry)).toStrictEqual(entry);
+  // A mode outside git's closed set is refused, so a source cannot invent one.
+  expect(() => v.parse(ReviewTreeEntrySchema, { ...entry, mode: "100600" })).toThrow(v.ValiError);
 });
 
 // Catches: a commit read that loses its tree id or its time, so a review cannot name the root it

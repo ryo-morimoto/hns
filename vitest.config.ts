@@ -47,6 +47,12 @@ const alias: readonly SourceAlias[] = [
     find: /^@hns\/workspace\/objects$/,
     replacement: source("./packages/workspace/src/objects.ts"),
   },
+  {
+    // The pack reader is its own subpath because it imports node:zlib; the root entry stays free
+    // of it so the Worker-facing imports keep working.
+    find: /^@hns\/workspace\/pack$/,
+    replacement: source("./packages/workspace/src/pack.ts"),
+  },
   { find: /^@hns\/agent$/, replacement: source("./packages/agent/src/index.ts") },
   {
     find: /^@hns\/agent\/session$/,

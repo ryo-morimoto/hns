@@ -27,6 +27,11 @@
       "types": "./dist/objects.d.ts",
       "import": "./dist/objects.js"
     },
+    "./pack": {
+      "source": "./src/pack.ts",
+      "types": "./dist/pack.d.ts",
+      "import": "./dist/pack.js"
+    },
     "./sandbox": {
       "source": "./src/sandbox.ts",
       "types": "./dist/sandbox.d.ts",

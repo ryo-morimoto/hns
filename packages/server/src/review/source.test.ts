@@ -20,6 +20,7 @@ const commit = (id: string, message: string): ReviewCommit => ({
 const blob = (path: string, object: string, size: number): ReviewTreeEntry => ({
   path,
   kind: "blob",
+  mode: "100644",
   object,
   size,
 });

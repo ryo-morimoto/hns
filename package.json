@@ -45,6 +45,19 @@
           "mkfifo"
         ]
       },
+      "packages/server": {
+        "entry": [
+          "src/**/*.test.ts",
+          "test/integration/**/*.test.ts"
+        ],
+        "ignoreExportsUsedInFile": true,
+        "ignoreIssues": {
+          "src/review/*.ts": [
+            "exports",
+            "types"
+          ]
+        }
+      },
       "packages/web": {
         "entry": [
           "src/**/*.test.{ts,tsx}"

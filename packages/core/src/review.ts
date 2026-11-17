@@ -58,12 +58,28 @@ export interface ReviewCommit extends ReviewCommitFields {}
 /** One entry of one directory in a tree, as `ls-tree` names them. */
 export const REVIEW_TREE_ENTRY_KINDS = ["blob", "tree", "commit"] as const;
 
+/**
+ * The git file modes a tree entry may carry.
+ *
+ * @remarks
+ * A mode is part of git's object model, not an inference: `100644` and `100755` are a file, `120000`
+ * is a symlink whose blob is its target, `40000` is a directory, and `160000` is a submodule (a
+ * commit in another repository). A review shows the mode so that a caller can tell a symlink from
+ * the file it names without guessing from the entry kind.
+ */
+export const REVIEW_TREE_ENTRY_MODES = ["100644", "100755", "120000", "40000", "160000"] as const;
+
+/** One git file mode a tree entry may carry. */
+export type ReviewTreeEntryMode = (typeof REVIEW_TREE_ENTRY_MODES)[number];
+
 /** One git object type a tree entry may name. Symlinks and submodules are not entries a reviewer reads. */
 export type ReviewTreeEntryKind = (typeof REVIEW_TREE_ENTRY_KINDS)[number];
 
 interface ReviewTreeEntryFields {
   readonly path: string;
   readonly kind: ReviewTreeEntryKind;
+  /** The git file mode, which distinguishes a symlink or a submodule from a file. */
+  readonly mode: ReviewTreeEntryMode;
   readonly object: string;
   readonly size: number;
 }
@@ -118,6 +134,7 @@ export const ReviewCommitSchema: v.GenericSchema<unknown, ReviewCommit> = v.obje
 export const ReviewTreeEntrySchema: v.GenericSchema<unknown, ReviewTreeEntry> = v.object({
   path: v.pipe(v.string(), v.minLength(1)),
   kind: v.picklist(REVIEW_TREE_ENTRY_KINDS),
+  mode: v.picklist(REVIEW_TREE_ENTRY_MODES),
   object: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/u)),
   size: v.pipe(v.number(), v.integer(), v.minValue(0)),
 });
