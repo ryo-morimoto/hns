@@ -1,6 +1,6 @@
 # 0181: store の鮮度方針を画面ごとに決める
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D097
@@ -171,10 +171,6 @@ Relay の store は、満たせる要求を network に行かない。実測で�
 - C3 の「古い可能性」という文言は 0105 / 0106 のコピー。ここでは状態が隠れないこと（ラベル /
   `data-state` / 最後のデータ）を固定する。
 
-## Log
-
-- 2026-11-17: D097 で合意。U-01〜U-05 を決定し、`design: agreed` にした。
-
 ## 未確定 / follow-up
 
 - U-06: 会話・タスク一覧の購読。D097 の U-02 は一覧も購読すると決めたが、0159 の WS は 1 会話単位で、
@@ -226,3 +222,15 @@ Relay の store は、満たせる要求を network に行かない。実測で�
   - `npm run check` exit 0（38.5s、849 tests、web 93 tests）。HEAD でも再実行して exit 0（41.7s、
     849 tests）。1 回目は machine-integration の `cf dev` が port 衝突（"Address already in use"）で
     1 本落ち、再実行で緑。web の変更とは無関係の環境要因。
+
+- 2026-11-17: D097 で合意。U-01〜U-05 を決定し、`design: agreed` にした。
+- 2026-11-17: reviewer-0181 PASS（blocking 0）。main へ ff 統合（e52a728）。main の gate は exit 0（849 tests / 38.1s）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0181、blocking 0）
+- reviewer: reviewer-0181（この変更を書いていない別エージェント）
+- HEAD: e52a728（main に ff 統合）
+- 受入: 5/5。gate は exit 0（849 tests / 20 web files、main で 38.1s）。
+- 確認: 画面→方針の表（既定 store-or-network、既定を破る画面は reason 必須、store-only は型で排除）、projects は store-and-network + 30s + focus（29.999s store / 30.000s network）、workspace は mount ごとの read + 再接続 refetch + 開いている会話の live title、transcript は network-only（0105）。WS の snapshot title を store に書き、再接続 refetch 後に reapplyLiveTitles で巻き戻さない（snapshot → drop → reconnect → refetch を 1 本で固定）。focus の再取得は成功時だけ窓を更新。workspace の subscribes は false（0159 は会話単位）で、一覧の購読は U-06 に follow-up。
+- 非 blocking（低 8、follow-up）: U-03 / D097 の resync 文言が「送る」のまま（決定 6 は送らない理由あり）/ 別クライアント改名は socket が閉じるまで live title 優先 / fetchQuery の再検証が unmount で abort しない / reapplyLiveTitles が毎 render / forgetLiveTitle の component test がない / record の無い会話で empty sink の commitLocalUpdate / useScreenRead の TSDoc の in-flight 文言 / focus 失敗は silent で 0106 のバナー待ち。
