@@ -1,6 +1,6 @@
 # 0243: Artifacts B の契約（core 型・pack wire・ReviewSource）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D106 / docs/durability.md §5 / work/research/cloudflare-artifacts.md

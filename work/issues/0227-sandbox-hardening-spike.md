@@ -1,6 +1,6 @@
 # 0227: sandbox 追加硬化の実測（Landlock / netns+proxy / seccomp）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §12, work/research/tool-call-fastpath-security.md §8

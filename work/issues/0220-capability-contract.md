@@ -1,6 +1,6 @@
 # 0220: capability 契約（canonical call・grant・policy 型）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §3–§4
