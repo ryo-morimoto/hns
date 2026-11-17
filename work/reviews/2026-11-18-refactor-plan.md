@@ -43,3 +43,8 @@
 
 - request-id / 署名対象 / AbsentVersion / EVENT_NAMES / DetailSchema 導出 / 定数（core は 50、agent は 500 を INDEX_LIST_LIMIT）/ levelOfStatus / JOURNAL_UNKNOWN_REASONS を core に一元化。利用側の手写が消え、重複 grep 0。918 tests、SDL / codegen 差分 0、署名バイト列は diff 0（reviewer が signatureMessage と署名器のハンク無しを確認）。
 - 非 blocking: (1) AbsentVersion は実質 string の別名（Version はもともとブランド無しの string。`"absent"` リテラル主体の設計は follow-up）、(2) SIGNED_FIELDS は写し（Object.values で導出可）、(3) SIGNED_HEADER_BY_FIELD の as は satisfies で塞げる、(4) wire の間接が増えた、(5) `index.legacy_rows` が EVENT_NAMES に無い（L3 で拾う）、(6) wire の新テストは header 名変更時のみ検出。
+
+## L4 への申し送り（L3 から）
+
+- `index.*`（rebuilt / drain.failed / state.failed / legacy_rows）を `ObsLogEntry` で書くと、D1 障害時のテスト環境では 1 ターンで 1 行増える。cost の行数上限（`ROWS_PER_TURN = 10`）と測定窓の定義を L4 で決める: (a) 観測行を窓の外にする、(b) 上限を 11 にする、(c) 障害時は観測を落とす。あわせて `deploy/limits/RESULTS.md` の数値を更新する。
+- L3 は語彙・表・写像・型の整理まで。sink は付けない。
