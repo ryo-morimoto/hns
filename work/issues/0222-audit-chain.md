@@ -1,6 +1,6 @@
 # 0222: ツール決定の監査を Session DO に追記する（hash chain）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §8, §10
@@ -17,13 +17,13 @@ Session DO に `policy_audit` テーブルを作り、`tool.call` を実行前�
 
 ## Acceptance criteria
 
-- [ ] `policy_audit` の schema と append を `packages/server/src/do/audit.ts` に閉じる（seq / event_id / at / event / workspace_id / session_id / call_id / call_hash / args_hash / tool_id / tool_version / manifest_hash / decision_json / duration_ms / grant_id / prev_hash / hash）
-- [ ] `openDurableSession` が `openSession` に `onAudit`（`AuditSink`）を渡し、`tool.call` と `tool.result` を監査に書く
-- [ ] `tool.call` は実行前に書き、書けなければ実行しない。`tool.result` は結果を返す前に書く
-- [ ] `hash = sha256Hex(JCS(event から hash キーを除いたもの))`、`prevHash` は直前の hash、最初は null
-- [ ] `GET /rpc/policy/audit?limit=` が昇順で返す。limit は 1..200、既定 50
-- [ ] 生の args / 出力 / 秘密を保存しない
-- [ ] `npm test -w @hns/server` と typecheck が通る
+- [x] `policy_audit` の schema と append を `packages/server/src/do/audit.ts` に閉じる（seq / event_id / at / event / workspace_id / session_id / call_id / call_hash / args_hash / tool_id / tool_version / manifest_hash / decision_json / duration_ms / grant_id / prev_hash / hash）
+- [x] `openDurableSession` が `openSession` に `onAudit`（`AuditSink`）を渡し、`tool.call` と `tool.result` を監査に書く
+- [x] `tool.call` は実行前に書き、書けなければ実行しない。`tool.result` は結果を返す前に書く
+- [x] `hash = sha256Hex(JCS(event から hash キーを除いたもの))`、`prevHash` は直前の hash、最初は null
+- [x] `GET /rpc/policy/audit?limit=` が昇順で返す。limit は 1..200、既定 50
+- [x] 生の args / 出力 / 秘密を保存しない
+- [x] `npm test -w @hns/server` と typecheck が通る
 
 ## テスト条件
 
@@ -69,3 +69,11 @@ Session DO に `policy_audit` テーブルを作り、`tool.call` を実行前�
 ## Log
 
 - 2026-11-17: 作成（D091）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0222。blocking 0 / non-blocking 7 + 記録 1）
+- HEAD: 3a2399f（main に ff 統合）。gate は exit 0（1080 tests / 1 skip、main で 61.3s。1 回目は 0223n の既知 flake で落ち、再実行で green）。
+- 確認: `policy_audit` の hash chain（`HASHED_MEMBERS` 1 箇所 + 型証明、`verify` は全行再計算で保存 hash を信じない、prevHash の連鎖と seq の連続）、append は SELECT → hash → INSERT を 1 トランザクションで冪等、`tool.call` の失敗で実行しない / `afterTool` の失敗で結果を差し替え、読取 RPC は dependencies 経由（agent の公開 API を増やさない、limit 1..200・既定 50・昇順）、拒否行は hash のキーが不在（`callHash` / `argsHash` を core で optional 化）。実経路 probe（faux → ToolTask → 実 openSession → node:sqlite → verify → RPC）と mutation 4 件（著者 2 + レビュアー 2）で検出力を確認。
+- 非 blocking（follow-up）: `entryOf` の実行時の固定は型のみ / `withAudit` が拡張なしでも通る配線穴 / `denialOf` の二重実装 / テスト専用の export / 到達しない defensive code / 「秘密なし」の検査が部分一致 / list の TSDoc の clamp / T4 を `audit-probe` で代替。
+- 記録: `docs/capability.md` §3 は hash を必須のまま（別セッションの未コミット）。core の optional 化は docs / decisions に未反映なので、**0220 の契約の所有者が 1 行追記**する（lead の申し送り）。
