@@ -14,6 +14,7 @@ import {
   type CostGate,
 } from "../cost/index.ts";
 import { readBody } from "../edge/body.ts";
+import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { ModelUnavailableError } from "./models.ts";
 
@@ -256,7 +257,9 @@ export async function handleSessionRpc(
           throw error;
         }
       }
-      const requestId = parsed.output.requestId;
+      // The edge forwards x-request-id on every RPC; a body id still wins for an internal caller.
+      const headerId = request.headers.get(REQUEST_ID_HEADER);
+      const requestId = parsed.output.requestId ?? headerId ?? undefined;
       const run = (): ReturnType<AgentSession["send"]> =>
         session.send(id, parsed.output.text, requestId);
       const turn =

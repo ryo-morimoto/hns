@@ -24,7 +24,7 @@ import type { SessionEnv, SessionState } from "./state.ts";
 const LONG_RESPONSE = "word ".repeat(200).trim();
 
 /** The rows one text turn added, measured when this test was written; see deploy/limits/RESULTS.md. */
-const ROWS_PER_TURN = 9;
+const ROWS_PER_TURN = 10;
 
 /**
  * The row budget for one text turn.
@@ -82,6 +82,7 @@ function longAnswerRuntime(): SessionRuntimeFactory {
       context: BACKGROUND_CONTEXT,
       onWake: hooks.onWake,
       onReport: hooks.onReport,
+      onEvent: hooks.onEvent,
     });
   };
 }

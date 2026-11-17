@@ -1,10 +1,15 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createRegistry, type Report, type Wake } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
+import type { AgentEvent } from "@hns/agent";
 import { openSession, type AgentLiveWatch, type AgentSession } from "@hns/agent/session";
 import { migrateStore } from "@hns/store";
 import { createCostGate, type CostGate } from "../cost/index.ts";
+import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { problem } from "../edge/problem.ts";
+import { handleObsRpc } from "../obs/api.ts";
+import { agentEntry, doEntry } from "../obs/log.ts";
+import { createObsStore, type ObsStore } from "../obs/store.ts";
 import {
   defaultLiveUpgradeResponse,
   defaultWebSocketPair,
@@ -25,6 +30,7 @@ import type { SessionEnv, SessionState } from "./state.ts";
 interface SessionHooks {
   readonly onWake: (wake: Wake) => void;
   readonly onReport: (report: Report) => void;
+  readonly onEvent: (event: AgentEvent) => void;
 }
 
 /** Opens one runtime over a Durable Object state; tests substitute the storage. */
@@ -72,6 +78,7 @@ async function openDurableSession(
     context: BACKGROUND_CONTEXT,
     onWake: hooks.onWake,
     onReport: hooks.onReport,
+    onEvent: hooks.onEvent,
   });
 }
 
@@ -95,6 +102,7 @@ export class Session {
   readonly #ready: Promise<void>;
   readonly #live = new Map<LiveSocket, LiveEntry>();
   #cost: CostGate | undefined;
+  #obs: ObsStore | undefined;
   #session: AgentSession | undefined;
   #closed = false;
 
@@ -115,6 +123,13 @@ export class Session {
 
   async #initialize(): Promise<void> {
     try {
+      try {
+        // The event table shares the Session's SQLite but not the harness prefix. A failed
+        // open must not stop conversations: observation is a side effect, not a precondition.
+        this.#obs = createObsStore(this.#state.storage, { now: this.#now });
+      } catch (error) {
+        console.error("session obs open failed", error instanceof Error ? error.name : "unknown");
+      }
       // A deployment migrates the control database here as well as at the edge, so the first
       // send after a deploy cannot fail closed on a missing limit row. A failed migration is
       // not a failed open: conversation reads do not need D1, and the gate still refuses a new
@@ -150,6 +165,9 @@ export class Session {
             report.error instanceof Error ? report.error.name : "unknown",
           );
         },
+        onEvent: (event) => {
+          this.#append(agentEntry(event));
+        },
       });
       this.#session = session;
       void session.closed.then((end) => {
@@ -179,24 +197,60 @@ export class Session {
    * they do not repeat the session check; they still parse every body before using it.
    */
   async fetch(request: Request): Promise<Response> {
+    const started = this.#now();
     try {
       await this.#ready;
     } catch {
-      return problem(
-        "unavailable",
-        "The Session could not be opened.",
-        new URL(request.url).pathname,
+      return this.#finished(
+        request,
+        problem("unavailable", "The Session could not be opened.", new URL(request.url).pathname),
+        started,
       );
     }
     const session = this.#session;
-    if (session === undefined) {
-      return problem("unavailable", "The Session is not open.", new URL(request.url).pathname);
-    }
     const path = new URL(request.url).pathname;
-    if (path === "/ws") {
-      return this.#openLive(request, session);
+    if (session === undefined) {
+      return this.#finished(
+        request,
+        problem("unavailable", "The Session is not open.", path),
+        started,
+      );
     }
-    return handleSessionRpc(request, session, { cost: this.#cost });
+    let response: Response;
+    if (path === "/ws") {
+      response = await this.#openLive(request, session);
+    } else if (path === "/rpc/events" || path === "/rpc/metrics") {
+      const obs = this.#obs;
+      response =
+        obs === undefined
+          ? problem("unavailable", "The event log is not open.", path)
+          : await handleObsRpc(request, obs);
+    } else {
+      response = await handleSessionRpc(request, session, { cost: this.#cost });
+    }
+    return this.#finished(request, response, started);
+  }
+
+  /** Record one internal RPC's hop and return the answer unchanged. */
+  #finished(request: Request, response: Response, started: number): Response {
+    const path = new URL(request.url).pathname;
+    // A turn's DO hop is the agent event (same request id), not a second row; `do.rpc` covers
+    // the internal RPCs that emit no agent event, so one hop is not double counted.
+    if (path.startsWith("/rpc/conversations")) return response;
+    const requestId = request.headers.get(REQUEST_ID_HEADER) ?? "unattributed";
+    this.#append(doEntry(requestId, path, response.status, this.#now() - started, this.#now()));
+    return response;
+  }
+
+  /** Append one entry; a broken log must not break the request that produced it. */
+  #append(entry: Parameters<ObsStore["append"]>[0]): void {
+    const obs = this.#obs;
+    if (obs === undefined) return;
+    try {
+      obs.append(entry);
+    } catch (error) {
+      console.error("session obs append failed", error instanceof Error ? error.name : "unknown");
+    }
   }
 
   /** Accept a live socket for one conversation, or return the typed refusal. */

@@ -71,10 +71,15 @@ function get(path: string): Request {
   return new Request("https://session" + path);
 }
 
-function post(path: string, body: JsonValue, contentType = "application/json"): Request {
+function post(
+  path: string,
+  body: JsonValue,
+  contentType = "application/json",
+  headers: Record<string, string> = {},
+): Request {
   return new Request("https://session" + path, {
     method: "POST",
-    headers: { "content-type": contentType },
+    headers: { "content-type": contentType, ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -261,6 +266,25 @@ test("a turn is measured with the request id the caller gave", async () => {
   const response = await handleSessionRpc(SEND("turn-1"), fake.session, { cost: gate });
   expect(response.status).toBe(200);
   expect(measured).toStrictEqual([{ id: "turn-1", conversationId: "2", requests: 1 }]);
+});
+
+// Catches: the edge's x-request-id stopping before the agent that must log the same id.
+test("the forwarded request id reaches the agent send", async () => {
+  let seen: string | undefined;
+  const fake = fakeSession({
+    send: async (_id: string, _text: string, requestId?: string) => {
+      seen = requestId;
+      return answer();
+    },
+  });
+  const response = await handleSessionRpc(
+    post("/rpc/conversations/2/messages", { text: "hi" }, "application/json", {
+      "x-request-id": "forwarded-1",
+    }),
+    fake.session,
+  );
+  expect(response.status).toBe(200);
+  expect(seen).toBe("forwarded-1");
 });
 
 test("a turn without a request id gets a generated one", async () => {

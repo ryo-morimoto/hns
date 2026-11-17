@@ -1,4 +1,6 @@
 import { expect, test } from "vitest";
+import { openSqliteState } from "../../test/support/sqlite.ts";
+import { createObsStore } from "../obs/store.ts";
 import {
   CONVERSATION,
   entry,
@@ -91,6 +93,58 @@ test("a socket without an attachment is closed instead of guessed", async () => 
   const session = liveSession(state, fake, () => ({ 0: fakeSocket(), 1: fakeSocket() }));
   await session.fetch(new Request("https://session/rpc/conversations"));
   expect(zombie.closes).toStrictEqual([{ code: 1008, reason: "missing live attachment" }]);
+});
+
+// Catches: the DO hop and the agent event being unreadable, or the agent text reaching the log.
+test("the Session records the DO hop and the agent event under one request id", async () => {
+  const opened = openSqliteState();
+  const storage = {
+    ...opened.state.storage,
+    getAlarm: async () => null,
+    setAlarm: async () => undefined,
+    deleteAlarm: async () => undefined,
+  };
+  const state = {
+    storage,
+    blockConcurrencyWhile: opened.state.blockConcurrencyWhile,
+    abort: () => undefined,
+  };
+  const fake = fakeSession();
+  const session = new Session(state, {}, async (_state, _env, hooks) => {
+    hooks.onEvent({
+      event: "agent.response",
+      at: "2026-11-17T12:00:00.000Z",
+      text: "super-secret-answer",
+      requestId: "req-1",
+      conversationId: CONVERSATION.id,
+    });
+    return fake.session;
+  });
+  try {
+    const metrics = await session.fetch(
+      new Request("https://session/rpc/metrics", { headers: { "x-request-id": "req-1" } }),
+    );
+    expect(metrics.status).toBe(200);
+    const store = createObsStore(storage, {
+      now: () => Date.parse("2026-11-17T12:00:01.000Z"),
+    });
+    const lines = store.list({ requestId: "req-1" });
+    expect(lines.map((line) => line.event).sort()).toStrictEqual(["agent.response", "do.rpc"]);
+    expect(lines.find((line) => line.hop === "agent")?.detail).toStrictEqual({
+      conversationId: CONVERSATION.id,
+    });
+    expect(JSON.stringify(lines)).not.toContain("super-secret-answer");
+
+    const read = await session.fetch(
+      new Request("https://session/rpc/events?requestId=req-1", {
+        headers: { "x-request-id": "req-1" },
+      }),
+    );
+    expect(read.status).toBe(200);
+    expect(JSON.stringify(await read.json())).not.toContain("super-secret-answer");
+  } finally {
+    opened.close();
+  }
 });
 
 test("without a socket host the live face is unavailable", async () => {
