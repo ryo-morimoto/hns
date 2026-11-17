@@ -5,6 +5,7 @@ import {
   createEdge,
   type EdgeRequest,
   type EdgeResponseEvent,
+  type FilesRequest,
   type GraphQLRequest,
   type HandlerDependencies,
 } from "./handler.ts";
@@ -367,4 +368,48 @@ test("a handler past the deadline returns 504 and aborts the signal", async () =
   await expectProblem(response, 504, "timeout");
   assert.ok(seen !== undefined);
   expect(seen.aborted).toBe(true);
+});
+// Catches: the files route answering before authentication, serving a method it does not
+// support, or matching a deeper path than the one it owns.
+test("the files face requires a session and only GET or POST", async () => {
+  const calls: FilesRequest[] = [];
+  const deps: HandlerDependencies = {
+    ...recordingDeps().deps,
+    files(request: FilesRequest): Promise<Response> {
+      calls.push(request);
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    },
+  };
+  const edge = createEdge(deps);
+  const anonymous = await edge(post("/api/workspaces/w1/files", '{"path":"a.txt"}'), envWith());
+  await expectProblem(anonymous, 401, "unauthorized");
+  expect(calls).toHaveLength(0);
+
+  const wrong = await edge(
+    new Request(BASE + "/api/workspaces/w1/files", { method: "PUT" }),
+    envWith(),
+  );
+  expect(wrong.status).toBe(405);
+  expect(wrong.headers.get("allow")).toBe("GET, POST");
+  expect(calls).toHaveLength(0);
+
+  const cookie = await sessionCookie("owner");
+  const ok = await edge(get("/api/workspaces/w1/files?path=a.txt", { cookie }), envWith());
+  expect(ok.status).toBe(200);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]?.workspaceId).toBe("w1");
+  expect(calls[0]?.requestId).toBe(ok.headers.get("x-request-id"));
+  expect(calls[0]?.session.subject).toBe("owner");
+
+  const unknown = await edge(get("/api/workspaces/w1/files/extra", { cookie }), envWith());
+  await expectProblem(unknown, 404, "not_found");
+});
+
+test("the files face fails closed without its dependency", async () => {
+  const cookie = await sessionCookie("owner");
+  const response = await createEdge(recordingDeps().deps)(
+    get("/api/workspaces/w1/files?path=a.txt", { cookie }),
+    envWith(),
+  );
+  await expectProblem(response, 503, "unavailable");
 });

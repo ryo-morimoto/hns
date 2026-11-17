@@ -1,15 +1,18 @@
 import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import {
+  MACHINE_WRITE_UNKNOWN_REASONS,
   OperationIdSchema,
   isoTimestamp,
   type LeaseRefusal,
   type MutationResult,
   type WorkspaceLease,
 } from "@hns/core";
+import type { JournalOutcomeEntry } from "@hns/store";
 import * as v from "valibot";
 import { readBody } from "../edge/body.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { Journal, JournalWatermarkError, type JournalBucket } from "./journal.ts";
+import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
 
 /** How long an issued lease stays valid unless renewed. */
 const DEFAULT_LEASE_TTL_MS = 60_000;
@@ -21,7 +24,13 @@ const LEASE_ACTIONS = ["acquire", "renew", "release"] as const;
 type LeaseAction = (typeof LEASE_ACTIONS)[number];
 
 /** The closed failure codes that are not lease refusals. */
-type WorkspaceRpcCode = "invalid_request" | "not_found" | "conflict" | "unavailable" | "internal";
+type WorkspaceRpcCode =
+  | "invalid_request"
+  | "not_found"
+  | "conflict"
+  | "denied"
+  | "unavailable"
+  | "internal";
 
 /** The slice of `DurableObjectState` the Workspace uses. */
 export interface WorkspaceState {
@@ -29,12 +38,21 @@ export interface WorkspaceState {
   blockConcurrencyWhile<T>(run: () => Promise<T>): Promise<T>;
 }
 
-/** Test seams for the clock and lease lifetime. */
+/** Test seams for the clock, the lease lifetime, and the machine. */
 export interface WorkspaceOptions {
   /** Milliseconds since the epoch; defaults to `Date.now`. */
   readonly now?: (() => number) | undefined;
   /** Lease lifetime in milliseconds; defaults to 60 seconds. */
   readonly leaseTtlMs?: number | undefined;
+  /**
+   * The machine the writes and reads go to; defaults to the signed client built from
+   * `HNS_AGENT_URL` and `HNS_CONTROL_PLANE_KEY`.
+   *
+   * @remarks
+   * A seam: the unit layer supplies a fake, and production supplies the bindings. When neither
+   * is present the file faces fail closed (503) instead of falling back to a local write.
+   */
+  readonly files?: MachineFiles | undefined;
 }
 
 /**
@@ -49,6 +67,16 @@ export interface WorkspaceOptions {
 export interface WorkspaceBindings {
   /** The bucket for journal bodies over 256KB. */
   readonly OBJECTS?: JournalBucket | undefined;
+  /** The machine agent's origin (`http://127.0.0.1:<port>` in dev). */
+  readonly HNS_AGENT_URL?: string | undefined;
+  /**
+   * base64url of the 32-byte Ed25519 control-plane seed (D100).
+   *
+   * @remarks
+   * A Worker secret. The machine is chosen by the workspace's lease (0148's registry replaces
+   * that choice); the key is what authenticates the Worker to whichever machine it calls.
+   */
+  readonly HNS_CONTROL_PLANE_KEY?: string | undefined;
 }
 
 interface StoredLease {
@@ -68,12 +96,11 @@ type AcquireOutcome =
   | { readonly ok: true; readonly lease: WorkspaceLease }
   | { readonly ok: false; readonly code: LeaseRefusal };
 
-type ApplyOutcome =
-  | { readonly ok: true; readonly result: MutationResult }
-  | { readonly ok: false; readonly code: LeaseRefusal };
-
 type RenewOutcome = AcquireOutcome;
 type MutationOutcome = { readonly ok: true } | { readonly ok: false; readonly code: LeaseRefusal };
+type ApplyGate =
+  | { readonly ok: true; readonly machineId: string }
+  | { readonly ok: false; readonly code: LeaseRefusal };
 
 /** A row as the DO SQL binding returns it. */
 type SqlValue = ArrayBuffer | string | number | null;
@@ -90,12 +117,23 @@ const RenewSchema = v.object({
 });
 const ApplySchema = v.object({
   workspaceId: NonEmptyText,
-  machineId: NonEmptyText,
-  epoch: EpochSchema,
+  /**
+   * The lease holder, when the caller is the machine proving its lease.
+   *
+   * @remarks
+   * The Worker's own write (a browser save through the editor face) omits both this and the
+   * epoch: the object knows the lease and calls the machine it is configured for. A tool call
+   * from the machine presents both, so a stale epoch is refused.
+   */
+  machineId: v.optional(NonEmptyText),
+  epoch: v.optional(EpochSchema),
   operationId: OperationIdSchema,
+  /** The project below the machine's ROOT; `""` is the root itself. */
+  projectRoot: v.string(),
   path: NonEmptyText,
   expectedVersion: NonEmptyText,
-  version: NonEmptyText,
+  /** The bytes to write, base64; the face decodes its text into this. */
+  content: v.string(),
 });
 
 const WatermarkSchema = v.object({
@@ -124,6 +162,51 @@ class WorkspaceIdentityError extends Error {
   constructor() {
     super("the request names a different workspace");
     this.name = "WorkspaceIdentityError";
+  }
+}
+
+/** A request that names a project root other than the one this workspace is bound to. */
+class WorkspaceProjectError extends Error {
+  constructor() {
+    super("the request names a different project root");
+    this.name = "WorkspaceProjectError";
+  }
+}
+
+/**
+ * Parse the project root of a file request.
+ *
+ * @param value - The project directory below the machine's ROOT.
+ * @returns The normalized names, or `""` for the ROOT itself; undefined when it must be refused.
+ *
+ * @remarks
+ * The same syntactic rule as {@link parsePath}, plus the empty value: a workspace may serve the
+ * machine's ROOT directly. This is checked here, before any machine call, for reads and writes
+ * alike; the machine repeats it when it resolves the path.
+ *
+ * @internal
+ */
+function parseProjectRoot(value: string): string | undefined {
+  if (value === "") return "";
+  return parsePath(value);
+}
+
+/**
+ * Decode the base64 content of a write.
+ *
+ * @param value - The base64 text from the RPC body.
+ * @returns The bytes, or undefined when the text is not base64.
+ *
+ * @internal
+ */
+function bytesOfBase64(value: string): Uint8Array | undefined {
+  try {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  } catch {
+    return undefined;
   }
 }
 
@@ -178,7 +261,7 @@ function failure(code: WorkspaceRpcCode, message: string, status: number): Respo
 
 /** A refusal from the closed lease vocabulary. */
 function refusal(code: LeaseRefusal): Response {
-  return json({ ok: false, code }, 409);
+  return json({ ok: false, code, message: "The write is refused: " + code }, 409);
 }
 
 /**
@@ -227,13 +310,15 @@ async function bodyOf(
  * The object also owns the workspace's Journal (`./journal.ts`): entries are appended here and
  * the checkpoint watermark truncates them. `env.OBJECTS` holds bodies over 256KB.
  *
- * `apply` returns `applied` or `conflict`. The `unknown` member of `MutationResult`
- * describes a write whose transport died before the outcome reached the DO; this face never
- * produces it.
+ * A file write is the durability path of docs/durability.md §3.1: the intent is appended, the
+ * **machine** re-resolves the path, recomputes the version, and replaces the file, and only then
+ * is the outcome recorded and the answer sent. The version table is a cache of what the machine
+ * last reported, not the authority; the machine's re-hash decides a conflict. A missing answer
+ * is recorded as `unknown` and never rounded to `applied`.
  *
  * RPC face (`/rpc`):
- * - `POST /rpc/apply` — compare and record a version.
- * - `GET /rpc/read?path=` — the recorded version, or `"absent"`.
+ * - `POST /rpc/apply` — append the intent, apply it on the machine, settle the outcome.
+ * - `GET /rpc/read?projectRoot=&path=` — the bytes and version from the machine, or 503.
  * - `POST /rpc/journal/watermark` — write the checkpoint watermark and truncate the Journal.
  * - `POST /rpc/lease/acquire` — issue the workspace's only lease.
  * - `POST /rpc/lease/renew` — extend the holder's lease.
@@ -249,6 +334,7 @@ export class Workspace {
   readonly #clock: () => number;
   readonly #leaseTtlMs: number;
   readonly #journal: Journal;
+  readonly #files: MachineFiles | undefined;
   readonly #ready: Promise<void>;
 
   /**
@@ -268,6 +354,7 @@ export class Workspace {
       now: this.#clock,
       bucket: options.OBJECTS,
     });
+    this.#files = options.files ?? machineFilesFrom(options);
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -281,7 +368,7 @@ export class Workspace {
     this.#exec(
       "CREATE TABLE IF NOT EXISTS workspace_version (path TEXT PRIMARY KEY, version TEXT NOT NULL)",
     );
-    this.#journal.ensureSchema();
+    await this.#journal.ensureSchema();
   }
 
   /**
@@ -305,6 +392,9 @@ export class Workspace {
     } catch (error) {
       if (error instanceof WorkspaceIdentityError) {
         return failure("invalid_request", "The request names a different workspace.", 400);
+      }
+      if (error instanceof WorkspaceProjectError) {
+        return failure("invalid_request", "The request names a different project root.", 400);
       }
       console.error("workspace rpc failed", error instanceof Error ? error.name : "unknown");
       return failure("internal", "Unexpected Workspace failure.", 500);
@@ -334,7 +424,7 @@ export class Workspace {
       if (request.method !== "GET") {
         return failure("invalid_request", "Only GET is allowed here.", 405);
       }
-      return this.#read(url);
+      return await this.#read(url, request);
     }
     if (face === "journal") {
       if (segments.length !== 3 || segments[2] !== "watermark") {
@@ -383,6 +473,8 @@ export class Workspace {
       const expiresAtMs = nowMs + this.#leaseTtlMs;
       const next: StoredLease = { workspaceId, machineId, epoch, expiresAtMs };
       this.#setMeta("epoch", String(epoch));
+      // The machine survives the lease: a read has no lease but still needs a target.
+      this.#setMeta("machine_id", machineId);
       this.#storeLease(next);
       return { ok: true, lease: asLease(next) };
     });
@@ -426,6 +518,22 @@ export class Workspace {
     return outcome.ok ? json({ ok: true }) : refusal(outcome.code);
   }
 
+  /**
+   * Append the intent, apply it on the machine, and settle the outcome.
+   *
+   * @param request - The apply RPC: the lease identity, the attempt id, the project and path,
+   * the expected version, and the bytes (base64).
+   * @returns The recorded `MutationResult` (200), a lease refusal (409), `denied` for a
+   * definite machine refusal (400), or `unavailable` when no answer arrived (504).
+   *
+   * @remarks
+   * The order is the durability contract (INV-04, INV-10): the lease and the project binding
+   * are checked first, then the intent is appended, and only then is the machine asked. A
+   * retry sees the recorded outcome (`settled`) or the pending intent (`pending`) and never
+   * appends a second intent. The machine recomputes `expectedVersion`; this object's version
+   * table is only a cache, so a stale row cannot turn a real conflict into a success. No answer
+   * is recorded as `unknown` and is not rounded.
+   */
   async #apply(request: Request): Promise<Response> {
     const body = await bodyOf(request);
     if (!body.ok) return body.response;
@@ -433,31 +541,114 @@ export class Workspace {
     if (!parsed.success) return failure("invalid_request", "Invalid apply input.", 400);
     const input = parsed.output;
     const path = parsePath(input.path);
-    if (path === undefined) return failure("invalid_request", "Invalid path.", 400);
-    if (input.version === ABSENT_VERSION) {
-      return failure("invalid_request", "A write must record a version.", 400);
+    const projectRoot = parseProjectRoot(input.projectRoot);
+    if (path === undefined || projectRoot === undefined) {
+      return failure("invalid_request", "Invalid path.", 400);
     }
-    const outcome: ApplyOutcome = await this.#state.storage.transaction(async () => {
-      this.#assertWorkspace(input.workspaceId);
+    const content = bytesOfBase64(input.content);
+    if (content === undefined) {
+      return failure("invalid_request", "The content is not base64.", 400);
+    }
+    const gate: ApplyGate = await this.#state.storage.transaction(async () => {
+      this.#claimWorkspace(input.workspaceId);
+      this.#claimProject(projectRoot);
       const nowMs = this.#clock();
       const held = this.#lease();
       if (held === undefined) return { ok: false, code: "lease_not_held" };
-      const refused = refusalFor(held, input, nowMs);
-      if (refused !== undefined) return { ok: false, code: refused };
-      const current = this.#currentVersion(path) ?? ABSENT_VERSION;
-      if (current !== input.expectedVersion) {
-        return {
-          ok: true,
-          result: { status: "conflict", operationId: input.operationId, currentVersion: current },
-        };
+      if (nowMs >= held.expiresAtMs) return { ok: false, code: "lease_expired" };
+      if (input.epoch !== undefined && input.epoch !== held.epoch) {
+        return { ok: false, code: "lease_epoch_stale" };
       }
-      this.#putVersion(path, input.version);
-      return {
-        ok: true,
-        result: { status: "applied", operationId: input.operationId, version: input.version },
-      };
+      if (input.machineId !== undefined && input.machineId !== held.machineId) {
+        return { ok: false, code: "lease_not_held" };
+      }
+      return { ok: true, machineId: held.machineId };
     });
-    return outcome.ok ? json({ ok: true, result: outcome.result }) : refusal(outcome.code);
+    if (!gate.ok) return refusal(gate.code);
+    // The lease is checked before the machine: an unwritable workspace is refused as such, and
+    // a missing binding is not an intent anyone has to reconcile.
+    const files = this.#files;
+    if (files === undefined) {
+      return failure("unavailable", "The machine is not configured.", 503);
+    }
+
+    const appended = await this.#journal.appendIntent({
+      operationId: input.operationId,
+      path,
+      expectedVersion: input.expectedVersion,
+      body: content,
+    });
+    if (appended.status === "settled") return outcomeResponse(appended.entry);
+    if (appended.status === "denied") {
+      return failure("conflict", "The operation id is already used for another write.", 409);
+    }
+    const contentHash = appended.entry.body?.hash;
+    if (contentHash === undefined) {
+      return failure("internal", "The intent records no content.", 500);
+    }
+
+    const answer = await files.write(
+      {
+        op: "write",
+        projectRoot,
+        path,
+        expectedVersion: input.expectedVersion,
+        operationId: input.operationId,
+        content: input.content,
+        contentHash,
+      },
+      {
+        machineId: gate.machineId,
+        requestId: request.headers.get("x-request-id") ?? "",
+        signal: request.signal,
+      },
+    );
+
+    if (!answer.ok) {
+      // The code or error name, never the body or the key: enough to see which hop failed.
+      console.error("workspace: machine write failed", answer.failure, answer.detail);
+      if (answer.failure === "denied") {
+        const settled = await this.#journal.appendOutcome({
+          path,
+          result: { status: "denied", operationId: input.operationId, reason: answer.detail },
+        });
+        return outcomeResponse(settled.entry);
+      }
+      const settled = await this.#journal.appendOutcome({
+        path,
+        result: { status: "unknown", operationId: input.operationId, reason: "timeout" },
+      });
+      return outcomeResponse(settled.entry);
+    }
+
+    const result = answer.result;
+    if (result.operationId !== input.operationId) {
+      return failure("internal", "The machine answered a different operation.", 500);
+    }
+    const settled = await this.#journal.appendOutcome({
+      path,
+      result:
+        result.status === "applied"
+          ? { status: "applied", operationId: input.operationId, version: result.version }
+          : result.status === "conflict"
+            ? {
+                status: "conflict",
+                operationId: input.operationId,
+                currentVersion: result.currentVersion,
+              }
+            : { status: "unknown", operationId: input.operationId, reason: result.reason },
+    });
+    if (settled.entry.status === "applied") {
+      const version = settled.entry.version;
+      if (version === null) throw new Error("an applied outcome has no version");
+      this.#putVersion(path, version);
+      await this.#journal.appendEvent({
+        eventKind: input.expectedVersion === ABSENT_VERSION ? "created" : "changed",
+        path,
+        version,
+      });
+    }
+    return outcomeResponse(settled.entry);
   }
 
   /**
@@ -487,15 +678,62 @@ export class Workspace {
     }
   }
 
-  #read(url: URL): Response {
-    const path = url.searchParams.get("path");
-    if (path === null) return failure("invalid_request", "A path is required.", 400);
-    const normalized = parsePath(path);
-    if (normalized === undefined) return failure("invalid_request", "Invalid path.", 400);
+  /**
+   * Read one file from the machine.
+   *
+   * @param url - The read RPC's `projectRoot` and `path`.
+   * @param request - The request, for its correlation id and deadline.
+   * @returns The base64 bytes and their version, plus `externalChange` when the version table
+   * disagreed with the machine; 503 when the machine is unreachable, never a stale value.
+   *
+   * @remarks
+   * Reads need no lease, but they do go through this object: it owns the project binding and
+   * the version table. The table is refreshed from every read, so a change made outside this
+   * workspace (an agent's shell) shows up as `externalChange` and the next save conflicts.
+   */
+  async #read(url: URL, request: Request): Promise<Response> {
+    const files = this.#files;
+    if (files === undefined) {
+      return failure("unavailable", "The machine is not configured.", 503);
+    }
+    const path = parsePath(url.searchParams.get("path") ?? "");
+    const projectRoot = parseProjectRoot(url.searchParams.get("projectRoot") ?? "");
+    if (path === undefined || projectRoot === undefined) {
+      return failure("invalid_request", "Invalid path.", 400);
+    }
+    const machineId: string | undefined = await this.#state.storage.transaction(async () =>
+      this.#meta("machine_id"),
+    );
+    if (machineId === undefined) {
+      return failure("unavailable", "The workspace has no machine yet.", 503);
+    }
+    const answer = await files.read(
+      { path: projectRoot === "" ? path : projectRoot + "/" + path },
+      {
+        machineId,
+        requestId: request.headers.get("x-request-id") ?? "",
+        signal: request.signal,
+      },
+    );
+    if (!answer.ok) {
+      // A definite refusal means the file is absent (or unreadable); it is not a transport
+      // failure, so the caller can tell "create it" from "the machine is unreachable".
+      if (answer.failure === "denied") return failure("not_found", "The file cannot be read.", 404);
+      return failure("unavailable", "The machine did not answer.", 503);
+    }
+    const version = answer.result.version;
+    const externalChange: boolean = await this.#state.storage.transaction(async () => {
+      this.#claimProject(projectRoot);
+      const previous = this.#currentVersion(path);
+      if (previous !== version) this.#putVersion(path, version);
+      return previous !== undefined && previous !== version;
+    });
     return json({
       ok: true,
-      path: normalized,
-      version: this.#currentVersion(normalized) ?? ABSENT_VERSION,
+      path,
+      version,
+      content: answer.result.content,
+      externalChange,
     });
   }
 
@@ -513,6 +751,26 @@ export class Workspace {
   #assertWorkspace(workspaceId: string): void {
     const bound = this.#meta("workspace_id");
     if (bound !== undefined && bound !== workspaceId) throw new WorkspaceIdentityError();
+  }
+
+  /**
+   * Bind the workspace to the machine project its first file call names.
+   *
+   * @param projectRoot - The project directory below the machine's ROOT.
+   * @throws {WorkspaceProjectError} When the workspace is already bound to another project.
+   *
+   * @remarks
+   * One workspace is one project: the binding keeps a later request from reading or writing a
+   * sibling project on the same machine. It is recorded on the first call that passes the local
+   * checks, read or write, and never moves.
+   */
+  #claimProject(projectRoot: string): void {
+    const bound = this.#meta("project_root");
+    if (bound === undefined) {
+      this.#setMeta("project_root", projectRoot);
+      return;
+    }
+    if (bound !== projectRoot) throw new WorkspaceProjectError();
   }
 
   #lease(): StoredLease | undefined {
@@ -596,4 +854,76 @@ function asLease(lease: StoredLease): WorkspaceLease {
 /** Whether a path segment names a lease operation. */
 function isLeaseAction(value: string | undefined): value is LeaseAction {
   return value !== undefined && LEASE_ACTIONS.some((action) => action === value);
+}
+/** The HTTP status a recorded outcome answers with, when it is not the 200 success. */
+function outcomeStatus(entry: JournalOutcomeEntry): number {
+  switch (entry.status) {
+    case "applied":
+    case "conflict":
+    case "unknown":
+      return 200;
+    case "denied":
+      return 400;
+  }
+}
+
+/**
+ * Turn a recorded outcome into the RPC answer.
+ *
+ * @param entry - The stored outcome, which is the authoritative answer for its operation id.
+ * @returns `{ ok: true, result }` for a mutation result, or a `denied` failure carrying the
+ * machine's refusal code.
+ *
+ * @remarks
+ * A retry gets this same answer (INV-04): the recorded outcome is never recomputed, so a
+ * `conflict` or an `unknown` cannot change between attempts.
+ */
+function outcomeResponse(entry: JournalOutcomeEntry): Response {
+  switch (entry.status) {
+    case "applied": {
+      if (entry.version === null) throw new Error("an applied outcome has no version");
+      const result: MutationResult = {
+        status: "applied",
+        operationId: entry.operationId,
+        version: entry.version,
+      };
+      return json({ ok: true, result }, outcomeStatus(entry));
+    }
+    case "conflict": {
+      if (entry.currentVersion === null) {
+        throw new Error("a conflict outcome has no current version");
+      }
+      const result: MutationResult = {
+        status: "conflict",
+        operationId: entry.operationId,
+        currentVersion: entry.currentVersion,
+      };
+      return json({ ok: true, result }, outcomeStatus(entry));
+    }
+    case "unknown": {
+      const reason = MACHINE_WRITE_UNKNOWN_REASONS.find((candidate) => candidate === entry.reason);
+      if (reason === undefined) throw new Error("an unknown outcome has no known reason");
+      const result: MutationResult = { status: "unknown", operationId: entry.operationId, reason };
+      return json({ ok: true, result }, outcomeStatus(entry));
+    }
+    case "denied":
+      return failure("denied", entry.reason ?? "denied", outcomeStatus(entry));
+  }
+}
+
+/**
+ * Build the production machine port from the deploy's bindings.
+ *
+ * @param bindings - The Worker environment the object was constructed with.
+ * @returns The signed client, or undefined when the machine is not configured.
+ *
+ * @remarks
+ * Both bindings are needed: the URL and the control-plane key (D100). A missing one is not
+ * defaulted; the file faces fail closed with 503 until 0148 supplies the registry entry.
+ */
+function machineFilesFrom(bindings: WorkspaceBindings): MachineFiles | undefined {
+  const agentUrl = bindings.HNS_AGENT_URL;
+  const controlPlaneKey = bindings.HNS_CONTROL_PLANE_KEY;
+  if (agentUrl === undefined || controlPlaneKey === undefined) return undefined;
+  return createSignedMachineFiles({ agentUrl, controlPlaneKey });
 }

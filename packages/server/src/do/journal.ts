@@ -71,12 +71,28 @@ export interface IntentAppendInput {
   readonly body?: Uint8Array | undefined;
 }
 
+/**
+ * What a settle records: a `MutationResult`, or the Journal's own `denied`.
+ *
+ * @remarks
+ * `denied` is not part of `MutationResult` (the application contract): it is how the Journal
+ * settles an intent the machine refused before writing, so the intent is no longer pending and
+ * a checkpoint may pass it. `reason` is the machine's refusal code.
+ */
+export type JournalOutcomeInput =
+  | MutationResult
+  | {
+      readonly status: "denied";
+      readonly operationId: OperationId;
+      readonly reason: string;
+    };
+
 /** The input of {@link Journal.appendOutcome}. */
 export interface OutcomeAppendInput {
   /** The path the intent named; it must match. */
   readonly path: string;
   /** The result to record; its `operationId` names the intent. */
-  readonly result: MutationResult;
+  readonly result: JournalOutcomeInput;
 }
 
 /** The input of {@link Journal.appendAudit}. */
@@ -136,6 +152,7 @@ export class JournalWatermarkError extends Error {
 const SeqSchema = v.pipe(v.number(), v.integer(), v.minValue(1));
 const SeqRowSchema = v.object({ seq: SeqSchema });
 const MetaRowSchema = v.object({ value: v.string() });
+const TableSqlRowSchema = v.object({ sql: v.pipe(v.string(), v.minLength(1)) });
 const CounterSchema = v.pipe(
   v.string(),
   v.regex(/^(0|[1-9][0-9]*)$/u),
@@ -262,7 +279,7 @@ function bodyHashOf(body: JournalBody | null): string | null {
  *   },
  * };
  * const journal = new Journal(storage, { now: () => Date.parse("2026-01-01T00:00:00.000Z") });
- * journal.ensureSchema();
+ * await journal.ensureSchema();
  * const id = operationId("op-1");
  * const intent = await journal.appendIntent({
  *   operationId: id,
@@ -297,14 +314,43 @@ export class Journal {
   }
 
   /**
-   * Create the Journal's tables.
+   * Create the Journal's tables, rebuilding one that predates the `denied` status.
+   *
+   * @returns A promise that settles once the tables are ready.
    *
    * @remarks
    * Every statement is idempotent, so the object runs this on each open. It must finish before
-   * the object serves a request; the Workspace calls it inside `blockConcurrencyWhile`.
+   * the object serves a request; the Workspace awaits it inside `blockConcurrencyWhile`.
    */
-  ensureSchema(): void {
+  async ensureSchema(): Promise<void> {
+    await this.#rebuildStatusVocabulary();
     for (const statement of JOURNAL_SCHEMA) this.#exec(statement);
+  }
+
+  /**
+   * Rebuild the Journal table when its CHECK predates the `denied` outcome status.
+   *
+   * @remarks
+   * SQLite cannot widen a CHECK in place, and the DDL derives the status CHECK from
+   * {@link JOURNAL_OUTCOME_STATUSES}. The rename, recreate, copy, and drop run in one
+   * transaction, so a crash cannot strand the rows: either the old table is still the Journal
+   * or the new one has them. The indexes are recreated after the old table (and its indexes)
+   * is dropped, because their names are taken until then.
+   */
+  async #rebuildStatusVocabulary(): Promise<void> {
+    const row = this.#all(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'journal'",
+    )[0];
+    if (row === undefined) return;
+    const sql = v.parse(TableSqlRowSchema, row).sql;
+    if (sql.includes("'denied'")) return;
+    await this.#storage.transaction(async () => {
+      this.#exec("ALTER TABLE journal RENAME TO journal_previous");
+      for (const statement of JOURNAL_SCHEMA) this.#exec(statement);
+      this.#exec("INSERT INTO journal SELECT * FROM journal_previous");
+      this.#exec("DROP TABLE journal_previous");
+      for (const statement of JOURNAL_SCHEMA) this.#exec(statement);
+    });
   }
 
   /**
@@ -326,6 +372,17 @@ export class Journal {
     const outcome: IntentAppend = await this.#storage.transaction(async () => {
       const settled = this.#outcomeRow(input.operationId);
       if (settled !== undefined) {
+        // A settled operation is only replayed for the same attempt: the intent still
+        // records what was sent, so another body under the same id is refused (INV-04).
+        const prior = this.#intentRow(input.operationId);
+        if (prior !== undefined) {
+          const intent = intentOf(parseJournalEntry(prior));
+          const same =
+            intent.path === input.path &&
+            intent.expectedVersion === input.expectedVersion &&
+            bodyHashOf(intent.body) === (body === null ? null : body.hash);
+          if (!same) return { status: "denied", reason: "operation_id_reused" };
+        }
         return { status: "settled", entry: outcomeOf(parseJournalEntry(settled)) };
       }
       const pending = this.#intentRow(input.operationId);
@@ -389,6 +446,7 @@ export class Journal {
         throw new Error("the outcome path differs from its intent: " + String(operationId));
       }
       const seq = this.#nextSeq();
+      const result = input.result;
       this.#insert({
         seq,
         kind: "outcome",
@@ -396,10 +454,10 @@ export class Journal {
         path: input.path,
         at: this.#stamp(),
         expectedVersion: null,
-        version: input.result.status === "applied" ? input.result.version : null,
-        currentVersion: input.result.status === "conflict" ? input.result.currentVersion : null,
-        status: input.result.status,
-        reason: input.result.status === "unknown" ? input.result.reason : null,
+        version: result.status === "applied" ? result.version : null,
+        currentVersion: result.status === "conflict" ? result.currentVersion : null,
+        status: result.status,
+        reason: result.status === "unknown" || result.status === "denied" ? result.reason : null,
         eventKind: null,
         bodyHash: null,
         bodyKey: null,

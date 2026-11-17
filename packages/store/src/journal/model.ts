@@ -1,5 +1,5 @@
-import type { IsoTimestamp, MutationResult, MutationUnknownReason, OperationId } from "@hns/core";
-import type { JournalEventKind } from "./schema.ts";
+import type { IsoTimestamp, OperationId } from "@hns/core";
+import type { JournalEventKind, JournalOutcomeStatus } from "./schema.ts";
 
 /**
  * One body the Journal stores: in its row up to 256KB, or in the object store.
@@ -55,21 +55,26 @@ export interface JournalIntentEntry extends JournalEntryStamp {
  * What happened to an intent.
  *
  * @remarks
- * The fields mirror `MutationResult` in `@hns/core`: `version` is set only for `applied`,
- * `currentVersion` only for `conflict`, and `reason` only for `unknown`. An outcome is never
+ * The fields mirror `MutationResult` in `@hns/core` for `applied`, `conflict`, and `unknown`:
+ * `version` is set only for `applied`, `currentVersion` only for `conflict`, and `reason`
+ * only for `unknown` and `denied`. `denied` is the Journal's own settlement of an intent the
+ * machine refused before writing, so no checkpoint has to reconcile it. An outcome is never
  * rewritten: a retry reads the recorded one (INV-04).
  */
 export interface JournalOutcomeEntry extends JournalEntryStamp {
   readonly kind: "outcome";
   readonly operationId: OperationId;
   readonly path: string;
-  readonly status: MutationResult["status"];
+  readonly status: JournalOutcomeStatus;
   /** The applied version; null unless `status` is `applied`. */
   readonly version: string | null;
   /** The version found instead; null unless `status` is `conflict`. */
   readonly currentVersion: string | null;
-  /** Why the outcome is unknown; null unless `status` is `unknown`. */
-  readonly reason: MutationUnknownReason | null;
+  /**
+   * Why the outcome is `unknown` (a `MutationUnknownReason`), or the machine's refusal code
+   * when it is `denied`; null for `applied` and `conflict`.
+   */
+  readonly reason: string | null;
 }
 
 /**

@@ -49,7 +49,7 @@ const OutcomeRowSchema = v.object({
   status: v.picklist(JOURNAL_OUTCOME_STATUSES),
   version: v.nullable(NonEmptyText),
   current_version: v.nullable(NonEmptyText),
-  reason: v.nullable(v.picklist(JOURNAL_UNKNOWN_REASONS)),
+  reason: v.nullable(NonEmptyText),
 });
 
 const AuditRowSchema = v.object({
@@ -117,7 +117,15 @@ function outcomeFieldsMatch(row: OutcomeRow): boolean {
     case "conflict":
       return row.current_version !== null && row.version === null && row.reason === null;
     case "unknown":
-      return row.reason !== null && row.version === null && row.current_version === null;
+      return (
+        row.version === null &&
+        row.current_version === null &&
+        JOURNAL_UNKNOWN_REASONS.some((reason) => reason === row.reason)
+      );
+    case "denied":
+      // The reason is the machine's refusal code; the vocabulary is the machine's, not the
+      // Journal's, so a code the Worker did not expect still reads back rather than failing.
+      return row.version === null && row.current_version === null && row.reason !== null;
   }
 }
 

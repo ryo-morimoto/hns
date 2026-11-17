@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { LEASE_REFUSALS } from "@hns/core";
-import assert from "node:assert/strict";
+
 import { afterAll, beforeAll, expect, test } from "vitest";
 import * as v from "valibot";
 
@@ -65,18 +65,6 @@ const Lease = v.object({
     epoch: v.number(),
     expiresAt: v.string(),
   }),
-});
-const Read = v.object({ ok: v.literal(true), path: v.string(), version: v.string() });
-const Apply = v.object({
-  ok: v.literal(true),
-  result: v.variant("status", [
-    v.object({ status: v.literal("applied"), operationId: v.string(), version: v.string() }),
-    v.object({
-      status: v.literal("conflict"),
-      operationId: v.string(),
-      currentVersion: v.string(),
-    }),
-  ]),
 });
 const Refused = v.object({ ok: v.literal(false), code: v.picklist(LEASE_REFUSALS) });
 const Watermark = v.object({
@@ -251,9 +239,10 @@ function applyBody(overrides: Record<string, JsonValue> = {}): JsonValue {
     machineId: "m1",
     epoch: 1,
     operationId: "op-1",
+    projectRoot: "project",
     path: "a.txt",
     expectedVersion: "absent",
-    version: "sha256:one",
+    content: Buffer.from("one", "utf8").toString("base64"),
     ...overrides,
   };
 }
@@ -269,7 +258,7 @@ afterAll(async () => {
 });
 
 test.skipIf(!existsSync(CF))(
-  "the Workspace DO serializes writes, fences the old epoch, and survives a restart",
+  "the Workspace DO fences the old epoch and keeps the lease across a restart",
   async () => {
     project = await writeProject();
     const firstPort = await freePort();
@@ -277,57 +266,17 @@ test.skipIf(!existsSync(CF))(
     try {
       const first = await call(firstPort, "POST", "/t/rpc/lease/acquire", Lease, leaseBody());
       expect(first.lease.epoch).toBe(1);
-
-      const applied = await call(firstPort, "POST", "/t/rpc/apply", Apply, applyBody());
-      expect(applied.result.status).toBe("applied");
-      const read = await call(firstPort, "GET", "/t/rpc/read?path=a.txt", Read);
-      expect(read.version).toBe("sha256:one");
-
-      const concurrent = await Promise.all([
-        send(
-          firstPort,
-          "POST",
-          "/t/rpc/apply",
-          applyBody({ operationId: "op-b", expectedVersion: "sha256:one", version: "sha256:two" }),
-        ),
-        send(
-          firstPort,
-          "POST",
-          "/t/rpc/apply",
-          applyBody({
-            operationId: "op-c",
-            expectedVersion: "sha256:one",
-            version: "sha256:three",
-          }),
-        ),
-      ]);
-      const results = concurrent.map((response) => {
-        expect(response.status, response.text).toBe(200);
-        return v.parse(Apply, JSON.parse(response.text)).result;
-      });
-      const appliedResults = results.filter((result) => result.status === "applied");
-      const conflictResults = results.filter((result) => result.status === "conflict");
-      expect(appliedResults).toHaveLength(1);
-      expect(conflictResults).toHaveLength(1);
-      const [winner] = appliedResults;
-      const [loser] = conflictResults;
-      assert.ok(winner !== undefined && winner.status === "applied");
-      assert.ok(loser !== undefined && loser.status === "conflict");
-      expect(loser.currentVersion).toBe(winner.version);
-      const winnerVersion = winner.version;
+      const second = await send(firstPort, "POST", "/t/rpc/lease/acquire", leaseBody());
+      expect(second.status).toBe(409);
 
       const released = await send(firstPort, "POST", "/t/rpc/lease/release", leaseBody());
       expect(released.status).toBe(200);
-      const second = await call(firstPort, "POST", "/t/rpc/lease/acquire", Lease, leaseBody());
-      expect(second.lease.epoch).toBe(2);
+      const third = await call(firstPort, "POST", "/t/rpc/lease/acquire", Lease, leaseBody());
+      expect(third.lease.epoch).toBe(2);
 
-      // Catches: a write from the previous epoch landing after a new holder acquired.
-      const stale = await send(
-        firstPort,
-        "POST",
-        "/t/rpc/apply",
-        applyBody({ expectedVersion: winnerVersion, version: "sha256:stale" }),
-      );
+      // Catches: a write from the previous epoch passing after a new holder acquired. The
+      // lease check runs before the machine, so no machine is configured in this project.
+      const stale = await send(firstPort, "POST", "/t/rpc/apply", applyBody({ epoch: 1 }));
       expect(stale.status).toBe(409);
       expect(v.parse(Refused, JSON.parse(stale.text)).code).toBe("lease_epoch_stale");
 
@@ -336,17 +285,18 @@ test.skipIf(!existsSync(CF))(
       const secondPort = await freePort();
       running = await start(project, secondPort);
 
-      // Catches: a version or lease table that is only in memory, not in DO SQLite.
-      const persisted = await call(secondPort, "GET", "/t/rpc/read?path=a.txt", Read);
-      expect(persisted.version).toBe(winnerVersion);
-      const resumed = await call(
+      // Catches: a lease that lives only in memory, not in the object's SQLite.
+      const held = await send(secondPort, "POST", "/t/rpc/lease/acquire", leaseBody());
+      expect(held.status).toBe(409);
+      const releaseSecond = await send(
         secondPort,
         "POST",
-        "/t/rpc/apply",
-        Apply,
-        applyBody({ epoch: 2, expectedVersion: winnerVersion, version: "sha256:persisted" }),
+        "/t/rpc/lease/release",
+        leaseBody({ epoch: 2 }),
       );
-      expect(resumed.result.status).toBe("applied");
+      expect(releaseSecond.status).toBe(200);
+      const resumed = await call(secondPort, "POST", "/t/rpc/lease/acquire", Lease, leaseBody());
+      expect(resumed.lease.epoch).toBe(3);
     } finally {
       await stop(running);
       running = undefined;

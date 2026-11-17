@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { OperationIdSchema } from "./codecs.ts";
-import type { MutationResult, MutationUnknownReason } from "./types.ts";
+import type { MutationUnknownReason } from "./types.ts";
 
 /**
  * The machine agent's RPC contract: what a Worker sends it and what it answers.
@@ -88,7 +88,7 @@ export interface RequestSignature {
  * );
  * ```
  */
-export function signatureMessage(input: RequestSignature): Uint8Array {
+export function signatureMessage(input: RequestSignature): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(
     JSON.stringify([
       MACHINE_REQUEST_VERSION,
@@ -157,10 +157,28 @@ export const MACHINE_WRITE_UNKNOWN_REASONS = [
  * `applied` carries the version of the bytes it wrote; `conflict` carries the
  * version it found instead and means nothing was written; `unknown` means the
  * machine could not decide, so the Worker must not round it to either of the
- * other two. The result is the same vocabulary the workspace returns
- * (`MutationResult`), so the caller branches on `status` once.
+ * other two. Each member is a `MutationResult` member plus the resolved path,
+ * spelled as a union so narrowing on `status` works at the call site.
  */
-export type MachineWriteResult = MutationResult & { readonly path: string };
+export type MachineWriteResult =
+  | {
+      readonly status: "applied";
+      readonly operationId: string;
+      readonly version: string;
+      readonly path: string;
+    }
+  | {
+      readonly status: "conflict";
+      readonly operationId: string;
+      readonly currentVersion: string;
+      readonly path: string;
+    }
+  | {
+      readonly status: "unknown";
+      readonly operationId: string;
+      readonly reason: MutationUnknownReason;
+      readonly path: string;
+    };
 
 /** The write result as it arrives, parsed at the boundary. */
 export const MachineWriteResultSchema: v.GenericSchema<unknown, MachineWriteResult> = v.variant(

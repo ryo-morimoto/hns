@@ -1,3 +1,4 @@
+import { createFilesFace } from "../files/content.ts";
 import { createGraphQLFace } from "../graphql/index.ts";
 import { SESSION_NAME } from "../session-name.ts";
 import { httpEntry } from "../obs/log.ts";
@@ -100,6 +101,7 @@ const dependencies: HandlerDependencies = {
   graphql: createGraphQLFace(),
   ws: forwardToSession,
   obs: forwardObs,
+  files: createFilesFace(),
   onResponse: recordResponse,
 };
 

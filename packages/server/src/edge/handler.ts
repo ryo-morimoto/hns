@@ -20,6 +20,11 @@ export interface GraphQLRequest extends EdgeRequest {
   readonly body: string;
 }
 
+/** The files content face additionally receives the workspace its path names. */
+export interface FilesRequest extends EdgeRequest {
+  readonly workspaceId: string;
+}
+
 /** One finished request, as the observability log records it. */
 export interface EdgeResponseEvent {
   readonly requestId: string;
@@ -42,12 +47,23 @@ export interface HandlerDependencies {
    * that does not exercise the API needs no stub.
    */
   readonly obs?: ((request: EdgeRequest) => Promise<Response>) | undefined;
+  /**
+   * The files content face (REST), forwarded to the Workspace object.
+   *
+   * @remarks
+   * Optional so a missing binding or an unwired deployment fails closed (503) instead of
+   * crashing, and so an edge test that does not exercise the face needs no stub.
+   */
+  readonly files?: ((request: FilesRequest) => Promise<Response>) | undefined;
   /** Called once per request; production forwards the entry to the Session object. */
   readonly onResponse?: ((event: EdgeResponseEvent, env: WorkerEnv) => void) | undefined;
 }
 
 /** The fetch signature the Worker module exposes. */
 export type EdgeFetch = (request: Request, env: WorkerEnv) => Promise<Response>;
+
+/** The files content face: `/api/workspaces/<workspaceId>/files`. */
+const FILES_PATH = /^\/api\/workspaces\/([^/]+)\/files$/u;
 
 class DeadlineError extends Error {
   constructor() {
@@ -145,6 +161,33 @@ async function route(
       return problem("unauthorized", "A valid session cookie is required.", path);
     }
     return dependencies.ws({ request, env, session, requestId, signal });
+  }
+  const files = FILES_PATH.exec(path);
+  if (files !== null) {
+    if (request.method !== "GET" && request.method !== "POST") {
+      const response = problem(
+        "method_not_allowed",
+        "Only GET and POST are allowed on this path.",
+        path,
+      );
+      response.headers.set("allow", "GET, POST");
+      return response;
+    }
+    const session = await authenticate(request, env);
+    if (session === null) {
+      return problem("unauthorized", "A valid session cookie is required.", path);
+    }
+    if (dependencies.files === undefined) {
+      return problem("unavailable", "The files face is not configured.", path);
+    }
+    return dependencies.files({
+      request,
+      env,
+      session,
+      requestId,
+      signal,
+      workspaceId: files[1] ?? "",
+    });
   }
   if (path === "/api/events" || path === "/api/metrics") {
     if (request.method !== "GET") return methodNotAllowed("GET", path);

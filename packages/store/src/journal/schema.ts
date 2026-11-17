@@ -28,8 +28,19 @@ export const JOURNAL_EVENT_KINDS = ["created", "changed", "deleted", "overflow"]
 /** One kind of file event a Journal row can carry. */
 export type JournalEventKind = (typeof JOURNAL_EVENT_KINDS)[number];
 
-/** The outcome statuses, taken from `MutationResult`. */
-export const JOURNAL_OUTCOME_STATUSES = ["applied", "conflict", "unknown"] as const;
+/**
+ * The outcome statuses.
+ *
+ * @remarks
+ * `applied`, `conflict`, and `unknown` come from `MutationResult`; `denied` is the
+ * Journal's own answer for a write the machine refused before it wrote anything. A denied
+ * outcome settles its intent, so the checkpoint watermark can pass it and the retry returns
+ * the same refusal. The application contract (`MutationResult`) does not gain the member.
+ */
+export const JOURNAL_OUTCOME_STATUSES = ["applied", "conflict", "unknown", "denied"] as const;
+
+/** One stored outcome status. */
+export type JournalOutcomeStatus = (typeof JOURNAL_OUTCOME_STATUSES)[number];
 
 /** Why an outcome is unknown, taken from the core model. */
 export const JOURNAL_UNKNOWN_REASONS = [

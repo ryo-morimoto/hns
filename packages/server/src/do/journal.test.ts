@@ -2,6 +2,7 @@ import { operationId, type MutationResult } from "@hns/core";
 import {
   JOURNAL_INLINE_BODY_MAX_BYTES,
   JOURNAL_MAX_ROWS_PER_MUTATION,
+  JOURNAL_SCHEMA,
   journalBodyKey,
 } from "@hns/store";
 import assert from "node:assert/strict";
@@ -66,11 +67,11 @@ interface Harness {
   close(): void;
 }
 
-function harness(bucket?: JournalBucket): Harness {
+async function harness(bucket?: JournalBucket): Promise<Harness> {
   const opened = openSqliteState();
   const nowMs = Date.parse("2026-01-01T00:00:00.000Z");
   const journal = new Journal(opened.state.storage, { now: () => nowMs, bucket });
-  journal.ensureSchema();
+  await journal.ensureSchema();
   return { journal, state: opened.state, close: opened.close };
 }
 
@@ -155,7 +156,7 @@ const WatermarkOk = v.object({
 const Failure = v.object({ ok: v.literal(false), code: v.string() });
 
 test("sequence numbers are assigned in order and never repeat under concurrent appends", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     const [first, second] = await Promise.all([
       appendIntent(h.journal, { operationId: "op-a", path: "a.txt" }),
@@ -183,7 +184,7 @@ test("sequence numbers are assigned in order and never repeat under concurrent a
 });
 
 test("one table holds intents, outcomes, audits, and events", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     await appendIntent(h.journal, { operationId: "op-1" });
     await appendOutcome(h.journal, {
@@ -210,7 +211,7 @@ test("one table holds intents, outcomes, audits, and events", async () => {
 
 test("a body at the inline limit stays in the row and one byte more goes to the bucket", async () => {
   const bucket = fakeBucket();
-  const h = harness(bucket);
+  const h = await harness(bucket);
   try {
     const atLimit = new Uint8Array(JOURNAL_INLINE_BODY_MAX_BYTES).fill(7);
     await appendIntent(h.journal, {
@@ -248,7 +249,7 @@ test("a body at the inline limit stays in the row and one byte more goes to the 
 });
 
 test("a body over the inline limit without an object store is refused", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     const over = new Uint8Array(JOURNAL_INLINE_BODY_MAX_BYTES + 1);
     await expect(appendIntent(h.journal, { operationId: "op-1", body: over })).rejects.toThrow(
@@ -262,7 +263,7 @@ test("a body over the inline limit without an object store is refused", async ()
 
 test("a refused body write leaves no row and a retry stores the body once", async () => {
   const bucket = fakeBucket();
-  const h = harness(bucket);
+  const h = await harness(bucket);
   try {
     const over = new Uint8Array(JOURNAL_INLINE_BODY_MAX_BYTES + 1).fill(3);
     bucket.refuseNextPut();
@@ -287,7 +288,7 @@ test("a refused body write leaves no row and a retry stores the body once", asyn
 });
 
 test("one mutation appends three rows and a retry appends none", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     const body = new TextEncoder().encode("hello");
     await appendIntent(h.journal, { operationId: "op-1", body });
@@ -324,7 +325,7 @@ test("one mutation appends three rows and a retry appends none", async () => {
 });
 
 test("the watermark truncates intents and bodies but keeps audits and events", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     const body = new TextEncoder().encode("hello");
     await appendIntent(h.journal, { operationId: "op-1", body });
@@ -363,7 +364,7 @@ test("the watermark truncates intents and bodies but keeps audits and events", a
 });
 
 test("a watermark cannot pass an intent that has no outcome", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     await appendIntent(h.journal, { operationId: "op-1" });
     await h.journal.appendEvent({ eventKind: "created", path: "a.txt", version: "sha256:one" });
@@ -386,7 +387,7 @@ test("a watermark cannot pass an intent that has no outcome", async () => {
 });
 
 test("the watermark never decreases", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     await h.journal.writeWatermark(2);
     await expect(h.journal.writeWatermark(1)).rejects.toThrow(JournalWatermarkError);
@@ -397,7 +398,7 @@ test("the watermark never decreases", async () => {
 });
 
 test("a cursor reads the journal in bounded pages without skipping or repeating", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     for (let index = 0; index < 10; index += 1) {
       await h.journal.appendAudit({
@@ -425,7 +426,7 @@ test("a cursor reads the journal in bounded pages without skipping or repeating"
 });
 
 test("an invalid cursor or an out-of-range page size is refused", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     await h.journal.appendAudit({ operationId: null, path: null, reason: "attempt" });
     await expect(h.journal.read({ limit: 0 })).rejects.toThrow(RangeError);
@@ -438,7 +439,7 @@ test("an invalid cursor or an out-of-range page size is refused", async () => {
 });
 
 test("a retried operation returns its recorded outcome and appends nothing", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     await appendIntent(h.journal, { operationId: "op-1" });
     const first = await appendOutcome(h.journal, {
@@ -467,7 +468,7 @@ test("a retried operation returns its recorded outcome and appends nothing", asy
 });
 
 test("the same operation id with different content is denied", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     await appendIntent(h.journal, {
       operationId: "op-1",
@@ -491,7 +492,7 @@ test("the same operation id with different content is denied", async () => {
 });
 
 test("an outcome without its intent is refused", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     await expect(
       appendOutcome(h.journal, {
@@ -507,7 +508,7 @@ test("an outcome without its intent is refused", async () => {
 });
 
 test("an outcome cannot settle another path's intent", async () => {
-  const h = harness();
+  const h = await harness();
   try {
     await appendIntent(h.journal, { operationId: "op-1", path: "a.txt" });
     await expect(
@@ -531,7 +532,7 @@ test("the Workspace DO writes the journal watermark through its RPC face", async
     // The deploy constructs the object as new Workspace(ctx, env); the test passes the same env.
     const workspace = new Workspace(opened.state, { OBJECTS: bucket, now: () => nowMs });
     const journal = new Journal(opened.state.storage, { now: () => nowMs, bucket });
-    journal.ensureSchema();
+    await journal.ensureSchema();
     await appendIntent(journal, {
       operationId: "op-1",
       body: new TextEncoder().encode("hello"),
@@ -571,6 +572,90 @@ test("the Workspace DO writes the journal watermark through its RPC face", async
       post("/rpc/journal/watermark", { workspaceId: "w1", throughSeq: -1 }),
     );
     expect(invalid.status).toBe(400);
+  } finally {
+    opened.close();
+  }
+});
+// Catches: a settled operation id replayed with another body returning the old outcome.
+test("a settled operation id with different content is denied", async () => {
+  const h = await harness();
+  try {
+    await appendIntent(h.journal, {
+      operationId: "op-1",
+      body: new TextEncoder().encode("one"),
+    });
+    await appendOutcome(h.journal, {
+      status: "applied",
+      operationId: "op-1",
+      version: "sha256:one",
+    });
+    const replay = await appendIntent(h.journal, {
+      operationId: "op-1",
+      body: new TextEncoder().encode("two"),
+    });
+    expect(replay.status).toBe("denied");
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a refused write leaving its intent pending, so no checkpoint can ever truncate it.
+test("a denied outcome settles its intent and the watermark may pass it", async () => {
+  const h = await harness();
+  try {
+    const intent = await appendIntent(h.journal, {
+      operationId: "op-denied",
+      body: new TextEncoder().encode("x"),
+    });
+    assert.equal(intent.status, "appended");
+    const outcome = await h.journal.appendOutcome({
+      path: "a.txt",
+      result: { status: "denied", operationId: operationId("op-denied"), reason: "path_denied" },
+    });
+    expect(outcome.status).toBe("appended");
+    const stored = (await h.journal.read()).entries.find((entry) => entry.kind === "outcome");
+    expect(stored).toMatchObject({
+      status: "denied",
+      reason: "path_denied",
+      version: null,
+      currentVersion: null,
+    });
+    const written = await h.journal.writeWatermark(stored?.seq ?? 0);
+    expect(written.truncated).toBe(2);
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a DO table created before the denied status refusing the new vocabulary forever.
+test("a journal table without the denied status is rebuilt in place", async () => {
+  const opened = openSqliteState();
+  const nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+  try {
+    // The previous DDL: the same statements without the widened status CHECK.
+    for (const statement of JOURNAL_SCHEMA) {
+      opened.state.storage.sql.exec(statement.replace(", 'denied'", ""));
+    }
+    const journal = new Journal(opened.state.storage, { now: () => nowMs });
+    const intent = await appendIntent(journal, { operationId: "op-legacy" });
+    assert.equal(intent.status, "appended");
+
+    await journal.ensureSchema();
+
+    const table = opened.state.storage.sql
+      .exec("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'journal'")
+      .toArray()[0];
+    expect(v.parse(v.object({ sql: v.string() }), table).sql).toContain("'denied'");
+    const outcome = await journal.appendOutcome({
+      path: "a.txt",
+      result: { status: "denied", operationId: operationId("op-legacy"), reason: "path_denied" },
+    });
+    expect(outcome.status).toBe("appended");
+    // The rows written before the rebuild are still there.
+    expect((await journal.read()).entries.map((entry) => entry.kind)).toStrictEqual([
+      "intent",
+      "outcome",
+    ]);
   } finally {
     opened.close();
   }

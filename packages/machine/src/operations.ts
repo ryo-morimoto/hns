@@ -18,6 +18,35 @@ import type {
   StatResult,
 } from "./wire.ts";
 
+/**
+ * One write at a time per path, so two concurrent applies cannot both pass the version check.
+ *
+ * @remarks
+ * The compare-and-rename window is already the documented residual race (a same-name swap
+ * between the hash and the rename); serializing the machine's own writes removes the common
+ * case of two of our own requests interleaving, which is what makes "one applied, one conflict"
+ * hold for the editor. The map holds only the paths with a write in flight.
+ *
+ * @internal
+ */
+const writeLocks = new Map<string, Promise<void>>();
+
+/** Run one write after any write to the same root and path has settled. */
+async function withWriteLock<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = writeLocks.get(key) ?? Promise.resolve();
+  const run = previous.then(work);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  writeLocks.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (writeLocks.get(key) === tail) writeLocks.delete(key);
+  }
+}
+
 /** The result of any operation, before it is serialized. */
 export type OperationResult =
   | HealthResult
@@ -378,16 +407,20 @@ async function writePath(
   signal.throwIfAborted();
   const content = Buffer.from(operation.content, "base64");
   try {
-    const outcome = await applyVersionedWrite({
-      root,
-      identity,
-      projectRoot: operation.projectRoot,
-      path: operation.path,
-      content,
-      expectedVersion: operation.expectedVersion,
-      contentHash: operation.contentHash,
-      signal,
-    });
+    const outcome = await withWriteLock(
+      root + "\0" + operation.projectRoot + "\0" + operation.path,
+      () =>
+        applyVersionedWrite({
+          root,
+          identity,
+          projectRoot: operation.projectRoot,
+          path: operation.path,
+          content,
+          expectedVersion: operation.expectedVersion,
+          contentHash: operation.contentHash,
+          signal,
+        }),
+    );
     // The intent id is the Worker's journal key: the write never uses it as a path.
     return { ...outcome, operationId: operation.operationId };
   } catch (error) {

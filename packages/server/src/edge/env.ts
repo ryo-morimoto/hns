@@ -101,4 +101,21 @@ export interface WorkerEnv {
   readonly DB?: D1Binding | undefined;
   /** HMAC key for `hns_session`; at least 32 characters. Never logged. */
   readonly HNS_SESSION_SECRET?: string | undefined;
+  /**
+   * The machine agent's origin; the Workspace object calls it through the tunnel.
+   *
+   * @remarks
+   * Declared here because it is the same environment the Durable Objects are constructed with.
+   * The edge itself does not call the machine; `Workspace` reads this through its own bindings
+   * type. Absent means the file faces fail closed (503).
+   */
+  readonly HNS_AGENT_URL?: string | undefined;
+  /**
+   * The control-plane Ed25519 seed (base64url) the Workspace signs machine requests with.
+   *
+   * @remarks
+   * A Worker secret (D100). The machine verifies with the enrolled public half; never log it.
+   * 0148 supplies the enrollment and rotation.
+   */
+  readonly HNS_CONTROL_PLANE_KEY?: string | undefined;
 }
