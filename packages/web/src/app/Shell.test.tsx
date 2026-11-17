@@ -164,6 +164,9 @@ test("project switch changes the workspace root and the editor slot's target", a
     );
     expect(document.body.textContent ?? "").toMatch(/root: projects\/scratch/u);
   });
+  // The previous project's conversations are not shown under the new one.
+  expect(screen.queryByRole("link", { name: "デザインシステムのレビュー" })).toBe(null);
+  expect(document.body.textContent ?? "").toMatch(/scratch · 会話 0 · タスク 0/u);
   const workspaceCalls = calls.filter((call) => call.operation === "ShellWorkspaceQuery");
   expect(workspaceCalls.at(-1)?.variables["projectId"]).toBe(
     toGlobalId("Project", "project-scratch"),
