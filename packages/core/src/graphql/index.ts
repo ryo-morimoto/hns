@@ -8,7 +8,7 @@
 export { buildSchema, buildSdl, buildTypes } from "./schema.ts";
 export { fromGlobalId, toGlobalId } from "./global-id.ts";
 export type { GlobalId, GlobalIdResult } from "./global-id.ts";
-export type { QueryRootFactory } from "./schema.ts";
+export type { MutationRootFactory, QueryRootFactory } from "./schema.ts";
 export {
   ConversationEntity,
   ENTITIES,

@@ -21,9 +21,7 @@ import {
   type GraphQLRequestLimits,
 } from "./queries.ts";
 import { buildGraphQLSchema } from "./schema.ts";
-
-/** The schema is built once per isolate; it is immutable after construction. */
-const SCHEMA = buildGraphQLSchema();
+import type { MutationModule } from "./mutations/index.ts";
 
 /** A request the face refused before execution. */
 const REQUEST_INVALID = "GRAPHQL_REQUEST_INVALID";
@@ -45,13 +43,15 @@ interface ParsedRequest {
   readonly operationName?: string | undefined;
 }
 
-/** How many rows a request may read and a list may return. */
+/** How many rows a request may read or write, and how many a list may return. */
 type RowLimits = Pick<EdgeLimits, "maxRowsPerRequest" | "maxRowsPerList">;
 
-/** What a test replaces: the reads, the query limits, and the row budget. */
+/** What a test replaces: the reads, the mutation modules, the query limits, and the row budget. */
 export interface GraphQLFaceDependencies {
   /** Replace one or more reads; production reads D1 and the Session DO. */
   readonly reads?: Partial<GraphQLReads> | undefined;
+  /** Replace the feature mutation modules; production uses the registered collection. */
+  readonly mutations?: readonly MutationModule[] | undefined;
   /** The query limits; production uses {@link DEFAULT_GRAPHQL_LIMITS}. */
   readonly queryLimits?: GraphQLRequestLimits | undefined;
   /** The row budget; production uses the edge limits. */
@@ -147,20 +147,24 @@ function logUnexpected(requestId: string, error: Error | undefined): void {
 /**
  * Build the `/graphql` handler the edge calls after authentication.
  *
- * @param dependencies - Optional replacements for tests; production uses D1, the Session DO, and
- * the default limits.
+ * @param dependencies - Optional replacements for tests; production uses D1, the Session DO, the
+ * registered mutation modules, and the default limits.
  * @returns A handler that parses, validates, bounds, executes, and answers.
  *
  * @remarks
- * Expected read failures travel inside the result unions at HTTP 200. A request that cannot be
- * executed (not JSON, not GraphQL, over a limit, not a query operation) is 400. Anything else is
- * 500 with a message that carries no row data; the correlation id is logged, never returned.
+ * Expected read and write failures travel inside the result unions at HTTP 200. A request that
+ * cannot be executed (not JSON, not GraphQL, over a limit, not a query or mutation operation) is
+ * 400; a mutation document with no registered module fails validation the same way. Anything else
+ * is 500 with a message that carries no row data; the correlation id is logged, never returned.
  */
 export function createGraphQLFace(
   dependencies: GraphQLFaceDependencies = {},
 ): (request: GraphQLRequest) => Promise<Response> {
   const queryLimits = dependencies.queryLimits ?? DEFAULT_GRAPHQL_LIMITS;
   const rows = dependencies.rows ?? DEFAULT_LIMITS;
+  // Built once per face; the schema is immutable after construction. The face is created once
+  // per isolate in production, so this is the same cost as a module-level constant.
+  const schema = buildGraphQLSchema(dependencies.mutations);
 
   return async function graphqlFace(request: GraphQLRequest): Promise<Response> {
     const parsed = parseRequest(request.body);
@@ -192,9 +196,11 @@ export function createGraphQLFace(
     const operations = operationsOf(document);
     if (
       operations.length === 0 ||
-      operations.some((operation) => operation.operation !== "query")
+      operations.some(
+        (operation) => operation.operation !== "query" && operation.operation !== "mutation",
+      )
     ) {
-      return failure("Only query operations are supported.", REQUEST_INVALID, 400);
+      return failure("Only query and mutation operations are supported.", REQUEST_INVALID, 400);
     }
     if (operations.length > 1 && parsed.value.operationName === undefined) {
       return failure(
@@ -204,7 +210,7 @@ export function createGraphQLFace(
       );
     }
 
-    const problems = validate(SCHEMA, document);
+    const problems = validate(schema, document);
     if (problems.length > 0) {
       return failure(problems.map((problem) => problem.message).join("; "), REQUEST_INVALID, 400);
     }
@@ -212,6 +218,7 @@ export function createGraphQLFace(
     const context = createContext({
       env: request.env,
       requestId: request.requestId,
+      session: request.session,
       reads: dependencies.reads,
       maxRows: rows.maxRowsPerRequest,
       maxRowsPerList: rows.maxRowsPerList,
@@ -220,7 +227,7 @@ export function createGraphQLFace(
     let result: ExecutionResult;
     try {
       result = await execute({
-        schema: SCHEMA,
+        schema,
         document,
         contextValue: context,
         variableValues: parsed.value.variables,

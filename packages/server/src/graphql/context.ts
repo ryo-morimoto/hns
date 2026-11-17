@@ -4,6 +4,7 @@ import { ConversationIdSchema, ProjectIdSchema } from "@hns/core";
 import { openStore, type D1Binding, type Store } from "@hns/store";
 import type { WorkerEnv } from "../edge/env.ts";
 import { createRowBudget, type RowBudget } from "../edge/limits.ts";
+import type { Session } from "../edge/session.ts";
 import { SESSION_NAME } from "../session-name.ts";
 import { QueryReadError } from "./failures.ts";
 
@@ -24,8 +25,16 @@ export interface GraphQLReads {
 export interface GraphQLContext {
   /** The edge's correlation id; logged, never returned. */
   readonly requestId: string;
+  /**
+   * The verified caller.
+   *
+   * @remarks
+   * The edge has proven only that the cookie is a valid session. A mutation resolver still
+   * authorizes its own target (owner) before it writes.
+   */
+  readonly session: Session;
   readonly reads: GraphQLReads;
-  /** The rows this request may still read across every resolver. */
+  /** The rows this request may still read or write across every resolver. */
   readonly budget: RowBudget;
   /** The most rows one list field may return. */
   readonly maxRowsPerList: number;
@@ -35,6 +44,7 @@ export interface GraphQLContext {
 export interface GraphQLContextOptions {
   readonly env: WorkerEnv;
   readonly requestId: string;
+  readonly session: Session;
   readonly reads?: Partial<GraphQLReads> | undefined;
   readonly maxRows: number;
   readonly maxRowsPerList: number;
@@ -183,6 +193,7 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
   const overrides = options.reads ?? {};
   return {
     requestId: options.requestId,
+    session: options.session,
     budget: createRowBudget(options.maxRows),
     maxRowsPerList: options.maxRowsPerList,
     reads: {

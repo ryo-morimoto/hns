@@ -10,9 +10,10 @@ import {
   GraphQLString,
   GraphQLUnionType,
 } from "graphql";
-import { buildSchema, publicEnumName } from "@hns/core/graphql";
+import { buildSchema, publicEnumName, type MutationRootFactory } from "@hns/core/graphql";
 import type { GraphQLContext } from "./context.ts";
 import { QUERY_FAILURE_CODES } from "./failures.ts";
+import { buildMutationRoot, MUTATION_MODULES, type MutationModule } from "./mutations/index.ts";
 import { resolveConversations, resolveProjects, resolveTasks } from "./resolvers.ts";
 
 /** The first line of the generated SDL; the codegen verifier reads it. */
@@ -128,24 +129,43 @@ function buildQuery(objects: ReadonlyMap<string, GraphQLObjectType>): GraphQLObj
 }
 
 /**
+ * The Mutation root builder, or undefined when no feature has registered a module.
+ *
+ * @internal
+ * @remarks
+ * The absence is what keeps the schema free of an empty Mutation root: GraphQL refuses a
+ * Mutation type with no fields, and the published SDL must not change until a write exists.
+ */
+function mutationOf(modules: readonly MutationModule[]): MutationRootFactory | undefined {
+  if (modules.length === 0) return undefined;
+  return (objects) => buildMutationRoot(objects, modules);
+}
+
+/**
  * Build the schema the Worker serves.
  *
- * @returns The model types, the result unions, and the Query root, ready for `validate` and
- * `execute`.
+ * @param modules - The feature mutation modules to collect; production uses
+ * {@link MUTATION_MODULES}. An empty collection leaves the schema without a Mutation root.
+ * @returns The model types, the result unions, and the Query root (and the Mutation root when a
+ * module is registered), ready for `validate` and `execute`.
  */
-export function buildGraphQLSchema(): GraphQLSchema {
-  return buildSchema(buildQuery);
+export function buildGraphQLSchema(
+  modules: readonly MutationModule[] = MUTATION_MODULES,
+): GraphQLSchema {
+  return buildSchema(buildQuery, mutationOf(modules));
 }
 
 /**
  * The schema as SDL, for the client code generator.
  *
+ * @param modules - The feature mutation modules to collect; production uses
+ * {@link MUTATION_MODULES}.
  * @returns The printed schema, preceded by a generated header and ending in a newline.
  *
  * @remarks
  * The web package commits this as `schema.graphql`; relay-compiler validates the app's documents
  * against it. Regenerate with `npm run codegen` instead of editing it.
  */
-export function buildSchemaSdl(): string {
-  return SDL_HEADER + "\n" + SDL_COMMAND + "\n" + printSchema(buildGraphQLSchema()) + "\n";
+export function buildSchemaSdl(modules: readonly MutationModule[] = MUTATION_MODULES): string {
+  return SDL_HEADER + "\n" + SDL_COMMAND + "\n" + printSchema(buildGraphQLSchema(modules)) + "\n";
 }

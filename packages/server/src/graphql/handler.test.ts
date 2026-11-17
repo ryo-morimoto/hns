@@ -3,6 +3,7 @@ import type { JsonValue } from "@hns/core";
 import { toGlobalId } from "@hns/core/graphql";
 import { createEdge } from "../edge/handler.ts";
 import { envWith, sessionCookie, sessionWith } from "../../test/support/edge.ts";
+import { noteMutation } from "../../test/graphql/fixture-mutation.ts";
 import { conversation, project, task } from "../../test/support/graphql.ts";
 import type { WorkerEnv } from "../edge/env.ts";
 import type { GraphQLFaceDependencies } from "./handler.ts";
@@ -24,8 +25,12 @@ function edgeWith(dependencies: GraphQLFaceDependencies = {}) {
     graphql: createGraphQLFace(dependencies),
     ws: () => Promise.resolve(new Response("ok")),
   });
-  return async function send(body: RequestBody, env: WorkerEnv = envWith()): Promise<Response> {
-    const cookie = await sessionCookie("owner");
+  return async function send(
+    body: RequestBody,
+    env: WorkerEnv = envWith(),
+    subject = "owner",
+  ): Promise<Response> {
+    const cookie = await sessionCookie(subject);
     return edge(
       new Request("https://hns.test/graphql", {
         method: "POST",
@@ -318,10 +323,115 @@ test("a query over the limits is refused before execution", async () => {
   expect(read).not.toHaveBeenCalled();
 });
 
-// Catches: a mutation accepted on a query-only face.
-test("a mutation document is refused with 400", async () => {
+// Catches: a mutation document accepted while the schema has no Mutation root.
+test("a mutation document on a face with no module is refused with 400", async () => {
   const send = edgeWith();
   const response = await send({ query: "mutation { projects { __typename } }" });
+  expect(response.status).toBe(400);
+});
+
+const CREATE_NOTE =
+  "mutation Create($text: String!) { createNote(text: $text) { __typename ... on NotePayload { text actor } ... on MutationFailure { code } } }";
+
+// Catches: a registered mutation field the face validates but never executes, or a payload read
+// as a failure.
+test("a mutation executes through its result union at HTTP 200", async () => {
+  const send = edgeWith({ mutations: [noteMutation("owner")] });
+  const response = await send({ query: CREATE_NOTE, variables: { text: "hello" } });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: {
+      createNote: { __typename: "NotePayload", text: "hello", actor: "owner" },
+    },
+  });
+});
+
+// Catches: a resolver that skips the caller check the edge cannot make, or a denial reported as
+// a server failure instead of a union member.
+test("a caller that does not own the target gets a typed forbidden failure", async () => {
+  const send = edgeWith({ mutations: [noteMutation("owner")] });
+  const response = await send(
+    { query: CREATE_NOTE, variables: { text: "hello" } },
+    envWith(),
+    "intruder",
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: { createNote: { __typename: "MutationFailure", code: "FORBIDDEN" } },
+  });
+});
+
+// Catches: invalid mutation input reported as a GraphQL error (500) or an empty payload.
+test("invalid mutation input is a typed failure at HTTP 200", async () => {
+  const send = edgeWith({ mutations: [noteMutation("owner")] });
+  const response = await send({ query: CREATE_NOTE, variables: { text: "   " } });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: { createNote: { __typename: "MutationFailure", code: "INVALID_ARGUMENT" } },
+  });
+});
+
+// Catches: a mutation variable that does not coerce reported as a server failure.
+test("a mutation variable that does not coerce is refused with 400", async () => {
+  const send = edgeWith({ mutations: [noteMutation("owner")] });
+  const response = await send({ query: CREATE_NOTE, variables: { text: 42 } });
+  expect(response.status).toBe(400);
+});
+
+// Catches: an unknown operationName in a mutation document answered with 200 or 500.
+test("an unknown operationName on a mutation document is refused with 400", async () => {
+  const document =
+    'mutation A { createNote(text: "a") { __typename } } mutation B { createNote(text: "b") { __typename } }';
+  const send = edgeWith({ mutations: [noteMutation("owner")] });
+  const response = await send({ query: document, operationName: "C" });
+  expect(response.status).toBe(400);
+  const missing = await send({ query: document });
+  expect(missing.status).toBe(400);
+});
+
+// Catches: a mutation that spends rows outside the request budget.
+test("a mutation spends the same row budget as a query", async () => {
+  const send = edgeWith({
+    mutations: [noteMutation("owner")],
+    rows: { maxRowsPerRequest: 0, maxRowsPerList: 0 },
+  });
+  const response = await send({ query: CREATE_NOTE, variables: { text: "hello" } });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: { createNote: { __typename: "MutationFailure", code: "LIMIT_EXCEEDED" } },
+  });
+});
+
+// Catches: a mutation body paying for a parse before the byte limit runs.
+test("an oversized mutation is refused before parsing", async () => {
+  const send = edgeWith({
+    mutations: [noteMutation("owner")],
+    queryLimits: { maxBytes: 32, maxDepth: 8, maxComplexity: 500 },
+  });
+  const response = await send({
+    query: CREATE_NOTE + " ".repeat(64),
+    variables: { text: "hello" },
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({
+    errors: [{ message: expect.stringContaining("bytes") }],
+  });
+});
+
+// Catches: mutations escaping the depth or complexity limit that queries obey.
+test("a mutation over the limits is refused before execution", async () => {
+  const send = edgeWith({
+    mutations: [noteMutation("owner")],
+    queryLimits: { maxBytes: 4_096, maxDepth: 1, maxComplexity: 10 },
+  });
+  const response = await send({ query: CREATE_NOTE, variables: { text: "hello" } });
+  expect(response.status).toBe(400);
+});
+
+// Catches: an unknown mutation field reaching execution instead of validation.
+test("an unknown mutation field is refused with 400", async () => {
+  const send = edgeWith({ mutations: [noteMutation("owner")] });
+  const response = await send({ query: "mutation { nope { __typename } }" });
   expect(response.status).toBe(400);
 });
 

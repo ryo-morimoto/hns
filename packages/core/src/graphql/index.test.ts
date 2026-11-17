@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 import { readFileSync } from "node:fs";
-import { GraphQLBoolean, GraphQLEnumType, GraphQLObjectType, validateSchema } from "graphql";
+import {
+  GraphQLBoolean,
+  GraphQLEnumType,
+  GraphQLNonNull,
+  GraphQLObjectType,
+  GraphQLString,
+  validateSchema,
+} from "graphql";
 import { buildSchema, buildSdl, defineEntity, EXCLUDED } from "./index.ts";
 import { TASK_STATUSES } from "../types.ts";
 
@@ -10,6 +17,14 @@ const golden = readFileSync(new URL("../../test/fixtures/schema.graphql", import
 /** A stand-in for the server's Query root; the model contributes no Query of its own. */
 function dummyQuery(): GraphQLObjectType {
   return new GraphQLObjectType({ name: "Query", fields: { ok: { type: GraphQLBoolean } } });
+}
+
+/** A stand-in for the server's Mutation root; the model contributes no Mutation of its own. */
+function dummyMutation(): GraphQLObjectType {
+  return new GraphQLObjectType({
+    name: "Mutation",
+    fields: { echo: { type: new GraphQLNonNull(GraphQLString) } },
+  });
 }
 
 test("buildSdl is deterministic", () => {
@@ -24,6 +39,41 @@ test("SDL matches the committed golden", () => {
 test("the model types plus a Query root form a valid schema", () => {
   const schema = buildSchema(() => dummyQuery());
   expect(validateSchema(schema)).toStrictEqual([]);
+});
+
+// Catches: an empty Mutation type added to every schema, which GraphQL refuses to validate.
+test("a build without a Mutation root exposes no Mutation type", () => {
+  const schema = buildSchema(() => dummyQuery());
+  expect(schema.getMutationType()).toBeUndefined();
+  expect(buildSdl()).not.toContain("type Mutation");
+});
+
+test("the SDL carries the Mutation root only when one is given", () => {
+  expect(buildSdl(dummyMutation)).toContain("type Mutation {\n  echo: String!\n}");
+});
+
+test("the model types plus both roots form a valid schema", () => {
+  const schema = buildSchema(() => dummyQuery(), dummyMutation);
+  expect(schema.getMutationType()?.name).toBe("Mutation");
+  expect(validateSchema(schema)).toStrictEqual([]);
+});
+
+// Catches: a Mutation root naming a second Project type instead of the schema's own instance.
+test("the Mutation root receives the schema's own model instances", () => {
+  let seen: GraphQLObjectType | undefined;
+  const schema = buildSchema(
+    () => dummyQuery(),
+    (objects) => {
+      const project = objects.get("Project");
+      if (project === undefined) throw new Error("the model has no Project type");
+      seen = project;
+      return new GraphQLObjectType({
+        name: "Mutation",
+        fields: { project: { type: project } },
+      });
+    },
+  );
+  expect(seen).toBe(schema.getType("Project"));
 });
 
 test("ids are exposed as ID and the brand is not part of the contract", () => {

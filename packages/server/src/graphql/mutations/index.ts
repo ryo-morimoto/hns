@@ -1,0 +1,69 @@
+import { GraphQLObjectType, type GraphQLFieldConfigMap } from "graphql";
+import type { GraphQLContext } from "../context.ts";
+
+/**
+ * One feature's contribution to the Mutation root.
+ *
+ * @remarks
+ * One module per feature (D059: the schema, resolvers, and tests of a feature land together).
+ * A module owns its payload and union types; it shares `MutationFailureType` from
+ * `./failure.ts` so the schema carries one failure type.
+ */
+export interface MutationModule {
+  /** The feature name; unique, and named when two modules claim the same field. */
+  readonly name: string;
+  /**
+   * The fields this feature adds.
+   *
+   * @param objects - The model's object types, so a payload can name `Project` or `Task`
+   * without a second definition of that name.
+   * @returns The feature's field configs, keyed by GraphQL field name.
+   */
+  readonly fields: (
+    objects: ReadonlyMap<string, GraphQLObjectType>,
+  ) => GraphQLFieldConfigMap<undefined, GraphQLContext>;
+}
+
+/**
+ * Every feature mutation, in declaration order.
+ *
+ * @remarks
+ * Empty until the first feature lands. The schema then has no Mutation root at all, so the
+ * published SDL and Relay's codegen do not change while the face is unused.
+ */
+export const MUTATION_MODULES: readonly MutationModule[] = [];
+
+/**
+ * Build the Mutation root from the feature modules.
+ *
+ * @param objects - The model object types the schema is built with.
+ * @param modules - At least one feature module; an empty collection has no root.
+ * @returns The collected root, preserving module and field declaration order.
+ * @throws Error when two modules define the same field name, or when a module defines no field.
+ *
+ * @remarks
+ * A duplicate field would otherwise be merged silently by the object type, hiding the feature
+ * that lost its field. Callers that may have no module pass `undefined` to `buildSchema`
+ * instead of an empty root, because GraphQL refuses a Mutation type with no fields.
+ */
+export function buildMutationRoot(
+  objects: ReadonlyMap<string, GraphQLObjectType>,
+  modules: readonly MutationModule[],
+): GraphQLObjectType {
+  const fields: GraphQLFieldConfigMap<undefined, GraphQLContext> = {};
+  const owners = new Map<string, string>();
+  for (const module of modules) {
+    for (const [name, field] of Object.entries(module.fields(objects))) {
+      const owner = owners.get(name);
+      if (owner !== undefined) {
+        throw new Error(
+          "mutation field " + name + " is defined by " + owner + " and " + module.name,
+        );
+      }
+      owners.set(name, module.name);
+      fields[name] = field;
+    }
+  }
+  if (owners.size === 0) throw new Error("the mutation modules define no fields");
+  return new GraphQLObjectType<undefined, GraphQLContext>({ name: "Mutation", fields });
+}
