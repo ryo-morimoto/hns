@@ -46,6 +46,8 @@ type Query {
   conversations(projectId: ID!, first: Int, after: String, q: String): ConversationListResult!
   indexState(projectId: ID!): IndexStateResult!
   tasks(projectId: ID!, first: Int): TaskListResult!
+  policyRevisions(workspaceId: ID!, first: Int): PolicyRevisionListResult!
+  policyProposals(workspaceId: ID!, status: PolicyProposalStatus): PolicyProposalListResult!
 }
 
 union ProjectListResult = ProjectList | QueryFailure
@@ -87,8 +89,93 @@ type TaskList {
   tasks: [Task!]!
 }
 
+union PolicyRevisionListResult = PolicyRevisionList | PolicyFailure
+
+type PolicyRevisionList {
+  revisions: [PolicyRevision!]!
+}
+
+type PolicyRevision {
+  id: ID!
+  workspaceId: ID!
+  revision: Int!
+  hash: String!
+  active: Boolean!
+  createdAt: String!
+  createdBy: String!
+  document: PolicyDocument!
+}
+
+type PolicyDocument {
+  readRoots: [String!]!
+  writeRoots: [String!]!
+  bash: Boolean!
+  network: Boolean!
+}
+
+type PolicyFailure {
+  code: PolicyFailureCode!
+  message: String!
+}
+
+enum PolicyFailureCode {
+  POLICY_DENIED
+  APPROVAL_STALE
+  UNSUPPORTED
+  NOT_FOUND
+  INVALID_REQUEST
+}
+
+union PolicyProposalListResult = PolicyProposalList | PolicyFailure
+
+type PolicyProposalList {
+  proposals: [PolicyProposal!]!
+}
+
+type PolicyProposal {
+  id: ID!
+  baseRevision: Int!
+  reviewToken: String!
+  status: PolicyProposalStatus!
+  requestedBy: String!
+  reason: String!
+  createdAt: String!
+  decidedBy: String
+  decidedAt: String
+  decisionReason: String
+  candidate: PolicyDocument!
+  diff: PolicyDiff!
+}
+
+enum PolicyProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+type PolicyDiff {
+  kind: PolicyDiffKind!
+  added: [PolicyDiffAtom!]!
+  removed: [PolicyDiffAtom!]!
+}
+
+enum PolicyDiffKind {
+  EQUAL
+  NARROWING
+  EXPANSION
+  MIXED
+  UNSUPPORTED
+}
+
+type PolicyDiffAtom {
+  atomKind: String!
+  value: String!
+}
+
 type Mutation {
   createProject(name: String!, workspaceRoot: String!): CreateProjectResult!
+  proposePolicy(input: PolicyProposalInput!): ProposePolicyResult!
+  decidePolicy(input: DecidePolicyInput!): DecidePolicyResult!
 }
 
 union CreateProjectResult = CreateProjectPayload | MutationFailure
@@ -107,4 +194,34 @@ enum MutationFailureCode {
   INVALID_REQUEST
   LIMIT_EXCEEDED
   UNAVAILABLE
+}
+
+union ProposePolicyResult = ProposePolicyPayload | PolicyFailure
+
+type ProposePolicyPayload {
+  proposal: PolicyProposal!
+}
+
+input PolicyProposalInput {
+  workspaceId: ID!
+  readRoots: [String!]!
+  writeRoots: [String!]!
+  bash: Boolean!
+  network: Boolean!
+  reason: String!
+}
+
+union DecidePolicyResult = DecidePolicyPayload | PolicyFailure
+
+type DecidePolicyPayload {
+  proposal: PolicyProposal!
+  revision: PolicyRevision
+  proposalStale: Boolean!
+}
+
+input DecidePolicyInput {
+  proposalId: ID!
+  reviewToken: String!
+  approve: Boolean!
+  reason: String!
 }

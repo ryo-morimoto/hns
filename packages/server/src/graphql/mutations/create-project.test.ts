@@ -21,6 +21,7 @@ async function run(
     requestId: "test",
     session: { subject, expiresAt: 0 },
     writes: { createProject: write },
+    policy: undefined,
     maxRows: 10,
     maxRowsPerList: 10,
   });

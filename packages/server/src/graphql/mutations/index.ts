@@ -1,6 +1,7 @@
 import { GraphQLObjectType, type GraphQLFieldConfigMap } from "graphql";
 import type { GraphQLContext } from "../context.ts";
 import { createProjectModule } from "./create-project.ts";
+import { policyModule } from "../policy/schema.ts";
 
 /**
  * One feature's contribution to the Mutation root.
@@ -33,7 +34,7 @@ export interface MutationModule {
  * no writes free of an empty (and invalid) root. `createProject` is the first real feature; the
  * 0198 skeleton's fixture stays test-only.
  */
-export const MUTATION_MODULES: readonly MutationModule[] = [createProjectModule()];
+export const MUTATION_MODULES: readonly MutationModule[] = [createProjectModule(), policyModule()];
 
 /**
  * Build the Mutation root from the feature modules.

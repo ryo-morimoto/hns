@@ -12,6 +12,7 @@ import { createRowBudget, type RowBudget } from "../edge/limits.ts";
 import type { Session } from "../edge/session.ts";
 import { projectFor, storeFor, StoreUnavailableError } from "../edge/store.ts";
 import { QueryReadError } from "./failures.ts";
+import { policyFaceOver, type PolicyFace } from "./policy/face.ts";
 
 /**
  * The reads one GraphQL request performs.
@@ -89,6 +90,15 @@ export interface GraphQLContext {
   readonly session: Session;
   readonly reads: GraphQLReads;
   readonly writes: GraphQLWrites;
+  /**
+   * The policy service's operations (0223), as the policy fields call them.
+   *
+   * @remarks
+   * One port rather than one per field: the four policy fields are four views of one service, and a
+   * port on the context is what lets a unit test replace it. Production builds it with
+   * `policyFaceOver` over the request's store; the port opens the store lazily.
+   */
+  readonly policy: PolicyFace;
   /** The rows this request may still read or write across every resolver. */
   readonly budget: RowBudget;
   /** The most rows one list field may return. */
@@ -102,6 +112,15 @@ export interface GraphQLContextOptions {
   readonly session: Session;
   readonly reads?: Partial<GraphQLReads> | undefined;
   readonly writes?: Partial<GraphQLWrites> | undefined;
+  /**
+   * Replace the policy face; production builds it over the control database.
+   *
+   * @remarks
+   * Required rather than optional with a default, because the default reaches for `env.DB` and a
+   * test that forgot to replace it would answer `unavailable` instead of testing the face. The
+   * production caller (`handler.ts`) passes undefined explicitly to mean "the default".
+   */
+  readonly policy: PolicyFace | undefined;
   readonly maxRows: number;
   readonly maxRowsPerList: number;
 }
@@ -194,6 +213,37 @@ function defaultReads(env: WorkerEnv, requestId: string): GraphQLReads {
   };
 }
 
+/**
+ * The production policy face: the 0223 service over the request's control database.
+ *
+ * @internal
+ * @remarks
+ * The port opens the policy lazily, so a request that never touches a policy field does not pay for
+ * `ensure`. `bashSandbox` is `false`: no machine fact on the project row says a workspace has a
+ * sandbox yet (0226 carries the machine's capability into the session), and `false` is the fail
+ * closed default — the baseline then omits `bash` rather than granting a process nobody can
+ * sandbox. A store that cannot be opened is `unavailable`, like every other read on this face.
+ */
+function defaultPolicy(env: WorkerEnv, requestId: string): PolicyFace {
+  let opened: PolicyFace | undefined;
+  const open = async (): Promise<PolicyFace> => {
+    if (opened !== undefined) return opened;
+    const store = await storeWith(env, requestId);
+    if (opened === undefined) opened = policyFaceOver(store, { bashSandbox: false });
+    return opened;
+  };
+  return {
+    revisions: (workspaceId) =>
+      storeFailure(requestId, async () => (await open()).revisions(workspaceId)),
+    proposals: (workspaceId, status) =>
+      storeFailure(requestId, async () => (await open()).proposals(workspaceId, status)),
+    propose: (actor, input) =>
+      storeFailure(requestId, async () => (await open()).propose(actor, input)),
+    decide: (actor, input) =>
+      storeFailure(requestId, async () => (await open()).decide(actor, input)),
+  };
+}
+
 /** The production writes: D1 for the project table. */
 function defaultWrites(env: WorkerEnv, requestId: string): GraphQLWrites {
   return {
@@ -213,11 +263,13 @@ function defaultWrites(env: WorkerEnv, requestId: string): GraphQLWrites {
 export function createContext(options: GraphQLContextOptions): GraphQLContext {
   const reads = defaultReads(options.env, options.requestId);
   const writes = defaultWrites(options.env, options.requestId);
+  const policy = options.policy ?? defaultPolicy(options.env, options.requestId);
   const readOverrides = options.reads ?? {};
   const writeOverrides = options.writes ?? {};
   return {
     requestId: options.requestId,
     session: options.session,
+    policy,
     budget: createRowBudget(options.maxRows),
     maxRowsPerList: options.maxRowsPerList,
     reads: {
