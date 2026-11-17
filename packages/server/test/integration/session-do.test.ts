@@ -70,6 +70,8 @@ const WORKER = [
 interface Running {
   readonly child: ChildProcess;
   readonly output: () => string;
+  /** The HTTP port this attempt settled on; a retry may move it. */
+  readonly port: number;
 }
 
 const HAS_WEBSOCKET = "WebSocket" in globalThis;
@@ -184,7 +186,9 @@ async function writeProject(): Promise<string> {
   return dir;
 }
 
-async function collect(child: ChildProcess): Promise<Running> {
+async function collect(
+  child: ChildProcess,
+): Promise<{ readonly child: ChildProcess; readonly output: () => string }> {
   let text = "";
   child.stdout?.on("data", (chunk: Buffer) => {
     text += chunk.toString();
@@ -207,25 +211,48 @@ async function health(port: number, target: Running): Promise<boolean> {
   }
 }
 
-async function start(dir: string, port: number): Promise<Running> {
-  const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
-    cwd: dir,
-    detached: true,
-    env: {
-      ...process.env,
-      XDG_CONFIG_HOME: join(dir, "config"),
-      XDG_CACHE_HOME: join(dir, "cache"),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const target = await collect(child);
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (await health(port, target)) return target;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+/**
+ * Start cf dev on a fresh port.
+ *
+ * @remarks
+ * Two shared addresses can make cf dev exit during startup: the HTTP port taken between the
+ * probe and the bind, and the debug inspector, which wrangler fixes at 9229 for every instance.
+ * The other integration suites run their own dev servers beside this one, so either can be
+ * lost. That is a lost shared resource, not a product failure: retry on a fresh port.
+ */
+async function start(dir: string): Promise<Running> {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const port = await freePort();
+    const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
+      cwd: dir,
+      detached: true,
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: join(dir, "config"),
+        XDG_CACHE_HOME: join(dir, "cache"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const target: Running = { ...(await collect(child)), port };
+    const deadline = Date.now() + READY_TIMEOUT_MS;
+    let ready = false;
+    while (Date.now() < deadline) {
+      try {
+        if (await health(port, target)) {
+          ready = true;
+          break;
+        }
+      } catch {
+        // The child exited during startup; let the retry take a fresh port.
+        break;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    }
+    if (ready) return target;
+    await stop(target);
+    if (attempt === 2) throw new Error("cf dev did not become ready:\n" + target.output());
   }
-  await stop(target);
-  throw new Error("cf dev did not become ready:\n" + target.output());
+  throw new Error("cf dev did not become ready");
 }
 
 async function stop(target: Running | undefined): Promise<void> {
@@ -311,8 +338,8 @@ test.skipIf(!existsSync(CF))(
   "the Session DO serves conversations and survives a cf dev restart",
   async () => {
     project = await writeProject();
-    const firstPort = await freePort();
-    running = await start(project, firstPort);
+    running = await start(project);
+    const firstPort = running.port;
     expect(existsSync(join(project, "config"))).toBe(true);
     try {
       const bad = await fetch("http://127.0.0.1:" + String(firstPort) + "/t/rpc/conversations", {
@@ -346,8 +373,8 @@ test.skipIf(!existsSync(CF))(
 
       await stop(running);
       running = undefined;
-      const secondPort = await freePort();
-      running = await start(project, secondPort);
+      running = await start(project);
+      const secondPort = running.port;
       const reopened = await call(secondPort, "GET", "/t/rpc/conversations", List);
       expect(reopened.conversations.map((item) => item.title)).toStrictEqual(["CF"]);
       const transcript = await call(
@@ -368,8 +395,8 @@ test.skipIf(!existsSync(CF) || !HAS_WEBSOCKET)(
   "the Session DO upgrades /ws and keeps a conversation live across reconnect",
   async () => {
     project = await writeProject();
-    const port = await freePort();
-    running = await start(project, port);
+    running = await start(project);
+    const port = running.port;
     try {
       const created = await call(port, "POST", "/t/rpc/conversations", Create, { title: "WS" });
       const id = created.conversation.id;
@@ -442,8 +469,8 @@ test.skipIf(!existsSync(CF) || !HAS_WEBSOCKET)(
   "the production edge authenticates and forwards a live WebSocket",
   async () => {
     project = await writeProject();
-    const port = await freePort();
-    running = await start(project, port);
+    running = await start(project);
+    const port = running.port;
     try {
       const created = await call(port, "POST", "/t/rpc/conversations", Create, { title: "Edge" });
       const id = created.conversation.id;
