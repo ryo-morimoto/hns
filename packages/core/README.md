@@ -17,6 +17,7 @@ npm run build
 - `src/workflow.ts` — Workflow / Automation の状態遷移と `validateWorkflowGraph()`。
 - `src/result.ts` — `Result<T, E>`。想定内の失敗を値で返す。
 - `src/graphql/` — `types.ts` から SDL を起こす射影。`@hns/core/graphql` として公開し、ルート entry には出さない。
+- `src/capability/` — ツール呼び出しの契約。型（`ToolManifest` / `ToolCall` / `SignedGrant` / `PolicyDocument` / `AuditEvent` など）、strict な valibot schema、JCS とハッシュ、`authorizeCall`、能力 atom の差分、`DENIAL_CODES` と再試行の表、review token。`@hns/core/capability` として公開し、ルート entry と web には出さない。
 
 要求・応答の封筒は core に置かない。REST の面は、それを実装するパッケージが schema・認証・handler を
 同じ変更で足す（D059）。core にあるのは、永続するモデルと、2つ以上のパッケージが使う型だけ。
@@ -29,6 +30,7 @@ npm run build
 - CheckpointRef / DurableUnit / FailureClass / DurabilityAuthority — 耐久の契約。0153〜0155 が消費する（現時点の product call site は無い）。
 - WorkspaceLease / LeaseRefusal — 書き込みの lease の契約。0156 / 0157 が消費する（現時点の product call site は無い）。
 - Limits — 運用の面が読む。
+- ツール呼び出しの capability（`ToolManifest` / `SignedGrant` / `PolicyDocument` / `PolicyDecision` / `AuditEvent`）— `@hns/core/capability`。server が grant を発行し、machine が `authorizeCall` で検証する（0220 の契約。消費者は 0221 以降）。
 
 Row 型（`archived: 0 | 1` など）は `store`、実行中の内部状態は `agent`、ファイル操作の内部型は `workspace`。
 詳細は [docs/packages.md](../../docs/packages.md) を見る。

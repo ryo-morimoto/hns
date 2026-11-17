@@ -21,6 +21,11 @@
       "source": "./src/graphql/index.ts",
       "types": "./dist/graphql/index.d.ts",
       "import": "./dist/graphql/index.js"
+    },
+    "./capability": {
+      "source": "./src/capability/index.ts",
+      "types": "./dist/capability/index.d.ts",
+      "import": "./dist/capability/index.js"
     }
   },
   "scripts": {
