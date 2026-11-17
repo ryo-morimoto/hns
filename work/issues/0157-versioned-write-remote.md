@@ -1,6 +1,6 @@
 # 0157: 版付き書き込みのリモート化（ack が DO を通る）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: docs/durability.md §3.1・§3.4
@@ -250,14 +250,15 @@ truncation 後に settled の別内容が applied を返す件（低6）は、ou
 - 2026-11-17: 修正後の npm run check exit 0（706 tests / 37.7s、全 stage）。保存 20 回の p50 18.1ms / p95 25.4ms（cf dev + 実 machine + 実 fs）。再レビュー待ち。
 - 2026-11-17: 再レビュー BLOCKED（新規 1）。未束縛の並行初回呼び出しが両方 machine に届き、敗者の `#bindProject` が outcome を rollback して pending intent を残す（watermark 恒久停止）。束縛を決め得る呼び出しを未束縛の間だけ DO 内で直列化（`#serializedByBinding`）。ロック無しでは 2 本の再現テストが落ちることを確認（machine 2 回・status [200,404]）。低・中も修正（面コメント、machine 応答の stream bound、edge limits の受け渡し、ヘッダ literal test、write too_large、settled 修復の TSDoc、移行の列検査）。
 - 2026-11-17: 修正後の npm run check exit 0（710 tests / 43.9s、全 stage）。保存 20 回の p50 18.0ms / p95 27.0ms。2 回目の再レビュー待ち。
+- 2026-11-17: reviewer-0157 PASS（blocking 0）。main へ ff 統合（032cab0）。main の gate は exit 0（710 tests / 37.8s）。
 
 ## Result
 
-- verdict: 2 回目の再レビュー待ち（0202 の blocking 7 + 再レビューの blocking 1 は修正済み。この issue は done にしない）
-- reviewer: reviewer-0202（実装を書いていない agent。lead が割り当て）
-- HEAD: 9258a8c（コード。issue の記録は別 commit）
+- verdict: **PASS**（初回 BLOCKED: blocking 7 → 修正 → 再レビュー BLOCKED: blocking 1（未束縛の並行初回呼び出し）→ 修正 → PASS）
+- reviewer: reviewer-0157（この変更を書いていない別エージェント）
+- HEAD: 032cab0（コード HEAD 9258a8c。main に ff 統合）
 - 受入: 7/7。証拠は「テスト設計」の各行に対応するテスト。
-- ゲート: 修正後 HEAD で `npm run check` exit 0（710 tests / 43.9s、lint 0 warnings / fmt / codegen / typecheck / test（統合と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。`npm run build -w @hns/server` も exit 0（dist に node: import なし）。
+- ゲート: `npm run check` exit 0（710 tests / 118 files、main で 37.8s。lint 0 warnings / fmt / codegen / typecheck / test（統合と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。`npm run build -w @hns/server` も exit 0（dist に node: import なし）。
 - 計測: 保存 20 回の p50 14.5–20.0ms / p95 17.2–34.5ms（cf dev + 実 machine + 実 fs、127.0.0.1。複数回。目標は e2e p95 ≤ 1s、DO 側 ≤ 150ms）。tunnel 越しは未計測（0148 / 0167）。
 - follow-up（0169 の契約）: watermark で intent が切り詰められた後、同じ operationId の別内容は「忘れた settled」として新しい write になる（outcome が intent の digest を持たないため）。直すなら 0169 の outcome に digest を足す。ここでは直さない。
 - 実経路で確認したこと: workerd の WebCrypto で Ed25519 署名が動き、machine が control-plane 公開鍵で検証する（D100 の向き）。`x-request-id` は署名対象外のまま machine の `fs.op` ログに届く。machine 停止で read 503 / write unknown。
