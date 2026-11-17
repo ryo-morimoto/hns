@@ -1,11 +1,43 @@
-import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import type { Extension, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord";
+import { ToolTask } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, hook } from "@earendil-works/pi-durable";
+import type {
+  Extension,
+  JsonObject,
+  ToolExecutionResult,
+  ToolHooks,
+  ToolRegistration,
+} from "@earendil-works/pi-durable";
 import { createBashTool } from "@earendil-works/pi-durable/tools";
 import { obj, str } from "@earendil-works/pi-schema";
+import * as v from "valibot";
 import { operationIdFrom } from "@hns/core";
 import type { MutationResult, OperationId } from "@hns/core";
+import type { DenialCode, PolicyDecision, ToolId } from "@hns/core/capability";
 import type { Workspace } from "@hns/workspace";
-import * as v from "valibot";
+import {
+  INVALID_ARGUMENTS,
+  admitCall,
+  appendEvent,
+  definitionOf,
+  isWriteFileArguments,
+  manifestFor,
+  phase0Deny,
+  succeeded,
+} from "./capability.ts";
+import type {
+  AuditIdentity,
+  AuditSink,
+  BashInput,
+  CallIdentity,
+  CallRecord,
+  CallSinks,
+  ReadFileArguments,
+  ToolArguments,
+  ToolCallSpec,
+  ToolIdentity,
+  WriteFileArguments,
+} from "./capability.ts";
 import type { AgentEventSink } from "./events.ts";
 import { failureOf } from "./failure.ts";
 import type { ReadReply, ToolFailure } from "./failure.ts";
@@ -13,6 +45,9 @@ import type { ShellAccess } from "./shell.ts";
 
 /** Model-facing read size, in characters. Worst-case JSON escaping is 6x, so 256 KiB covers it. */
 const MAX_READ_CONTENT = 32 * 1024;
+
+/** The largest wait a bash call may name, in milliseconds: one day. */
+const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Derive the write operationId from the tool call id.
@@ -30,15 +65,24 @@ export function operationIdFor(callId: string): OperationId {
 }
 
 /**
- * What workspaceTools needs: the workspace to expose, whether exec is offered, and
- * where observations go.
+ * What workspaceTools needs: the workspace to expose, whether exec is offered, where
+ * observations go, and where the audit goes.
  */
 export interface WorkspaceToolsOptions {
   readonly workspace: Workspace;
   /** Decides whether bash is registered; only "sandboxed" adds it. */
   readonly shell: ShellAccess;
-  /** Receives tool.call and tool.result around each execution. */
+  /** Receives tool.call and tool.result around each execution. Not awaited. */
   readonly onEvent?: AgentEventSink | undefined;
+  /**
+   * Receives the contract's audit events. `tool.call` is **awaited before the call runs** and
+   * `tool.result` **before the result returns**: a sink that rejects refuses the call and the result
+   * does not reach the model (fail closed, `docs/capability.md` §8). Omitted: calls run and their
+   * observations are emitted, but no audit row is written.
+   */
+  readonly audit?: AuditSink | undefined;
+  /** What an audit event names; required when `audit` is given. */
+  readonly auditIdentity?: AuditIdentity | undefined;
 }
 
 /**
@@ -73,85 +117,328 @@ if (import.meta.vitest) {
 }
 
 /**
- * Whether the model should read a tool result as a failure.
+ * The sinks a call reports to.
  *
- * @param result - The tool's result, before the harness applies output limits.
- * @returns false when `isError` is true, or when a structured `exitCode` is nonzero.
- *
- * @remarks
- * `isError` is the general signal. bash also reports a nonzero exit as
- * `structuredOutput.exitCode`; reading both keeps `ok` true only for a command
- * that actually succeeded.
+ * @param options - The workspace tools' options.
+ * @throws Error when an audit sink has no identity to record events under: a wiring defect, not a
+ * call's refusal.
  */
-function succeeded(result: ToolExecutionResult): boolean {
-  if (result.isError === true) return false;
-  const exitCode = exitCodeOf(result.structuredOutput);
-  return exitCode === undefined || exitCode === 0;
-}
-
-/** The part of bash's structured output that decides success; other tools have none. */
-const ExitCodeOutput = v.object({ exitCode: v.number() });
-
-/**
- * The exit code a tool put in its structured output, when it has one.
- *
- * @param output - A tool's `structuredOutput`, which crosses the tool boundary as JSON.
- * @returns The numeric exit code, or undefined for tools that do not report one.
- *
- * @remarks
- * The value is parsed, not asserted: other tools return objects without an exit
- * code, and a future schema may change.
- */
-function exitCodeOf(output: ToolExecutionResult["structuredOutput"]): number | undefined {
-  const parsed = v.safeParse(ExitCodeOutput, output);
-  return parsed.success ? parsed.output.exitCode : undefined;
-}
-
-/**
- * Emit tool.call and tool.result around one execution.
- *
- * @param name - The tool name as the model called it.
- * @param sink - Where the events go; undefined disables observation.
- * @param work - The execution to time; its result is returned unchanged.
- * @returns The execution's result.
- *
- * @remarks
- * `ms` covers only the awaited execution. A throwing `work` still emits
- * tool.result with `ok: false` before the throw propagates: bash reports a
- * timeout or an exec failure by throwing, and an unpaired call would hide it.
- */
-async function observed(
-  name: string,
-  sink: AgentEventSink | undefined,
-  work: () => Promise<ToolExecutionResult>,
-): Promise<ToolExecutionResult> {
-  const started = Date.now();
-  sink?.({ event: "tool.call", at: new Date().toISOString(), tool: name });
-  let ok = false;
-  try {
-    const result = await work();
-    ok = succeeded(result);
-    return result;
-  } finally {
-    sink?.({
-      event: "tool.result",
-      at: new Date().toISOString(),
-      tool: name,
-      ok,
-      ms: Date.now() - started,
-    });
+function sinksOf(options: WorkspaceToolsOptions): CallSinks {
+  const { audit, auditIdentity } = options;
+  if (audit !== undefined && auditIdentity === undefined) {
+    throw new Error("an audit sink needs the workspace and session it records under");
   }
+  return audit === undefined || auditIdentity === undefined
+    ? { onEvent: options.onEvent }
+    : { onEvent: options.onEvent, audit, auditIdentity };
+}
+
+/** What one call's admission left for its result. */
+interface Admitted {
+  readonly call: CallIdentity;
+  readonly decision: PolicyDecision;
+  readonly startedAt: number;
+}
+
+/**
+ * One extension's calls, by the call id `beforeTool` admitted.
+ *
+ * @remarks
+ * `beforeTool` writes an entry and `afterTool` reads and deletes it: a refused call's entry has no
+ * `call`, and no entry at all means pi-durable refused the arguments before either hook ran.
+ */
+type CallMemory = Map<string, Admitted>;
+
+/** What the tool hooks need: the tools, the sinks, the environment, and the call memory. */
+interface ToolHookOptions {
+  readonly identityOf: (name: string) => Promise<ToolIdentity>;
+  readonly sinks: CallSinks;
+  readonly env: ShellAccess["env"];
+  readonly memory: CallMemory;
+}
+
+/**
+ * The tool task's hooks: admission before the tool runs, the harness's verdict after it settles.
+ *
+ * @param options - The tools, the sinks, the environment, and the call memory.
+ * @returns The handlers for pi-durable's tool task (`hook(ToolTask, handlers)`).
+ *
+ * @remarks
+ * **The tools are registered as pi-durable defines them; the hooks wrap them.** That keeps the result
+ * contract the harness's own (`isError`, `structuredOutput`, `exitCode`): `succeeded` reads it the way
+ * the harness does, and `afterTool` returns the result unchanged. The audit sits where the contract
+ * wants it: `tool.call` awaited before the tool runs, `tool.result` awaited before the result is
+ * committed.
+ *
+ * The four ways a call settles, and what is recorded for each:
+ * - **admitted and run**: `tool.call` before, `tool.result` after, with the admitted decision.
+ * - **refused** (the strict schema, the path, or the canonical form): the `tool.call` is written and
+ *   its decision denies the call; `beforeTool` throws, so the tool never runs and the model reads the
+ *   harness's refusal whose text is {@link refusalWording}. The decision's `code` is the audit's
+ *   vocabulary, not the model's.
+ * - **invalid arguments** (pi-durable's own validation, before any hook): nothing ran, so only the
+ *   harness's result is recorded after it settles.
+ * - **an audit sink that rejects**: the rejection propagates out of the hook, which stops the call
+ *   (fail closed) — nothing runs.
+ */
+function toolHooks(options: ToolHookOptions): ToolHooks {
+  const { identityOf, sinks, env, memory } = options;
+  const specFor = (callId: string, identity: ToolIdentity, context: Context): ToolCallSpec => ({
+    identity,
+    callId,
+    env,
+    context,
+    sinks,
+  });
+  const callRecordOf = (callId: string, identity: ToolIdentity): CallRecord => ({
+    identity,
+    name: identity.definition.toolId,
+    callId,
+    sinks,
+  });
+  return {
+    async beforeTool(call, _api, context) {
+      const identity = await identityOf(call.name);
+      const spec = specFor(call.id, identity, context);
+      // The harness validated the call against pi-durable's schema and coerced it (an omitted number
+      // may arrive as Infinity); admission parses the arguments as the model's own schema sees them.
+      const model = modelArguments(identity.definition.toolId, call.arguments);
+      const admission = await admitCall(spec, model);
+      if (!admission.ok) {
+        // `admitCall` recorded both rows, with the denial's own code. The call does not run: throwing
+        // here settles it with the harness's own error, whose text is the refusal in words (A: the
+        // model's contract stays the harness's; the code is the audit's). `afterTool` records nothing.
+        throw new Error(refusalWording(admission.decision));
+      }
+      memory.set(call.id, {
+        call: admission.admitted.call,
+        decision: admission.admitted.decision,
+        startedAt: Date.now(),
+      });
+      return {
+        arguments: harnessArguments(admission.admitted.args, identity.definition.toolId),
+      };
+    },
+    async afterTool(call, result) {
+      const identity = await identityOf(call.name);
+      const record = callRecordOf(call.id, identity);
+      const known = memory.get(call.id);
+      memory.delete(call.id);
+      if (known === undefined) {
+        // pi-durable refused the arguments before `beforeTool`: no `tool.call` names the call, and its
+        // result is still recorded, under the contract's code for an argument it cannot parse.
+        await appendEvent(
+          record,
+          undefined,
+          phase0Deny(INVALID_ARGUMENTS, "the arguments were refused before the tool ran"),
+          "tool.result",
+          {
+            ok: succeeded(result),
+            durationMs: 0,
+          },
+        );
+        return undefined;
+      }
+      await appendEvent(record, known.call, known.decision, "tool.result", {
+        ok: succeeded(result),
+        durationMs: Date.now() - known.startedAt,
+      });
+      return undefined;
+    },
+  };
+}
+
+/**
+ * The arguments a call's `beforeTool` hands the tool: what the call was hashed over, plus what
+ * pi-durable's own tool needs from it.
+ *
+ * @param admitted - The arguments the call was hashed over (a normalized path, bash's envelope).
+ * @param toolId - The tool they belong to.
+ * @returns The arguments `execute` must receive.
+ *
+ * @remarks
+ * For a filesystem tool the admitted arguments are what runs (a normalized path names the same file).
+ * For bash, pi-durable's bash takes `timeout` in seconds, so the model's `timeoutMs` is converted here
+ * and nowhere else; the seconds value is what runs, and the call's `argsHash` covers the milliseconds.
+ */
+function harnessArguments(admitted: ToolArguments, toolId: ToolId): JsonObject {
+  if (toolId === "bash") {
+    if (!isBashInput(admitted)) {
+      throw new Error("a bash call was admitted without its command");
+    }
+    if (admitted.timeoutMs === undefined) return { command: admitted.command };
+    return { command: admitted.command, timeout: admitted.timeoutMs / 1000 };
+  }
+  if (isWriteFileArguments(admitted)) {
+    return {
+      path: admitted.path,
+      content: admitted.content,
+      expectedVersion: admitted.expectedVersion,
+    };
+  }
+  if (!isReadFileArguments(admitted)) {
+    throw new Error("a filesystem tool was given bash's arguments");
+  }
+  return { path: admitted.path };
+}
+
+/** The model's arguments of one call, before the agent adds bash's envelope. */
+type ModelArguments = ReadFileArguments | WriteFileArguments | BashInput;
+
+function isBashInput(args: ModelArguments): args is BashInput {
+  return "command" in args;
+}
+
+function isReadFileArguments(args: ModelArguments): args is ReadFileArguments {
+  return "path" in args;
+}
+
+/**
+ * The model's arguments, recovered from what pi-durable validated.
+ *
+ * @param toolId - The tool's name.
+ * @param args - What the hook receives: pi-durable's validated (and coerced) arguments.
+ * @returns The arguments as the tool's own schema reads them: a filesystem call's strings, or bash's
+ * `command` and whole `timeoutMs`.
+ *
+ * @remarks
+ * pi-durable validates against the registration's JSON Schema with coercion, and its bash schema is
+ * open, so what the hook sees is the model's own `timeoutMs` beside the `timeout` (seconds) it
+ * coerced from it — an omitted one arrives as `Infinity`. This reads the model's name first and the
+ * seconds only as a fallback, and rounds to whole milliseconds: the call is hashed over the timeout it
+ * runs with, never a fraction, because the contract's canonical JSON holds safe integers only.
+ */
+function modelArguments(toolId: ToolId, args: ToolHookArguments): ModelArguments {
+  return toolId === "bash" ? bashModelArguments(args) : fileModelArguments(args);
+}
+
+/**
+ * The arguments a hook receives: the model's JSON after pi-durable's validation and coercion.
+ *
+ * @remarks
+ * pi-durable's own `JsonObject` (its `ToolHookCall.arguments`), so reading one is not an open
+ * dictionary: the tool's schema is what gives each member its meaning.
+ */
+type ToolHookArguments = Parameters<NonNullable<ToolHooks["beforeTool"]>>[0]["arguments"];
+
+/** A filesystem call's string members, as the harness validated them. */
+function fileModelArguments(args: ToolHookArguments): ModelArguments {
+  const parsed = v.safeParse(FileArgumentsSchema, args);
+  if (!parsed.success) throw new Error("a filesystem call arrived without its strings");
+  return parsed.output;
+}
+
+/** The model's own bash arguments: `command`, and whole milliseconds from `timeoutMs` or `timeout`. */
+function bashModelArguments(args: ToolHookArguments): ModelArguments {
+  const parsed = v.safeParse(BashHarnessSchema, args);
+  if (!parsed.success) throw new Error("a bash call arrived without its command");
+  const { command, timeoutMs, timeout } = parsed.output;
+  if (timeoutMs !== undefined) return { command, timeoutMs: Math.round(timeoutMs) };
+  if (timeout !== undefined) return { command, timeoutMs: Math.round(timeout * 1000) };
+  return { command };
+}
+
+/** A filesystem call as pi-durable validated it: the tool's three string members and no others. */
+const FileArgumentsSchema = v.object({
+  path: v.string(),
+  content: v.optional(v.string()),
+  expectedVersion: v.optional(v.string()),
+});
+
+/** A bash call as pi-durable validated it: its command, and either form of its timeout. */
+const BashHarnessSchema = v.object({
+  command: v.string(),
+  timeoutMs: v.optional(v.number()),
+  timeout: v.optional(v.number()),
+});
+
+/**
+ * The line the model reads for a refused call: the harness's refusal, whose detail is this.
+ *
+ * @param decision - The refusal `admitCall` recorded.
+ * @returns One fixed sentence per denial code, with no argument and no internal value in it.
+ *
+ * @remarks
+ * The model's contract is the harness's error result (A); the denial's `code` is the audit's vocabulary
+ * (`AuditEvent.decision`), and this sentence says the same thing in words a model can act on. The
+ * failure face's code-to-status table is `docs/contracts/failures.md`; these are the tool face's
+ * readings of the same denials.
+ */
+function refusalWording(decision: PolicyDecision): string {
+  if (decision.outcome !== "deny") return "the call was not allowed";
+  const wording: Record<DenialCode, string> = {
+    policy_denied: "the policy does not allow this call",
+    tool_disabled: "the arguments are not the shape the tool declares",
+    scope_exceeded: "the call is outside the granted scope",
+    manifest_mismatch: "the tool's contract does not match the one the call named",
+    grant_invalid: "the grant is not valid",
+    grant_expired: "the grant has expired",
+    grant_algorithm_mismatch: "the grant's key does not match its algorithm",
+    grant_replayed: "the grant was already used",
+    counter_exhausted: "the grant's budget is spent",
+    epoch_stale: "the policy this was granted under has changed",
+    path_outside_root: "the path is not inside the workspace root",
+    command_not_allowed: "the command is not inside the exec envelope",
+    egress_denied: "network egress is not granted",
+    approval_stale: "the approval is for an older revision",
+    unsupported: "the arguments cannot be canonicalized as a call",
+  };
+  return wording[decision.code];
+}
+
+/**
+ * The tool id a name names.
+ *
+ * @throws Error when no workspace tool has that id; `definitionOf` is the table's check.
+ */
+function toolId(name: string): ToolId {
+  if (name === "read_file" || name === "write_file" || name === "bash") return name;
+  throw new Error("no workspace tool named " + name);
+}
+
+/**
+ * The schema pi-durable validates bash's calls with: the model's arguments, plus what the agent adds.
+ *
+ * @remarks
+ * The model writes `command` and `timeoutMs` (milliseconds, a whole number). The agent's `beforeTool`
+ * hands `execute` the same call with `timeout` in seconds for pi-durable's bash, so both names are
+ * declared here — `timeoutMs` stays the call's own value and `timeout` is what the tool runs with.
+ * The model-facing form (`bashParameters`) declares only the two the model writes.
+ */
+function bashHarnessParameters(): JsonObject {
+  return {
+    type: "object",
+    properties: {
+      command: { type: "string", description: "The command to run" },
+      timeoutMs: {
+        type: "integer",
+        minimum: 1,
+        maximum: MAX_TIMEOUT_MS,
+        description: "The longest wait in milliseconds; omit to wait as the sandbox allows",
+      },
+      timeout: { type: "number", minimum: 0, description: "The same wait in seconds" },
+    },
+    required: ["command"],
+    additionalProperties: false,
+  };
 }
 
 /**
  * The tools an agent gets: the workspace with a version check, and bash only
- * when a sandbox is available. A refused call comes back as a value the model
+ * when a sandbox is available. A refused call comes back as a result the model
  * can read, so one bad path does not lose the run.
  *
- * @param options - The workspace, the exec decision, and the observation sink.
+ * @param options - The workspace, the exec decision, the observation sink, and the audit sink.
  * @returns The extension registering read_file, write_file, and bash when sandboxed.
  *
  * @remarks
+ * The tools are pi-durable's own registrations (`defineTool` and `createBashTool`); the extension's
+ * tool-task hooks (`toolHooks`) admit every call (`admitCall`) before it runs — the tool's own strict
+ * schema parses the arguments, a filesystem path is normalized and kept inside the root, the call and
+ * the tool's manifest are hashed, and the Phase 0 decision is audited — and record the harness's
+ * verdict as the `tool.result` before it is committed. The tool events carry `callId`, `callHash`,
+ * `argsHash`, `manifestHash`, `decision`, and `durationMs`; the raw arguments never do.
+ *
  * read_file returns JSON {ok, content, version, truncated, characters}, capped at
  * 32K characters; version and characters describe the whole file, so a truncated
  * read can still be written back. write_file requires expectedVersion ("absent" for
@@ -160,70 +447,82 @@ async function observed(
  * never thrown. There is no unsandboxed exec fallback: only "sandboxed" registers bash.
  */
 export function workspaceTools(options: WorkspaceToolsOptions): Extension {
-  const { workspace, shell, onEvent } = options;
+  const { workspace, shell } = options;
+  const sinks = sinksOf(options);
+  const identities = new Map<string, ToolIdentity>();
+  const identityOf = async (name: string): Promise<ToolIdentity> => {
+    const cached = identities.get(name);
+    if (cached !== undefined) return cached;
+    const built = await manifestFor(definitionOf(toolId(name)));
+    identities.set(name, built);
+    return built;
+  };
+  const memory: CallMemory = new Map();
+
+  const readDefinition = definitionOf("read_file");
+  const writeDefinition = definitionOf("write_file");
   const registrations: ToolRegistration[] = [
     defineTool({
       name: "read_file",
-      description:
-        "Read a workspace file. Returns JSON {ok, content, version} or {ok:false, status, message}.",
+      description: readDefinition.description,
       parameters: obj({ path: str() }),
       // The tool bounds its own content; give the harness room so it does not cut the JSON.
-      outputLimits: { maxBytes: 256 * 1024, maxLines: 40_000, retain: "head" },
-      execute: (args) =>
-        observed("read_file", onEvent, async () => {
-          try {
-            const read = await workspace.read(args.path);
-            const truncated = read.content.length > MAX_READ_CONTENT;
-            const content = truncated ? read.content.slice(0, MAX_READ_CONTENT) : read.content;
-            return {
-              output: text({
-                ok: true,
-                content,
-                version: read.version,
-                truncated,
-                characters: read.content.length,
-              }),
-              isError: false,
-            };
-          } catch (error) {
-            if (!(error instanceof Error)) throw error;
-            return failureReply(failureOf(error));
-          }
-        }),
+      outputLimits: { ...readDefinition.outputLimits, retain: "head" },
+      execute: async (args) => {
+        try {
+          const result = await workspace.read(args.path);
+          const truncated = result.content.length > MAX_READ_CONTENT;
+          const content = truncated ? result.content.slice(0, MAX_READ_CONTENT) : result.content;
+          return {
+            output: text({
+              ok: true,
+              content,
+              version: result.version,
+              truncated,
+              characters: result.content.length,
+            }),
+            isError: false,
+          };
+        } catch (error) {
+          if (!(error instanceof Error)) throw error;
+          return failureReply(failureOf(error));
+        }
+      },
     }),
     defineTool({
       name: "write_file",
-      description:
-        "Replace a workspace file. expectedVersion is the version from read_file, or 'absent'. Returns JSON " +
-        "{status:'applied'|'conflict'|'unknown'} so a conflict can be re-read instead of retried blindly.",
+      description: writeDefinition.description,
       parameters: obj({ path: str(), content: str(), expectedVersion: str() }),
-      execute: (args, api) =>
-        observed("write_file", onEvent, async () => {
-          try {
-            // The idempotency key is the tool call, not something the model can repeat.
-            const outcome = await workspace.write({
-              path: args.path,
-              content: args.content,
-              expectedVersion: args.expectedVersion,
-              operationId: operationIdFor(api.callId),
-            });
-            return { output: text(outcome), isError: outcome.status !== "applied" };
-          } catch (error) {
-            if (!(error instanceof Error)) throw error;
-            return failureReply(failureOf(error));
-          }
-        }),
+      execute: async (args, api) => {
+        try {
+          // The idempotency key is the tool call, not something the model can repeat.
+          const outcome = await workspace.write({
+            path: args.path,
+            content: args.content,
+            expectedVersion: args.expectedVersion,
+            operationId: operationIdFor(api.callId),
+          });
+          return { output: text(outcome), isError: outcome.status !== "applied" };
+        } catch (error) {
+          if (!(error instanceof Error)) throw error;
+          return failureReply(failureOf(error));
+        }
+      },
     }),
   ];
   if (shell.kind === "sandboxed") {
     const bash = createBashTool();
-    // The harness sees the result through execute(); wrapping it here gives bash
-    // the same call/result pair as the workspace tools.
-    const execute: typeof bash.execute = (args, api, context) =>
-      observed("bash", onEvent, async () => bash.execute(args, api, context));
-    registrations.push({ ...bash, execute });
+    // The manifest's arguments, not pi-durable's: the model writes `timeoutMs` (an integer), and
+    // `harnessArguments` turns it into the seconds pi-durable's bash takes. The schema is closed, so an
+    // unknown key is refused before anything runs.
+    const parameters: typeof bash.parameters = bashHarnessParameters();
+    registrations.push({ ...bash, parameters });
   }
-  return defineExtension({ name: "hns-workspace", tools: registrations });
+  return defineExtension({
+    name: "hns-workspace",
+    tools: registrations,
+    hooks: [hook(ToolTask, toolHooks({ identityOf, sinks, env: shell.env, memory }))],
+  });
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   type Conversation,
 } from "@hns/core";
 import * as v from "valibot";
+import type { AuditIdentity, AuditSink } from "./capability.ts";
 import type { AgentEventSink } from "./events.ts";
 import { lastAssistantText } from "./transcript.ts";
 import type { Turn } from "./turn.ts";
@@ -71,6 +72,18 @@ export interface SessionOptions {
   readonly onWake?: ((wake: Wake) => void) | undefined;
   readonly onReport?: ((report: Report) => void) | undefined;
   readonly onEvent?: AgentEventSink | undefined;
+  /**
+   * Receives the capability contract's audit events for tool calls; awaited, so a rejected append
+   * refuses the call (0221 / 0222).
+   *
+   * @remarks
+   * `openSession` carries the value for callers that read it; a Session runs the tools of the
+   * registry it is given, so the extension in that registry is where the sink is attached
+   * (`workspaceTools({ audit })`).
+   */
+  readonly audit?: AuditSink | undefined;
+  /** What an audit event names; required when `audit` is given. */
+  readonly auditIdentity?: AuditIdentity | undefined;
   readonly newRequestId?: (() => string) | undefined;
 }
 

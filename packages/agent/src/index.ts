@@ -1,5 +1,43 @@
 export { openAgent } from "./agent.ts";
 export type { Agent, AgentModelRef, AgentOptions, Models, Turn } from "./agent.ts";
+export {
+  INVALID_ARGUMENTS,
+  PHASE0_EXEC_ENVELOPE,
+  PHASE0_POLICY_HASH,
+  PHASE0_POLICY_REVISION,
+  TOOL_VERSION,
+  WORKSPACE_TOOLS,
+  callIdentity,
+  appendEvent,
+  succeeded,
+  admitCall,
+  definitionOf,
+  manifestFor,
+  normalizeToolPath,
+  parseJsonArguments,
+  phase0Allow,
+  phase0Deny,
+  refusalOf,
+} from "./capability.ts";
+export type {
+  AuditIdentity,
+  AuditSink,
+  BashArguments,
+  CallIdentity,
+  Admission,
+  CallRecord,
+  CallSinks,
+  CapabilityRefusal,
+  ExecEnvelope,
+  ToolCallSpec,
+  ToolIdentity,
+  JsonSchemaObject,
+  JsonSchemaValue,
+  ReadFileArguments,
+  ToolArguments,
+  WriteFileArguments,
+  WorkspaceToolDefinition,
+} from "./capability.ts";
 export type { AgentEvent, AgentEventSink } from "./events.ts";
 export { failureOf } from "./failure.ts";
 export type { ReadReply, ToolFailure, WriteReply } from "./failure.ts";

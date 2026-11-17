@@ -71,7 +71,9 @@ test("a write from a stale version comes back as a conflict value", async () => 
   });
 });
 
-// Catches: a refused path aborting the run instead of reaching the model as a value.
+// Catches: a refused path aborting the run instead of reaching the model as a result it can act on.
+// Since 0221 the refusal is the harness's error result (the tool never runs), and its text carries
+// why; the denial's code is the audit's vocabulary (docs/capability.md §3-§4, decision A).
 test("a refused path is reported to the model, not thrown", async () => {
   await withAgent(async ({ agent, faux }) => {
     faux.setResponses([
@@ -86,9 +88,11 @@ test("a refused path is reported to the model, not thrown", async () => {
 
     expect(turn.settlement.status).toBe("done");
     expect(
-      results.some((text) => text.includes('"status":"denied"')),
+      results.some((text) => text.includes("not inside the workspace root")),
       results.join(" | "),
     ).toBe(true);
+    // The arguments are not echoed back into the refusal.
+    expect(results.join(" | ")).not.toContain("outside.txt");
   });
 });
 

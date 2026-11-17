@@ -5,6 +5,7 @@ import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import type { EntryRecord, Storage } from "@earendil-works/pi-durable";
 import { Denied } from "@hns/workspace";
 import type { Workspace } from "@hns/workspace";
+import type { AuditIdentity, AuditSink } from "./capability.ts";
 import type { AgentEvent, AgentEventSink } from "./events.ts";
 import type { ShellAccess } from "./shell.ts";
 import { toolNames, workspaceTools } from "./tools.ts";
@@ -48,6 +49,13 @@ export interface AgentOptions {
   readonly context: Context;
   /** Receives tool and response observations; the server persists them. */
   readonly onEvent?: AgentEventSink | undefined;
+  /**
+   * Receives the capability contract's audit events for tool calls; awaited, so a rejected append
+   * refuses the call (0221 / 0222).
+   */
+  readonly audit?: AuditSink | undefined;
+  /** What an audit event names; required when `audit` is given. */
+  readonly auditIdentity?: AuditIdentity | undefined;
   /** Deterministic request ids for tests; randomUUID in the app. */
   readonly newRequestId?: (() => string) | undefined;
 }
@@ -103,6 +111,8 @@ export async function openAgent(options: AgentOptions): Promise<Agent> {
     workspace: options.workspace,
     shell: options.shell,
     onEvent: options.onEvent,
+    audit: options.audit,
+    auditIdentity: options.auditIdentity,
   });
   const registry = createRegistry();
   registry.install(extension);

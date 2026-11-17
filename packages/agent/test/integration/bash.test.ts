@@ -70,6 +70,10 @@ test("read_file, write_file, and bash each report a call and a result", async (t
     ]);
 
     const turn = await agent.send("use every tool");
+    const dump = (await agent.transcript())
+      .filter((entry) => entry.kind === "pi.tool-result")
+      .map((entry) => JSON.stringify(entry.model).slice(0, 400))
+      .join("\n---\n");
 
     expect(turn.settlement.status).toBe("done");
     for (const tool of ["read_file", "write_file", "bash"]) {
@@ -78,7 +82,7 @@ test("read_file, write_file, and bash each report a call and a result", async (t
       expect(outcomes.length, tool).toBe(1);
       const outcome = outcomes[0];
       assert.ok(outcome !== undefined, tool + " reported no result");
-      expect(outcome.ok, tool).toBe(true);
+      expect(outcome.ok, tool + " " + dump).toBe(true);
       expect(outcome.ms, tool).toBeGreaterThanOrEqual(0);
     }
   });
@@ -118,7 +122,9 @@ test("a command that times out still reports a failed result", async (t) => {
   }
   await withAgent(async ({ agent, events, faux }) => {
     faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 30", timeout: 0.01 }), {
+      // Milliseconds, an integer: the capability contract's canonical JSON accepts safe integers only,
+      // so the tool's timeout is `timeoutMs`, never fractional seconds (0221).
+      fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 30", timeoutMs: 10 }), {
         stopReason: "toolUse",
       }),
       fauxAssistantMessage("timed out"),
@@ -128,7 +134,7 @@ test("a command that times out still reports a failed result", async (t) => {
     const outcomes = resultsFor(events, "bash");
 
     expect(turn.settlement.status).toBe("done");
-    expect(outcomes.length).toBe(1);
+    expect(outcomes.length, JSON.stringify(outcomes)).toBe(1);
     expect(outcomes[0]?.ok).toBe(false);
   });
 });
