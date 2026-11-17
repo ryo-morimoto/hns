@@ -1,6 +1,6 @@
 # 0223: ポリシー改訂・提案・承認（review token・CAS）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §6, §9
