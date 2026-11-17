@@ -615,9 +615,14 @@ export class Workspace {
       // The code or error name, never the body or the key: enough to see which hop failed.
       console.error("workspace: machine write failed", answer.failure, answer.detail);
       if (answer.failure === "denied" || answer.failure === "too_large") {
+        // The machine answers a refusal with a code from its closed vocabulary, and the Journal's
+        // reason column holds exactly that list (the two are one type). An answer that reached
+        // here without a code cannot settle a denial a caller can branch on.
+        const reason = answer.refusal;
+        if (reason === undefined) return failure("internal", "The machine refused without a code.");
         const settled = await this.#journal.settle({
           path,
-          result: { status: "denied", operationId: input.operationId, reason: answer.detail },
+          result: { status: "denied", operationId: input.operationId, reason },
         });
         return outcomeResponse(settled.entry);
       }

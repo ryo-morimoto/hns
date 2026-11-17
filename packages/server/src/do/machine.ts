@@ -1,4 +1,5 @@
 import {
+  MACHINE_REFUSALS,
   MACHINE_RPC_PATH,
   MachineReadResultSchema,
   MachineWriteResultSchema,
@@ -7,6 +8,7 @@ import {
 } from "@hns/core";
 import type {
   MachineReadResult,
+  MachineRefusalCode,
   MachineWriteRequest,
   MachineWriteResult,
   RequestSignature,
@@ -96,7 +98,17 @@ type MachineFailure = (typeof MACHINE_FAILURES)[number];
 /** What one machine call answered: a result, or the failure and a short diagnostic code. */
 export type MachineFilesAnswer<T> =
   | { readonly ok: true; readonly result: T }
-  | { readonly ok: false; readonly failure: MachineFailure; readonly detail: string };
+  | {
+      readonly ok: false;
+      readonly failure: MachineFailure;
+      /**
+       * A short diagnostic: the machine's refusal code when it answered with one, else a
+       * fixed phrase. Never the body.
+       */
+      readonly detail: string;
+      /** The machine's refusal code, when the answer carried one; what a refusal records. */
+      readonly refusal?: MachineRefusalCode | undefined;
+    };
 
 /** What every machine call carries: the target, the correlation id, and the deadline. */
 export interface MachineCall {
@@ -146,7 +158,9 @@ export interface MachineTarget {
 /** The shape of the machine's answer envelope. */
 const AnswerSchema = v.variant("ok", [
   v.object({ ok: v.literal(true), op: v.string(), result: v.unknown() }),
-  v.object({ ok: v.literal(false), code: v.string(), message: v.string() }),
+  // The code is the machine's closed refusal vocabulary (the core list `@hns/machine` also
+  // uses): a refusal the Worker records is a member of it, never free text.
+  v.object({ ok: v.literal(false), code: v.picklist(MACHINE_REFUSALS), message: v.string() }),
 ]);
 
 /** The sha256 of some bytes, in hex. */
@@ -307,7 +321,7 @@ export function createSignedMachineFiles(
         : DEFINITE_REFUSALS.has(answer.code)
           ? "denied"
           : "unavailable";
-    return { ok: false, failure, detail: answer.code };
+    return { ok: false, failure, detail: answer.code, refusal: answer.code };
   }
 
   return {

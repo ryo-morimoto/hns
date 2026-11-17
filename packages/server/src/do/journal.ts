@@ -20,6 +20,7 @@ import {
   type JournalIntentEntry,
   type JournalKind,
   type JournalOutcomeEntry,
+  type JournalRefusalCode,
   type JournalWatermark,
 } from "@hns/store";
 import * as v from "valibot";
@@ -79,14 +80,15 @@ export interface IntentAppendInput {
  * @remarks
  * `denied` is not part of `MutationResult` (the application contract): it is how the Journal
  * settles an intent the machine refused before writing, so the intent is no longer pending and
- * a checkpoint may pass it. `reason` is the machine's refusal code.
+ * a checkpoint may pass it. `reason` is the machine's refusal code, from the core vocabulary
+ * (`@hns/machine`'s `RefusalCode` is that list), which is what a `denied` row stores.
  */
 type JournalOutcomeInput =
   | MutationResult
   | {
       readonly status: "denied";
       readonly operationId: OperationId;
-      readonly reason: string;
+      readonly reason: JournalRefusalCode;
     };
 
 /** The input of {@link Journal.appendOutcome}. */
@@ -103,8 +105,8 @@ export interface AuditAppendInput {
   readonly operationId: OperationId | null;
   /** The path as the attempt named it, or null when the refusal names none. */
   readonly path: string | null;
-  /** Short reason from the refusal. */
-  readonly reason: string;
+  /** The refusal code the machine answered with. */
+  readonly reason: JournalRefusalCode;
 }
 
 /** The input of {@link Journal.appendEvent}: one file event, in the closed vocabulary. */
@@ -544,12 +546,14 @@ export class Journal {
   /**
    * Append one refusal to the audit trail.
    *
-   * @param input - The id (when valid), the path, and a short reason.
+   * @param input - The id (when valid), the path, and the refusal code.
    * @returns The stored entry.
    *
    * @remarks
    * Audits are never deduplicated or truncated: a retried refusal is evidence of another
-   * attempt, and no checkpoint can absorb a write that never happened.
+   * attempt, and no checkpoint can absorb a write that never happened. The reason is a
+   * {@link JournalRefusalCode}: the column holds a closed vocabulary, so a free-text reason
+   * cannot be written here.
    */
   async appendAudit(input: AuditAppendInput): Promise<JournalAuditEntry> {
     const entry: JournalAuditEntry = await this.#storage.transaction(async () => {

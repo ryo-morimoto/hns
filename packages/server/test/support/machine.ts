@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import type { MachineReadResult, MachineWriteRequest, MachineWriteResult } from "@hns/core";
+import type {
+  MachineReadResult,
+  MachineRefusalCode,
+  MachineWriteRequest,
+  MachineWriteResult,
+} from "@hns/core";
 import type { MachineCall, MachineFiles, MachineFilesAnswer } from "../../src/do/machine.ts";
 
 /** The sha256 version of some text, in the spelling the workspace uses. */
@@ -37,7 +42,7 @@ export interface FakeMachine extends MachineFiles {
   /** Make the next answer a transport failure. */
   failNext(): void;
   /** Make the next answer a definite refusal with this code. */
-  denyNext(refusal: string): void;
+  denyNext(refusal: MachineRefusalCode): void;
   /** Make the next answer a too-large refusal (the file or the body is beyond the bound). */
   tooLargeNext(): void;
 }
@@ -53,7 +58,7 @@ export function fakeMachine(): FakeMachine {
   const writes: FakeWrite[] = [];
   const reads: string[] = [];
   let failNext = false;
-  let denial: string | undefined;
+  let denial: MachineRefusalCode | undefined;
   let tooLarge = false;
   let queue: Promise<void> = Promise.resolve();
 
@@ -67,8 +72,12 @@ export function fakeMachine(): FakeMachine {
     return await result;
   }
 
-  function failure(failureKind: "denied" | "too_large" | "unavailable", detail: string) {
-    return { ok: false as const, failure: failureKind, detail };
+  function failure(
+    failureKind: "denied" | "too_large" | "unavailable",
+    detail: string,
+    refusal?: MachineRefusalCode,
+  ) {
+    return { ok: false as const, failure: failureKind, detail, refusal };
   }
 
   return {
@@ -106,18 +115,18 @@ export function fakeMachine(): FakeMachine {
         }
         if (tooLarge) {
           tooLarge = false;
-          return failure("too_large", "too_large");
+          return failure("too_large", "too_large", "too_large");
         }
         if (denial !== undefined) {
           const detail = denial;
           denial = undefined;
-          return failure("denied", detail);
+          return failure("denied", detail, detail);
         }
         const key =
           request.projectRoot === "" ? request.path : request.projectRoot + "/" + request.path;
         const content = Buffer.from(request.content, "base64").toString("utf8");
         if (versionOfText(content) !== request.contentHash) {
-          return failure("denied", "invalid_request");
+          return failure("denied", "invalid_request", "invalid_request");
         }
         const current = files.get(key);
         if (current !== undefined && versionOfText(current) === request.contentHash) {
@@ -166,7 +175,7 @@ export function fakeMachine(): FakeMachine {
       }
       if (tooLarge) {
         tooLarge = false;
-        return failure("too_large", "too_large");
+        return failure("too_large", "too_large", "too_large");
       }
       const encoded = raw.get(request.path);
       if (encoded !== undefined) {
@@ -182,7 +191,7 @@ export function fakeMachine(): FakeMachine {
         };
       }
       const content = files.get(request.path);
-      if (content === undefined) return failure("denied", "not_found");
+      if (content === undefined) return failure("denied", "not_found", "not_found");
       const bytes = Buffer.from(content, "utf8");
       return {
         ok: true as const,
