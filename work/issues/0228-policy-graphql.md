@@ -1,6 +1,6 @@
 # 0228: ポリシー承認の GraphQL 面（Query / Mutation）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §10
@@ -17,13 +17,13 @@ touches: packages/server/src/graphql/policy.ts, packages/server/src/graphql/sche
 
 ## Acceptance criteria
 
-- [ ] `PolicyDocument` / `PolicyRevision` / `PolicyProposal` / `PolicyDiff` / `PolicyDiffAtom` を GraphQL の object として定義する（`CapabilityScope` / `HostPort` は Phase 1 では出さない）
-- [ ] `Query.policyRevisions(workspaceId, first)` と `Query.policyProposals(workspaceId, status)` が result union を返す
-- [ ] `Mutation.proposePolicy(input)` と `Mutation.decidePolicy(input)` が 0223 のサービスを呼ぶ
-- [ ] `decidePolicy` は human principal だけ。agent の tool token は `policy_denied`
-- [ ] 失敗は専用の `PolicyFailure` と閉じた `PolicyErrorCode`（`policy_denied` / `approval_stale` / `unsupported` / `not_found` / `invalid_request`）で返す。既存の `QueryFailure` を広げない
-- [ ] SDL を再生成し、web の codegen が通る
-- [ ] `npm test -w @hns/server` と `npm run codegen` が通る
+- [x] `PolicyDocument` / `PolicyRevision` / `PolicyProposal` / `PolicyDiff` / `PolicyDiffAtom` を GraphQL の object として定義する（`CapabilityScope` / `HostPort` は Phase 1 では出さない）
+- [x] `Query.policyRevisions(workspaceId, first)` と `Query.policyProposals(workspaceId, status)` が result union を返す
+- [x] `Mutation.proposePolicy(input)` と `Mutation.decidePolicy(input)` が 0223 のサービスを呼ぶ
+- [x] `decidePolicy` は human principal だけ。agent の tool token は `policy_denied`
+- [x] 失敗は専用の `PolicyFailure` と閉じた `PolicyErrorCode`（`policy_denied` / `approval_stale` / `unsupported` / `not_found` / `invalid_request`）で返す。既存の `QueryFailure` を広げない
+- [x] SDL を再生成し、web の codegen が通る
+- [x] `npm test -w @hns/server` と `npm run codegen` が通る
 
 ## テスト条件
 
@@ -67,3 +67,11 @@ touches: packages/server/src/graphql/policy.ts, packages/server/src/graphql/sche
 ## Log
 
 - 2026-11-17: 作成（D091）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0228。初回 BLOCKED 2（glob の規則の写し / root の語彙と off-by-one）→ 修正 → PASS）
+- HEAD: db78b1f（main に ff 統合）。gate は exit 0（1215 tests / 1216、main で 61.7s。1 回目は test 段で落ち、再実行で green）。
+- 確認: 0198 の `MutationModule` に `policyModule()` を 1 箇所で追加。Query `policyRevisions` / `policyProposals`、Mutation `proposePolicy` / `decidePolicy`。失敗は `PolicyFailure` の閉じた union（`QueryFailure` / `MutationFailure` は不変）。**glob は core の `GLOB_CHARACTERS` 1 箇所**（face は `normalizePath` の答えを使う。`a/{b,c}` / `a/[bc]` / NUL / `..` / 絶対は `unsupported`）。root は **1..1,024 inclusive・workspace 相対 POSIX**（`Project.workspaceRoot` と別語彙）、**`[]` = 変更なし**、**`equal` は提案可（`diff.kind = EQUAL`）**。resolver と service の **2 段**で human を検査。
+- 実経路: 実 D1（workerd）で agent が propose → human が decide → active 1→2。HTTP 経路（createGraphQLFace → handler）も同じ。二重提案で stale、agent は `policy_denied` で何も書かない、glob は `unsupported` で 0 行。mutation P1〜P5。
+- 非 blocking / follow-up: **agent が人の `hns_session` cookie を持つと区別できない**（0158 の `Session.kind` で閉じる。TSDoc と commit message に明記）/ 監査 `policy.approved` を 0222 の鎖に繋ぐ担当が未定 / **`equal` の承認は内容の変わらない revision を積む**（全件人承認なので許容、docs に 1 行必要）/ revision の global id が逆シリアル化不能 / `writable` が input に無い（Phase 2）/ `docs/capability.md` §10 に root の語彙の 1 段落が必要（所有者待ち）。
