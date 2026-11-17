@@ -12,16 +12,21 @@ import type {
   WorkflowRun,
   WorkflowRunNode,
 } from "@hns/core";
+import type { PolicyRevision } from "@hns/core/capability";
 import {
   AutomationRowSchema,
   ConversationRowSchema,
   FiringRowSchema,
+  PolicyActiveRowSchema,
+  PolicyProposalRowSchema,
+  PolicyRevisionRowSchema,
   ProjectRowSchema,
   TaskRowSchema,
   WorkflowRowSchema,
   WorkflowRunNodeRowSchema,
   WorkflowRunRowSchema,
 } from "./schemas.ts";
+import type { PolicyActive, StoredPolicyProposal } from "./repositories/policy.ts";
 
 /**
  * Parse a raw `projects` row into the public {@link Project}.
@@ -138,4 +143,47 @@ export function parseAutomation(input: unknown): Automation {
  */
 export function parseFiring(input: unknown): Firing {
   return v.parse(FiringRowSchema, input);
+}
+
+/**
+ * Parse a raw `policy_revisions` row into the public {@link PolicyRevision}.
+ *
+ * @remarks
+ * `document_json` is decoded into a `PolicyDocument`; a stored document this build cannot parse
+ * throws rather than being returned partially, because a revision is immutable.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated revision.
+ * @throws ValiError if a column or the decoded document is invalid.
+ * @throws SyntaxError if `document_json` is not valid JSON.
+ */
+export function parsePolicyRevision(input: unknown): PolicyRevision {
+  return v.parse(PolicyRevisionRowSchema, input);
+}
+
+/**
+ * Parse a raw `policy_active` row into the active pointer.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated pointer.
+ * @throws ValiError if a column is missing or `revision` is not positive.
+ */
+export function parsePolicyActive(input: unknown): PolicyActive {
+  return v.parse(PolicyActiveRowSchema, input);
+}
+
+/**
+ * Parse a raw `policy_proposals` row into the stored proposal.
+ *
+ * @remarks
+ * `candidate_json` is decoded into a `PolicyDocument`. The optional `decided*` members are
+ * absent, not `undefined`, until the row carries them.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated proposal, with the store's `updatedAt` alongside the public fields.
+ * @throws ValiError if a column, `status`, or the decoded candidate is invalid.
+ * @throws SyntaxError if `candidate_json` is not valid JSON.
+ */
+export function parsePolicyProposal(input: unknown): StoredPolicyProposal {
+  return v.parse(PolicyProposalRowSchema, input);
 }

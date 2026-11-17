@@ -6,6 +6,7 @@ import {
   type ConversationRepository,
 } from "./repositories/conversations.ts";
 import { indexStateRepository, type IndexStateRepository } from "./repositories/index-state.ts";
+import { policyRepository, type PolicyRepository } from "./repositories/policy.ts";
 import {
   projectRepository,
   taskRepository,
@@ -37,6 +38,14 @@ export interface Store {
   readonly indexState: IndexStateRepository;
   readonly workflows: WorkflowRepository;
   readonly automations: AutomationRepository;
+  /**
+   * A workspace's policy revisions, its active pointer, and its proposals.
+   *
+   * @remarks
+   * The store keeps the rows and the compare-and-swap; the server's policy service decides what
+   * may be proposed and who may approve (`docs/capability.md` §6).
+   */
+  readonly policy: PolicyRepository;
   /** Close the adapter. Calls made after this throw from the closed adapter. */
   close(): Promise<void>;
 }
@@ -75,6 +84,7 @@ export async function openStore(options: StoreOptions): Promise<Store> {
       indexState: indexStateRepository(context),
       workflows: workflowRepository(context),
       automations: automationRepository(context),
+      policy: policyRepository(context),
       close: () => sql.close(),
     };
   } catch (error) {

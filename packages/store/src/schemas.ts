@@ -25,6 +25,9 @@ import type {
   WorkflowRun,
   WorkflowRunNode,
 } from "@hns/core";
+import { HashSchema, POLICY_PROPOSAL_STATUSES, PolicyDocumentSchema } from "@hns/core/capability";
+import type { PolicyRevision } from "@hns/core/capability";
+import type { PolicyActive, StoredPolicyProposal } from "./repositories/policy.ts";
 
 /** The `projects` row before `agent_cwd` is derived from the stored root. */
 const projectRowSchema = v.object({
@@ -349,3 +352,119 @@ export const FiringRowSchema: v.GenericSchema<unknown, Firing> = v.object({
   run_id: v.nullable(v.string()),
   created_at: IsoTimestampSchema,
 });
+
+// The policy tables hold the capability contract's document as JSON text. Store validates the
+// text on the way in and on the way out; the model shapes are `@hns/core/capability`'s.
+
+/** A shallow-mutable view, for building a row's public shape member by member. */
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
+/** The `policy_revisions` row before `document_json` is decoded. */
+const policyRevisionRowSchema = v.object({
+  workspace_id: v.pipe(v.string(), v.minLength(1)),
+  revision: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  hash: HashSchema,
+  document_json: v.string(),
+  created_at: IsoTimestampSchema,
+  created_by: v.pipe(v.string(), v.minLength(1)),
+});
+
+/**
+ * One `policy_revisions` row, with its document decoded.
+ *
+ * @remarks
+ * A stored document that no longer parses throws instead of being returned half-parsed: a
+ * revision is immutable, so a row that cannot be read is one this build must not act on.
+ */
+export const PolicyRevisionRowSchema: v.GenericSchema<unknown, PolicyRevision> = v.pipe(
+  policyRevisionRowSchema,
+  v.transform((row): PolicyRevision => ({
+    workspaceId: row.workspace_id,
+    revision: row.revision,
+    hash: row.hash,
+    document: parseJsonText(PolicyDocumentSchema, row.document_json),
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+  })),
+);
+
+/**
+ * The `policy_active` row: the revision a workspace's calls are allowed under.
+ *
+ * @remarks
+ * One row per workspace. The document is not copied here; it is read from `policy_revisions` at
+ * the revision this row names, so the two can never disagree about a document.
+ */
+export const PolicyActiveRowSchema: v.GenericSchema<unknown, PolicyActive> = v.pipe(
+  v.object({
+    workspace_id: v.pipe(v.string(), v.minLength(1)),
+    revision: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    hash: HashSchema,
+    updated_at: IsoTimestampSchema,
+  }),
+  v.transform((row): PolicyActive => ({
+    workspaceId: row.workspace_id,
+    revision: row.revision,
+    hash: row.hash,
+    updatedAt: row.updated_at,
+  })),
+);
+
+/** The `policy_proposals` row before `candidate_json` is decoded. */
+const policyProposalRowSchema = v.object({
+  id: v.pipe(v.string(), v.minLength(1)),
+  workspace_id: v.pipe(v.string(), v.minLength(1)),
+  base_revision: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  base_hash: HashSchema,
+  candidate_json: v.string(),
+  candidate_hash: HashSchema,
+  review_token: HashSchema,
+  requested_by: v.pipe(v.string(), v.minLength(1)),
+  reason: v.string(),
+  status: v.picklist(POLICY_PROPOSAL_STATUSES),
+  decided_by: v.nullable(v.string()),
+  decided_at: v.nullable(IsoTimestampSchema),
+  decision_reason: v.nullable(v.string()),
+  created_at: IsoTimestampSchema,
+  updated_at: IsoTimestampSchema,
+});
+
+/**
+ * One `policy_proposals` row, with its candidate decoded.
+ *
+ * @remarks
+ * The optional `decided*` members come out **absent** until the row carries them, not as
+ * `undefined`: the contract's optional members are absent-or-present
+ * (`exactOptionalPropertyTypes`), so a consumer reads "was it decided" from the key's presence.
+ * `updated_at` is the store's own column; it is not part of the public proposal.
+ */
+export const PolicyProposalRowSchema: v.GenericSchema<unknown, StoredPolicyProposal> = v.pipe(
+  policyProposalRowSchema,
+  v.transform((row): StoredPolicyProposal => {
+    const proposal: Mutable<StoredPolicyProposal> = {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      baseRevision: row.base_revision,
+      baseHash: row.base_hash,
+      candidate: parseJsonText(PolicyDocumentSchema, row.candidate_json),
+      candidateHash: row.candidate_hash,
+      reviewToken: row.review_token,
+      requestedBy: row.requested_by,
+      reason: row.reason,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+    if (row.decided_by !== null) proposal.decidedBy = row.decided_by;
+    if (row.decided_at !== null) proposal.decidedAt = row.decided_at;
+    if (row.decision_reason !== null) proposal.decisionReason = row.decision_reason;
+    return proposal;
+  }),
+);
+
+/** The input shape of {@link PolicyRevisionRowSchema}: a raw `policy_revisions` row. */
+export type PolicyRevisionRow = v.InferInput<typeof PolicyRevisionRowSchema>;
+/** The input shape of {@link PolicyActiveRowSchema}: a raw `policy_active` row. */
+export type PolicyActiveRow = v.InferInput<typeof PolicyActiveRowSchema>;
+/** The input shape of {@link PolicyProposalRowSchema}: a raw `policy_proposals` row. */
+export type PolicyProposalRow = v.InferInput<typeof PolicyProposalRowSchema>;

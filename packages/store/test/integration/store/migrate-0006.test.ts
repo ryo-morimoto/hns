@@ -72,7 +72,7 @@ test("the drop step removes events and usage_log from a version-5 database", asy
     expect(await hasTable(sql, "events")).toBe(false);
     expect(await hasTable(sql, "usage_log")).toBe(false);
     expect(await sql.get("SELECT MAX(version) AS version FROM schema_migrations")).toStrictEqual({
-      version: 6,
+      version: 7,
     });
   } finally {
     await sql.close();

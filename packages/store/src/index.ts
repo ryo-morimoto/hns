@@ -16,3 +16,12 @@ export type { IndexStateRepository } from "./repositories/index-state.ts";
 export type { ConversationIndexRow, IndexStateRow } from "./conversation-index/model.ts";
 export type { WorkflowRepository } from "./repositories/workflows.ts";
 export type { AutomationRepository } from "./repositories/automations.ts";
+export type {
+  PolicyActivation,
+  PolicyActive,
+  PolicyProposalInput,
+  PolicyRepository,
+  PolicySeed,
+  ProposalTransition,
+  StoredPolicyProposal,
+} from "./repositories/policy.ts";
