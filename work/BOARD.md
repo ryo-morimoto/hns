@@ -33,28 +33,28 @@
 | --- | --- | --- | --- |
 | [0220](issues/0220-capability-contract.md) | capability 契約（canonical call・grant・policy 型） | 依存なし | L0（capability） |
 | [0227](issues/0227-sandbox-hardening-spike.md) | sandbox 追加硬化の実測（Landlock / netns+proxy / seccomp） | 依存なし | L4（sandbox） |
-| [0163](issues/0163-cost-and-limits.md) | コスト・上限（usage / budget） | 0151 / 0153 done | L8（運用） |
+| [0198](issues/0198-graphql-mutation.md) | GraphQL の Mutation 面（書き込みの骨格） | 0176 done | L10（GraphQL） |
 
-0059（c55fc2d）、0153（37f5f1d）は done。0169 は作業中（owner 未割当）。いまの `now` は **0220 / 0227 / 0163（開始待ち）**。0048 / 0049 / 0103 / 0149 / 0152 / 0154 / 0157 / 0162 / 0182 / 0191 / 0198 は順番待ち。
-0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を、0156 の後は 0169 / 0157 を、0151 の後は 0152、0190 の後は 0191 を開ける。
+第2波は 0059 / 0153 / 0169 / 0163 / 0154 / 0157 / 0162 が done（c55fc2d / 37f5f1d / 1ab43ea / 176310e / 13556fd / 21c65b2 / 8355d1f）。いまの `now` は **0220 / 0227 / 0198**。0048 / 0049 / 0103 / 0149 / 0152 / 0160 / 0165 / 0181 / 0182 / 0191 / 0194 / 0199 は順番待ち。
+0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を、0151 の後は 0152、0190 の後は 0191 を開ける。0169 / 0157 / 0154 / 0162 / 0163 は done。
 
 ### 次の昇格
 
 `now` の条件は `design: agreed` かつ `depends-on` 充足。lead がレーン順に選ぶ（agent は昇格しない）。
 
-- 順番待ち（0048 / 0049 / 0103 / 0149 / 0152 / 0154 / 0157 / 0162 / 0163 / 0182 / 0198）は、枠が空いたら `now` へ。
+- 順番待ち（0048 / 0049 / 0103 / 0149 / 0152 / 0160 / 0165 / 0181 / 0182 / 0191 / 0194 / 0199）は、枠が空いたら `now` へ。
 - 設計待ちは 0 件。次の実装レーンは順番待ちから選ぶ。
 - 依存待ちの agreed 6 件（0122, 0127, 0155, 0166, 0167, 0168）は、依存が解けたら `now` の候補。
 
 
 
 
-### next（69）
+### next（65）
 
 `now` の条件は `design: agreed` かつ `depends-on` 充足。`next` は `now` ではない理由で分ける（設計待ち / 順番待ち / 依存待ち）。
 
 - **設計待ち（design: pending・依存充足、0）**: なし
-- **順番待ち（design: agreed・依存充足、17）**: 0043, 0048, 0049, 0103, 0149, 0152, 0154, 0157, 0160, 0162, 0165, 0181, 0182, 0191, 0194, 0198, 0199
+- **順番待ち（design: agreed・依存充足、13）**: 0043, 0048, 0049, 0103, 0149, 0152, 0160, 0165, 0181, 0182, 0191, 0194, 0199
 - **依存待ち（52、* は design: agreed）**:
   - **L4 耐久**: 0125*, 0155*, 0167*, 0168*
   - **L3 マシン**: 0148*
@@ -219,22 +219,22 @@
 | [0151](issues/0151-provider-gateway.md) | provider gateway（鍵の分離・予算・緊急停止） | **done** | — | 0143, 0144 |
 | [0152](issues/0152-real-provider.md) | 実プロバイダ（faux → 実・ストリーミング・usage） | open | next | 0146, 0151 |
 | [0153](issues/0153-r2-object-store.md) | R2 オブジェクトストア（git object 互換・pack アップロード） | open | next | 0141, 0144 |
-| [0154](issues/0154-checkpoint-commit.md) | checkpoint commit（refs/hns・Run 境界） | open | next | 0153, 0156 |
+| [0154](issues/0154-checkpoint-commit.md) | checkpoint commit（refs/hns・Run 境界） | **done** | — | 0153, 0156 |
 | [0155](issues/0155-restore.md) | restore（base + Journal の再生） | open | next | 0154 |
 | [0156](issues/0156-journal-in-do.md) | Workspace DO の骨格（lease・版・所有） | **done** | — | 0142, 0145 |
-| [0157](issues/0157-versioned-write-remote.md) | 版付き書き込みのリモート化（ack が DO を通る） | open | next | 0033, 0147, 0156 |
+| [0157](issues/0157-versioned-write-remote.md) | 版付き書き込みのリモート化（ack が DO を通る） | **done** | — | 0033, 0147, 0156 |
 | [0158](issues/0158-auth-edge.md) | 認証の再編（passkey / PRF / デバイス鍵） | open | next | 0048, 0069, 0070, 0071, 0147 |
 | [0159](issues/0159-live-ws.md) | ライブ更新の WS 化（SSE の置き換え） | open | now | 0146 |
 | [0160](issues/0160-ui-delivery.md) | UI の配信（Workers Assets・typed client） | open | next | 0037, 0159 |
 | [0161](issues/0161-automation-target.md) | automations の実行先（マシン必須の明示） | open | next | 0038, 0148 |
-| [0162](issues/0162-observability-hops.md) | 観測（相関 ID を全ホップに通す） | open | next | 0145, 0147 |
-| [0163](issues/0163-cost-and-limits.md) | コストの上限と監視（DO 行・R2・モデル） | open | next | 0151, 0153 |
+| [0162](issues/0162-observability-hops.md) | 観測（相関 ID を全ホップに通す） | **done** | — | 0145, 0147 |
+| [0163](issues/0163-cost-and-limits.md) | コストの上限と監視（DO 行・R2・モデル） | **done** | — | 0151, 0153 |
 | [0164](issues/0164-backup-restore-ops.md) | バックアップと復元の運用（0020 の再定義） | open | next | 0154 |
 | [0165](issues/0165-safety-reeval.md) | 安全の再評価（XSS→exec・サプライチェーン・egress） | open | next | 0147 |
 | [0166](issues/0166-migration-rollback.md) | 移行とロールバック（ローカル実装を残す） | open | next | 0150, 0157 |
 | [0167](issues/0167-remote-fault-injection.md) | リモート経路の故障注入（intent / apply / outcome） | open | next | 0157, 0169 |
 | [0168](issues/0168-retention-gc.md) | checkpoint と R2 の保持（GC・保持期間） | open | next | 0154, 0155 |
-| [0169](issues/0169-journal-truncation.md) | Journal と切り詰め（append・watermark・256KB閾値） | open | next | 0141, 0156 |
+| [0169](issues/0169-journal-truncation.md) | Journal と切り詰め（append・watermark・256KB閾値） | **done** | — | 0141, 0156 |
 | [0170](issues/0170-integration-tier.md) | integration 層を分ける | **done** | — | - |
 | [0171](issues/0171-build-prepush.md) | build を pre-push に移す | **done** | — | 0170 |
 | [0172](issues/0172-rooted-helper-spawn.md) | rooted ヘルパーの起動を操作ごとにしない | **置換**（0191） | — | - |
@@ -263,7 +263,7 @@
 | [0195](issues/0195-work-record-contract.md) | 仕事の記録の契約（意図・方針・判断） | **done** | — | — |
 | [0196](issues/0196-record-package.md) | 構造化レコードの実装（@hns/record・YAML・CLI） | **done** | — | 0195 |
 | [0197](issues/0197-record-product-integration.md) | 記録の製品統合（WorkItem / Evidence への写像） | open | next | 0116, 0120, 0196 |
-| [0198](issues/0198-graphql-mutation.md) | GraphQL の Mutation 面（書き込みの骨格） | open | next | 0176 |
+| [0198](issues/0198-graphql-mutation.md) | GraphQL の Mutation 面（書き込みの骨格） | open | now | 0176 |
 | [0199](issues/0199-code-mode-contract.md) | code mode の実行契約（profile・event・budget・モジュール境界） | open | next | - |
 | [0200](issues/0200-code-mode.md) | code mode（codemode・sandbox・structured output） | open | next | 0199 |
 | [0201](issues/0201-subagent-budget.md) | subagent と実行予算（深さ・本数・usage） | open | next | 0199 |
