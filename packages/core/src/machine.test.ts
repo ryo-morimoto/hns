@@ -5,6 +5,7 @@ import {
   MACHINE_RPC_PATH,
   MACHINE_WRITE_UNKNOWN_REASONS,
   SIGNED_HEADERS,
+  SIGNED_HEADER_BY_FIELD,
   MachineReadResultSchema,
   MachineWriteRequestSchema,
   MachineWriteResultSchema,
@@ -108,4 +109,9 @@ test("a read result carries the bytes and their version", () => {
   expect(v.safeParse(MachineReadResultSchema, { ...result, version: undefined }).success).toBe(
     false,
   );
+});
+// Catches: a signer and a verifier reading different header names for the same field.
+test("each signed field maps to the header the list declares", () => {
+  expect(Object.values(SIGNED_HEADER_BY_FIELD)).toStrictEqual([...SIGNED_HEADERS]);
+  expect(new Set(Object.values(SIGNED_HEADER_BY_FIELD)).size).toBe(SIGNED_HEADERS.length);
 });

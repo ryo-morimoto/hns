@@ -1,6 +1,10 @@
 import * as v from "valibot";
 import type { IncomingHttpHeaders } from "node:http";
-import { MachineReadResultSchema, MachineWriteRequestSchema } from "@hns/core";
+import {
+  MachineReadResultSchema,
+  MachineWriteRequestSchema,
+  SIGNED_HEADER_BY_FIELD,
+} from "@hns/core";
 import type { JsonValue, MachineReadResult, MachineWriteRequest } from "@hns/core";
 import { MachineRefusal, REFUSAL_CODES } from "./refusal.ts";
 import type { RefusalCode } from "./refusal.ts";
@@ -53,12 +57,12 @@ const SignedHeadersSchema: v.GenericSchema<unknown, SignedHeaders> = v.object({
  */
 export function parseSignedHeaders(headers: IncomingHttpHeaders): SignedHeaders {
   const parsed = v.safeParse(SignedHeadersSchema, {
-    machineId: headers["x-hns-machine"],
-    connection: headers["x-hns-connection"],
-    seq: headers["x-hns-seq"],
-    timestamp: headers["x-hns-timestamp"],
-    nonce: headers["x-hns-nonce"],
-    signature: headers["x-hns-signature"],
+    machineId: headers[SIGNED_HEADER_BY_FIELD.machineId],
+    connection: headers[SIGNED_HEADER_BY_FIELD.connection],
+    seq: headers[SIGNED_HEADER_BY_FIELD.seq],
+    timestamp: headers[SIGNED_HEADER_BY_FIELD.timestamp],
+    nonce: headers[SIGNED_HEADER_BY_FIELD.nonce],
+    signature: headers[SIGNED_HEADER_BY_FIELD.signature],
   });
   if (!parsed.success) {
     throw new MachineRefusal("unauthorized", "the request is not signed with the machine headers");

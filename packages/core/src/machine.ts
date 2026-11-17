@@ -38,6 +38,22 @@ export const SIGNED_HEADERS = [
 /** One signed header name. */
 export type SignedHeaderName = (typeof SIGNED_HEADERS)[number];
 
+/**
+ * The header that carries each signed field, derived from {@link SIGNED_HEADERS}.
+ *
+ * @remarks
+ * Both the signer and the verifier read names from here, so a renamed header cannot leave one
+ * side reading a literal that the other side no longer sends. The order is the array's order.
+ */
+export const SIGNED_HEADER_BY_FIELD = {
+  machineId: SIGNED_HEADERS[0],
+  connection: SIGNED_HEADERS[1],
+  seq: SIGNED_HEADERS[2],
+  timestamp: SIGNED_HEADERS[3],
+  nonce: SIGNED_HEADERS[4],
+  signature: SIGNED_HEADERS[5],
+} as const;
+
 /** The only route the machine agent answers; the signature covers this path. */
 export const MACHINE_RPC_PATH = "/rpc";
 

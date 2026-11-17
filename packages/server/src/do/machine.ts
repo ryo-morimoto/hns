@@ -2,6 +2,7 @@ import {
   MACHINE_RPC_PATH,
   MachineReadResultSchema,
   MachineWriteResultSchema,
+  SIGNED_HEADER_BY_FIELD,
   signatureMessage,
 } from "@hns/core";
 import type {
@@ -27,13 +28,10 @@ const WORKER_CONNECTION = "hns-worker";
 const WORKER_SEQ = "1";
 
 /** The refusals that prove the machine wrote nothing. */
-const DEFINITE_REFUSALS = new Set([
-  "path_denied",
-  "forbidden",
-  "not_found",
-  "invalid_request",
-  "too_large",
-]);
+const DEFINITE_REFUSALS = new Set(["path_denied", "forbidden", "not_found", "invalid_request"]);
+
+/** The largest answer this client reads; the machine's own response bound is 256 KiB. */
+const MAX_ANSWER_BYTES = 1_048_576;
 
 /** The prefixes of the Ed25519 PKCS#8 encoding, up to the 32-byte seed. */
 const PKCS8_PREFIX = Uint8Array.from([
@@ -44,12 +42,13 @@ const PKCS8_PREFIX = Uint8Array.from([
  * Why the Worker has no answer it can act on.
  *
  * @remarks
- * `denied` means the machine refused before writing, so the caller can report the refusal.
- * `unavailable` means no usable answer arrived (a transport failure, a malformed body, an
- * unexpected status, or an authentication failure): for a write it is the `unknown` case, and
- * for a read it is "cannot read right now".
+ * `denied` means the machine refused before writing, so the caller can report the refusal;
+ * `too_large` is the one refusal with its own status (413) on both faces. `unavailable` means
+ * no usable answer arrived (a transport failure, a malformed body, an unexpected status, or an
+ * authentication failure): for a write it is the `unknown` case, and for a read it is "cannot
+ * read right now".
  */
-const MACHINE_FAILURES = ["denied", "unavailable"] as const;
+const MACHINE_FAILURES = ["denied", "too_large", "unavailable"] as const;
 
 /** One way the Worker has no usable answer. */
 type MachineFailure = (typeof MACHINE_FAILURES)[number];
@@ -189,12 +188,12 @@ async function signedHeaders(
   );
   const headers = new Headers({ "content-type": "application/json" });
   if (requestId !== "") headers.set("x-request-id", requestId);
-  headers.set("x-hns-machine", signature.machineId);
-  headers.set("x-hns-connection", signature.connection);
-  headers.set("x-hns-seq", signature.seq);
-  headers.set("x-hns-timestamp", signature.timestamp);
-  headers.set("x-hns-nonce", signature.nonce);
-  headers.set("x-hns-signature", toBase64Url(signatureBytes));
+  headers.set(SIGNED_HEADER_BY_FIELD.machineId, signature.machineId);
+  headers.set(SIGNED_HEADER_BY_FIELD.connection, signature.connection);
+  headers.set(SIGNED_HEADER_BY_FIELD.seq, signature.seq);
+  headers.set(SIGNED_HEADER_BY_FIELD.timestamp, signature.timestamp);
+  headers.set(SIGNED_HEADER_BY_FIELD.nonce, signature.nonce);
+  headers.set(SIGNED_HEADER_BY_FIELD.signature, toBase64Url(signatureBytes));
   return headers;
 }
 
@@ -242,7 +241,25 @@ export function createSignedMachineFiles(
         detail: error instanceof Error ? error.name + ": " + error.message : "transport",
       };
     }
-    const text = await response.text();
+    // Reading the answer can fail too (a cut connection, an unreadable body); that is no
+    // answer, never a success. The size is bounded so a runaway body cannot be materialized.
+    const declared = Number(response.headers.get("content-length") ?? "0");
+    if (Number.isFinite(declared) && declared > MAX_ANSWER_BYTES) {
+      return { ok: false, failure: "unavailable", detail: "answer too large" };
+    }
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      return {
+        ok: false,
+        failure: "unavailable",
+        detail: error instanceof Error ? error.name : "unreadable answer",
+      };
+    }
+    if (text.length > MAX_ANSWER_BYTES) {
+      return { ok: false, failure: "unavailable", detail: "answer too large" };
+    }
     let answer: v.InferOutput<typeof AnswerSchema>;
     try {
       answer = v.parse(AnswerSchema, JSON.parse(text));
@@ -253,7 +270,12 @@ export function createSignedMachineFiles(
       if (!response.ok) return { ok: false, failure: "unavailable", detail: "unexpected status" };
       return { ok: true, result: answer.result };
     }
-    const failure: MachineFailure = DEFINITE_REFUSALS.has(answer.code) ? "denied" : "unavailable";
+    const failure: MachineFailure =
+      answer.code === "too_large"
+        ? "too_large"
+        : DEFINITE_REFUSALS.has(answer.code)
+          ? "denied"
+          : "unavailable";
     return { ok: false, failure, detail: answer.code };
   }
 

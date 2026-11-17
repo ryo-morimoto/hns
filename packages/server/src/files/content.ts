@@ -1,21 +1,23 @@
 import { LEASE_REFUSALS, OperationIdSchema } from "@hns/core";
 import * as v from "valibot";
+import { readBody } from "../edge/body.ts";
 import type { DurableObjectStub } from "../edge/env.ts";
 import type { FilesRequest } from "../edge/handler.ts";
-import { problem } from "../edge/problem.ts";
+import { DEFAULT_LIMITS, type EdgeLimits } from "../edge/limits.ts";
 
 /**
  * The closed failure codes the files face answers with.
  *
  * @remarks
- * A caller branches on `code`. `conflict` means the file changed since the version the caller
- * sent; `unknown` means the save may or may not have landed and must be reconciled by a read;
- * `denied` is a refusal the machine decided before writing. None of these is ever rounded into
- * `applied`.
+ * A caller branches on `code». `conflict» means the file changed since the version the caller
+ * sent; `unknown» means the save may or may not have landed and must be reconciled by a read;
+ * `denied» is a refusal the machine decided before writing. None of these is ever rounded into
+ * `applied».
  */
 const FILES_FAILURES = [
   "invalid_request",
   "unsupported_media_type",
+  "payload_too_large",
   "not_found",
   "conflict",
   "lease",
@@ -30,10 +32,10 @@ type FilesFailure = (typeof FILES_FAILURES)[number];
 
 /** The body of a versioned write. */
 const WriteInput = v.object({
-  /** The project directory below the machine's ROOT; `""` is the root itself. */
+  /** The project directory below the machine's ROOT; `""» is the root itself. */
   projectRoot: v.string(),
   path: v.pipe(v.string(), v.minLength(1)),
-  /** The version the editor saw, or `"absent"`. */
+  /** The version the editor saw, or `"absent"». */
   expectedVersion: v.pipe(v.string(), v.minLength(1)),
   /** The attempt's id; a retry with the same id returns the recorded outcome. */
   operationId: OperationIdSchema,
@@ -63,10 +65,17 @@ function fail(code: FilesFailure, message: string, status: number): Response {
   return json({ ok: false, code, message }, status);
 }
 
-/** The DO RPC answer envelope. */
-const RpcAnswer = v.variant("ok", [
+/** A failure envelope from the Workspace object. */
+const RpcFailure = v.object({
+  ok: v.literal(false),
+  code: v.string(),
+  message: v.pipe(v.string(), v.minLength(1)),
+});
+
+/** The apply answer: a mutation result, or the workspace's typed failure. */
+const ApplyAnswer = v.variant("ok", [
   v.object({ ok: v.literal(true), result: v.unknown() }),
-  v.object({ ok: v.literal(false), code: v.string(), message: v.pipe(v.string(), v.minLength(1)) }),
+  RpcFailure,
 ]);
 
 /** The mutation result inside a successful apply. */
@@ -80,7 +89,7 @@ const RpcResult = v.variant("status", [
   }),
 ]);
 
-/** What a successful read RPC carries. */
+/** A successful read answer: the machine's bytes (base64) and their version. */
 const RpcRead = v.object({
   ok: v.literal(true),
   path: v.string(),
@@ -88,6 +97,9 @@ const RpcRead = v.object({
   content: v.string(),
   externalChange: v.boolean(),
 });
+
+/** The read answer: a result, or the workspace's typed failure. */
+const ReadAnswer = v.variant("ok", [RpcRead, RpcFailure]);
 
 /** The workspace binding for one request, or a 503. */
 function workspaceStub(
@@ -120,13 +132,54 @@ function fromBase64(text: string): string | undefined {
 }
 
 /**
- * Read one RPC answer, or report that it could not be parsed.
+ * Map one Workspace failure onto this face's closed union.
+ *
+ * @param code - The workspace RPC code (or a lease refusal).
+ * @param message - The workspace's diagnostic message; never a secret.
+ * @returns The face's failure with the matching status.
+ *
+ * @remarks
+ * The mapping is explicit so a status is never inferred from an envelope this face did not
+ * expect: an unknown code is an internal error, not a success and not a guessed status.
  *
  * @internal
  */
-async function answerOf(response: Response): Promise<v.InferOutput<typeof RpcAnswer> | undefined> {
+function workspaceFailure(code: string, message: string): Response {
+  const leaseRefusal = LEASE_REFUSALS.find((refusal) => refusal === code);
+  if (leaseRefusal !== undefined) {
+    // The workspace is not writable right now; this is not a version conflict.
+    return json({ ok: false, code: "lease", reason: leaseRefusal }, 409);
+  }
+  switch (code) {
+    case "invalid_request":
+      return fail("invalid_request", message, 400);
+    case "not_found":
+      return fail("not_found", message, 404);
+    case "conflict":
+      return fail("conflict", message, 409);
+    case "denied":
+      return fail("denied", message, 400);
+    case "payload_too_large":
+      return fail("payload_too_large", message, 413);
+    case "unavailable":
+      return fail("unavailable", message, 503);
+    case "internal":
+      return fail("internal", message, 500);
+  }
+  return fail("internal", "Unexpected workspace failure.", 500);
+}
+
+/**
+ * Read one JSON answer with its envelope, or undefined when it is not one.
+ *
+ * @internal
+ */
+async function bodyOf<T>(
+  response: Response,
+  schema: v.GenericSchema<unknown, T>,
+): Promise<T | undefined> {
   try {
-    return v.parse(RpcAnswer, await response.json());
+    return v.parse(schema, await response.json());
   } catch {
     return undefined;
   }
@@ -135,27 +188,44 @@ async function answerOf(response: Response): Promise<v.InferOutput<typeof RpcAns
 /**
  * The files content face: versioned reads and writes over the machine.
  *
- * @param request - An authenticated edge request whose path names one workspace.
- * @returns The face's closed answer: 200 / 400 / 404 / 409 / 413 / 415 / 503 / 504.
+ * @param limits - The edge's request budgets; the body limit and content type apply here too.
+ * @returns A handler for one authenticated edge request whose path names one workspace.
  *
  * @remarks
- * The face owns the wire: it parses the caller's body, forwards a base64 body to the Workspace
- * object (which appends the intent, applies it on the machine, and settles the outcome), and
- * maps the recorded outcome to HTTP. A conflict is 409, an unknown is 504, and neither is ever
- * reported as a save. Authentication and the method are the edge's job (D059).
+ * The face owns the wire: it reads the caller's body with the edge's limits, parses it, forwards
+ * a base64 body to the Workspace object (which appends the intent, applies it on the machine, and
+ * settles the outcome), and maps the recorded outcome to HTTP. A conflict is 409, an unknown is
+ * 504, and neither is ever reported as a save. Authentication and the method are the edge's job
+ * (D059); an oversized or non-JSON body is this face's failure (413 / 415).
  */
-export function createFilesFace(): (request: FilesRequest) => Promise<Response> {
+export function createFilesFace(
+  limits: EdgeLimits = DEFAULT_LIMITS,
+): (request: FilesRequest) => Promise<Response> {
   return async function files(request: FilesRequest): Promise<Response> {
     const stub = workspaceStub(request.env, request.workspaceId);
     if (stub === undefined) {
-      return problem("unavailable", "The workspace binding is not configured.", "/api/workspaces");
+      // This face's failures are its own union, not the edge's problem+json (that is for
+      // authentication and the method, which the edge answers before calling here).
+      return fail("unavailable", "The workspace binding is not configured.", 503);
     }
     const url = new URL(request.request.url);
     const headers = new Headers({ "content-type": "application/json" });
     headers.set("x-request-id", request.requestId);
+
     if (request.request.method === "POST") {
-      const body = await request.request.text();
-      const parsed = v.safeParse(WriteInput, JSON.parse(body.length === 0 ? "null" : body));
+      const body = await readBody(request.request, limits.maxBodyBytes);
+      if (!body.ok) {
+        return body.code === "payload_too_large"
+          ? fail("payload_too_large", "The request body exceeds the configured limit.", 413)
+          : fail("unsupported_media_type", "The request body must be application/json.", 415);
+      }
+      let raw: unknown;
+      try {
+        raw = JSON.parse(body.text.length === 0 ? "null" : body.text);
+      } catch {
+        return fail("invalid_request", "The write body is not JSON.", 400);
+      }
+      const parsed = v.safeParse(WriteInput, raw);
       if (!parsed.success) {
         return fail("invalid_request", "The write body is not valid.", 400);
       }
@@ -174,32 +244,11 @@ export function createFilesFace(): (request: FilesRequest) => Promise<Response> 
         }),
       });
       const answer = await stub.fetch(forwarded);
-      const envelope = await answerOf(answer);
+      const envelope = await bodyOf(answer, ApplyAnswer);
       if (envelope === undefined) {
-        return fail("unavailable", "The workspace did not answer.", 503);
+        return fail("internal", "The workspace did not answer.", 500);
       }
-      if (!envelope.ok) {
-        const leaseRefusal = LEASE_REFUSALS.find((code) => code === envelope.code);
-        if (leaseRefusal !== undefined) {
-          // The workspace is not writable right now; this is not a version conflict.
-          return json({ ok: false, code: "lease", reason: leaseRefusal }, 409);
-        }
-        switch (envelope.code) {
-          case "denied":
-            return fail("denied", envelope.message, 400);
-          case "invalid_request":
-            return fail("invalid_request", envelope.message, 400);
-          case "not_found":
-            return fail("not_found", envelope.message, 404);
-          case "conflict":
-            return fail("conflict", envelope.message, 409);
-          case "unavailable":
-            return fail("unavailable", envelope.message, 503);
-          case "internal":
-            return fail("internal", envelope.message, 500);
-        }
-        return fail("internal", "Unexpected workspace failure.", 500);
-      }
+      if (!envelope.ok) return workspaceFailure(envelope.code, envelope.message);
       const result = v.safeParse(RpcResult, envelope.result);
       if (!result.success) return fail("internal", "The workspace result is not valid.", 500);
       const value = result.output;
@@ -255,25 +304,21 @@ export function createFilesFace(): (request: FilesRequest) => Promise<Response> 
       signal: request.signal,
     });
     const answer = await stub.fetch(forwarded);
-    if (answer.status === 404) return fail("not_found", "The file does not exist.", 404);
-    const parsed = v.safeParse(RpcRead, await answer.json().catch(() => null));
-    if (!parsed.success) {
-      return fail(
-        "unavailable",
-        answer.ok ? "The read answer is not valid." : "The machine did not answer.",
-        503,
-      );
+    const envelope = await bodyOf(answer, ReadAnswer);
+    if (envelope === undefined) {
+      return fail("internal", "The workspace did not answer.", 500);
     }
-    const text = fromBase64(parsed.output.content);
+    if (!envelope.ok) return workspaceFailure(envelope.code, envelope.message);
+    const text = fromBase64(envelope.content);
     if (text === undefined) {
       return fail("unsupported_media_type", "The file is not UTF-8 text.", 415);
     }
     return json({
       ok: true,
-      path: parsed.output.path,
-      version: parsed.output.version,
+      path: envelope.path,
+      version: envelope.version,
       content: text,
-      externalChange: parsed.output.externalChange,
+      externalChange: envelope.externalChange,
     });
   };
 }
