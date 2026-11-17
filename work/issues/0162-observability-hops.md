@@ -1,7 +1,7 @@
 # 0162: 観測（相関 ID を全ホップに通す）
 
-status: in-progress
-priority: next
+status: done
+priority: now
 design: agreed
 design-ref: docs/observability.md, D082
 depends-on: 0145, 0147
@@ -13,13 +13,13 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
 
 ## Acceptance criteria
 
-- [ ] 相関 ID を browser → Worker → DO → agent → fs まで通す
-- [ ] `/api/events`・`/api/metrics` を提供する（docs/observability.md）
-- [ ] イベントの語彙を core に閉じた union で置く
-- [ ] 本文・ヘッダ・トークンをログに残さない（パスと status だけ）
-- [ ] DO のログと agent のログを同じ形で読める
-- [ ] 「どこで詰まったか」を1コマンドで出せる
-- [ ] 保持期間と量の上限
+- [x] 相関 ID を browser → Worker → DO → agent → fs まで通す
+- [x] `/api/events`・`/api/metrics` を提供する（docs/observability.md）
+- [x] イベントの語彙を core に閉じた union で置く
+- [x] 本文・ヘッダ・トークンをログに残さない（パスと status だけ）
+- [x] DO のログと agent のログを同じ形で読める
+- [x] 「どこで詰まったか」を1コマンドで出せる
+- [x] 保持期間と量の上限
 
 ## Design
 
@@ -141,9 +141,20 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
 - 外部への送出（OTel 等）。
 - メトリクスの可視化 UI。
 
+## Result
+
+- verdict: **PASS**（初回 BLOCKED: blocking 1（machine の fs ログが先頭 / 付きパスで壊れる）→ 修正 → 再レビュー PASS）
+- reviewer: reviewer-0162（この変更を書いていない別エージェント）
+- HEAD: 29a8bbe（main に ff 統合）
+- 受入: 7/7。`npm run check` exit 0（646 tests / 112 files、34.1s）
+- 確認: 相関 ID は 0145 の x-request-id を再利用し、edge → DO → agent → fs まで通る。0147 の署名対象には入れず、改ざんされた相関ヘッダでも認証結果が変わらない。`/api/events` / `/api/metrics` は session 認証 + valibot + no-store で edge の同一変更。core の閉じた語彙、allowlist による redaction（body / headers / token / agent text / file content）、DO と machine が同じ ObsLogEntry。trace CLI は stopped after / --expect。保持は 30 日 / 5000 件 / 256 append ごとの prune。
+- 0163 との相互作用: 成功ターンの DO 行は 9 → 10 になり、session-cost.test.ts と RESULTS を更新（do.rpc の二重計上なし）。
+- 非 blocking（5 + follow-up）: RESULTS の「ターンごとの上限 5000 件 / 30 日」の係り先 / handler.test の名前（obs face 不在）/ 成功ターンの trace が not observed: do を出す / requestId の無い内部呼び出しの端ケース / #agentRequestIds のスコープ。follow-up: 語彙・allowlist・regex の二重管理、CLI の fake API、tool イベントの requestId。browser の実 JS と Worker → machine の発信は 0148 / 0157。
+
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-17: 0154 の後に lead が `next` から `now` へ（0145 / 0147 の依存が満たされ、0039 を吸収済み）。
 - 2026-11-17: 実装開始。## Design / ## テスト条件 / ## テスト設計 を追加し、status: in-progress。
   touches を拡張（edge / DO / agent / machine / core 語彙 / CLI / docs / コスト実測）。
 - 2026-11-17: core に `ObsLogEntry`・ホップ/詳細の閉じた語彙・`formatObsLog` / `parseObsLog` / `obsPath` を追加。
