@@ -1,7 +1,9 @@
 import type { ConversationId, EntryId, SubmissionId } from "@earendil-works/pi-durable";
 import type { AgentEvent } from "@hns/agent";
 import type { AgentSession } from "@hns/agent/session";
-import { expect, test } from "vitest";
+import type { SessionEnv } from "./state.ts";
+import { expect, test, vi } from "vitest";
+import { openFakeD1 } from "../../test/support/d1.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { createObsStore } from "../obs/store.ts";
 import { ModelUnavailableError } from "./models.ts";
@@ -17,6 +19,16 @@ import {
 import { Session } from "./session.ts";
 
 const PATH = "https://session/ws?conversationId=" + CONVERSATION.id;
+
+/**
+ * The bindings a unit test opens the object with.
+ *
+ * @remarks
+ * Development and no control database: that is the one combination the Session opens without
+ * `DB` (the cost gate and the index are then absent). A non-development binding without `DB`
+ * is refused at open.
+ */
+const DEV: SessionEnv = { HNS_ENV: "dev" };
 
 /** A settled answer for the routes that succeed. */
 function answer(): Awaited<ReturnType<AgentSession["send"]>> {
@@ -75,7 +87,7 @@ function liveSession(
     readonly 1: ReturnType<typeof fakeSocket>;
   },
 ): Session {
-  return new Session(state, {}, async () => fake.session, {
+  return new Session(state, DEV, async () => fake.session, {
     webSocketPair: pair,
     now: () => 0,
     upgradeResponse: testUpgradeResponse,
@@ -159,7 +171,7 @@ test("the Session records the DO hop and the agent event under one request id", 
     abort: () => undefined,
   };
   const fake = fakeSession();
-  const session = new Session(state, {}, async (_state, _env, hooks) => {
+  const session = new Session(state, DEV, async (_state, _env, hooks) => {
     hooks.onEvent({
       event: "agent.response",
       at: "2026-11-17T12:00:00.000Z",
@@ -211,7 +223,7 @@ test("a successful turn keeps one agent row and no do.rpc", async () => {
     });
     return answer();
   };
-  const session = new Session(opened.state, {}, async (_state, _env, hooks) => {
+  const session = new Session(opened.state, DEV, async (_state, _env, hooks) => {
     emit = hooks.onEvent;
     return fake.session;
   });
@@ -236,7 +248,7 @@ test("a refused turn still logs the DO hop", async () => {
   fake.session.send = async () => {
     throw new ModelUnavailableError("no model");
   };
-  const session = new Session(opened.state, {}, async () => fake.session);
+  const session = new Session(opened.state, DEV, async () => fake.session);
   try {
     const response = await session.fetch(send(CONVERSATION.id));
     expect(response.status).toBe(503);
@@ -257,8 +269,78 @@ test("without a socket host the live face is unavailable", async () => {
     abort: base.abort,
   };
   const fake = fakeSession();
-  const session = new Session(state, {}, async () => fake.session);
+  const session = new Session(state, DEV, async () => fake.session);
   const response = await session.fetch(upgrade());
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({ code: "unavailable" });
+});
+
+/**
+ * A runtime factory that fails the way a missing model does, after the open.
+ *
+ * @remarks
+ * The Session opens as usual and every request then answers 503; used to prove that a bound
+ * control database is the only thing the open needs.
+ */
+async function failingRuntime(): Promise<AgentSession> {
+  throw new ModelUnavailableError("no model");
+}
+
+// Catches: a deployment that forgot the control database serving work it cannot bound (no cost
+// gauge, no limit), which is the fail-open the audit found.
+test.each([
+  ["staging", { HNS_ENV: "stg" }],
+  ["production", { HNS_ENV: "prod" }],
+  ["an unset environment", {}],
+] as const)("%s without the control database does not open the Session", async (_label, env) => {
+  const opened = objectState();
+  const aborts: string[] = [];
+  const state = { ...opened.state, abort: (reason?: string) => aborts.push(reason ?? "") };
+  const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const session = new Session(state, env, failingRuntime);
+  try {
+    const response = await session.fetch(new Request("https://session/rpc/conversations"));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "unavailable" });
+    expect(aborts).toStrictEqual(["session open failed"]);
+    // The log names the failure, never a binding value.
+    const lines = errors.mock.calls.map((call) => call.join(" "));
+    expect(lines.some((line) => line.includes("session open failed"))).toBe(true);
+    expect(lines.join(" ")).not.toContain("control database binding is missing");
+  } finally {
+    errors.mockRestore();
+    opened.close();
+  }
+});
+
+// Catches: development losing the local unit path, where a Session runs without D1 on purpose.
+test("development without the control database still opens the Session", async () => {
+  const opened = objectState();
+  const fake = fakeSession();
+  const session = new Session(opened.state, DEV, async () => fake.session);
+  try {
+    const response = await session.fetch(new Request("https://session/rpc/conversations"));
+    expect(response.status).toBe(200);
+  } finally {
+    opened.close();
+  }
+});
+
+// Catches: a non-development open being refused even though the database is bound.
+test("a bound control database opens a non-development Session", async () => {
+  const opened = objectState();
+  const fake = fakeSession();
+  const d1 = openFakeD1();
+  const session = new Session(
+    opened.state,
+    { HNS_ENV: "prod", DB: d1.db },
+    async () => fake.session,
+  );
+  try {
+    const response = await session.fetch(new Request("https://session/rpc/conversations"));
+    expect(response.status).toBe(200);
+  } finally {
+    opened.close();
+    d1.close();
+  }
 });

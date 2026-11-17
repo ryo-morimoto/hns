@@ -117,7 +117,8 @@ test("the alarm resumes without duplicating the run", async () => {
   const path = join(base, "session.sqlite");
   const runtime: Runtime = { resumeCalls: 0 };
   const state = fakeState();
-  const session = new Session(state, {}, factory(path, runtime));
+  // Development without the control database: the one binding set a Session opens without DB.
+  const session = new Session(state, { HNS_ENV: "dev" }, factory(path, runtime));
   try {
     const created = v.parse(
       Created,

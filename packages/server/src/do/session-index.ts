@@ -17,21 +17,16 @@ import { indexEntry } from "../obs/log.ts";
 const INDEX_WRITE_FAILED = "d1_write_failed";
 
 /**
- * The index's log sink: one line of text.
+ * The index's observation sink.
  *
  * @remarks
- * The index used to build its own JSON. Every observation is now built by {@link indexEntry}, so
- * the entry has the one shape the worker and the object write; this sink still receives a line,
- * and `Session` passes the line to the same console sink as before, so the cost gate's turn
- * measurement is unchanged. Connecting the sink to the event log (an `ObsLogEntry` append) is
- * the data-lane decision about the measurement window.
+ * Every observation is built by {@link indexEntry}, so the entry has the one shape the worker
+ * and the object write. `Session` passes the event log's append, which stores the entry in the
+ * object's `obs_events`; the sink must not throw. A drain that fails on D1 does not call the
+ * sink: the observation is dropped, because writing it would be the observation path failing
+ * on the same outage the drain already recorded in `index_state`.
  */
-export type IndexLog = (line: string) => void;
-
-/** The one-line text of one index observation, built as {@link indexEntry}. */
-function indexLine(entry: ObsLogEntry): string {
-  return JSON.stringify(entry);
-}
+export type IndexLog = (entry: ObsLogEntry) => void;
 
 /** What the Session gives the index drain. */
 export interface SessionIndexOptions {
@@ -98,14 +93,13 @@ export class SessionIndex {
   readonly #log: IndexLog;
   #state: IndexStateRow | undefined;
   #loaded = false;
-  #attempts = 0;
 
   constructor(options: SessionIndexOptions) {
     this.#session = options.session;
     this.#index = options.index;
     this.#workspaceId = options.workspaceId;
     this.#now = options.now;
-    this.#log = options.log ?? ((line) => console.error(line));
+    this.#log = options.log ?? ((entry) => console.error(JSON.stringify(entry)));
   }
 
   /**
@@ -115,12 +109,11 @@ export class SessionIndex {
    * @returns Nothing; every failure is recorded and retried by the next drain.
    */
   async drain(requestId: string): Promise<void> {
-    this.#attempts += 1;
     let pending: PendingIndex;
     try {
       pending = await this.#session.pendingIndex(INDEX_DRAIN_BATCH);
-    } catch (error) {
-      await this.#recordFailure(requestId, error, 0, undefined);
+    } catch {
+      await this.#recordFailure(0);
       return;
     }
     const backlog = pending.entries.length + pending.remaining;
@@ -129,32 +122,41 @@ export class SessionIndex {
       return;
     }
     const indexedAt = new Date(this.#now()).toISOString();
+    // Read before writing: a drain runs after every turn, D1 bills every statement, and most
+    // turns reindex a row the index already holds under the same version.
+    let stale = pending.entries.map((entry) => indexRow(entry.conversation, indexedAt));
     try {
-      await this.#index.upsert(
-        pending.entries.map((entry) => indexRow(entry.conversation, indexedAt)),
-      );
-    } catch (error) {
-      await this.#recordFailure(requestId, error, backlog, pending.entries[0]);
+      const stored = await this.#index.read(this.#workspaceId);
+      if (stored.length > 0) {
+        const known = new Map(stored.map((row) => [row.id, row.updatedAt]));
+        stale = stale.filter((row) => known.get(row.id) !== row.updatedAt);
+      }
+    } catch {
+      await this.#recordFailure(backlog);
+      return;
+    }
+    try {
+      await this.#index.upsert(stale);
+    } catch {
+      await this.#recordFailure(backlog);
       return;
     }
     try {
       await this.#session.markIndexed(pending.entries.map((entry) => this.#markOf(entry)));
-    } catch (error) {
+    } catch {
       // The rows are written; the dirty marks stay and the next drain rewrites them (idempotent).
-      await this.#recordFailure(requestId, error, backlog, pending.entries[0]);
+      await this.#recordFailure(backlog);
       return;
     }
     if (pending.legacy > 0) {
       this.#log(
-        indexLine(
-          indexEntry({
-            event: "index.legacy_rows",
-            requestId,
-            at: this.#at(),
-            level: "info",
-            rows: pending.legacy,
-          }),
-        ),
+        indexEntry({
+          event: "index.legacy_rows",
+          requestId,
+          at: this.#at(),
+          level: "info",
+          rows: pending.legacy,
+        }),
       );
     }
     await this.#recordPending(pending.remaining);
@@ -213,16 +215,14 @@ export class SessionIndex {
     };
     await this.#write(this.#state);
     this.#log(
-      indexLine(
-        indexEntry({
-          event: "index.rebuilt",
-          requestId,
-          at: this.#at(),
-          level: "info",
-          indexed,
-          removed,
-        }),
-      ),
+      indexEntry({
+        event: "index.rebuilt",
+        requestId,
+        at: this.#at(),
+        level: "info",
+        indexed,
+        removed,
+      }),
     );
     return { indexed, removed };
   }
@@ -283,29 +283,16 @@ export class SessionIndex {
     });
   }
 
-  /** Record one failed drain: a structured line, then the state transition. */
-  async #recordFailure(
-    requestId: string,
-    // The cause is not written (no allowlisted detail key); the event name and code say what failed.
-    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a caught value is unknown by definition.
-    error: unknown,
-    backlog: number,
-    entry: PendingIndexEntry | undefined,
-  ): Promise<void> {
-    this.#log(
-      indexLine(
-        indexEntry({
-          event: "index.drain.failed",
-          requestId,
-          at: this.#at(),
-          level: "warn",
-          conversationId: entry?.conversation.id,
-          attempt: this.#attempts,
-          code: INDEX_WRITE_FAILED,
-        }),
-      ),
-    );
-    void error;
+  /**
+   * Record one failed drain: the state transition only.
+   *
+   * @remarks
+   * The drain's failure observation is dropped rather than written: a failure means D1 is
+   * unreachable, the same outage the state write is about to record, and a line for it would
+   * add a row to the object after the turn's rows were measured. The state row already says what
+   * failed (`d1_write_failed`) and how many rows wait.
+   */
+  async #recordFailure(backlog: number): Promise<void> {
     await this.#recordFailureState(backlog, this.#at());
   }
 
@@ -340,14 +327,12 @@ export class SessionIndex {
       this.#state = undefined;
       this.#loaded = false;
       this.#log(
-        indexLine(
-          indexEntry({
-            event: "index.state.failed",
-            requestId: null,
-            at: this.#at(),
-            level: "warn",
-          }),
-        ),
+        indexEntry({
+          event: "index.state.failed",
+          requestId: null,
+          at: this.#at(),
+          level: "warn",
+        }),
       );
     }
   }

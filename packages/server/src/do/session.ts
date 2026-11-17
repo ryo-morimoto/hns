@@ -53,6 +53,11 @@ export interface SessionDependencies {
   readonly upgradeResponse?: LiveUpgradeResponseFactory | undefined;
 }
 
+/** Whether a Session RPC path is the turn route (one conversation's message send). */
+function isTurn(path: string): boolean {
+  return path.startsWith("/rpc/conversations/") && path.endsWith("/messages");
+}
+
 /** One accepted live socket and what keeps it fed. */
 interface LiveEntry {
   readonly connection: LiveConnection;
@@ -128,6 +133,12 @@ export class Session {
 
   async #initialize(): Promise<void> {
     try {
+      // Fail closed first: without the control database there is no cost gauge and no index, so
+      // a deployment missing the binding must not serve work it cannot bound. Development is
+      // the only exception (local unit tests; docs/limits.md). The error names no binding value.
+      if (this.#env.HNS_ENV !== "dev" && this.#env.DB === undefined) {
+        throw new Error("the control database binding is missing outside development");
+      }
       try {
         // The event table shares the Session's SQLite but not the harness prefix. A failed
         // open must not stop conversations: observation is a side effect, not a precondition.
@@ -152,6 +163,9 @@ export class Session {
           db: this.#env.DB,
           storage: this.#state.storage,
           now: () => new Date(this.#now()),
+          // After the turn's rows are measured: a drain or an observation written here is not
+          // billed to the turn.
+          turnEnded: () => this.#drain("turn"),
         });
       }
       const session = await this.#open(this.#state, this.#env, {
@@ -183,6 +197,11 @@ export class Session {
           index: openConversationIndex(this.#env.DB),
           workspaceId: this.#state.id?.name ?? LEGACY_SESSION_NAME,
           now: this.#now,
+          // The index's observations are event-log rows: one shape with the worker and the
+          // agent. A sink that cannot write loses the line; it never fails the turn.
+          log: (entry) => {
+            this.#append(entry);
+          },
         });
       }
       void session.closed.then((end) => {
@@ -250,9 +269,10 @@ export class Session {
           turnRequestId = id;
         },
       });
-      // The index write follows the commit, so the turn is durable before the copy is attempted;
-      // a D1 failure leaves the dirty mark and the next RPC or alarm retries (D078).
-      if (response.ok && path.startsWith("/rpc/conversations")) {
+      // A turn's drain runs in the cost gate's post-turn hook, outside the measurement; this is
+      // the non-turn RPC path, whose write also follows the commit. A D1 failure leaves the
+      // dirty mark and the next RPC or alarm retries (D078).
+      if (response.ok && path.startsWith("/rpc/conversations") && !isTurn(path)) {
         await this.#drain(request.headers.get(REQUEST_ID_HEADER) ?? "unattributed");
       }
     }
@@ -328,7 +348,7 @@ export class Session {
     // A successful turn's DO hop is the agent event (same request id), so the row is not
     // written twice. A refused turn wrote no agent event and still gets its `do.rpc` line,
     // so a trace can see that the request reached the object and stopped there.
-    const turn = path.startsWith("/rpc/conversations/") && path.endsWith("/messages");
+    const turn = isTurn(path);
     if (turn && response.status >= 200 && response.status < 300) {
       if (turnRequestId !== undefined && this.#agentRequestIds.delete(turnRequestId)) {
         return response;

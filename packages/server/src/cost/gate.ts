@@ -91,6 +91,16 @@ export interface CostGateDependencies {
   readonly alert?: ((alert: CostAlert) => void) | undefined;
   /** Receives a measurement or recording failure; defaults to `console.error` with the name. */
   readonly failure?: ((stage: CostFailureStage, error: Error) => void) | undefined;
+  /**
+   * Runs after the turn's answer, before the meter reads the object's rows.
+   *
+   * @remarks
+   * The turn's own rows are measured first, inside the turn; then this hook writes what the turn
+   * made observable — the conversation index and its observations — outside the measurement, so
+   * observation never lands in the row count the month total sums. A failure of the hook is the
+   * hook's to report and never fails the turn.
+   */
+  readonly turnEnded?: (() => Promise<void>) | undefined;
 }
 
 /**
@@ -217,12 +227,25 @@ export function createCostGate(dependencies: CostGateDependencies): CostGate {
       } catch (error) {
         failure("measure", asError(error));
       }
+      // The rows are counted here, before the turn's observations are written, so the window is
+      // the turn's writes only (see the turnEnded hook).
+      const ended = async (): Promise<void> => {
+        if (dependencies.turnEnded === undefined) return;
+        try {
+          await dependencies.turnEnded();
+        } catch (error) {
+          // The hook reports its own failures; a throw here would fail a finished turn.
+          failure("measure", asError(error));
+        }
+      };
       try {
         const value = await run();
         await record(activity, at, before, "completed");
+        await ended();
         return value;
       } catch (error) {
         await record(activity, at, before, "failed");
+        await ended();
         throw error;
       }
     },

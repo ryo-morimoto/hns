@@ -8,9 +8,18 @@ import * as v from "valibot";
 import { expect, test, vi } from "vitest";
 import { openFakeD1, type FakeD1 } from "../../test/support/d1.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
+import { createObsStore } from "../obs/store.ts";
 import { Session } from "./session.ts";
 
 const AT = "2026-01-01T00:00:00.000Z";
+
+/**
+ * The bindings these tests open a Session with.
+ *
+ * @remarks
+ * Development: without `HNS_ENV` a Session that has no `DB` is refused at open.
+ */
+const DEV = { HNS_ENV: "dev" } as const;
 
 function conversation(id: string, title = "chat", updated: string = AT): Conversation {
   return {
@@ -165,7 +174,7 @@ test("a successful turn writes its conversation into the D1 index", async () => 
   const d1 = openFakeD1();
   const state = objectState();
   const fake = indexedSession();
-  const session = new Session(state.state, { DB: d1.db }, async () => fake.session);
+  const session = new Session(state.state, { ...DEV, DB: d1.db }, async () => fake.session);
   try {
     await session.fetch(list());
     seedProject(d1);
@@ -191,14 +200,15 @@ test("a successful turn writes its conversation into the D1 index", async () => 
   }
 });
 
-// Catches: a D1 outage failing the chat, or the dirty row being cleared without a write.
-test("a D1 failure leaves the turn successful, the row dirty, and the backlog recorded", async () => {
+// Catches: a D1 outage failing the chat, the dirty row cleared without a write, or the failed
+// drain's observation written into the turn's event log.
+test("a D1 failure drops the observation and leaves the turn successful, the row dirty, and the backlog recorded", async () => {
   const d1 = openFakeD1();
   const flakyDb = flaky(d1);
   const state = objectState();
   const fake = indexedSession();
   const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  const session = new Session(state.state, { DB: flakyDb.db }, async () => fake.session);
+  const session = new Session(state.state, { ...DEV, DB: flakyDb.db }, async () => fake.session);
   try {
     await session.fetch(list());
     seedProject(d1);
@@ -214,21 +224,10 @@ test("a D1 failure leaves the turn successful, the row dirty, and the backlog re
       lastErrorCode: "d1_write_failed",
       lastSyncedAt: expect.any(String),
     });
-    // The drain's line is the log entry the index builds, not free JSON: the shape of the log is
-    // one type across the worker, the object, and the index.
-    const lines = errors.mock.calls.map((call) => String(call[0]));
-    const line = lines.find((text) => text.includes("index.drain.failed"));
-    expect(line).toBeDefined();
-    expect(parseObsLog(JSON.parse(line ?? "null"))).toMatchObject({
-      v: 1,
-      level: "warn",
-      event: "index.drain.failed",
-      hop: "do",
-      // No `pending` count: OBS_DETAIL_KEYS has no key for it, so the line keeps the code only.
-      detail: { code: "d1_write_failed" },
-    });
-    expect(line).not.toContain("hi");
-    expect(line).not.toContain("answered");
+    // A failed drain writes no observation: the failure is already the state row, and a line
+    // here would be a row the object appends on every turn of an outage.
+    const obs = createObsStore(state.state.storage, { now: () => Date.parse(AT) });
+    expect(obs.list().map((entry) => entry.event)).not.toContain("index.drain.failed");
 
     // The next request is the retry: the row is written and the mark cleared.
     flakyDb.fail(false);
@@ -253,7 +252,7 @@ test("a rebuild repairs the index from the object's metadata", async () => {
   const truth = conversation("1", "truth");
   const fake = indexedSession({ rebuild: [truth] });
   const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  const session = new Session(state.state, { DB: d1.db }, async () => fake.session);
+  const session = new Session(state.state, { ...DEV, DB: d1.db }, async () => fake.session);
   try {
     await session.fetch(list());
     seedProject(d1);
@@ -302,7 +301,7 @@ test("a rebuild that cannot read the object is a 500, not an empty index", async
     throw new Error("storage is gone");
   };
   const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  const session = new Session(state.state, { DB: d1.db }, async () => fake.session);
+  const session = new Session(state.state, { ...DEV, DB: d1.db }, async () => fake.session);
   try {
     const response = await session.fetch(reindex());
     expect(response.status).toBe(500);
@@ -317,7 +316,7 @@ test("a rebuild that cannot read the object is a 500, not an empty index", async
 test("a Session without the database still serves conversations", async () => {
   const state = objectState();
   const fake = indexedSession();
-  const session = new Session(state.state, {}, async () => fake.session);
+  const session = new Session(state.state, DEV, async () => fake.session);
   try {
     fake.markDirty("1");
     const response = await session.fetch(send("1"));
@@ -327,5 +326,44 @@ test("a Session without the database still serves conversations", async () => {
     expect(reindexResponse.status).toBe(503);
   } finally {
     state.close();
+  }
+});
+
+// Catches: an index observation that never reaches the object's event log (the sink was the
+// console only), or that is written as free JSON the log cannot parse back.
+test("a successful drain writes its legacy-row observation into the event log", async () => {
+  const d1 = openFakeD1();
+  const state = objectState();
+  const fake = indexedSession();
+  fake.session.pendingIndex = async () => {
+    const entries = [{ conversation: conversation("1"), version: AT }];
+    return { entries, remaining: 0, legacy: 2 };
+  };
+  const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const session = new Session(state.state, { ...DEV, DB: d1.db }, async () => fake.session);
+  try {
+    await session.fetch(list());
+    seedProject(d1);
+    const response = await session.fetch(list());
+    expect(response.status).toBe(200);
+    const obs = createObsStore(state.state.storage, { now: () => Date.parse(AT) });
+    const rows = obs.list({ requestId: "req-2" });
+    const line = rows.find((entry) => entry.event === "index.legacy_rows");
+    expect(line).toBeDefined();
+    expect(parseObsLog(line)).toMatchObject({
+      v: 1,
+      level: "info",
+      event: "index.legacy_rows",
+      hop: "do",
+      detail: { rows: 2 },
+    });
+    // Nothing went to the console for a drain that succeeded.
+    expect(errors.mock.calls.map((call) => call.join(" ")).join(" ")).not.toContain(
+      "index.legacy_rows",
+    );
+  } finally {
+    errors.mockRestore();
+    state.close();
+    d1.close();
   }
 });
