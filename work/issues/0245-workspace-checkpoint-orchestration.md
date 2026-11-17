@@ -1,6 +1,6 @@
 # 0245: Workspace DO の checkpoint 調停・R2・mirror 記録
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D106 / 0243 / 0244 / docs/durability.md §5
@@ -23,12 +23,12 @@ Workspace DO に checkpoint の prepare / pack / complete を足す。pack は s
 
 ## Acceptance criteria
 
-- [ ] prepare が machine の checkpoint を呼び、pack なしの metadata を返す
-- [ ] pack endpoint が署名・Content-Length・64MiB を検証し、R2 に書く
-- [ ] 同じ runId / commit の再送は同じ packKey を返し、二重 put しない
-- [ ] complete が watermark と CheckpointRecord を1トランザクションで書く
-- [ ] mirror は pending のまま。失敗しても checkpoint の ack を壊さない
-- [ ] machine の checkpoint 失敗は CheckpointFailure で返し、ack しない
+- [x] prepare が machine の checkpoint を呼び、pack なしの metadata を返す
+- [x] pack endpoint が署名・Content-Length・64MiB を検証し、R2 に書く
+- [x] 同じ runId / commit の再送は同じ packKey を返し、二重 put しない
+- [x] complete が watermark と CheckpointRecord を1トランザクションで書く
+- [x] mirror は pending のまま。失敗しても checkpoint の ack を壊さない
+- [x] machine の checkpoint 失敗は CheckpointFailure で返し、ack しない
 
 ## テスト条件
 
@@ -65,3 +65,11 @@ Workspace DO に checkpoint の prepare / pack / complete を足す。pack は s
 
 - 2026-11-17: 作成（D106）。
 - 2026-11-17: レビュー B1/B5/B6 を反映（pack 受け口・packBytes/maxBlobBytes・mirror pending・ack 順序）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0245。初回 BLOCKED 1（edge 経路のテスト不在で face のルーティングを壊しても gate が緑）→ 修正 → PASS）
+- HEAD: 2fb816a（main に ff 統合）。gate は exit 0（1087 tests / 1088、main で 58.8s）。
+- 確認: `prepare`（machine の checkpoint を control-plane 鍵で署名して呼ぶ）、`pack`（device 鍵を `machines.public_key` で検証・**Worker が実バイトから sha256 を計算**して署名対象の bodyHash と照合・64 MiB を本文前に拒否・key は prepare 行から）、`complete`（record と watermark を 1 トランザクション、応答喪失の再送、record 無し + watermark 済み + R2 に pack 無しは 409）。server に `node:` は 0（WebCrypto のみ）。edge は **認証 → method** の順（未認証は 401、GET は 405 + allow: POST）。createEdge を通す経路テスト 6 本と、**mutation 3 種（method 判定無効・パス改名・認証順の戻し）がすべて検出される**ことをレビュー担当が確認。実 workerd は cf dev の integration に面を通して境界（401 / 405）まで。
+- 非 blocking（follow-up）: workerd の runtime pool は未導入（cf dev で代替）/ 認証済み prepare が object に届く所は workerd 未検証 / `parsePrepareRow` の v.parse は破損行で 500 / transport の at-limit テストの結び付き / pack 経路のルーティングは workerd の 405 のみ / `docs/packages.md` への export 追記（所有者待ち）。
+- 申し送り: workerd で fake D1 に `schema_migrations` の版だけ返させれば認証済み prepare まで通せる見込み（migration DDL を fake で成功させない）。
