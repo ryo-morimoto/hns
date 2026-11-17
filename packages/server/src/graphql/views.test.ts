@@ -21,11 +21,12 @@ test("each view carries exactly the GraphQL fields of its entity", () => {
 
 // Catches: a raw id crossing the boundary, where two types could share it in Relay's store.
 test("the project view carries global ids", () => {
-  expect(projectView(project("p1", "p1", "projects/p1"))).toStrictEqual({
+  expect(projectView(project("p1", "p1", "projects/p1", "deny"))).toStrictEqual({
     id: toGlobalId("Project", "p1"),
     name: "p1",
     workspaceRoot: "projects/p1",
     agentCwd: "projects/p1",
+    egress: "deny",
     createdAt: "2026-01-01T00:00:00.000Z",
   });
   expect(taskView(task("t1", "p1")).projectId).toBe(toGlobalId("Project", "p1"));

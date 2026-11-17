@@ -5,6 +5,7 @@ import {
   EVENT_LEVELS,
   EVENT_NAMES,
   IsoTimestampSchema,
+  PROJECT_EGRESS_POLICIES,
   ProjectIdSchema,
   WorkspaceRootSchema,
   TASK_STATUSES,
@@ -44,6 +45,7 @@ const projectRowSchema = v.object({
   id: ProjectIdSchema,
   name: v.string(),
   workspace_root: WorkspaceRootSchema,
+  egress: v.picklist(PROJECT_EGRESS_POLICIES),
   created_at: v.string(),
 });
 
@@ -63,6 +65,7 @@ export const ProjectRowSchema: v.GenericSchema<unknown, Project> = v.pipe(
     name: row.name,
     workspace_root: row.workspace_root,
     agent_cwd: row.workspace_root,
+    egress: row.egress,
     created_at: row.created_at,
   })),
 );

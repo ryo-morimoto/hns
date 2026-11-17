@@ -11,7 +11,7 @@ import type { GraphQLFaceDependencies } from "./handler.ts";
 import { createGraphQLFace } from "./handler.ts";
 
 const PROJECTS =
-  "{ projects { __typename ... on ProjectList { projects { id name workspaceRoot agentCwd createdAt } } ... on QueryFailure { code } } }";
+  "{ projects { __typename ... on ProjectList { projects { id name workspaceRoot agentCwd egress createdAt } } ... on QueryFailure { code } } }";
 
 /** The JSON body a test sends; mirrors the shape the face parses. */
 interface RequestBody {
@@ -58,6 +58,7 @@ test("projects are served from the injected read", async () => {
             name: "One",
             workspaceRoot: "",
             agentCwd: "",
+            egress: "INHERIT",
             createdAt: "2026-01-01T00:00:00.000Z",
           },
         ],
@@ -412,7 +413,7 @@ const CREATE_NOTE =
   "mutation Create($text: String!) { createNote(text: $text) { __typename ... on NotePayload { text actor } ... on MutationFailure { code } } }";
 
 const CREATE_PROJECT =
-  "mutation Create($name: String!, $workspaceRoot: String!) { createProject(name: $name, workspaceRoot: $workspaceRoot) { __typename ... on CreateProjectPayload { project { id name workspaceRoot agentCwd } } ... on MutationFailure { code } } }";
+  "mutation Create($name: String!, $workspaceRoot: String!) { createProject(name: $name, workspaceRoot: $workspaceRoot) { __typename ... on CreateProjectPayload { project { id name workspaceRoot agentCwd egress } } ... on MutationFailure { code } } }";
 
 /** A write port that records its input and answers with the created project. */
 function createProjectWrite() {
@@ -440,6 +441,7 @@ test("createProject writes through the store and returns the project", async () 
           name: "a",
           workspaceRoot: "projects/a",
           agentCwd: "projects/a",
+          egress: "INHERIT",
         },
       },
     },

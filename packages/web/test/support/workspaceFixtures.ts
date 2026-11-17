@@ -21,6 +21,7 @@ const projects: readonly Project[] = [
     name: "hns",
     workspace_root: "",
     agent_cwd: "",
+    egress: "inherit",
     created_at: "2026-11-01T00:00:00.000Z",
   },
   {
@@ -28,6 +29,7 @@ const projects: readonly Project[] = [
     name: "scratch",
     workspace_root: "projects/scratch",
     agent_cwd: "projects/scratch",
+    egress: "inherit",
     created_at: "2026-11-06T00:00:00.000Z",
   },
   {
@@ -35,6 +37,7 @@ const projects: readonly Project[] = [
     name: "docs",
     workspace_root: "projects/docs",
     agent_cwd: "projects/docs",
+    egress: "deny",
     created_at: "2026-11-05T00:00:00.000Z",
   },
 ];

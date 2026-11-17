@@ -5,6 +5,7 @@ const projectRow = {
   id: "p1",
   name: "hns",
   workspace_root: "projects/hns",
+  egress: "inherit",
   created_at: "2026-11-07T00:00:00.000Z",
 };
 const conversationRow = {
@@ -42,6 +43,7 @@ test("a project row parses into the public model", () => {
     name: "hns",
     workspace_root: "projects/hns",
     agent_cwd: "projects/hns",
+    egress: "inherit",
     created_at: "2026-11-07T00:00:00.000Z",
   });
 });

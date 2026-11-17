@@ -129,6 +129,18 @@ export type JsonValue =
   | readonly JsonValue[]
   | { [key: string]: JsonValue };
 
+/**
+ * The closed egress vocabulary for a project (D080 U-06).
+ *
+ * @remarks
+ * `inherit` follows the machine's network setting, `deny` closes it, and `allowlist` reserves a
+ * domain list that the machine's proxy will enforce (0147 / 0194; until then it is treated as
+ * `deny`). The model stores the policy; enforcement is the machine's.
+ */
+export const PROJECT_EGRESS_POLICIES = ["inherit", "deny", "allowlist"] as const;
+/** One egress policy. */
+export type ProjectEgress = (typeof PROJECT_EGRESS_POLICIES)[number];
+
 /** A project: the owner of conversations, tasks, workflows, and automations. */
 export interface Project {
   id: ProjectId;
@@ -151,6 +163,14 @@ export interface Project {
    * changes one without the other.
    */
   agent_cwd: string;
+  /**
+   * The project's network egress policy.
+   *
+   * @remarks
+   * Fixed at creation to `inherit`; choosing `deny` for an untrusted project is a later
+   * mutation. The machine enforces it (0147 / 0194).
+   */
+  egress: ProjectEgress;
   /** ISO 8601 (UTC), set by the store. */
   created_at: string;
 }

@@ -2,6 +2,7 @@ import {
   parseProjectWorkspaceRoot,
   parseWorkspaceRoot,
   type Project,
+  type ProjectEgress,
   type ProjectId,
   type Task,
   type TaskStatus,
@@ -28,9 +29,10 @@ export interface ProjectRepository {
    * @param name - The display name.
    * @param workspaceRoot - The project's canonical directory below the machine ROOT. Empty is
    * refused: only the seeded default project points at the ROOT itself.
+   * @param egress - The network egress policy; defaults to `inherit`. Fixed at creation (D080).
    * @throws ValiError when `workspaceRoot` is empty or not canonical. Nothing is written.
    */
-  create(name: string, workspaceRoot: string): Promise<Project>;
+  create(name: string, workspaceRoot: string, egress?: ProjectEgress): Promise<Project>;
   /** Rename a project; `undefined` when it does not exist. */
   rename(id: ProjectId, name: string): Promise<Project | undefined>;
   /**
@@ -103,7 +105,7 @@ export function projectRepository(context: StoreContext): ProjectRepository {
       return rows.map((row) => parseProject(row));
     },
     get,
-    async create(name, workspaceRoot) {
+    async create(name, workspaceRoot, egress = "inherit") {
       // The repository is the last gate before storage: a caller that skipped the mutation's
       // validation still cannot store a non-canonical root.
       const workspace_root = parseProjectWorkspaceRoot(workspaceRoot);
@@ -111,12 +113,13 @@ export function projectRepository(context: StoreContext): ProjectRepository {
         id: newId(),
         name,
         workspace_root,
+        egress,
         created_at: now(),
       });
       const row = await sql.get(
-        "INSERT INTO projects (id, name, workspace_root, created_at) VALUES (?, ?, ?, ?) " +
-          "RETURNING *",
-        [project.id, project.name, project.workspace_root, project.created_at],
+        "INSERT INTO projects (id, name, workspace_root, egress, created_at) " +
+          "VALUES (?, ?, ?, ?, ?) RETURNING *",
+        [project.id, project.name, project.workspace_root, project.egress, project.created_at],
       );
       if (row === undefined) throw new Error("project was not created");
       return parseProject(row);
@@ -141,12 +144,13 @@ export function projectRepository(context: StoreContext): ProjectRepository {
         id: "default",
         name: "default",
         workspace_root,
+        egress: "inherit",
         created_at: now(),
       });
       const row = await sql.get(
-        "INSERT INTO projects (id, name, workspace_root, created_at) VALUES (?, ?, ?, ?) " +
-          "ON CONFLICT(id) DO NOTHING RETURNING *",
-        [project.id, project.name, project.workspace_root, project.created_at],
+        "INSERT INTO projects (id, name, workspace_root, egress, created_at) " +
+          "VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING RETURNING *",
+        [project.id, project.name, project.workspace_root, project.egress, project.created_at],
       );
       if (row !== undefined) return parseProject(row);
       const seeded = await get(DEFAULT_PROJECT_ID);

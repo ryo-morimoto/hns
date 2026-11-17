@@ -55,7 +55,12 @@ test("an empty automation task title is rejected", () => {
 
 // Catches: a missing or non-canonical stored root being read as the machine ROOT.
 test("a project row without a canonical root fails closed", () => {
-  const row = { id: "p1", name: "p1", created_at: "2026-01-01T00:00:00.000Z" };
+  const row = {
+    id: "p1",
+    name: "p1",
+    egress: "inherit",
+    created_at: "2026-01-01T00:00:00.000Z",
+  };
   expect(() => parseProject(row)).toThrow();
   expect(() => parseProject({ ...row, workspace_root: null })).toThrow();
   expect(() => parseProject({ ...row, workspace_root: "../x" })).toThrow();

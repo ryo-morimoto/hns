@@ -1,6 +1,6 @@
 // The model types that the SDL may reference. Adding an entity to the schema means
 // adding it here, so an object field cannot point at a type that is not registered.
-import type { Conversation, Project, Task, TaskStatus } from "../types.ts";
+import type { Conversation, Project, ProjectEgress, Task, TaskStatus } from "../types.ts";
 
 /**
  * Model types the SDL may reference, keyed by GraphQL object name.
@@ -28,5 +28,6 @@ export interface EntityRegistry {
  * `String` or `ID`.
  */
 export interface EnumRegistry {
+  readonly ProjectEgress: ProjectEgress;
   readonly TaskStatus: TaskStatus;
 }

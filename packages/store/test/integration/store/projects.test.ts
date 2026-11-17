@@ -19,6 +19,7 @@ test("projects are created, renamed, listed and deleted", async () => {
     expect((await store.projects.get(created.id))?.name).toBe("demo");
     expect(created.workspace_root).toBe("projects/demo");
     expect(created.agent_cwd).toBe("projects/demo");
+    expect(created.egress).toBe("inherit");
     expect((await store.projects.rename(created.id, "renamed"))?.name).toBe("renamed");
     expect((await store.projects.list()).map((project) => project.name)).toStrictEqual([
       "default",
@@ -37,6 +38,7 @@ test("the default project keeps the machine ROOT", async () => {
     expect(project.id).toBe("default");
     expect(project.workspace_root).toBe("");
     expect(project.agent_cwd).toBe("");
+    expect(project.egress).toBe("inherit");
   });
 });
 

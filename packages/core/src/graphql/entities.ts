@@ -1,4 +1,4 @@
-import { TASK_STATUSES } from "../types.ts";
+import { PROJECT_EGRESS_POLICIES, TASK_STATUSES } from "../types.ts";
 import type { Conversation, Project, Task } from "../types.ts";
 import { defineEntity, enumOf } from "./spec.ts";
 
@@ -8,6 +8,9 @@ import { defineEntity, enumOf } from "./spec.ts";
 /** The `TaskStatus` GraphQL enum; values keep the model's declaration order. */
 export const TaskStatusEnum = enumOf("TaskStatus", TASK_STATUSES);
 
+/** The `ProjectEgress` GraphQL enum; values keep the model's declaration order. */
+export const ProjectEgressEnum = enumOf("ProjectEgress", PROJECT_EGRESS_POLICIES);
+
 /** The `Project` GraphQL type. Model snake_case fields are exposed as camelCase. */
 export const ProjectEntity = defineEntity<Project>({
   name: "Project",
@@ -16,6 +19,7 @@ export const ProjectEntity = defineEntity<Project>({
     name: { name: "name", kind: "scalar", type: "String", nonNull: true },
     workspace_root: { name: "workspaceRoot", kind: "scalar", type: "String", nonNull: true },
     agent_cwd: { name: "agentCwd", kind: "scalar", type: "String", nonNull: true },
+    egress: { name: "egress", kind: "enum", typeName: "ProjectEgress", nonNull: true },
     created_at: { name: "createdAt", kind: "scalar", type: "String", nonNull: true },
   },
 });
@@ -56,7 +60,7 @@ export const TaskEntity = defineEntity<Task>({
 /** The model entities the SDL exposes, in declaration order. */
 export const ENTITIES = [ProjectEntity, ConversationEntity, TaskEntity] as const;
 /** The model enums the SDL exposes, in declaration order. */
-export const ENUMS = [TaskStatusEnum] as const;
+export const ENUMS = [TaskStatusEnum, ProjectEgressEnum] as const;
 
 /**
  * Model types that the SDL does not carry yet, with the reason.

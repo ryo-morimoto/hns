@@ -70,6 +70,7 @@ test("the root migration gives an existing project the machine ROOT it already u
     const project = parseProject(row);
     expect(project.workspace_root).toBe("");
     expect(project.agent_cwd).toBe("");
+    expect(project.egress).toBe("inherit");
   } finally {
     await sql.close();
   }

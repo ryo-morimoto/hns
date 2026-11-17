@@ -10,7 +10,7 @@ import {
   validateSchema,
 } from "graphql";
 import { buildSchema, buildSdl, defineEntity, EXCLUDED } from "./index.ts";
-import { TASK_STATUSES } from "../types.ts";
+import { PROJECT_EGRESS_POLICIES, TASK_STATUSES } from "../types.ts";
 
 const golden = readFileSync(new URL("../../test/fixtures/schema.graphql", import.meta.url), "utf8");
 
@@ -78,12 +78,20 @@ test("the Mutation root receives the schema's own model instances", () => {
 
 test("ids are exposed as ID and the brand is not part of the contract", () => {
   const sdl = buildSdl();
-  expect(sdl).toMatch(/type Project \{\n  agentCwd: String!\n  createdAt: String!\n  id: ID!/u);
+  expect(sdl).toMatch(
+    /type Project \{\n  agentCwd: String!\n  createdAt: String!\n  egress: ProjectEgress!/u,
+  );
   expect(sdl).toMatch(/  workspaceRoot: String!/u);
   expect(sdl).toMatch(/  projectId: ID!/u);
   expect(sdl).toMatch(/type Task \{\n  createdAt: String!\n  id: ID!/u);
   const typeNames = [...sdl.matchAll(/^(?:type|enum) (\w+)/gmu)].map((match) => match[1]);
-  expect(typeNames).toStrictEqual(["Conversation", "Project", "Task", "TaskStatus"]);
+  expect(typeNames).toStrictEqual([
+    "Conversation",
+    "Project",
+    "ProjectEgress",
+    "Task",
+    "TaskStatus",
+  ]);
 });
 
 test("nullability follows the model", () => {
@@ -104,6 +112,13 @@ test("enum names are SCREAMING_SNAKE_CASE and keep the model values", () => {
     "BLOCKED",
   ]);
   expect(type.getValues().map((value) => value.value)).toStrictEqual([...TASK_STATUSES]);
+});
+
+// Catches: an egress value the machine cannot enforce added to the model without the enum.
+test("the egress enum keeps the closed model vocabulary", () => {
+  const type = buildSchema(() => dummyQuery()).getType("ProjectEgress");
+  assert.ok(type instanceof GraphQLEnumType);
+  expect(type.getValues().map((value) => value.value)).toStrictEqual([...PROJECT_EGRESS_POLICIES]);
 });
 
 test("every excluded model type says why", () => {

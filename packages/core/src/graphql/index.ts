@@ -14,6 +14,7 @@ export {
   ENTITIES,
   ENUMS,
   EXCLUDED,
+  ProjectEgressEnum,
   ProjectEntity,
   TaskEntity,
   TaskStatusEnum,

@@ -13,9 +13,16 @@ type Conversation {
 type Project {
   agentCwd: String!
   createdAt: String!
+  egress: ProjectEgress!
   id: ID!
   name: String!
   workspaceRoot: String!
+}
+
+enum ProjectEgress {
+  INHERIT
+  DENY
+  ALLOWLIST
 }
 
 type Task {

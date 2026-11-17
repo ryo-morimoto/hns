@@ -13,6 +13,7 @@ export interface ProjectView {
   readonly name: string;
   readonly workspaceRoot: string;
   readonly agentCwd: string;
+  readonly egress: Project["egress"];
   readonly createdAt: string;
 }
 
@@ -50,6 +51,7 @@ export function projectView(project: Project): ProjectView {
     name: project.name,
     workspaceRoot: project.workspace_root,
     agentCwd: project.agent_cwd,
+    egress: project.egress,
     createdAt: project.created_at,
   };
 }
