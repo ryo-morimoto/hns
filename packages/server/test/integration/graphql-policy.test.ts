@@ -2,6 +2,8 @@ import { execute, parse } from "graphql";
 import * as v from "valibot";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { toGlobalId } from "@hns/core/graphql";
+import { ProjectIdSchema } from "@hns/core";
+import type { ProjectId } from "@hns/core";
 import type { Store } from "../../../store/src/index.ts";
 import { createD1Harness, type D1Harness } from "../../../store/test/integration/harness.ts";
 import { createContext } from "../../src/graphql/context.ts";
@@ -168,6 +170,11 @@ const PROPOSE =
 
 const DECIDE =
   "mutation Decide($input: DecidePolicyInput!) { decidePolicy(input: $input) { __typename ... on DecidePolicyPayload { proposal { id status decidedBy } revision { revision hash active } proposalStale } ... on PolicyFailure { __typename code message } } }";
+
+/** A raw project id as the ProjectId brand; the harness's ids are plain strings. */
+function projectIdOf(id: string): ProjectId {
+  return v.parse(ProjectIdSchema, id);
+}
 
 /** The baseline with \`docs\` added to the read roots: an expansion the algebra can compare. */
 function proposalInput(workspaceId: string, overrides: { readonly reason?: string } = {}) {
@@ -371,6 +378,100 @@ test.each([
     );
     expect(refused.code).toBe("UNSUPPORTED");
     expect(await store.policy.proposals(workspaceId)).toHaveLength(0);
+  });
+});
+
+// Catches: the size bound being off by one at the edge it documents: a 1,024-character root is the
+// longest the input promises to accept, and one more is the first it refuses.
+test("a 1,024-character root is accepted and 1,025 is invalid_request on the real D1", async () => {
+  await withPolicy(async (store, workspaceId) => {
+    const longest = "a".repeat(1_024);
+    const proposed = v.parse(
+      ProposeSchema,
+      await run(store, AGENT, PROPOSE, {
+        input: { ...proposalInput(workspaceId), readRoots: [".", longest] },
+      }),
+    );
+    expect(proposed.proposePolicy.proposal.status).toBe("PENDING");
+    expect(
+      (await store.policy.proposals(workspaceId))[0]?.candidate.tools.read_file?.scope,
+    ).toMatchObject({
+      roots: [".", longest],
+    });
+    const tooLong = await failureOf(
+      run(store, AGENT, PROPOSE, {
+        input: { ...proposalInput(workspaceId), readRoots: ["a".repeat(1_025)] },
+      }),
+      "proposePolicy",
+    );
+    expect(tooLong.code).toBe("INVALID_REQUEST");
+  });
+});
+
+// B2: Catches: `[]` meaning "disable the tool" instead of "keep the base's roots", which would make an
+// equal proposal (the UI's "change nothing") impossible and silently narrow the policy.
+test("an empty root list keeps the active roots and yields an equal diff on the real D1", async () => {
+  await withPolicy(async (store, workspaceId) => {
+    const proposed = v.parse(
+      ProposeSchema,
+      await run(store, AGENT, PROPOSE, {
+        input: {
+          workspaceId: toGlobalId("Project", workspaceId),
+          readRoots: [],
+          writeRoots: ["."],
+          bash: false,
+          network: false,
+          reason: "nothing to change",
+        },
+      }),
+    );
+    expect(proposed.proposePolicy.proposal.diff.kind).toBe("EQUAL");
+    const stored = (await store.policy.proposals(workspaceId))[0];
+    expect(stored?.candidate.tools.read_file?.scope).toStrictEqual({ kind: "read", roots: ["."] });
+    // Nothing moved; the human may still decide it.
+    expect((await store.policy.active(workspaceId))?.revision).toBe(1);
+    const token = stored?.reviewToken;
+    if (token === undefined) throw new Error("the proposal was not stored");
+    const decided = v.parse(
+      DecideSchema,
+      await run(store, HUMAN, DECIDE, {
+        input: {
+          proposalId: proposed.proposePolicy.proposal.id,
+          reviewToken: token,
+          approve: false,
+          reason: "nothing to change",
+        },
+      }),
+    );
+    expect(decided.decidePolicy.proposal.status).toBe("REJECTED");
+    expect(decided.decidePolicy.revision).toBeNull();
+  });
+});
+
+// Catches: a policy root joined to `Project.workspaceRoot` — the two vocabularies are different, and the
+// proposal's roots are workspace-relative, so a path under the project's `workspace_root` is a
+// normal root and the proposal goes through.
+test("a nested workspace-relative root is a normal proposal on the real D1", async () => {
+  await withPolicy(async (store, workspaceId) => {
+    const project = await store.projects.get(projectIdOf(workspaceId));
+    if (project === undefined) throw new Error("the scenario created no project");
+    // The project's root is machine-relative ("policy"); a policy root is workspace-relative, so a
+    // path below the workspace is a plain relative root and must not be joined with the project's.
+    const proposed = v.parse(
+      ProposeSchema,
+      await run(store, AGENT, PROPOSE, {
+        input: { ...proposalInput(workspaceId), readRoots: [".", "docs/design"] },
+      }),
+    );
+    expect(proposed.proposePolicy.proposal.diff.kind).toBe("EXPANSION");
+    const stored = (await store.policy.proposals(workspaceId))[0];
+    expect(stored?.candidate.tools.read_file?.scope).toStrictEqual({
+      kind: "read",
+      roots: [".", "docs/design"],
+    });
+    // The project's own root is machine-relative and unrelated to a policy root; the nested root
+    // above was accepted as "." + "docs/design" from the workspace, not from the project's root.
+    expect(project.workspace_root).toBe("");
   });
 });
 

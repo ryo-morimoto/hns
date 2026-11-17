@@ -6,7 +6,12 @@ import {
   GraphQLNonNull,
   GraphQLString,
 } from "graphql";
-import type { PolicyDocument, PolicyProposalStatus } from "@hns/core/capability";
+import type {
+  PolicyDocument,
+  PolicyProposalStatus,
+  PolicyTools,
+  ToolPolicy,
+} from "@hns/core/capability";
 import type { ProjectId } from "@hns/core";
 import * as v from "valibot";
 import { ProjectIdSchema } from "@hns/core";
@@ -28,7 +33,7 @@ const MAX_CALLS_PER_GRANT = 10;
 
 /** The maximum roots a proposal may name for one tool. */
 const MAX_ROOTS = 64;
-/** The maximum length of one root. */
+/** The inclusive maximum length of one root, in UTF-16 code units. */
 const MAX_ROOT_LENGTH = 1_024;
 /** The maximum length of a proposal or decision reason. */
 const MAX_REASON_LENGTH = 1_000;
@@ -38,9 +43,26 @@ export const PolicyProposalInputType = new GraphQLInputObjectType({
   name: "PolicyProposalInput",
   fields: {
     workspaceId: { type: new GraphQLNonNull(GraphQLID) },
-    /** The roots the policy's `read_file` permits; empty leaves the tool ungoverned. */
+    /**
+     * The roots the policy's `read_file` permits.
+     *
+     * @remarks
+     * A root is a **workspace-relative POSIX path**, where `"."` is the workspace root — the same
+     * vocabulary `CapabilityScope` uses, and **not** `Project.workspaceRoot`: that field names the
+     * directory below the machine's ROOT, while a policy root is resolved from the workspace the
+     * tool call runs in. No leading `/`, no "..", segment, no backslash, no NUL, no glob.
+     *
+     * An empty list means **unchanged**: the candidate keeps the active revision's roots for this
+     * tool, so a client that only changes `writeRoots` sends `readRoots: []`.
+     */
     readRoots: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))) },
-    /** The roots the policy's `write_file` permits; empty leaves the tool ungoverned. */
+    /**
+     * The roots the policy's `write_file` permits.
+     *
+     * @remarks
+     * The same vocabulary and the same "empty means unchanged" rule as {@link readRoots}. A tool the
+     * active revision does not govern and this proposal does not name stays ungoverned.
+     */
     writeRoots: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))) },
     /**
      * Whether the policy permits `bash`.
@@ -171,10 +193,11 @@ export function statusOf(
  *
  * @internal
  * @remarks
- * A root is checked for **shape** here only: it must be non-empty, at most {@link MAX_ROOT_LENGTH}
- * characters, and free of a NUL and a glob. Whether the algebra can compare it (an absolute path,
- * a `..` segment, a backslash) is the diff's answer, which the service reports as `unsupported`;
- * an empty list disables the tool rather than naming the root.
+ * A root is checked for **size** here only: it must be 1..{@link MAX_ROOT_LENGTH} characters, and the
+ * list at most {@link MAX_ROOTS} entries. Its **meaning** is the atom algebra's: whether the contract
+ * can compare it (a glob, an absolute path, a "..", segment, a NUL) is {@link comparableRoots}' answer,
+ * and that answer is `unsupported`, not `invalid_request` — a `{b,c}` root is a well-formed string this
+ * contract refuses, not a malformed request.
  */
 function rootsOf(value: readonly string[], field: string): Decoded<readonly string[]> {
   if (value.length > MAX_ROOTS) {
@@ -233,79 +256,106 @@ function comparableRoots(roots: readonly string[]): Uncomparable {
 export const ROOT_GLOB_CHARACTERS = GLOB_CHARACTERS;
 
 /**
- * Build the stored document a proposal asks for.
+ * Build the stored document a proposal asks for, from the base it is built on.
  *
  * @internal
  * @param input - The decoded input.
+ * @param base - The active revision's document, which supplies every atom the input does not name.
  * @returns The document, or `unsupported` because Phase 1 issues no grant that names a network.
  *
  * @remarks
- * The shape is the baseline's, with only the atoms the input can name: the tools whose root list
- * is non-empty are enabled over exactly those roots, `bash` is `network: "none"`, not writable, and
- * egress is disabled. **`network: true` is accepted and refused with `unsupported`**: the contract
- * has no Phase 1 grant to enforce a proxy, so a policy that named one would widen what a stored
- * revision says without anything that honours it. The grant ceiling (`grantTtlSeconds`,
- * `maxCallsPerGrant`) is the server's envelope, not a proposal's choice.
+ * **`[]` means "unchanged"**, not "the tool is ungoverned": a root list that names no root takes the
+ * base document's roots for that tool, and the `bash` flag takes the base's `bash` permission. A UI
+ * therefore has a way to say "change nothing here", and the whole document can equal the base —
+ * which the service answers with a `proposal` whose `diff.kind` is `equal`, not with `unsupported`.
+ * Phase 1 approves nothing automatically, so an equal proposal is valid and changes nothing active
+ * when approved.
  *
- * A root list of one element is the common case (`["."]`); a list of none leaves the tool
- * ungoverned, which the diff sees as removing that tool's atoms.
+ * The input names only four atoms, so a proposal can add or remove roots and turn `bash` on or off
+ * over an **already-present** scope; it cannot widen a `bash` envelope (`network: true` is
+ * `unsupported`, because no Phase 1 grant enforces a proxy and egress stays disabled), and it
+ * cannot change a grant ceiling — those are the server's envelope, not a proposal's choice. That is
+ * the contract's choice (§10), not an accident of this build.
  *
- * **What a proposal can express.** The input has no `writable` and no grant ceiling, so a proposal
- * can only add or remove roots (and turn `bash` on or off over an already-present scope): it can
- * narrow, or expand along roots, but it cannot widen a `bash` envelope or grant egress. That is the
- * contract's choice (§10), not an accident of this build.
+ * A tool the base does not govern and the input does not name stays ungoverned; a tool the base
+ * governs and the input empties is removed, which the diff sees as `narrowing`.
  */
-export function documentOf(input: PolicyDocumentView): DocumentDecoded {
+export function documentOf(input: PolicyDocumentView, base: PolicyDocument): DocumentDecoded {
   if (input.network) {
     return { ok: false, kind: "unsupported", message: "Phase 1 issues no grant over a network." };
   }
-  // The tools are absent-or-present, one statement at a time: `exactOptionalPropertyTypes` means a
-  // present key cannot hold undefined, so an empty object spread would widen the type.
-  const tools: Record<
-    string,
-    NonNullable<PolicyDocument["tools"][keyof PolicyDocument["tools"]]>
-  > = {};
-  if (input.readRoots.length > 0) {
-    tools.read_file = {
-      enabled: true,
-      scope: { kind: "read", roots: [...input.readRoots] },
-      grantTtlSeconds: GRANT_TTL_SECONDS,
-      maxCallsPerGrant: MAX_CALLS_PER_GRANT,
-    };
-  }
-  if (input.writeRoots.length > 0) {
-    tools.write_file = {
-      enabled: true,
-      scope: { kind: "write", roots: [...input.writeRoots] },
-      grantTtlSeconds: GRANT_TTL_SECONDS,
-      maxCallsPerGrant: MAX_CALLS_PER_GRANT,
-    };
-  }
-  if (input.bash) {
-    tools.bash = {
-      enabled: true,
-      scope: { kind: "exec", network: "none", writable: false },
-      grantTtlSeconds: GRANT_TTL_SECONDS,
-      maxCallsPerGrant: MAX_CALLS_PER_GRANT,
-    };
-  }
+  const readRoots =
+    input.readRoots.length === 0 ? rootsOfDocument(base, "read_file") : input.readRoots;
+  const writeRoots =
+    input.writeRoots.length === 0 ? rootsOfDocument(base, "write_file") : input.writeRoots;
+  const bash = input.bash || base.tools.bash !== undefined;
+  // Each tool is absent-or-present, decided by its own condition; a tool the input and the base
+  // both leave unset is absent, which is what "not governed" means.
+  const readFile =
+    readRoots.length > 0 ? { read_file: toolPolicy({ kind: "read", roots: [...readRoots] }) } : {};
+  const writeFile =
+    writeRoots.length > 0
+      ? { write_file: toolPolicy({ kind: "write", roots: [...writeRoots] }) }
+      : {};
+  const bashTool = bash
+    ? { bash: toolPolicy({ kind: "exec", network: "none", writable: false }) }
+    : {};
+  const tools: PolicyTools = { ...readFile, ...writeFile, ...bashTool };
   return { ok: true, value: { v: 1, tools, egress: { enabled: false, hosts: [] } } };
+}
+
+/**
+ * A tool policy with the envelope's grant ceiling.
+ *
+ * @internal
+ * @remarks
+ * A proposal changes what a tool may reach, not how many times it may be called, so the ceiling is
+ * the server's two constants rather than a field the input could set.
+ */
+function toolPolicy(scope: ToolPolicy["scope"]): ToolPolicy {
+  return {
+    enabled: true,
+    scope,
+    grantTtlSeconds: GRANT_TTL_SECONDS,
+    maxCallsPerGrant: MAX_CALLS_PER_GRANT,
+  };
+}
+
+/**
+ * The roots a stored document governs one tool with, or none when the tool is not governed.
+ *
+ * @internal
+ * @param document - The base revision's document.
+ * @param tool - The tool to read.
+ * @returns The scope's roots; a tool that is absent, disabled, or not a read/write scope has none.
+ */
+function rootsOfDocument(
+  document: PolicyDocument,
+  tool: "read_file" | "write_file",
+): readonly string[] {
+  const policy = document.tools[tool];
+  if (policy === undefined || !policy.enabled) return [];
+  return policy.scope.kind === "read" || policy.scope.kind === "write" ? policy.scope.roots : [];
 }
 
 /**
  * Decode `Mutation.proposePolicy`'s input.
  *
  * @param input - The GraphQL input object, whose fields GraphQL has already type-checked.
+ * @param base - The active revision's document; `[]` in the input means "keep the base's".
  * @returns The workspace, the document, and the reason, or the refusal.
  */
-export function proposeInputOf(input: {
-  readonly workspaceId: string;
-  readonly readRoots: readonly string[];
-  readonly writeRoots: readonly string[];
-  readonly bash: boolean;
-  readonly network: boolean;
-  readonly reason: string;
-}): DecodedPropose {
+export function proposeInputOf(
+  input: {
+    readonly workspaceId: string;
+    readonly readRoots: readonly string[];
+    readonly writeRoots: readonly string[];
+    readonly bash: boolean;
+    readonly network: boolean;
+    readonly reason: string;
+  },
+  base: PolicyDocument,
+): DecodedPropose {
   const workspaceId = workspaceIdOf(input.workspaceId);
   if (!workspaceId.ok) return { ok: false, message: workspaceId.message, code: "invalid_request" };
   const readRoots = rootsOf(input.readRoots, "readRoots");
@@ -316,12 +366,15 @@ export function proposeInputOf(input: {
   if (!reason.ok) return { ok: false, message: reason.message, code: "invalid_request" };
   const comparable = comparableRoots([...readRoots.value, ...writeRoots.value]);
   if (!comparable.ok) return { ok: false, message: comparable.message, code: comparable.code };
-  const document = documentOf({
-    readRoots: readRoots.value,
-    writeRoots: writeRoots.value,
-    bash: input.bash,
-    network: input.network,
-  });
+  const document = documentOf(
+    {
+      readRoots: readRoots.value,
+      writeRoots: writeRoots.value,
+      bash: input.bash,
+      network: input.network,
+    },
+    base,
+  );
   if (!document.ok) {
     return { ok: false, message: document.message, code: document.kind };
   }

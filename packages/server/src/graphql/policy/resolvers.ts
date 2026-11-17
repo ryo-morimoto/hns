@@ -204,11 +204,17 @@ export async function resolveProposePolicy(
   args: { readonly input: ProposePolicyArguments },
   context: GraphQLContext,
 ): Promise<ProposePolicyResult> {
-  const input = proposeInputOf(args.input);
-  if (!input.ok) return failureOf(input.code, input.message);
-  if (!(await workspaceExists(input.value.workspaceId, context))) {
+  const workspace = workspaceIdOf(args.input.workspaceId);
+  if (!workspace.ok) return failureOf("invalid_request", workspace.message);
+  if (!(await workspaceExists(workspace.value, context))) {
     return failureOf("not_found", "No workspace has this id.");
   }
+  // The base supplies what the input leaves empty (`[]` means "keep the active roots"), so the
+  // candidate is decoded against it rather than against an implied default.
+  const active = either(await context.policy.activeDocument(workspace.value));
+  if ("right" in active) return active.right;
+  const input = proposeInputOf(args.input, active.left);
+  if (!input.ok) return failureOf(input.code, input.message);
   const proposed = either(
     await context.policy.propose(principalOf(context.session.subject), {
       workspaceId: input.value.workspaceId,

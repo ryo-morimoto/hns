@@ -233,6 +233,8 @@ function defaultPolicy(env: WorkerEnv, requestId: string): PolicyFace {
     return opened;
   };
   return {
+    activeDocument: (workspaceId) =>
+      storeFailure(requestId, async () => (await open()).activeDocument(workspaceId)),
     revisions: (workspaceId) =>
       storeFailure(requestId, async () => (await open()).revisions(workspaceId)),
     proposals: (workspaceId, status) =>

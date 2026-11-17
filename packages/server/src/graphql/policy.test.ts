@@ -89,6 +89,7 @@ const REVISIONS: PolicyRevisionsRead = { active: 1, revisions: [REVISION] };
 /** A policy face over fakes; each test overrides the operations it is about. */
 function fakeFace(overrides: Partial<PolicyFace> = {}): PolicyFace {
   return {
+    activeDocument: vi.fn(() => Promise.resolve({ ok: true as const, value: DOCUMENT })),
     revisions: vi.fn(() => Promise.resolve({ ok: true as const, value: REVISIONS })),
     proposals: vi.fn(() => Promise.resolve({ ok: true as const, value: [PROPOSAL_READ] })),
     propose: vi.fn(() => Promise.resolve({ ok: true as const, value: PROPOSAL_READ })),
@@ -294,6 +295,50 @@ test.each(["a/..", "/etc"])(
     expect(face.propose).not.toHaveBeenCalled();
   },
 );
+
+// Catches: the size bound being off by one at the edge it documents — 1,024 characters is the
+// longest root the input promises to accept.
+test("a 1,024-character root is accepted and 1,025 is invalid_request", async () => {
+  const face = fakeFace();
+  const accepted = await run(AGENT, PROPOSE, face, {
+    input: { ...PROPOSE_INPUT, readRoots: [".".padEnd(1_024, "a")] },
+  });
+  expect(accepted.data).toMatchObject({ proposePolicy: { __typename: "ProposePolicyPayload" } });
+  const refused = await run(AGENT, PROPOSE, face, {
+    input: { ...PROPOSE_INPUT, readRoots: [".".padEnd(1_025, "a")] },
+  });
+  expect(refused.data).toMatchObject({
+    proposePolicy: { __typename: "PolicyFailure", code: "INVALID_REQUEST" },
+  });
+});
+
+// B2: Catches: `[]` meaning "disable the tool" rather than "keep the active roots" — the UI then has
+// no way to say "change nothing here", and the candidate silently narrows the policy.
+test("an empty root list keeps the active roots and sends an equal candidate", async () => {
+  const face = fakeFace();
+  const { data } = await run(AGENT, PROPOSE, face, {
+    input: { ...PROPOSE_INPUT, readRoots: [], writeRoots: [] },
+  });
+  expect(data).toMatchObject({ proposePolicy: { __typename: "ProposePolicyPayload" } });
+  const call = vi.mocked(face.propose).mock.calls[0];
+  expect(call?.[1].candidate.tools.read_file?.scope).toStrictEqual({ kind: "read", roots: ["."] });
+  expect(call?.[1].candidate.tools.write_file?.scope).toStrictEqual({
+    kind: "write",
+    roots: ["."],
+  });
+});
+
+// Catches: a network proposal Phase 1 cannot honour being stored and honoured by nothing.
+test("a network proposal is unsupported", async () => {
+  const face = fakeFace();
+  const { data } = await run(AGENT, PROPOSE, face, {
+    input: { ...PROPOSE_INPUT, network: true },
+  });
+  expect(data).toMatchObject({
+    proposePolicy: { __typename: "PolicyFailure", code: "UNSUPPORTED" },
+  });
+  expect(face.propose).not.toHaveBeenCalled();
+});
 
 // C7: Catches: an empty list answering for a workspace that does not exist.
 test("an unknown workspace is not_found, not an empty list", async () => {

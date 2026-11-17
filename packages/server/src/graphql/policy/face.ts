@@ -25,6 +25,16 @@ import { createPolicyService } from "../../policy/service.ts";
  * defect throws.
  */
 export interface PolicyFace {
+  /**
+   * The workspace's active document, after ensuring the baseline exists.
+   *
+   * @remarks
+   * A proposal is decoded against it: a root list the input leaves empty keeps the active roots,
+   * so the face needs the document before it can build the candidate (and before it can check the
+   * roots' meaning). It is the `ensure` read, so calling it is what gives a fresh workspace its
+   * revision 1.
+   */
+  readonly activeDocument: (workspaceId: ProjectId) => Promise<PolicyOutcome<PolicyDocument>>;
   /** Every revision of the workspace, oldest first, and the active one's number. */
   readonly revisions: (workspaceId: ProjectId) => Promise<PolicyOutcome<PolicyRevisionsRead>>;
   /** The workspace's proposals, newest first, all of them or only \`status\`. */
@@ -163,6 +173,9 @@ export function policyFaceOver(store: Store, options: PolicyFaceOptions): Policy
     bashSandbox: options.bashSandbox,
   });
   return {
+    async activeDocument(workspaceId) {
+      return ok((await service.ensure(workspaceId)).document);
+    },
     async revisions(workspaceId) {
       await service.ensure(workspaceId);
       const [active, revisions] = await Promise.all([
