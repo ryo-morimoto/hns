@@ -151,7 +151,7 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
   HTTP イベントを Session DO に fire-and-forget で送る。DO は `obs_events` に保存し、agent の
   `agent.response` / tool イベントを同じ形で記録する。machine は `fs.op` を JSON line で書く。
   `tools/obs/trace.mjs` と docs/observability の手順を追加。`npm run check` は実装後に確認する。
-- 2026-11-17: 実装完了（review 前）。HEAD は下の commit 群の先頭。`npm run check` exit 0
+- 2026-11-17: 実装完了（review 前）。HEAD 219d195（コードは 2cdd5d7）。`npm run check` exit 0
   （112 test files / 643 tests、lint / fmt / typecheck / test / build / deploy / knip すべて ok）。
   commit: core 語彙 / agent の requestId / server obs / edge / DO / machine / CLI / docs。
 - 受入の証拠:
