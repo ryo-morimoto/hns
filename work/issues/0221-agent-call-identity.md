@@ -5,7 +5,7 @@ priority: now
 design: agreed
 design-ref: D091, docs/capability.md §3–§4
 depends-on: 0220
-touches: packages/agent/src/capability.ts, packages/agent/src/tools.ts, packages/agent/src/events.ts, packages/agent/src/agent.ts, packages/agent/src/session.ts, packages/agent/src/tools.test.ts, packages/agent/src/capability.test.ts
+touches: packages/agent/src/capability.ts, packages/agent/src/tools.ts, packages/agent/src/events.ts, packages/agent/src/agent.ts, packages/agent/src/session.ts, packages/agent/src/tools.test.ts, packages/agent/src/capability.test.ts, packages/agent/test/integration/bash.test.ts
 
 ## Intent
 
@@ -16,6 +16,8 @@ touches: packages/agent/src/capability.ts, packages/agent/src/tools.ts, packages
 `workspaceTools` が `read_file` / `write_file` / `bash` のマニフェストを組み立て、呼び出しごとに `ToolCall` / `CallDigest` を計算する。引数は strict schema で parse し、パスは root 内に正規化する。Phase 0 の既定ポリシーを pure に評価し、イベントに `callHash` / `argsHash` / `manifestHash` / `decision` / `durationMs` を載せる。grant はまだ使わない。
 
 ## Acceptance criteria
+
+- [ ] bash の timeout は timeoutMs（safe integer）。小数の timeout（秒）は拒否し、pi-durable へはツール境界で ms→秒に変換する（JCS の safe integer 制約に合わせる）
 
 - [ ] `read_file` / `write_file` / `bash` の `ToolManifest` を 1 箇所で組み立て、`manifestHash` を出す（説明・引数記述子・危険度・出力上限を含む）
 - [ ] 各呼び出しで `ToolCall` と `CallDigest` を作り、`callId` は pi-durable の call id から取る
