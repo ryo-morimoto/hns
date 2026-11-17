@@ -59,3 +59,9 @@
 - `ExpectedVersion` の別名を削除し、core の `AbsentVersion` に統一（grep 0、公開面から消えた）。journal は `MUTATION_UNKNOWN_REASONS` から引く。checkpoint の exports は将来の利用者のため残す（互換を理由にしない）。knip entry の削除で hint 2 → 1（残りは `.agents/**` の意図的 ignore）。store の `import type` で bare import 警告 0。918 tests。
 - reviewer PASS。低: checkpoint の @remarks 2 連、tsdown のコメント、docs/workspace の expectedVersion（L6）、journal の reason unit、knip の dist 依存、store の deploy 警告の環境差。
 - 判断: `.agents/**` の knip ignore は L6 で消す（knip が exit 0 で hint 0 になることを check で 1 回確認してから）。machine の `SIGNED_HEADERS` / `SignedHeaders` の再公開は残し、「core の写し」と TSDoc に明記する（削除は語彙単一化の再設計後）。
+
+## 事故と対策: worktree の codegen は main checkout を読む
+
+- `tools/codegen/graphql.ts` の `@hns/server/graphql` は worktree の `node_modules` → `../../packages/server`（= main checkout）に解決される。そのため worktree から `npm run codegen` を回すと、**main のサーバで web の SDL / relay が生成**され、worktree の server の改名が web に反映されないのに gate は green になる（L3 の b275ca7 で発生）。
+- 対策: worktree で SDL を変えたら、(1) `node --conditions=source` で worktree の source から `buildSchemaSdl()` を直接書く、(2) relay-compiler を同じ schema で回す、(3) worktree で web の型 / テストを再実行、(4) main の cwd から codegen verify が差分なしを確認、の 4 段。
+- 恒久対策: codegen の `@hns/server` 解決を worktree 側に向ける（`customConditions: ["source"]` と `--conditions=source` を codegen でも使う）か、codegen を worktree の root から解決するように tools/codegen を直す。L6 か follow-up。
