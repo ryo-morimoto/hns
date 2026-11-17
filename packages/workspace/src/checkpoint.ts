@@ -281,15 +281,16 @@ const resolveRoot = async (root: string): Promise<string> => {
     throw new CheckpointError("not-a-work-tree", root + " is not a directory");
   }
   const canonical = await realpath(root);
-  let inside: string;
+  // The toplevel check, not `--is-inside-work-tree`: a directory inside a .git directory (a
+  // hook's scratch copy, a template) reports true there, and a checkpoint made in one would use
+  // that repository's index and refs.
+  let toplevel: string;
   try {
-    inside = (await runGit(canonical, ["rev-parse", "--is-inside-work-tree"]))
-      .toString("utf8")
-      .trim();
+    toplevel = (await runGit(canonical, ["rev-parse", "--show-toplevel"])).toString("utf8").trim();
   } catch {
     throw new CheckpointError("not-a-work-tree", root + " is not inside a git work tree");
   }
-  if (inside !== "true") {
+  if (toplevel === "") {
     throw new CheckpointError("not-a-work-tree", root + " is not inside a git work tree");
   }
   return canonical;
