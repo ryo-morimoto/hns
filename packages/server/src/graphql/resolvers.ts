@@ -185,9 +185,10 @@ export async function resolveTasks(
  * @returns The list, or a union failure for an invalid argument or an unreachable session.
  *
  * @remarks
- * The read addresses the project's own Session object (D080), so another project's
- * conversations never appear. The page is the object's newest page until 0149 indexes
- * conversations in D1.
+ * The project is checked in D1 before the Session object is addressed, so an unknown id is a
+ * typed `invalid_argument` and never creates an object (D080). The read then addresses the
+ * project's own object, so another project's conversations never appear.
+ *
  */
 export async function resolveConversations(
   _source: undefined,
@@ -197,6 +198,10 @@ export async function resolveConversations(
   const result = await guarded(async () => {
     const projectId = requiredProjectId(args.projectId);
     const limit = pageSize(args.first, context.maxRowsPerList);
+    const project = await context.reads.project(projectId);
+    if (project === undefined) {
+      throw new QueryReadError("invalid_argument", "No project has this id.");
+    }
     spend(context, limit);
     const conversations = (await context.reads.conversations(projectId, limit)).slice(0, limit);
     return conversations.map(conversationView);

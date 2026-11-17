@@ -1,4 +1,5 @@
 import { openStore, type D1Binding, type Store } from "@hns/store";
+import type { Project, ProjectId } from "@hns/core";
 import type { WorkerEnv } from "./env.ts";
 
 /** The control database is not configured or could not be opened. */
@@ -43,4 +44,25 @@ async function openOnce(db: D1Binding): Promise<Store> {
     STORES.delete(db);
     throw new StoreUnavailableError("The database could not be opened.", { cause: error });
   }
+}
+
+/**
+ * Look one project up in D1.
+ *
+ * @param env - The Worker environment carrying the `DB` binding.
+ * @param projectId - The project's raw id, already parsed.
+ * @returns The project, or undefined when no row has that id.
+ * @throws StoreUnavailableError when the database is missing or cannot be opened.
+ *
+ * @remarks
+ * The one project lookup the faces share, so `/ws`, the file face, and the GraphQL resolvers
+ * agree on what "this project exists" means. It never creates anything: an id with no row is
+ * undefined, and the caller decides the refusal.
+ */
+export async function projectFor(
+  env: WorkerEnv,
+  projectId: ProjectId,
+): Promise<Project | undefined> {
+  const store = await storeFor(env);
+  return await store.projects.get(projectId);
 }

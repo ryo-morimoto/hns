@@ -5,7 +5,7 @@ import type { Store } from "@hns/store";
 import type { WorkerEnv } from "../edge/env.ts";
 import { createRowBudget, type RowBudget } from "../edge/limits.ts";
 import type { Session } from "../edge/session.ts";
-import { storeFor, StoreUnavailableError } from "../edge/store.ts";
+import { projectFor, storeFor, StoreUnavailableError } from "../edge/store.ts";
 import { sessionNameFor } from "../session-name.ts";
 import { QueryReadError } from "./failures.ts";
 
@@ -18,6 +18,14 @@ import { QueryReadError } from "./failures.ts";
  */
 export interface GraphQLReads {
   readonly projects: () => Promise<readonly Project[]>;
+  /**
+   * The project with this id, or undefined.
+   *
+   * @remarks
+   * The existence check runs before any other read names a project, so a client cannot make a
+   * face address a Durable Object that D1 does not know.
+   */
+  readonly project: (projectId: ProjectId) => Promise<Project | undefined>;
   readonly tasks: (projectId: ProjectId) => Promise<readonly Task[]>;
   readonly conversations: (projectId: ProjectId, limit: number) => Promise<readonly Conversation[]>;
 }
@@ -72,10 +80,17 @@ export interface GraphQLContextOptions {
   readonly maxRowsPerList: number;
 }
 
-/** Open the store, mapping a missing binding or a failed open to `unavailable`. */
-async function storeWith(env: WorkerEnv, requestId: string): Promise<Store> {
+/**
+ * Run a store lookup, mapping an expected outage to `unavailable`.
+ *
+ * @internal
+ * @remarks
+ * Only `StoreUnavailableError` becomes a union failure. A corrupt row (`ValiError`) is a
+ * defect and is rethrown, so the request answers 500 instead of a retryable outage.
+ */
+async function storeFailure<T>(requestId: string, work: () => Promise<T>): Promise<T> {
   try {
-    return await storeFor(env);
+    return await work();
   } catch (error) {
     if (error instanceof StoreUnavailableError) {
       console.error("graphql: store open failed", requestId, error.name);
@@ -83,6 +98,11 @@ async function storeWith(env: WorkerEnv, requestId: string): Promise<Store> {
     }
     throw error;
   }
+}
+
+/** Open the store, mapping a missing binding or a failed open to `unavailable`. */
+async function storeWith(env: WorkerEnv, requestId: string): Promise<Store> {
+  return await storeFailure(requestId, () => storeFor(env));
 }
 
 /**
@@ -136,8 +156,9 @@ const ConversationListRpcSchema = v.object({
  * @internal
  * @remarks
  * One RPC per request to `sessionNameFor(projectId)`. The object holds one project's
- * conversations (D080), so the read is isolated by the object, not by a filter here. Until 0149
- * indexes conversations in D1, this is still one page.
+ * conversations (D080), so the read is isolated by the object. Until 0149 indexes conversations
+ * in D1, this is still one page. The resolver checks the project exists first; this function
+ * must never be the thing that creates an object for an unknown id.
  */
 async function readConversations(
   env: WorkerEnv,
@@ -181,6 +202,7 @@ async function readConversations(
 function defaultReads(env: WorkerEnv, requestId: string): GraphQLReads {
   return {
     projects: () => storeCall(env, requestId, "read", (store) => store.projects.list()),
+    project: (projectId) => storeFailure(requestId, () => projectFor(env, projectId)),
     tasks: (projectId) => storeCall(env, requestId, "read", (store) => store.tasks.list(projectId)),
     conversations: (projectId, limit) => readConversations(env, requestId, projectId, limit),
   };
@@ -214,6 +236,7 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
     maxRowsPerList: options.maxRowsPerList,
     reads: {
       projects: readOverrides.projects ?? reads.projects,
+      project: readOverrides.project ?? reads.project,
       tasks: readOverrides.tasks ?? reads.tasks,
       conversations: readOverrides.conversations ?? reads.conversations,
     },

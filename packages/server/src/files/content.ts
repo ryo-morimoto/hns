@@ -4,7 +4,7 @@ import { readBody } from "../edge/body.ts";
 import type { DurableObjectStub, WorkerEnv } from "../edge/env.ts";
 import type { FilesRequest } from "../edge/handler.ts";
 import type { EdgeLimits } from "../edge/limits.ts";
-import { storeFor } from "../edge/store.ts";
+import { projectFor } from "../edge/store.ts";
 import { ProjectParamSchema } from "../project-id.ts";
 
 /**
@@ -63,8 +63,7 @@ async function projectRootFromStore(
   env: WorkerEnv,
   projectId: string,
 ): Promise<string | undefined> {
-  const store = await storeFor(env);
-  const project = await store.projects.get(v.parse(ProjectIdSchema, projectId));
+  const project = await projectFor(env, v.parse(ProjectIdSchema, projectId));
   return project?.workspace_root;
 }
 

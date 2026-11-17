@@ -5,7 +5,7 @@ import { createEdge } from "../edge/handler.ts";
 import { QueryReadError } from "./failures.ts";
 import { envWith, sessionCookie, sessionWith } from "../../test/support/edge.ts";
 import { noteMutation } from "../../test/graphql/fixture-mutation.ts";
-import { project, task } from "../../test/support/graphql.ts";
+import { conversation, project, task } from "../../test/support/graphql.ts";
 import type { WorkerEnv } from "../edge/env.ts";
 import type { GraphQLFaceDependencies } from "./handler.ts";
 import { createGraphQLFace } from "./handler.ts";
@@ -87,7 +87,7 @@ test("a project's conversations are served from that project's Session object", 
       { status: 200, headers: { "content-type": "application/json" } },
     ),
   );
-  const send = edgeWith();
+  const send = edgeWith({ reads: { project: () => Promise.resolve(project("p1")) } });
   const response = await send(
     {
       query:
@@ -137,7 +137,7 @@ test("conversations are one Session RPC carrying the request id", async () => {
       { status: 200, headers: { "content-type": "application/json" } },
     ),
   );
-  const send = edgeWith();
+  const send = edgeWith({ reads: { project: () => Promise.resolve(project("p1")) } });
   const response = await send(
     {
       query:
@@ -167,7 +167,7 @@ test("conversations are one Session RPC carrying the request id", async () => {
 // Catches: a failed Session read shown as an empty list.
 test("a failed Session read is an unavailable union", async () => {
   const session = sessionWith(new Response("boom", { status: 500 }));
-  const send = edgeWith();
+  const send = edgeWith({ reads: { project: () => Promise.resolve(project("p1")) } });
   const response = await send(
     {
       query:
@@ -181,6 +181,27 @@ test("a failed Session read is an unavailable union", async () => {
   expect(await response.json()).toMatchObject({
     data: { conversations: { __typename: "QueryFailure", code: "UNAVAILABLE" } },
   });
+});
+
+// Catches: an unknown project id reaching idFromName, creating an empty Session object (D080).
+test("conversations for an unknown project never address a Session object", async () => {
+  const session = sessionWith();
+  const send = edgeWith({ reads: { project: () => Promise.resolve(undefined) } });
+  const response = await send(
+    {
+      query:
+        '{ conversations(projectId: "' +
+        toGlobalId("Project", "unknown") +
+        '") { __typename ... on QueryFailure { code } } }',
+    },
+    envWith({ session: session.namespace }),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: { conversations: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+  });
+  expect(session.ids).toStrictEqual([]);
+  expect(session.requests).toStrictEqual([]);
 });
 
 // Catches: tasks read across projects, or a task status serialized as a free string.

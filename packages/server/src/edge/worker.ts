@@ -6,7 +6,7 @@ import { httpEntry } from "../obs/log.ts";
 import { ProjectParamSchema } from "../project-id.ts";
 import { LEGACY_SESSION_NAME, sessionNameFor } from "../session-name.ts";
 import { withRequestIdHeader } from "./correlation.ts";
-import { storeFor } from "./store.ts";
+import { projectFor } from "./store.ts";
 import {
   createEdge,
   type EdgeRequest,
@@ -36,10 +36,9 @@ const OBS_SESSION_NAME = LEGACY_SESSION_NAME;
 /** Find one project in D1; a missing store or a failed read rejects. */
 export type ProjectLookup = (env: WorkerEnv, projectId: string) => Promise<Project | undefined>;
 
-/** The production lookup: the D1 project table through the shared store. */
+/** The production lookup: the shared D1 project lookup. */
 async function lookupProject(env: WorkerEnv, projectId: string): Promise<Project | undefined> {
-  const store = await storeFor(env);
-  return await store.projects.get(v.parse(ProjectIdSchema, projectId));
+  return await projectFor(env, v.parse(ProjectIdSchema, projectId));
 }
 
 /** Why a WebSocket request named no usable Session object. */
