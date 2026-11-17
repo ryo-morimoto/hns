@@ -35,8 +35,8 @@ export const SLOW_SCREEN_TTL_MS = 30_000;
  * next to the policy. `ttlMs` is the window in which the store answers alone; once it has
  * passed, the next mount or focus goes to the network again.
  *
- * A departure without a subscription and without a TTL would never revalidate; the table test
- * refuses that shape.
+ * A screen that subscribes or reads the network on every mount has no need for a TTL; one that
+ * has neither but also no TTL would never revalidate, and the table test refuses that shape.
  */
 export interface FreshnessPolicy {
   /** The policy a read uses once the store copy is too old to trust. */
@@ -56,8 +56,11 @@ export interface FreshnessPolicy {
  * - `projects`: no live channel carries a project's creation or rename (0159 subscribes per
  *   conversation), so a revisit is answered from the store inside the TTL and revalidated after
  *   it or when the tab regains focus.
- * - `workspace`: the conversation and task lists feed Needs you, so a stale copy misleads. The
- *   store is shown while the network read runs, and a reconnect refetches it.
+ * - `workspace`: the conversation and task lists feed Needs you, so a stale copy misleads. No
+ *   live channel carries the lists themselves (0159 subscribes per conversation, and subscribing
+ *   the list needs a server and protocol change), so each mount reads the network while the
+ *   store stays on screen. The open conversation's title is still live: its socket patches the
+ *   list record. A reconnect refetches the lists to pick up what the socket cannot carry.
  * - `conversation`: the transcript is followed by a cursor. A store copy has no cursor, so lost
  *   frames cannot be filled in from it; the read is always the network's and the socket keeps it
  *   current.
@@ -73,9 +76,9 @@ export const FRESHNESS: Record<FreshnessScreen, FreshnessPolicy> = {
   workspace: {
     fetchPolicy: "store-and-network",
     ttlMs: null,
-    subscribes: true,
+    subscribes: false,
     reason:
-      "会話とタスクの一覧は Needs you の判断に使うので、古いまま出すと判断を誤る。store を見せたまま開くたびに network でも取り、切断中に増えた会話は再接続の refetch で拾う。",
+      "会話とタスクの一覧は Needs you の判断に使うので、古いまま出すと判断を誤る。一覧を運ぶライブ配信は無い（0159 は会話単位。一覧の購読は server / protocol の拡張が要る）ので、store を見せたまま開くたびに network で読み直し、切断中に増えた会話は再接続の refetch で拾う。",
   },
   conversation: {
     fetchPolicy: "network-only",
