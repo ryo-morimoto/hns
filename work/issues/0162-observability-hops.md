@@ -184,4 +184,7 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
   fire-and-forget の消失と metrics が下限であることを docs / RESULTS に明記。
 - follow-up（低 4 / 5 / 7）: 語彙・allowlist・request-id regex の二重管理、CLI テストの fake API、
   tool イベントの requestId。いずれも 0162 の受入には影響しないが、次の観測変更で寄せる。
+- 2026-11-17: レビュー修正後の最終確認。main（13556fd）へ rebase（up to date）、`npm run build` exit 0、
+  `npm run check` exit 0（112 test files / 646 tests、全 stage ok）。コード HEAD は 17097cb。
+  gateway integration の inspector flake は単独実行で再確認し、全 `npm run check` でも通過した。
 
