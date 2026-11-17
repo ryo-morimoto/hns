@@ -18,10 +18,20 @@
 同時に流す変更は [parallel-change.md](parallel-change.md) の「変更レーン」に従う。同時に流すのは最大3本で、
 増やす条件は人が判定する。agent は自分でレーンを増やさない。
 
-**worktree では `npm run codegen` が隣の checkout のサーバを読む。** `node_modules` はメイン checkout を指すので、
-`@hns/server/graphql` はメインの `packages/server` に解決される。worktree のサーバが変わったときは、worktree の
-`buildSchemaSdl()` を直接呼んで SDL を書き、絶対パスの relay 設定で `relay-compiler` を回す（メインの cwd で
-`node packages/server/src/graphql/schema.ts` 由来の SDL と一致することを、enum 名で確かめる）。
+**worktree の `node_modules` はメイン checkout を指す。** 依存の解決と `@hns/*` の解決が同じ経路なので、
+worktree のソースを変えても tsc / tsdown / codegen が**メインのパッケージを読む**ことがある。
+
+**推奨: worktree だけ `@hns/*` を自前に向ける。** `node_modules` をメインへのシンボリックリンクにせず、
+ディレクトリにして、サードパーティの依存をメインの `node_modules/*` へリンクし、`@hns/<pkg>` だけ worktree の
+`packages/<pkg>` を指す。`.bin` もメインの `node_modules/.bin` へリンクすると `tsdown` / `prek` / `vitest` が動く。
+`node_modules` は ignore 済みなので commit されない。
+
+変えない場合: tsc / tsdown / vitest は worktree を見るが、**codegen はメインのサーバを読む**。SDL が変わった
+レーンでは worktree の `buildSchemaSdl()`（`node --conditions=source`）を直接呼んで SDL を書き、絶対パスの
+relay 設定で `relay-compiler` を回し、**出力の enum 名が worktree のサーバ由来**であることを確かめる。
+
+どちらの場合も、統合前にメインの cwd から `node tools/gate/main.ts --all` を通し、生成物の `git diff` が空で
+あることを確かめる。worktree の gate が緑でも、隣の checkout を検証していることがある。
 
 ## 完了・記録・成果
 
