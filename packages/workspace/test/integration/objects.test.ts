@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { gitObjectId } from "../../src/objects.ts";
 import type { GitObject } from "../../src/objects.ts";
 import { afterAll, beforeAll, expect, test } from "vitest";
@@ -12,8 +12,8 @@ import {
   startCfDev,
   type CfDev,
 } from "../../../../tools/test/cf-dev.ts";
+import { ensureDist } from "../../../../tools/test/ensure-dist.ts";
 
-const ROOT = resolve(import.meta.dirname, "../../../..");
 const TIMEOUT_MS = 300_000;
 const READY_TIMEOUT_MS = 60_000;
 const BUCKET = "hns-objects-test";
@@ -101,16 +101,6 @@ let repo = "";
 let running: CfDev | undefined;
 let port = 0;
 
-function build(): void {
-  // Only this package: the server's integration tests build the packages they need, and two
-  // concurrent builds of the same package race on tsdown's clean dist.
-  execFileSync("npm", ["run", "build", "-w", "@hns/workspace"], {
-    cwd: ROOT,
-    stdio: "pipe",
-    timeout: 120_000,
-  });
-}
-
 async function writeProject(): Promise<string> {
   await mkdir(CF_DEV_WORK_DIR, { recursive: true });
   const dir = await mkdtemp(join(CF_DEV_WORK_DIR, "objects-"));
@@ -172,7 +162,7 @@ const git = (args: readonly string[], input?: Uint8Array): string => {
 
 beforeAll(async () => {
   if (!isCfDevInstalled()) return;
-  build();
+  ensureDist(["@hns/workspace"]);
   project = await writeProject();
   repo = await mkdtemp(join(tmpdir(), "hns-objects-git-"));
   execFileSync("git", ["init", "-q"], { cwd: repo });

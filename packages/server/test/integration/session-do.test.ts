@@ -1,7 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import * as v from "valibot";
@@ -11,9 +10,9 @@ import {
   startCfDev,
   type CfDev,
 } from "../../../../tools/test/cf-dev.ts";
+import { ensureDist } from "../../../../tools/test/ensure-dist.ts";
 import { signSession } from "../../src/edge/session.ts";
 
-const ROOT = resolve(import.meta.dirname, "../../../..");
 const TIMEOUT_MS = 300_000;
 const READY_TIMEOUT_MS = 40_000;
 
@@ -151,17 +150,6 @@ let project: string | undefined;
 let running: CfDev | undefined;
 const projects: string[] = [];
 
-function build(): void {
-  if (!isCfDevInstalled()) return;
-  for (const name of ["@hns/core", "@hns/agent", "@hns/server"]) {
-    execFileSync("npm", ["run", "build", "-w", name], {
-      cwd: ROOT,
-      stdio: "pipe",
-      timeout: 90_000,
-    });
-  }
-}
-
 async function writeProject(): Promise<string> {
   await mkdir(CF_DEV_WORK_DIR, { recursive: true });
   const dir = await mkdtemp(join(CF_DEV_WORK_DIR, "session-do-"));
@@ -237,7 +225,8 @@ const Snapshot = v.object({
 });
 
 beforeAll(() => {
-  build();
+  if (!isCfDevInstalled()) return;
+  ensureDist(["@hns/core", "@hns/agent", "@hns/server"]);
 });
 
 afterAll(async () => {

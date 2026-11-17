@@ -1,7 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { startMachineAgent, type MachineAgent, type MachineLogSink } from "../../src/index.ts";
 import type { JsonValue, ObsLogEntry } from "@hns/core";
 import assert from "node:assert/strict";
@@ -13,6 +12,7 @@ import {
   startCfDev,
   type CfDev,
 } from "../../../../tools/test/cf-dev.ts";
+import { ensureDist } from "../../../../tools/test/ensure-dist.ts";
 
 /**
  * The real path, end to end: a cf dev Worker's Workspace object calls a real machine agent
@@ -22,10 +22,10 @@ import {
  * The Worker signs with the control-plane key and the machine verifies with the enrolled public
  * half (D100). The machine agent runs in this process; the Durable Object runs in workerd. The
  * project's worker.ts imports `@hns/server` through the repository's hoisted node_modules
- * (the packages are built first); the machine package is the only package this file imports.
+ * (the gate builds it first; a standalone run builds a missing dist/ here); the machine
+ * package is the only package this file imports.
  */
 
-const ROOT = resolve(import.meta.dirname, "../../../..");
 const TIMEOUT_MS = 300_000;
 const READY_TIMEOUT_MS = 40_000;
 const MACHINE_ID = "machine-1";
@@ -121,17 +121,6 @@ const machineLogs: ObsLogEntry[] = [];
 
 const onMachineLog: MachineLogSink = (entry) => machineLogs.push(entry);
 
-function build(): void {
-  if (!isCfDevInstalled()) return;
-  for (const name of ["@hns/core", "@hns/store", "@hns/agent", "@hns/server"]) {
-    execFileSync("npm", ["run", "build", "-w", name], {
-      cwd: ROOT,
-      stdio: "pipe",
-      timeout: 90_000,
-    });
-  }
-}
-
 /** The base64url seed of the control-plane key, as the Worker secret carries it. */
 function seedOf(privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"]): string {
   const jwk = v.parse(
@@ -202,7 +191,8 @@ function applyBody(overrides: Record<string, string> = {}): JsonValue {
 }
 
 beforeAll(async () => {
-  build();
+  if (!isCfDevInstalled()) return;
+  ensureDist(["@hns/core", "@hns/store", "@hns/agent", "@hns/server"]);
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   machineRoot = await mkdtemp(join(CF_DEV_WORK_DIR, "machine-root-"));
   await mkdir(join(machineRoot, "project"));

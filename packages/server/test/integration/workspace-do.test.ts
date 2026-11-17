@@ -1,6 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { LEASE_REFUSALS } from "@hns/core";
 
@@ -13,8 +12,8 @@ import {
   startCfDev,
   type CfDev,
 } from "../../../../tools/test/cf-dev.ts";
+import { ensureDist } from "../../../../tools/test/ensure-dist.ts";
 
-const ROOT = resolve(import.meta.dirname, "../../../..");
 const TIMEOUT_MS = 300_000;
 const READY_TIMEOUT_MS = 40_000;
 
@@ -122,17 +121,6 @@ const Conflict = v.object({ ok: v.literal(false), code: v.string() });
 let project: string | undefined;
 let running: CfDev | undefined;
 
-function build(): void {
-  if (!isCfDevInstalled()) return;
-  for (const name of ["@hns/core", "@hns/store", "@hns/agent", "@hns/server"]) {
-    execFileSync("npm", ["run", "build", "-w", name], {
-      cwd: ROOT,
-      stdio: "pipe",
-      timeout: 90_000,
-    });
-  }
-}
-
 async function writeProject(): Promise<string> {
   await mkdir(CF_DEV_WORK_DIR, { recursive: true });
   const dir = await mkdtemp(join(CF_DEV_WORK_DIR, "workspace-do-"));
@@ -197,7 +185,8 @@ function applyBody(overrides: Record<string, JsonValue> = {}): JsonValue {
 }
 
 beforeAll(() => {
-  build();
+  if (!isCfDevInstalled()) return;
+  ensureDist(["@hns/core", "@hns/store", "@hns/agent", "@hns/server"]);
 });
 
 afterAll(async () => {
