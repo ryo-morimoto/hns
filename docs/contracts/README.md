@@ -1,0 +1,16 @@
+# 契約（contract）
+
+2026-11-18 / L6 M2。面ごとの契約を 1 面 1 ファイルで持つ。**契約はここが正本**で、コードの TSDoc は同じ内容を短く持ち、ここを指す。不変条件は [invariants.md](../invariants.md)。
+
+| 面 | 契約 | 実装の正本 | 主な不変条件 |
+| --- | --- | --- | --- |
+| 失敗（全 HTTP 面 + GraphQL） | [failures.md](failures.md) | `server/src/failures/status.ts` | — |
+| Workspace のファイル（版 / absent / checkpoint） | [workspace.md](workspace.md) | `@hns/workspace`、`do/workspace`、`@hns/machine` | INV-03 / 04 / 05 |
+| Journal と索引（intent / outcome / watermark / dirtyAt） | [journal-index.md](journal-index.md) | `store/src/journal`、`do/journal`、`conversation-index`、`session-index` | INV-04 / 09 / 10 / 11 |
+| 観測（ObsLogEntry / 保持 / 測定窓） | [observability.md](observability.md) | `@hns/core` の observability、`server/src/obs`、`machine/src/log` | — |
+
+## 規則
+
+- 1 面 1 ファイル。別の面の話はリンクで済ませ、同じ規則を 2 か所に書かない。
+- **語彙はコードが持ち、契約はその意味と規則を書く**。列挙を写さない（写すと腐る）。表を写すのは「status のような値そのものが契約」の場合だけ。
+- 契約を変える変更は、このファイル・実装・テストを同じ変更に入れる。**挙動を変えるなら決定（`design:`）として扱う**。

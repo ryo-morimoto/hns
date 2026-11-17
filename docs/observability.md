@@ -85,6 +85,8 @@ server（Durable Object）と machine は同じ `ObsLogEntry`（`@hns/core`）�
 
 ### 索引の観測（`index.*`）と測定窓
 
+形・保持・測定窓の**契約は [contracts/observability.md](contracts/observability.md)**。ここは手順だけ。
+
 索引の `index.*` も observation で、`indexEntry`（`packages/server/src/obs/log.ts`）が組み立てた
 `ObsLogEntry` を、`Session` が同じ `obs_events` 表へ append する（`SessionIndex` の sink は
 `(entry: ObsLogEntry) => void`、既定の sink は console への 1 行）。
