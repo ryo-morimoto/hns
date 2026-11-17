@@ -16,12 +16,14 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
 
 ## 面
 
-| パス       | メソッド       | 認証              | 動作                                                   |
-| ---------- | -------------- | ----------------- | ------------------------------------------------------ |
-| `/graphql` | `POST`         | セッション cookie | 0145 では 501。schema / resolver は 0176               |
-| `/ws`      | `GET`          | セッション cookie | Session DO へ転送。ライブ frame は core の `LiveFrame` |
-| それ以外   | `GET` / `HEAD` | 不要              | `ASSETS` へ委譲。配信設定は 0160                       |
-| `/api/*`   | すべて         | —                 | 404                                                    |
+| パス                           | メソッド       | 認証              | 動作                                                    |
+| ------------------------------ | -------------- | ----------------- | ------------------------------------------------------- |
+| `/graphql`                     | `POST`         | セッション cookie | 0145 では 501。schema / resolver は 0176                |
+| `/ws`                          | `GET`          | セッション cookie | Session DO へ転送。ライブ frame は core の `LiveFrame`  |
+| `/api/events` / `/api/metrics` | `GET`          | セッション cookie | Session DO の観測面（0162）                             |
+| `/api/workspaces/:id/files`    | `GET` / `POST` | セッション cookie | Workspace DO の版付き読み書き（`src/files/content.ts`） |
+| それ以外                       | `GET` / `HEAD` | 不要              | `ASSETS` へ委譲。配信設定は 0160                        |
+| その他の `/api/*`              | すべて         | —                 | 404                                                     |
 
 `OPTIONS` は 405 で、CORS ヘッダは返さない。デバッグ用の口は作らない。
 `ASSETS` の `notFoundHandling` は SPA fallback にしない（画面は hash router）。未知のパスを 200 にしない設定は 0160 が持つ。
@@ -51,12 +53,19 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
 ## Workspace Durable Object
 
 - `src/do/workspace.ts` — 1 ワークスペースに 1 つの `Workspace`。lease（epoch は発行のたびに増える）、
-  `path → 版` の表、Journal を持つ。書き込みの直列化点で、版の比較と記録は 1 トランザクション。
+  `path → 版` の表（machine が最後に報告した版のキャッシュ）、Journal を持つ。ファイルの書き込みは
+  intent（Journal）→ machine（適用）→ outcome の順で、ack は outcome の記録後。版の比較は machine が再計算して行う。
+- `src/do/machine.ts` — machine への port（`write` / `read`）と、control-plane 鍵で署名する実装。
+  machine の id は呼び出しごと（write は lease の保持者、read は lease 取得時に残した machine）。
 - `src/do/journal.ts` — append 専用の Journal。intent / outcome / audit / event を 1 表に `kind` で持ち、
   `seq` はトランザクションで採番する。本文は 256KB まで行に置き、超えるものは `env.OBJECTS` に置いて
-  hash / key だけ残す。読み出しは cursor、切り詰めは checkpoint の watermark（[durability.md §5](../../docs/durability.md)）。
-- 内部 RPC: `POST /rpc/apply`、`GET /rpc/read?path=`、`POST /rpc/journal/watermark`、
-  `POST /rpc/lease/{acquire,renew,release}`。edge には公開しない。
+  hash / key だけ残す。outcome は `applied` / `conflict` / `unknown` に加えて `denied`（machine が書く前に
+  拒否した）を持ち、denied も intent を settle する。読み出しは cursor、切り詰めは checkpoint の watermark
+  （[durability.md §5](../../docs/durability.md)）。
+- 内部 RPC: `POST /rpc/apply`（intent → machine → outcome）、`GET /rpc/read?projectRoot=&path=`（machine から）、
+  `POST /rpc/journal/watermark`、`POST /rpc/lease/{acquire,renew,release}`。edge には公開しない。
+- 環境: `HNS_AGENT_URL`（machine の origin）と `HNS_CONTROL_PLANE_KEY`（Worker の secret。base64url の
+  Ed25519 seed）。どちらか欠けるとファイル面は 503 で閉じる。machine の選択と鍵の配布は 0148。
 
 ## D1 と DO
 
