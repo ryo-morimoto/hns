@@ -38,6 +38,8 @@ export interface FakeArtifactsBinding extends ArtifactsBinding {
   raceNextCreate(): void;
   /** Make the next `log` fail with this error. */
   failNextLog(error: Error): void;
+  /** Make the next `get` (the handle lookup) fail with this error. */
+  failNextGet(error: Error): void;
   /** Put a commit at the top of a ref, as a push would. */
   push(repo: string, ref: string, commit: string): void;
 }
@@ -62,6 +64,7 @@ export function fakeArtifactsBinding(options: FakeArtifactsOptions = {}): FakeAr
   let pendingCreateFailure: Error | undefined;
   let raceNext = false;
   let pendingLogFailure: Error | undefined;
+  let pendingGetFailure: Error | undefined;
 
   const handleOf = (repo: FakeRepo): ArtifactsRepoHandle => ({
     info: () => Promise.resolve({ name: repo.name, remote: repo.remote }),
@@ -140,6 +143,11 @@ export function fakeArtifactsBinding(options: FakeArtifactsOptions = {}): FakeAr
       });
     },
     get(name: string) {
+      if (pendingGetFailure !== undefined) {
+        const error = pendingGetFailure;
+        pendingGetFailure = undefined;
+        return Promise.reject(error);
+      }
       const repo = repos.get(name);
       return Promise.resolve(repo === undefined ? null : handleOf(repo));
     },
@@ -151,6 +159,9 @@ export function fakeArtifactsBinding(options: FakeArtifactsOptions = {}): FakeAr
     },
     failNextLog(error: Error) {
       pendingLogFailure = error;
+    },
+    failNextGet(error: Error) {
+      pendingGetFailure = error;
     },
     push(repo: string, ref: string, commit: string) {
       const held = repos.get(repo);

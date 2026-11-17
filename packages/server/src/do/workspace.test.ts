@@ -1493,7 +1493,8 @@ test("a mirrored report the binding's log cannot confirm is refused and recorded
       CheckpointRecordSchema,
       JSON.parse(String(checkpointRecordOfRun(h, "run-1"))),
     );
-    expect(stored.mirror).toMatchObject({ status: "failed", failure: "unknown" });
+    // The ref is absent (the commit was put at another Run's ref): the push did not land.
+    expect(stored.mirror).toMatchObject({ status: "failed", failure: "push_rejected" });
     // With the commit at the ref the report is accepted, and the record says mirrored.
     h.artifacts?.push(artifactsRepoName("w1"), mirrorRef("run-1"), record.commit);
     expect((await report("pending")).status).toBe(200);
@@ -1670,6 +1671,88 @@ test("a resent mirror report is the recorded state, and a different failure is r
     expect(resent.status, await resent.clone().text()).toBe(200);
     const last = await report("skipped");
     expect(last.status).toBe(409);
+  } finally {
+    h.close();
+  }
+});
+
+// NB3 / acceptance: Catches a `failed` mirror that can never become `mirrored` when its push had
+// in fact landed. The row is the object's own SQLite (the same shape D1 hands it), so this is
+// "recorded failed, then settled by a re-send" end to end at the storage layer: the failed row is
+// written, read back, and moved by the re-check; the binding's own failure reason is kept.
+//
+// Catches too a confirmation that writes "unknown" for a binding that said `network`: the row
+// must say why it failed, so an operator (and 0249's metrics) can tell a broken binding from a
+// push that did not land.
+test("a mirror recorded failed is settled to mirrored by a re-send that finds the commit", async () => {
+  const h = await harnessWithMirror();
+  try {
+    const record = await checkpointOnce(h);
+    const repo = artifactsRepoName("w1");
+    const ref = mirrorRef("run-1");
+    const report = (status: string) =>
+      h.workspace.fetch(
+        post("/rpc/checkpoint/mirror", { workspaceId: "w1", runId: "run-1", status }),
+      );
+    const storedMirror = () =>
+      v.parse(CheckpointRecordSchema, JSON.parse(String(checkpointRecordOfRun(h, "run-1")))).mirror;
+
+    // The push landed on the remote, but the binding could not answer when the Worker confirmed:
+    // the row records the binding's own reason, not a guess.
+    h.artifacts?.failNextGet(artifactError("UPSTREAM_UNAVAILABLE"));
+    const unconfirmed = await report("mirrored");
+    expect(unconfirmed.status).toBe(409);
+    expect(storedMirror()).toMatchObject({ status: "failed", failure: "network" });
+
+    // The binding answers again, and its history has the commit: the re-send settles the row.
+    h.artifacts?.push(repo, ref, record.commit);
+    const settled = await report("mirrored");
+    expect(settled.status, await settled.clone().text()).toBe(200);
+    expect(storedMirror()).toStrictEqual({
+      status: "mirrored",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    // A second re-send is the recorded state, and mirrored is terminal for the table.
+    expect((await report("mirrored")).status).toBe(200);
+    expect((await report("failed")).status).toBe(409);
+  } finally {
+    h.close();
+  }
+});
+
+// NB3 / low 5: Catches a ref that is absent being recorded as a binding failure (or the reverse):
+// the two are different answers, and the record keeps the one that happened.
+test("an absent ref is a failed push and a broken binding keeps its own reason", async () => {
+  const h = await harnessWithMirror();
+  try {
+    const record = await checkpointOnce(h);
+    const report = (status: string) =>
+      h.workspace.fetch(
+        post("/rpc/checkpoint/mirror", { workspaceId: "w1", runId: "run-1", status }),
+      );
+    const storedMirror = () =>
+      v.parse(CheckpointRecordSchema, JSON.parse(String(checkpointRecordOfRun(h, "run-1")))).mirror;
+
+    // Nothing is at the ref: the mirror is `push_rejected` — the push did not land.
+    expect((await report("mirrored")).status).toBe(409);
+    expect(storedMirror()).toMatchObject({ status: "failed", failure: "push_rejected" });
+
+    // The binding is unavailable: the row says `network`, not `push_rejected`.
+    h.artifacts?.failNextGet(artifactError("UPSTREAM_UNAVAILABLE"));
+    expect((await report("pending")).status).toBe(200);
+    expect((await report("mirrored")).status).toBe(409);
+    expect(storedMirror()).toMatchObject({ status: "failed", failure: "network" });
+
+    // A repository that is not there at all is `repo_unavailable`: the binding answered `NOT_FOUND`.
+    h.artifacts?.failNextGet(artifactError("NOT_FOUND"));
+    expect((await report("pending")).status).toBe(200);
+    expect((await report("mirrored")).status).toBe(409);
+    expect(storedMirror()).toMatchObject({ status: "failed", failure: "repo_unavailable" });
+
+    // And with the commit at the ref it settles, whatever earlier failure the row held.
+    h.artifacts?.push(artifactsRepoName("w1"), mirrorRef("run-1"), record.commit);
+    expect((await report("mirrored")).status).toBe(200);
+    expect(storedMirror()).toMatchObject({ status: "mirrored" });
   } finally {
     h.close();
   }

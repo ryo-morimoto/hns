@@ -106,30 +106,40 @@ test("a create that races another one adopts the repository it lost the race to"
   });
 });
 
-// Catches: a read-back that answers `true` for a ref at another commit, or for a repository the
-// binding cannot read. A failure is never a mirrored run.
+// Catches (NB3 / low 5): a read-back that answers `true` for a ref at another commit, and a
+// read-back that folds "the ref is not there" and "the binding could not answer" into one `false`.
+// Absent and failed are different answers: the first is a push that did not land, the second keeps
+// the reason so the record can say why.
 test("the ref is confirmed only when its log starts at the commit", async () => {
   const binding = fakeArtifactsBinding();
   const repos = new ArtifactsRepos(binding);
   const name = artifactsRepoName("w1");
+  // The repository does not exist yet: absent, not failed.
   expect(
     await repos.holds({ repo: name, ref: "refs/heads/hns/run/run-1", commit: "a".repeat(40) }),
-  ).toBe(false);
+  ).toStrictEqual({ ok: false, absence: "repo" });
   await repos.ensure(name);
+  // The repository exists but has no such ref: absent.
+  expect(
+    await repos.holds({ repo: name, ref: "refs/heads/hns/run/run-1", commit: "a".repeat(40) }),
+  ).toStrictEqual({ ok: false, absence: "ref" });
   binding.push(name, "refs/heads/hns/run/run-1", "a".repeat(40));
   expect(
     await repos.holds({ repo: name, ref: "refs/heads/hns/run/run-1", commit: "a".repeat(40) }),
-  ).toBe(true);
+  ).toStrictEqual({ ok: true });
+  // The ref is at another commit: the push it would confirm is not there.
   expect(
     await repos.holds({ repo: name, ref: "refs/heads/hns/run/run-1", commit: "b".repeat(40) }),
-  ).toBe(false);
-  expect(
-    await repos.holds({ repo: name, ref: "refs/heads/hns/run/run-2", commit: "a".repeat(40) }),
-  ).toBe(false);
+  ).toStrictEqual({ ok: false, failure: "push_rejected" });
+  // A binding that cannot answer keeps its own reason, never "absent".
   binding.failNextLog(artifactError("UPSTREAM_UNAVAILABLE"));
   expect(
     await repos.holds({ repo: name, ref: "refs/heads/hns/run/run-1", commit: "a".repeat(40) }),
-  ).toBe(false);
+  ).toStrictEqual({ ok: false, failure: "network" });
+  binding.failNextGet(artifactError("REMOTE_AUTH_REQUIRED"));
+  expect(
+    await repos.holds({ repo: name, ref: "refs/heads/hns/run/run-1", commit: "a".repeat(40) }),
+  ).toStrictEqual({ ok: false, failure: "unauthorized" });
 });
 
 // Catches: a second copy of Artifacts' limits in this module, drifting from the checkpoint

@@ -1174,9 +1174,7 @@ export class Workspace {
       return failure("not_found", "The Run has no completed checkpoint.");
     }
     if (input.status === "mirrored") {
-      // The Worker reads the ref back itself: a machine that says "mirrored" is not the proof,
-      // and the binding's log answering another commit (or nothing) is recorded as a failed
-      // mirror, never rounded to the state the machine claimed.
+      // The Worker reads the ref back itself: a machine that says "mirrored" is not the proof.
       const mirror = this.#mirror;
       const record = parseCheckpointRecord(row.record);
       if (mirror === undefined) {
@@ -1187,25 +1185,43 @@ export class Workspace {
         ref: mirrorRef(input.runId),
         commit: record.commit,
       });
-      if (!held) {
-        // Record the failure the refusal implies; the ack of the checkpoint is not affected.
-        const failed = nextMirror(
-          record.mirror,
-          { status: "failed", failure: "unknown" },
-          this.#clock(),
-        );
-        if (failed !== undefined) {
+      if (held.ok) {
+        // A re-check that finds the commit settles the mirror even from `failed`: the push
+        // landed and its confirmation was lost, which is one move in the transition table and
+        // not a second push.
+        const settled = nextMirror(record.mirror, { status: "mirrored" }, this.#clock());
+        if (settled !== undefined) {
+          const updated = checkpointRecordOf({ ...record, mirror: settled });
           this.#exec(
             "UPDATE checkpoint_run SET record = ? WHERE run_id = ?",
-            JSON.stringify(checkpointRecordOf({ ...record, mirror: failed })),
+            JSON.stringify(updated),
             input.runId,
           );
+          return json({ ok: true, checkpoint: updated });
         }
-        throw new CheckpointRefusedError(
-          "conflict",
-          "the commit is not at the mirror's ref: the mirror is recorded failed",
+        // Already terminal: the recorded state is the answer.
+        return json({ ok: true, checkpoint: record });
+      }
+      // The refusal keeps why: the binding's own failure code, or the closed word for a push
+      // that is not at the ref. `unsupported` is never guessed here: a ref that is not there is
+      // `push_rejected`, and a binding that could not answer is what it said.
+      const refusal = "absence" in held ? "push_rejected" : held.failure;
+      const failed = nextMirror(
+        record.mirror,
+        { status: "failed", failure: refusal },
+        this.#clock(),
+      );
+      if (failed !== undefined) {
+        this.#exec(
+          "UPDATE checkpoint_run SET record = ? WHERE run_id = ?",
+          JSON.stringify(checkpointRecordOf({ ...record, mirror: failed })),
+          input.runId,
         );
       }
+      throw new CheckpointRefusedError(
+        "conflict",
+        "the commit is not confirmed at the mirror's ref (" + refusal + ")",
+      );
     }
     const record = parseCheckpointRecord(row.record);
     const next = nextMirror(

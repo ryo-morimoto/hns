@@ -234,6 +234,19 @@ export function failureOfBinding(error: Error): MirrorFailure {
 }
 
 /**
+ * What a read-back of one ref found.
+ *
+ * @remarks
+ * `held` is the only positive answer. `absence` says the repository or the ref is not there
+ * (the push did not land), which a re-check can settle; `failure` is the closed code the binding
+ * or the history answered with, kept so the record says why instead of "not there".
+ */
+export type MirrorConfirmation =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly absence: "repo" | "ref" }
+  | { readonly ok: false; readonly failure: MirrorFailure };
+
+/**
  * One workspace's Artifacts repositories.
  *
  * @remarks
@@ -322,32 +335,55 @@ export class ArtifactsRepos {
   }
 
   /**
-   * Whether the repository's history holds one commit on one ref.
+   * Whether the repository holds one commit at one ref.
    *
    * @param request - The repository, the ref, and the commit.
-   * @returns True when the ref's log starts with the commit, false when it does not or the
-   * repository or ref is unknown.
+   * @returns `held` when the ref's commit is this one, `absent` when the repository or the ref
+   * is not there, or the closed failure the binding answered with.
    *
    * @remarks
    * This is the Worker's half of the push's confirmation: the machine reads the ref back over git,
-   * and this reads the same ref through the binding. A ref the binding cannot resolve (a
-   * repository without the branch) is `false`, which the caller records as a failed mirror; the
-   * answer is never turned into a success.
+   * and this reads the same ref through the binding.
+   *
+   * **Absent and failed are different answers.** A ref that is not there is the push not having
+   * landed, which a re-check can settle; a binding that could not answer (`network`,
+   * `unauthorized`, `repo_unavailable`) is a failure whose reason the record must keep, so that
+   * a broken binding is not written down as "the commit is not there". Neither is ever turned
+   * into `held`.
+   *
+   * The ref is read through the binding's `log` **without a limit narrowing what counts**: the
+   * log is the ref's own history, so a commit that is merely older in that history is not the
+   * ref's head and does not confirm a push of it. (An existing repository can hold the same
+   * commit from an earlier Run; the ref's first entry is what the push moved.)
    */
   async holds(request: {
     readonly repo: string;
     readonly ref: string;
     readonly commit: string;
-  }): Promise<boolean> {
+  }): Promise<MirrorConfirmation> {
+    let handle: ArtifactsRepoHandle | undefined;
     try {
-      const handle = await this.#handle(request.repo);
-      if (handle === undefined) return false;
-      const log = v.safeParse(RepoLogSchema, await handle.log({ ref: request.ref, limit: 1 }));
-      if (!log.success || log.output.length === 0) return false;
-      return log.output[0]?.hash === request.commit;
-    } catch {
-      return false;
+      handle = await this.#handle(request.repo);
+    } catch (error) {
+      return { ok: false, failure: failureOfBinding(errorOf(error)) };
     }
+    if (handle === undefined) return { ok: false, absence: "repo" };
+    let log: v.InferOutput<typeof RepoLogSchema>;
+    try {
+      // The log page is the head of the history: the first entry is the ref's tip.
+      const parsed = v.safeParse(RepoLogSchema, await handle.log({ ref: request.ref, limit: 1 }));
+      if (!parsed.success) return { ok: false, failure: "unknown" };
+      log = parsed.output;
+    } catch (error) {
+      const failure = failureOfBinding(errorOf(error));
+      // The binding answers NOT_FOUND for a ref (or repository) it cannot resolve: that is an
+      // absence, not a failure. Everything else is the failure it names.
+      if (failure === "repo_unavailable") return { ok: false, absence: "ref" };
+      return { ok: false, failure };
+    }
+    const head = log[0];
+    if (head === undefined) return { ok: false, absence: "ref" };
+    return head.hash === request.commit ? { ok: true } : { ok: false, failure: "push_rejected" };
   }
 
   /** An existing repository's name and remote. */
