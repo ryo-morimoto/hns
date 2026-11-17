@@ -1,12 +1,11 @@
 import { createHash, verify } from "node:crypto";
 import type { KeyObject } from "node:crypto";
+import { signatureMessage } from "@hns/core";
+import type { RequestSignature } from "@hns/core";
 import { verificationKey } from "./control-plane.ts";
 import type { ControlPlaneKeys } from "./control-plane.ts";
 import { MachineRefusal } from "./refusal.ts";
 import type { SignedHeaders } from "./wire.ts";
-
-/** The version tag inside the signed message; changing the fields changes it. */
-const SIGNATURE_VERSION = "hns.machine.request.v1";
 
 /** The default clock window: a request is accepted for a minute either way. */
 export const DEFAULT_WINDOW_MS = 60_000;
@@ -14,26 +13,8 @@ export const DEFAULT_WINDOW_MS = 60_000;
 /** Nonces remembered at once; the oldest is dropped first. */
 const DEFAULT_NONCE_LIMIT = 4096;
 
-/**
- * The exact fields one request signature covers.
- *
- * @remarks
- * Every field is the text that travels on the wire (the seq and timestamp stay
- * decimal strings), because a number formatted differently would sign
- * differently. `bodyHash` is `bodyHash` of the body bytes. The signature proves
- * possession of the device key and binds the method, the path, the body, the
- * connection, and the moment, so none of them can be changed in flight.
- */
-export interface RequestSignature {
-  readonly machineId: string;
-  readonly connection: string;
-  readonly seq: string;
-  readonly timestamp: string;
-  readonly nonce: string;
-  readonly method: string;
-  readonly path: string;
-  readonly bodyHash: string;
-}
+export { signatureMessage } from "@hns/core";
+export type { RequestSignature } from "@hns/core";
 
 /**
  * The sha256 of a request body, in hex.
@@ -43,30 +24,6 @@ export interface RequestSignature {
  */
 export function bodyHash(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
-}
-
-/**
- * The bytes an Ed25519 signature is computed over.
- *
- * @param input - The fields the signature covers.
- * @returns The UTF-8 encoding of a JSON array, so no field can be shifted into
- * another by concatenation.
- */
-export function signatureMessage(input: RequestSignature): Buffer {
-  return Buffer.from(
-    JSON.stringify([
-      SIGNATURE_VERSION,
-      input.machineId,
-      input.connection,
-      input.seq,
-      input.timestamp,
-      input.nonce,
-      input.method,
-      input.path,
-      input.bodyHash,
-    ]),
-    "utf8",
-  );
 }
 
 /**

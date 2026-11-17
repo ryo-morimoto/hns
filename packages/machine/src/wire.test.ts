@@ -60,6 +60,28 @@ test("an unknown operation or a non-JSON body is refused", () => {
   expect(() => parseOperation(encode('{"op":"list","path":42}'))).toThrow(MachineRefusal);
 });
 
+// Catches: a write accepted without the intent hash or the operation id, so the
+// machine could write bytes the journal cannot name.
+test("a write operation carries its project, path, and intent", () => {
+  const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+  const request = {
+    op: "write",
+    projectRoot: "projects/one",
+    path: "a.txt",
+    expectedVersion: "absent",
+    operationId: "op-1",
+    content: "aGVsbG8=",
+    contentHash: "sha256:" + "1".repeat(64),
+  };
+  expect(parseOperation(encode(JSON.stringify(request)))).toStrictEqual(request);
+  expect(() => parseOperation(encode(JSON.stringify({ ...request, contentHash: "nope" })))).toThrow(
+    MachineRefusal,
+  );
+  expect(() => parseOperation(encode(JSON.stringify({ ...request, operationId: "" })))).toThrow(
+    MachineRefusal,
+  );
+});
+
 test("a response body is parsed at the boundary", () => {
   const success = parseResponseBody(
     JSON.stringify({ ok: true, op: "health", result: { root: "/root", pid: 7 } }),

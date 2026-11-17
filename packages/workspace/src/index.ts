@@ -11,6 +11,8 @@ export type {
 } from "./types.ts";
 export { Workspace } from "./workspace.ts";
 export type { FileWrite, RecoveryEntry, WorkspaceOptions } from "./workspace.ts";
+export { FileSystemFailure, applyVersionedWrite, versionOf } from "./files.ts";
+export type { RootIdentity, VersionedWriteInput, WriteOutcome } from "./files.ts";
 export {
   GIT_OBJECT_TYPES,
   buildPack,

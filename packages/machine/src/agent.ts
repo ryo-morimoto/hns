@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { realpath, stat } from "node:fs/promises";
 import * as v from "valibot";
 import { Denied, FileFailure } from "@hns/workspace";
+import type { RootIdentity } from "@hns/workspace";
 import { ConnectionGate } from "./connection.ts";
 import { normalizeRelative } from "./containment.ts";
 import { InFlight, resolveLimits } from "./limits.ts";
@@ -64,6 +65,7 @@ export interface MachineAgent {
 /** What every request of one agent shares. */
 interface AgentContext {
   readonly root: string;
+  readonly identity: RootIdentity;
   readonly limits: Limits;
   readonly verifier: RequestVerifier;
   readonly gate: ConnectionGate;
@@ -104,9 +106,10 @@ function deadlineRefusal(): MachineRefusal {
  */
 export async function startMachineAgent(options: MachineAgentOptions): Promise<MachineAgent> {
   const limits = resolveLimits(options.limits);
-  const root = await canonicalRoot(options.root);
+  const canonical = await canonicalRoot(options.root);
   const context: AgentContext = {
-    root,
+    root: canonical.path,
+    identity: canonical.identity,
     limits,
     verifier: new RequestVerifier({
       machineId: options.machineId,
@@ -154,16 +157,19 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
  * Resolve the root once and refuse an unusable one before any request runs.
  *
  * @param root - The configured root, possibly a symbolic link.
- * @returns The canonical directory the agent serves.
+ * @returns The canonical directory the agent serves and the dev / ino it had at
+ * start, so a replaced root fails closed on a later write.
  * @throws {Error} When the root cannot be resolved or is not a directory.
  */
-async function canonicalRoot(root: string): Promise<string> {
+async function canonicalRoot(
+  root: string,
+): Promise<{ readonly path: string; readonly identity: RootIdentity }> {
   const canonical = await realpath(root).catch((error: Error) => {
     throw new Error(`the machine root cannot be resolved: ${error.message}`);
   });
   const info = await stat(canonical);
   if (!info.isDirectory()) throw new Error("the machine root is not a directory");
-  return canonical;
+  return { path: canonical, identity: { dev: info.dev, ino: info.ino } };
 }
 
 /**
@@ -250,7 +256,13 @@ async function handleRequest(
     const operation = parseOperation(body);
     op = operation.op;
     fsPath = logPathOf(operation);
-    const result = await runOperation(operation, context.root, context.limits, deadline.signal);
+    const result = await runOperation(
+      operation,
+      context.root,
+      context.limits,
+      deadline.signal,
+      context.identity,
+    );
     sendJson(response, { ok: true, op, result }, context.limits);
   } catch (error) {
     if (!(error instanceof Error)) throw error;

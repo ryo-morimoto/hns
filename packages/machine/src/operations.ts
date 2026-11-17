@@ -3,7 +3,9 @@ import { constants } from "node:fs";
 import { lstat, open, readdir } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import type { Dirent } from "node:fs";
-import { FileFailure } from "@hns/workspace";
+import { FileFailure, FileSystemFailure, applyVersionedWrite } from "@hns/workspace";
+import type { RootIdentity } from "@hns/workspace";
+import type { MachineWriteRequest, MachineWriteResult } from "@hns/core";
 import { containInRoot } from "./containment.ts";
 import type { Limits } from "./limits.ts";
 import { MachineRefusal } from "./refusal.ts";
@@ -17,7 +19,12 @@ import type {
 } from "./wire.ts";
 
 /** The result of any operation, before it is serialized. */
-export type OperationResult = HealthResult | StatResult | ReadResult | ListResult;
+export type OperationResult =
+  | HealthResult
+  | StatResult
+  | ReadResult
+  | ListResult
+  | MachineWriteResult;
 
 /**
  * Run one operation against ROOT.
@@ -27,6 +34,8 @@ export type OperationResult = HealthResult | StatResult | ReadResult | ListResul
  * @param limits - The response bound, so a large file is refused before it is read.
  * @param signal - The request's deadline. The operation settles when it fires:
  * reads are aborted, and every other step checks the signal before and after.
+ * @param identity - The root's dev / ino recorded at start; a replaced root
+ * fails closed. The write op checks it, the reads rely on the canonical root.
  * @returns The operation's result, ready to serialize.
  * @throws {Denied} When the path cannot stay inside ROOT.
  * @throws {MachineRefusal} `not_found` for a missing parent, `too_large` for a
@@ -41,6 +50,7 @@ export async function runOperation(
   root: string,
   limits: Limits,
   signal: AbortSignal,
+  identity?: RootIdentity | undefined,
 ): Promise<OperationResult> {
   switch (operation.op) {
     case "health":
@@ -52,6 +62,8 @@ export async function runOperation(
       return await readPath(root, operation.path, limits, signal);
     case "list":
       return await listPath(root, operation.path, signal);
+    case "write":
+      return await writePath(operation, root, identity, signal);
   }
   const unreachable: never = operation;
   return unreachable;
@@ -307,4 +319,81 @@ async function listPath(
     throw fileFailure(error, relativePath);
   }
   return { entries: entries.map((entry) => ({ name: entry.name, kind: kindOfEntry(entry) })) };
+}
+/**
+ * Refuse a file-system failure with the machine's closed vocabulary.
+ *
+ * @param failure - A failure raised before the write touched the target.
+ * @returns The refusal with the same meaning: absence is 404, a permission
+ * problem is 403, a request that cannot be honored is 400, and a broken root or
+ * an undecidable I/O failure is `internal` (never a success).
+ */
+function refusalForFileSystem(failure: FileSystemFailure): MachineRefusal {
+  switch (failure.code) {
+    case "not_found":
+      return new MachineRefusal("not_found", failure.message);
+    case "permission_denied":
+      return new MachineRefusal("forbidden", failure.message);
+    case "too_large":
+      return new MachineRefusal("too_large", failure.message);
+    case "is_directory":
+    case "not_directory":
+    case "invalid":
+    case "exists":
+      return new MachineRefusal("invalid_request", failure.message);
+    default:
+      return new MachineRefusal("internal", failure.message);
+  }
+}
+
+/**
+ * Apply one versioned write below ROOT.
+ *
+ * @param operation - The parsed write: the project, the path, the bytes, and
+ * the version the writer saw.
+ * @param root - The canonical ROOT.
+ * @param identity - The root's dev / ino recorded at start.
+ * @param signal - The request's deadline.
+ * @returns The mutation result plus the normalized path.
+ * @throws {MachineRefusal} `invalid_request` for an unsafe path, an empty
+ * project root, or bytes that do not match the intent hash; `not_found` for a
+ * missing parent; `forbidden` for a symbolic link component; `deadline_exceeded`
+ * once the deadline passes; `internal` for a replaced root or an undecidable
+ * I/O failure.
+ * @throws {Denied} When a component cannot stay inside ROOT.
+ *
+ * @remarks
+ * The write is anchored to directory fds (see `@hns/workspace`'s
+ * `applyVersionedWrite`): `projectRoot` and `path` are validated separately,
+ * the target is re-hashed, and the replacement is a temp in the same directory
+ * renamed from the held parent. The refusal is decided before anything is
+ * written, so a caller can treat every thrown refusal as "not applied".
+ */
+async function writePath(
+  operation: MachineWriteRequest,
+  root: string,
+  identity: RootIdentity | undefined,
+  signal: AbortSignal,
+): Promise<MachineWriteResult> {
+  signal.throwIfAborted();
+  const content = Buffer.from(operation.content, "base64");
+  try {
+    const outcome = await applyVersionedWrite({
+      root,
+      identity,
+      projectRoot: operation.projectRoot,
+      path: operation.path,
+      content,
+      expectedVersion: operation.expectedVersion,
+      contentHash: operation.contentHash,
+      signal,
+    });
+    // The intent id is the Worker's journal key: the write never uses it as a path.
+    return { ...outcome, operationId: operation.operationId };
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (error instanceof MachineRefusal) throw error;
+    if (error instanceof FileSystemFailure) throw refusalForFileSystem(error);
+    throw error;
+  }
 }

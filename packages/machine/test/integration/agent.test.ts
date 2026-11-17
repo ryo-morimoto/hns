@@ -1,11 +1,13 @@
 import { expect, test } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, realpath, symlink, truncate, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, symlink, truncate, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
+import { MachineWriteResultSchema } from "@hns/core";
 import type { JsonValue, ObsLogEntry } from "@hns/core";
+import * as v from "valibot";
 import {
   parseHealthResult,
   parseListResult,
@@ -417,6 +419,97 @@ test("reading and listing inside the root returns the bytes and their version", 
         resultOf(await fixture.call({ body: JSON.stringify({ op: "list", path: "sub" }) })),
       );
       expect(nested.entries).toStrictEqual([{ name: "b.txt", kind: "file" }]);
+    },
+  );
+});
+
+// Catches: a write op that trusts the request's version, resolves a path outside the
+// project, or leaves a replaced target behind when it reports a conflict.
+test("a signed write applies once, conflicts on a stale version, and refuses an escape", async () => {
+  await withAgent(
+    async ({ root }) => {
+      await mkdir(join(root, "one"));
+      await mkdir(join(root, "two"));
+      await writeFile(join(root, "two", "secret.txt"), "secret");
+      await symlink(join(root, "two"), join(root, "one", "link"));
+    },
+    async (fixture) => {
+      const versionOf = (text: string): string =>
+        "sha256:" + createHash("sha256").update(text).digest("hex");
+      const encoded = (text: string): string => Buffer.from(text).toString("base64");
+      interface WriteOverrides {
+        readonly projectRoot?: string;
+        readonly path?: string;
+        readonly expectedVersion?: string;
+        readonly operationId?: string;
+        readonly content?: string;
+        readonly contentHash?: string;
+      }
+      const write = (overrides: WriteOverrides = {}): string =>
+        JSON.stringify({
+          op: "write",
+          projectRoot: "one",
+          path: "a.txt",
+          expectedVersion: "absent",
+          operationId: "op-1",
+          content: encoded("hello"),
+          contentHash: versionOf("hello"),
+          ...overrides,
+        });
+
+      const first = await fixture.call({ body: write() });
+      expect(first.status).toBe(200);
+      const applied = v.parse(MachineWriteResultSchema, resultOf(first));
+      expect(applied).toStrictEqual({
+        status: "applied",
+        operationId: "op-1",
+        version: versionOf("hello"),
+        path: "one/a.txt",
+      });
+      expect(await readFile(join(fixture.root, "one", "a.txt"), "utf8")).toBe("hello");
+      const names = await readdir(join(fixture.root, "one"));
+      expect(names.filter((name) => name.startsWith(".hns-tmp-"))).toStrictEqual([]);
+
+      // A retry after a lost answer sees its own bytes and settles without a rewrite.
+      const retry = await fixture.call({ body: write() });
+      expect(v.parse(MachineWriteResultSchema, resultOf(retry))).toStrictEqual(applied);
+
+      const stale = await fixture.call({
+        body: write({
+          operationId: "op-2",
+          expectedVersion: versionOf("other"),
+          content: encoded("other"),
+          contentHash: versionOf("other"),
+        }),
+      });
+      expect(stale.status).toBe(200);
+      const conflicted = v.parse(MachineWriteResultSchema, resultOf(stale));
+      expect(conflicted).toStrictEqual({
+        status: "conflict",
+        operationId: "op-2",
+        currentVersion: versionOf("hello"),
+        path: "one/a.txt",
+      });
+      expect(await readFile(join(fixture.root, "one", "a.txt"), "utf8")).toBe("hello");
+
+      for (const body of [
+        write({ path: "../two/secret.txt" }),
+        write({ projectRoot: "../two", path: "secret.txt" }),
+        write({ projectRoot: "one/link", path: "secret.txt" }),
+        write({ contentHash: versionOf("other") }),
+      ]) {
+        const answer = await fixture.call({ body });
+        expect(answer.status, body).toBe(400);
+      }
+      expect(await readFile(join(fixture.root, "two", "secret.txt"), "utf8")).toBe("secret");
+      expect(
+        (await readdir(join(fixture.root, "one"))).filter((n) => n.startsWith(".hns-tmp-")),
+      ).toStrictEqual([]);
+
+      const read = parseReadResult(
+        resultOf(await fixture.call({ body: JSON.stringify({ op: "read", path: "one/a.txt" }) })),
+      );
+      expect(read.version).toBe(versionOf("hello"));
     },
   );
 });

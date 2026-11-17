@@ -1,28 +1,12 @@
 import * as v from "valibot";
 import type { IncomingHttpHeaders } from "node:http";
-import type { JsonValue } from "@hns/core";
+import { MachineReadResultSchema, MachineWriteRequestSchema } from "@hns/core";
+import type { JsonValue, MachineReadResult, MachineWriteRequest } from "@hns/core";
 import { MachineRefusal, REFUSAL_CODES } from "./refusal.ts";
 import type { RefusalCode } from "./refusal.ts";
 
-/**
- * The headers that carry one signed request.
- *
- * @remarks
- * The names are the wire contract: whatever calls the agent must spell them the
- * same. `x-hns-seq` names the connection instance, not the request count, so
- * every request of one connection carries it unchanged.
- */
-export const SIGNED_HEADERS = [
-  "x-hns-machine",
-  "x-hns-connection",
-  "x-hns-seq",
-  "x-hns-timestamp",
-  "x-hns-nonce",
-  "x-hns-signature",
-] as const;
-
-/** One signed header name. */
-export type SignedHeaderName = (typeof SIGNED_HEADERS)[number];
+export { SIGNED_HEADERS } from "@hns/core";
+export type { SignedHeaderName } from "@hns/core";
 
 /** The parsed headers of one signed request, each field still on the wire spelling. */
 export interface SignedHeaders {
@@ -83,7 +67,7 @@ export function parseSignedHeaders(headers: IncomingHttpHeaders): SignedHeaders 
 }
 
 /** The operations the agent answers; each is one closed member. */
-export const OPERATION_NAMES = ["health", "stat", "read", "list"] as const;
+export const OPERATION_NAMES = ["health", "stat", "read", "list", "write"] as const;
 
 /** One operation name. */
 export type OperationName = (typeof OPERATION_NAMES)[number];
@@ -93,13 +77,17 @@ export type Operation =
   | { readonly op: "health" }
   | { readonly op: "stat"; readonly path: string }
   | { readonly op: "read"; readonly path: string }
-  | { readonly op: "list"; readonly path: string };
+  | { readonly op: "list"; readonly path: string }
+  | MachineWriteRequest;
 
-const OperationSchema: v.GenericSchema<unknown, Operation> = v.variant("op", [
-  v.object({ op: v.literal("health") }),
-  v.object({ op: v.literal("stat"), path: v.string() }),
-  v.object({ op: v.literal("read"), path: v.string() }),
-  v.object({ op: v.literal("list"), path: v.string() }),
+const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
+  v.variant("op", [
+    v.object({ op: v.literal("health") }),
+    v.object({ op: v.literal("stat"), path: v.string() }),
+    v.object({ op: v.literal("read"), path: v.string() }),
+    v.object({ op: v.literal("list"), path: v.string() }),
+  ]),
+  MachineWriteRequestSchema,
 ]);
 
 /**
@@ -145,12 +133,7 @@ export type StatResult =
     };
 
 /** What the read operation reports: the bytes as base64 and their sha256. */
-export type ReadResult = {
-  readonly path: string;
-  readonly size: number;
-  readonly version: string;
-  readonly content: string;
-};
+export type ReadResult = MachineReadResult;
 
 /** One entry of a listing. */
 export type ListEntry = { readonly name: string; readonly kind: MachineFileKind };
@@ -233,12 +216,7 @@ const StatResultSchema: v.GenericSchema<unknown, StatResult> = v.variant("exists
   }),
 ]);
 
-const ReadResultSchema: v.GenericSchema<unknown, ReadResult> = v.object({
-  path: v.string(),
-  size: v.number(),
-  version: v.string(),
-  content: v.string(),
-});
+const ReadResultSchema: v.GenericSchema<unknown, ReadResult> = MachineReadResultSchema;
 
 const ListResultSchema: v.GenericSchema<unknown, ListResult> = v.object({
   entries: v.array(v.object({ name: v.string(), kind: v.picklist(MACHINE_FILE_KINDS) })),
