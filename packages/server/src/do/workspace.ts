@@ -2,12 +2,15 @@ import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/stor
 import {
   ABSENT_VERSION,
   CHECKPOINT_PACK_CONTENT_TYPE,
+  MAX_CHECKPOINT_PACK_BYTES,
+  CheckpointPrepareAnswerSchema,
   CheckpointPrepareResultSchema,
   MACHINE_WRITE_UNKNOWN_REASONS,
   MIRROR_FAILURES,
   MIRROR_STATUSES,
   OperationIdSchema,
   isoTimestamp,
+  type CheckpointPrepareAnswer,
   type CheckpointPrepareResult,
   type CheckpointRecord,
   type LeaseRefusal,
@@ -15,6 +18,7 @@ import {
   type WorkspaceLease,
 } from "@hns/core";
 import type { JournalOutcomeEntry } from "@hns/store";
+import { mirrorRef } from "@hns/workspace/mirror";
 import { checkpointPackKey } from "@hns/workspace/objects";
 import * as v from "valibot";
 import {
@@ -25,6 +29,7 @@ import {
   packUploadAnswer,
   parseCheckpointRecord,
 } from "../checkpoint/flow.ts";
+import { ArtifactsRepos, artifactsRepoName, type ArtifactsBinding } from "../artifacts/repos.ts";
 import { signedHeadersOf } from "../checkpoint/agent-wire.ts";
 import { BODY_HASH_HEADER, sha256Hex, verifyDeviceRequest } from "../checkpoint/signature.ts";
 import { R2PackTransport, type PackBucket } from "../checkpoint/transport.ts";
@@ -73,6 +78,25 @@ export interface WorkspaceOptions {
    * a pack endpoint answers `unavailable` instead of dropping the bytes.
    */
   readonly packs?: PackBucket | undefined;
+  /**
+   * The Artifacts repository binding a mirror target is issued from; defaults to `ARTIFACTS`.
+   *
+   * @remarks
+   * A seam like `packs`: the unit layer supplies a fake that records what it was asked, and
+   * production supplies the Worker's binding. Absent (and no `ARTIFACTS`) means the mirror is
+   * never offered a target: a run waits at `pending` instead of being handed a remote that does
+   * not exist.
+   */
+  readonly artifacts?: ArtifactsBinding | undefined;
+  /**
+   * Whether the Artifacts mirror is switched on; defaults to `ARTIFACTS_MIRROR`.
+   *
+   * @remarks
+   * The kill switch (0249 adds the workspace override and the metrics). Off means a prepare
+   * hands out no target and no mirror is attempted, so the run stays `pending` and its review is
+   * the machine's; a checkpoint's acknowledgement never depends on the switch.
+   */
+  readonly artifactsMirror?: boolean | undefined;
 }
 
 /**
@@ -97,6 +121,22 @@ export interface WorkspaceBindings {
    * that choice); the key is what authenticates the Worker to whichever machine it calls.
    */
   readonly HNS_CONTROL_PLANE_KEY?: string | undefined;
+  /**
+   * The Artifacts namespace binding that holds the workspace's mirror repository.
+   *
+   * @remarks
+   * The Worker's binding, structurally declared so a fake and the real binding both fit. Absent
+   * fails the mirror closed (no target is issued) and never the checkpoint path.
+   */
+  readonly ARTIFACTS?: ArtifactsBinding | undefined;
+  /**
+   * The mirror's kill switch (`"on"`/`"off"`); absent or anything else is off.
+   *
+   * @remarks
+   * A text binding the deploy sets. The smallest switch 0246 needs: it stops issuing targets and
+   * the mirror is not attempted. The workspace override and the metrics are the follow-up.
+   */
+  readonly ARTIFACTS_MIRROR?: string | undefined;
 }
 
 interface StoredLease {
@@ -396,6 +436,14 @@ export class Workspace {
   readonly #files: MachineFiles | undefined;
   /** Where packs go; undefined fails the checkpoint path closed at the RPC. */
   readonly #packs: R2PackTransport | undefined;
+  /**
+   * The Artifacts mirror, or undefined when it is switched off or unbound.
+   *
+   * @remarks
+   * The mirror never decides a checkpoint's answer: undefined here means a prepare hands out no
+   * target and a run waits at `pending`, which is a run whose review is the machine's.
+   */
+  readonly #mirror: ArtifactsRepos | undefined;
   /** The queue that serializes the calls which can decide the project binding. */
   #bindingQueue: Promise<void> = Promise.resolve();
   readonly #ready: Promise<void>;
@@ -420,6 +468,12 @@ export class Workspace {
     this.#files = options.files ?? machineFilesFrom(options);
     const packs = options.packs ?? options.OBJECTS;
     this.#packs = packs === undefined ? undefined : new R2PackTransport(packs);
+    const artifacts = options.artifacts ?? options.ARTIFACTS;
+    const switchedOn = options.artifactsMirror ?? mirrorSwitchFrom(options);
+    this.#mirror =
+      switchedOn && artifacts !== undefined
+        ? new ArtifactsRepos(artifacts, this.#clock)
+        : undefined;
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -823,11 +877,13 @@ export class Workspace {
     const stored = this.#checkpointRow(input.runId);
     if (stored !== undefined && stored.record !== null) {
       const record = parseCheckpointRecord(stored.record);
-      return json({
-        ok: true,
-        checkpoint: prepareAnswerOf(record),
-        watermark: this.#watermarkOf(),
-      });
+      const retried = await this.#prepareAnswer(
+        input.workspaceId,
+        prepareAnswerOf(record),
+        this.#watermarkOf(),
+        record.mirror,
+      );
+      return json({ ok: true, ...retried });
     }
 
     const answer = await files.checkpoint(
@@ -858,7 +914,65 @@ export class Workspace {
       return failure("internal", "The machine answered a different checkpoint.");
     }
     this.#putCheckpointPrepare(prepare);
-    return json({ ok: true, checkpoint: prepare, watermark: this.#watermarkOf() });
+    // `ok` is the RPC envelope, outside the contract's answer; the parse at the boundary is the
+    // contract's, so a field it does not name cannot reach the machine.
+    const withTarget = await this.#prepareAnswer(
+      input.workspaceId,
+      prepare,
+      this.#watermarkOf(),
+      initialMirror(this.#clock(), prepare.packBytes, prepare.maxBlobBytes, this.#packLimit()),
+    );
+    return json({ ok: true, ...withTarget });
+  }
+
+  /**
+   * Build a prepare answer, with the mirror target the run may be pushed with.
+   *
+   * @param workspaceId - The workspace the object serves; it names the mirror's repository.
+   * @param checkpoint - The machine's metadata (or the record's, on a retried prepare).
+   * @param watermark - The Journal's seq at the time of the answer.
+   * @param mirror - The run's mirror state; only `pending` is offered a target.
+   * @returns The answer; `mirror` is absent whenever no push should be attempted.
+   *
+   * @remarks
+   * Three things keep a target out of an answer: the switch is off or the binding is absent
+   * ({@link #mirror} undefined), the run is over Artifacts' limits (`skipped`), or the state has
+   * already settled. A binding failure is `repo_unavailable` and the answer simply has no
+   * target: the checkpoint is already the machine's answer, and the ack must not wait for
+   * Artifacts. The token is in this answer and nowhere else; nothing here writes, logs, or emits
+   * it.
+   */
+  async #prepareAnswer(
+    workspaceId: string,
+    checkpoint: CheckpointPrepareResult,
+    watermark: number,
+    mirror: CheckpointRecord["mirror"],
+  ): Promise<CheckpointPrepareAnswer> {
+    const repos = this.#mirror;
+    if (repos === undefined || mirror.status !== "pending") {
+      const answer: CheckpointPrepareAnswer = { checkpoint, watermark };
+      return v.parse(CheckpointPrepareAnswerSchema, answer);
+    }
+    const issued = await repos.target({
+      repo: artifactsRepoName(workspaceId),
+      ref: mirrorRef(checkpoint.runId),
+      now: this.#clock(),
+    });
+    if (!issued.ok) {
+      // The failure code, never the binding's message or a token: enough to see which hop failed.
+      console.error("workspace: the mirror target was not issued", issued.failure);
+      return v.parse(CheckpointPrepareAnswerSchema, { checkpoint, watermark });
+    }
+    return v.parse(CheckpointPrepareAnswerSchema, {
+      checkpoint,
+      watermark,
+      mirror: issued.target,
+    });
+  }
+
+  /** The pack limit the mirror's initial state reads; the contract's 64 MiB when unbound. */
+  #packLimit(): number {
+    return this.#packs?.maxBytes ?? MAX_CHECKPOINT_PACK_BYTES;
   }
 
   /**
@@ -1059,6 +1173,40 @@ export class Workspace {
     if (row === undefined || row.record === null) {
       return failure("not_found", "The Run has no completed checkpoint.");
     }
+    if (input.status === "mirrored") {
+      // The Worker reads the ref back itself: a machine that says "mirrored" is not the proof,
+      // and the binding's log answering another commit (or nothing) is recorded as a failed
+      // mirror, never rounded to the state the machine claimed.
+      const mirror = this.#mirror;
+      const record = parseCheckpointRecord(row.record);
+      if (mirror === undefined) {
+        return failure("unavailable", "The Artifacts mirror is not configured.");
+      }
+      const held = await mirror.holds({
+        repo: artifactsRepoName(input.workspaceId),
+        ref: mirrorRef(input.runId),
+        commit: record.commit,
+      });
+      if (!held) {
+        // Record the failure the refusal implies; the ack of the checkpoint is not affected.
+        const failed = nextMirror(
+          record.mirror,
+          { status: "failed", failure: "unknown" },
+          this.#clock(),
+        );
+        if (failed !== undefined) {
+          this.#exec(
+            "UPDATE checkpoint_run SET record = ? WHERE run_id = ?",
+            JSON.stringify(checkpointRecordOf({ ...record, mirror: failed })),
+            input.runId,
+          );
+        }
+        throw new CheckpointRefusedError(
+          "conflict",
+          "the commit is not at the mirror's ref: the mirror is recorded failed",
+        );
+      }
+    }
     const record = parseCheckpointRecord(row.record);
     const next = nextMirror(
       record.mirror,
@@ -1066,6 +1214,13 @@ export class Workspace {
       this.#clock(),
     );
     if (next === undefined) {
+      if (record.mirror.status === input.status) {
+        // The same state again, after an answer was lost: the recorded state is the answer, so a
+        // retried report is idempotent instead of a conflict the caller has to interpret. A
+        // `failed` row keeps its failure only when the retry names the same one; a different
+        // reason is a conflict, because it would rewrite why the mirror failed.
+        if (record.mirror.failure === input.failure) return json({ ok: true, checkpoint: record });
+      }
       throw new CheckpointRefusedError(
         "conflict",
         "the mirror does not move from " + record.mirror.status + " to " + input.status,
@@ -1549,6 +1704,20 @@ function outcomeResponse(entry: JournalOutcomeEntry): Response {
  * Both bindings are needed: the URL and the control-plane key (D100). A missing one is not
  * defaulted; the file faces fail closed with 503 until 0148 supplies the registry entry.
  */
+/**
+ * The mirror's kill switch as the deploy sets it.
+ *
+ * @param bindings - The Worker environment the object was constructed with.
+ * @returns True only for `"on"`; anything else (absent, empty, a typo) is off.
+ *
+ * @remarks
+ * Fail closed: a switch that cannot be read is off, because the mirror is an optional
+ * convenience and a run whose mirror is off is still checkpointed.
+ */
+function mirrorSwitchFrom(bindings: WorkspaceBindings): boolean {
+  return bindings.ARTIFACTS_MIRROR === "on";
+}
+
 function machineFilesFrom(bindings: WorkspaceBindings): MachineFiles | undefined {
   const agentUrl = bindings.HNS_AGENT_URL;
   const controlPlaneKey = bindings.HNS_CONTROL_PLANE_KEY;

@@ -2,21 +2,25 @@ import * as v from "valibot";
 import { expect, expectTypeOf, test } from "vitest";
 import { isoTimestamp } from "./codecs.ts";
 import {
+  ARTIFACTS_MAX_BLOB_BYTES,
   CHECKPOINT_PACK_CONTENT_TYPE,
   MIRROR_FAILURES,
   MIRROR_STATUSES,
   MIRROR_TRANSITIONS,
   MAX_CHECKPOINT_PACK_BYTES,
   CheckpointPackUploadResultSchema,
+  CheckpointPrepareAnswerSchema,
   CheckpointPrepareResultSchema,
   CheckpointRecordSchema,
   MirrorStateSchema,
   canMirrorTransition,
+  fitsArtifacts,
   fitsCheckpointPack,
   mirrorTargets,
 } from "./checkpoint.ts";
 import type {
   CheckpointPackUploadResult,
+  CheckpointPrepareAnswer,
   CheckpointPrepareResult,
   CheckpointRecord,
   MirrorFailure,
@@ -190,6 +194,58 @@ test("the prepare and upload answers are metadata only", () => {
   expect(() => v.parse(CheckpointPrepareResultSchema, { ...prepare, objectCount: 1.5 })).toThrow(
     v.ValiError,
   );
+});
+
+// Catches: the Artifacts file limit drifting from 32 MiB, or a run over it being offered a target
+// the push would then be refused for.
+test("a run fits Artifacts only when its pack and its largest blob do", () => {
+  expect(ARTIFACTS_MAX_BLOB_BYTES).toBe(32 * 1024 * 1024);
+  expect(fitsArtifacts(1024, ARTIFACTS_MAX_BLOB_BYTES)).toBe(true);
+  expect(fitsArtifacts(1024, ARTIFACTS_MAX_BLOB_BYTES + 1)).toBe(false);
+  expect(fitsArtifacts(MAX_CHECKPOINT_PACK_BYTES, 0)).toBe(true);
+  expect(fitsArtifacts(MAX_CHECKPOINT_PACK_BYTES + 1, 0)).toBe(false);
+});
+
+// Catches: a prepare answer that loses the mirror target at the boundary (so the machine can never
+// push), or one that accepts a ref Artifacts' binding cannot resolve.
+test("a prepare answer carries the mirror target and nothing else it is offered", () => {
+  const target: MirrorTarget = {
+    remote: "https://git.example/git/ns/ws-1.git",
+    token: "art_v2_x_secret",
+    ref: "refs/heads/hns/run/run-1",
+    expiresAt: isoTimestamp("2026-11-18T00:15:00.000Z"),
+  };
+  const answer: CheckpointPrepareAnswer = {
+    checkpoint: {
+      runId: record.runId,
+      ref: record.ref,
+      commit: record.commit,
+      packKey: record.packKey,
+      objectCount: record.objectCount,
+      packBytes: record.packBytes,
+      maxBlobBytes: record.maxBlobBytes,
+      created: true,
+    },
+    watermark: 0,
+    mirror: target,
+  };
+  const parsed = v.parse(CheckpointPrepareAnswerSchema, answer);
+  expect(parsed.mirror).toStrictEqual(target);
+  expect(Object.keys(parsed).sort()).toStrictEqual(["checkpoint", "mirror", "watermark"]);
+  // Without a target the answer is still the contract's: the mirror is an optional field.
+  // An answer without a target keeps the key as `undefined` (the schema's optional field), which
+  // JSON omits on the wire; what matters is that it is not a target.
+  expect(
+    v.parse(CheckpointPrepareAnswerSchema, { ...answer, mirror: undefined }).mirror,
+  ).toBeUndefined();
+  for (const ref of ["refs/hns/checkpoints/run-1", "hns/run/run-1", "refs/tags/hns-run-1"]) {
+    expect(() =>
+      v.parse(CheckpointPrepareAnswerSchema, { ...answer, mirror: { ...target, ref } }),
+    ).toThrow(v.ValiError);
+  }
+  expect(() =>
+    v.parse(CheckpointPrepareAnswerSchema, { ...answer, mirror: { ...target, token: "" } }),
+  ).toThrow(v.ValiError);
 });
 
 // Compile-time only: a failure code stays in the closed set, so a record cannot name a free word.

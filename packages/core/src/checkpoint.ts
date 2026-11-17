@@ -211,6 +211,30 @@ export const MAX_CHECKPOINT_PACK_BYTES = 64 * 1024 * 1024;
 export const CHECKPOINT_PACK_CONTENT_TYPE = "application/x-git-pack";
 
 /**
+ * The largest single file Artifacts accepts: 32 MiB.
+ *
+ * @remarks
+ * Artifacts refuses a push whose largest blob is over this, however small the pack is. The
+ * mirror reads it against the machine's `maxBlobBytes` and records `skipped` with `too_large`
+ * before any push, so a run that cannot be mirrored is not retried into the same refusal.
+ */
+export const ARTIFACTS_MAX_BLOB_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Whether one checkpoint can be mirrored to Artifacts.
+ *
+ * @param packBytes - The pack's size.
+ * @param maxBlobBytes - The largest blob in the pack.
+ * @returns True when both are within Artifacts' limits.
+ *
+ * @remarks
+ * The one place the two limits are compared, so the Workspace object's initial state and the
+ * machine's pre-push check cannot disagree. A value exactly at a limit fits.
+ */
+export const fitsArtifacts = (packBytes: number, maxBlobBytes: number): boolean =>
+  fitsCheckpointPack(packBytes) && maxBlobBytes <= ARTIFACTS_MAX_BLOB_BYTES;
+
+/**
  * Whether a pack is within {@link MAX_CHECKPOINT_PACK_BYTES}.
  *
  * @param bytes - The pack's size.
@@ -222,6 +246,23 @@ export const CHECKPOINT_PACK_CONTENT_TYPE = "application/x-git-pack";
  * accepted.
  */
 export const fitsCheckpointPack = (bytes: number): boolean => bytes <= MAX_CHECKPOINT_PACK_BYTES;
+
+interface CheckpointPrepareAnswerFields {
+  readonly checkpoint: CheckpointPrepareResult;
+  readonly watermark: number;
+  readonly mirror?: MirrorTarget | undefined;
+}
+
+/**
+ * What a prepare answers: the machine's metadata, the Journal watermark, and the mirror target.
+ *
+ * @remarks
+ * The Workspace object's answer to `POST /rpc/checkpoint/prepare`. `mirror` is present only
+ * when the mirror is switched on and the run is within Artifacts' limits, and it is the **one**
+ * place {@link MirrorTarget} travels: it is not stored, logged, or put in an event, so the
+ * schema below is the boundary that keeps the token out of everything that outlives the answer.
+ */
+export interface CheckpointPrepareAnswer extends CheckpointPrepareAnswerFields {}
 
 /** A non-empty string. */
 const nonEmpty = v.pipe(v.string(), v.minLength(1));
@@ -259,6 +300,29 @@ export const CheckpointPrepareResultSchema: v.GenericSchema<unknown, CheckpointP
     packBytes: count,
     maxBlobBytes: count,
     created: v.boolean(),
+  });
+
+/**
+ * The mirror target as it travels to the machine, parsed where it is read.
+ *
+ * @remarks
+ * This is a **transient** schema: it parses an in-flight answer, and nothing parses a stored or
+ * logged value with it. `ref` is a full ref name under `refs/heads/`, because Artifacts'
+ * binding resolves only branches and tags and a fork carries only those.
+ */
+const MirrorTargetSchema: v.GenericSchema<unknown, MirrorTarget> = v.object({
+  remote: nonEmpty,
+  token: nonEmpty,
+  ref: v.pipe(nonEmpty, v.startsWith("refs/heads/")),
+  expiresAt: IsoTimestampSchema,
+});
+
+/** The prepare answer as it arrives, parsed at the boundary. */
+export const CheckpointPrepareAnswerSchema: v.GenericSchema<unknown, CheckpointPrepareAnswer> =
+  v.object({
+    checkpoint: CheckpointPrepareResultSchema,
+    watermark: count,
+    mirror: v.optional(MirrorTargetSchema),
   });
 
 /** The pack upload answer as it arrives, parsed at the boundary. */

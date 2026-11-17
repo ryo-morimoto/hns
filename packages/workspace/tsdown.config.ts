@@ -7,6 +7,8 @@ export default defineConfig({
   entry: [
     "src/index.ts",
     "src/checkpoint.ts",
+    "src/mirror.ts",
+    "src/mirror-push.ts",
     "src/objects.ts",
     "src/pack.ts",
     "src/sandbox.ts",
@@ -16,7 +18,15 @@ export default defineConfig({
   platform: "node",
   root: "src",
   dts: {
-    entry: ["src/index.ts", "src/checkpoint.ts", "src/objects.ts", "src/pack.ts", "src/sandbox.ts"],
+    entry: [
+      "src/index.ts",
+      "src/checkpoint.ts",
+      "src/mirror.ts",
+      "src/mirror-push.ts",
+      "src/objects.ts",
+      "src/pack.ts",
+      "src/sandbox.ts",
+    ],
   },
   sourcemap: true,
   clean: true,

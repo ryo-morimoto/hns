@@ -148,6 +148,32 @@ test("staging and production require a hostname", () => {
   expect(customDomainFor("development", "hns.example.com")).toBeUndefined();
 });
 
+// Catches: the Workspace object reading env.ARTIFACTS without a declared Artifacts binding, or the
+// mirror switch silently defaulting to on because the binding is missing.
+test("the worker binds the Artifacts namespace and the mirror's switch", () => {
+  const previous = process.env.ARTIFACTS_MIRROR;
+  try {
+    delete process.env.ARTIFACTS_MIRROR;
+    const worker = workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3"));
+    expect(worker.env.ARTIFACTS).toStrictEqual({ type: "artifacts", namespace: "hns-prod" });
+    // Off unless the deploy says otherwise: a beta dependency is never switched on by omission.
+    expect(worker.env.ARTIFACTS_MIRROR).toStrictEqual({ type: "text", value: "off" });
+    process.env.ARTIFACTS_MIRROR = "on";
+    expect(
+      workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3")).env
+        .ARTIFACTS_MIRROR,
+    ).toStrictEqual({ type: "text", value: "on" });
+    process.env.ARTIFACTS_MIRROR = "yes";
+    expect(
+      workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3")).env
+        .ARTIFACTS_MIRROR,
+    ).toStrictEqual({ type: "text", value: "off" });
+  } finally {
+    if (previous === undefined) delete process.env.ARTIFACTS_MIRROR;
+    else process.env.ARTIFACTS_MIRROR = previous;
+  }
+});
+
 // Catches: the deploy project pointing at a stale or missing asset directory.
 test("the deploy project serves the built web app from deploy/assets", () => {
   expect(buildSettings.assetsDirectory).toBe("../../deploy/assets");

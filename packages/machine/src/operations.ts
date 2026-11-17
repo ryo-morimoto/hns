@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir, stat } from "node:fs/promises";
@@ -7,7 +8,10 @@ import { FileFailure, FileSystemFailure, applyVersionedWrite } from "@hns/worksp
 import type { RootIdentity } from "@hns/workspace";
 import { CheckpointError, checkpointRun } from "@hns/workspace/checkpoint";
 import type { Checkpoint } from "@hns/workspace/checkpoint";
-import type { MachineWriteRequest, MachineWriteResult } from "@hns/core";
+import { mirrorRef } from "@hns/workspace/mirror";
+import { pushCheckpoint } from "@hns/workspace/mirror-push";
+import { GIT_OBJECT_TYPES, type GitObject, type GitObjectType } from "@hns/workspace/objects";
+import { fitsCheckpointPack, type MachineWriteRequest, type MachineWriteResult } from "@hns/core";
 import { containInRoot } from "./containment.ts";
 import type { Limits } from "./limits.ts";
 import { MachineRefusal } from "./refusal.ts";
@@ -17,6 +21,8 @@ import type {
   HealthResult,
   ListResult,
   MachineFileKind,
+  MirrorRequest,
+  MirrorResult,
   Operation,
   ReadResult,
   StatResult,
@@ -58,7 +64,8 @@ export type OperationResult =
   | ReadResult
   | ListResult
   | MachineWriteResult
-  | CheckpointResult;
+  | CheckpointResult
+  | MirrorResult;
 
 /**
  * One checkpoint at a time per root and Run.
@@ -129,6 +136,8 @@ export async function runOperation(
       return await writePath(operation, root, identity, signal);
     case "checkpoint":
       return await checkpointPath(operation, root, identity, signal);
+    case "mirror":
+      return await mirrorPath(operation, root, identity, signal);
   }
   const unreachable: never = operation;
   return unreachable;
@@ -216,6 +225,198 @@ async function checkpointPath(
     maxBlobBytes: checkpoint.maxBlobBytes,
     created: checkpoint.created,
   };
+}
+
+/**
+ * Push one Run's checkpoint commit to Artifacts.
+ *
+ * @param operation - The remote, the token, the ref, the Run, and the commit.
+ * @param root - The canonical ROOT, which holds the repository the commit lives in.
+ * @param identity - The root's dev / ino recorded at start; a replaced root fails closed.
+ * @param signal - The request's deadline.
+ * @returns `mirrored` with the commit only when the push landed **and** was read back at the
+ * remote; `skipped` when the ref's commit cannot be packed within Artifacts' push limit; else
+ * `failed` with one of the contract's failure codes.
+ * @throws {MachineRefusal} `invalid_request` for a ref that is not the Run's branch,
+ * `internal` for a replaced root, `deadline_exceeded` once the deadline passes.
+ *
+ * @remarks
+ * The push is never a reason to fail the checkpoint: every expected failure is a value here, and
+ * the Worker records it as the mirror's state after the checkpoint was already acknowledged
+ * (0245's invariant).
+ *
+ * The commit is measured before anything leaves: the object closure is packed with the
+ * checkpoint's own packer and compared with the contract's 64 MiB, so a run that Artifacts would
+ * refuse is answered `skipped` without a push. The 32 MiB per-file limit cannot be re-measured
+ * here (it needs the machine's checkpoint metadata), so the Worker decides that one before it
+ * hands out a target; this check is the pack's.
+ *
+ * The ref must be the one `mirrorRef` derives from the Run: a Worker that sent another ref would
+ * be pushing a commit under a branch the review cannot find.
+ */
+async function mirrorPath(
+  operation: MirrorRequest,
+  root: string,
+  identity: RootIdentity | undefined,
+  signal: AbortSignal,
+): Promise<MirrorResult> {
+  signal.throwIfAborted();
+  if (operation.ref !== mirrorRef(operation.runId)) {
+    throw new MachineRefusal("invalid_request", "the ref is not the Run's mirror branch");
+  }
+  await assertRootIdentity(root, identity);
+  const packed = await runGitPack(root, operation.commit).catch(() => undefined);
+  if (packed === undefined) return { status: "failed", failure: "unknown", ref: operation.ref };
+  if (!fitsCheckpointPack(packed)) return { status: "skipped", reason: "too_large" };
+  const outcome = await pushCheckpoint({
+    root,
+    remote: operation.remote,
+    token: operation.token,
+    ref: operation.ref,
+    runId: operation.runId,
+    commit: operation.commit,
+  });
+  signal.throwIfAborted();
+  return outcome.status === "mirrored"
+    ? { status: "mirrored", ref: outcome.ref, commit: outcome.commit }
+    : { status: "failed", failure: outcome.failure, ref: outcome.ref };
+}
+
+/**
+ * Pack the object closure of one commit and answer the pack's size.
+ *
+ * @param root - The canonical ROOT.
+ * @param commit - The commit to pack.
+ * @returns The pack's byte length.
+ * @throws {CheckpointError} when git cannot list or read the closure.
+ *
+ * @remarks
+ * The same packer the checkpoint uses (`@hns/workspace/objects`), so a run the checkpoint could
+ * send is measured the way the upload measured it. Nothing here keeps the bytes: only the size
+ * decides whether Artifacts would accept the push. The closure is read with the same
+ * `rev-list` / `cat-file --batch` pair the checkpoint reads it with, under the same repository
+ * variables removed, so measuring never reports a different pack than the upload sent.
+ */
+async function runGitPack(root: string, commit: string): Promise<number> {
+  const { buildPack } = await import("@hns/workspace/objects");
+  const ids = (await runMirrorGit(root, ["rev-list", "--objects", "--no-object-names", commit]))
+    .toString("utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (ids.length === 0) throw new CheckpointError("git-failed", "the commit reaches no object");
+  const output = await runMirrorGit(
+    root,
+    ["cat-file", "--batch"],
+    Buffer.from(ids.join("\n") + "\n"),
+  );
+  const objects = parseBatchObjects(output);
+  const pack = await buildPack(objects);
+  return pack.bytes.byteLength;
+}
+
+/**
+ * Run git in `root` with the repository-location variables of the caller removed.
+ *
+ * @param root - The canonical ROOT.
+ * @param args - git's arguments, after `-C root`.
+ * @param input - Bytes for git's stdin, when the call reads a list.
+ * @returns git's stdout.
+ * @throws {CheckpointError} when git fails; the message names the subcommand and git's stderr.
+ *
+ * @remarks
+ * The caller's `GIT_DIR` and company would make git describe a different repository, and the
+ * agent may be started from a process (a commit hook) that has them set. Removing them is the
+ * same rule the checkpoint's packer applies.
+ */
+function runMirrorGit(root: string, args: readonly string[], input?: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const name of [
+      "GIT_DIR",
+      "GIT_WORK_TREE",
+      "GIT_INDEX_FILE",
+      "GIT_OBJECT_DIRECTORY",
+      "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+      "GIT_NAMESPACE",
+      "GIT_PREFIX",
+      "GIT_COMMON_DIR",
+    ]) {
+      delete env[name];
+    }
+    const child = spawn("git", ["-C", root, ...args], {
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout.push(chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr.push(chunk);
+    });
+    child.on("error", (error: Error) => {
+      reject(new CheckpointError("git-failed", "git " + String(args[0]) + ": " + error.message));
+    });
+    child.on("close", (code: number | null) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout));
+        return;
+      }
+      const detail = Buffer.concat(stderr).toString("utf8").trim();
+      reject(
+        new CheckpointError(
+          "git-failed",
+          "git " +
+            String(args[0]) +
+            " exited " +
+            String(code) +
+            (detail === "" ? "" : ": " + detail),
+        ),
+      );
+    });
+    child.stdin.end(input);
+  });
+}
+
+/** Whether a `cat-file` type word names one of the four git object types. */
+const isGitObjectType = (value: string): value is GitObjectType => {
+  for (const type of GIT_OBJECT_TYPES) {
+    if (type === value) return true;
+  }
+  return false;
+};
+
+/** Parse `git cat-file --batch` output into objects, in input order. */
+function parseBatchObjects(output: Buffer): GitObject[] {
+  const objects: GitObject[] = [];
+  let offset = 0;
+  while (offset < output.length) {
+    const newline = output.indexOf(0x0a, offset);
+    if (newline === -1) throw new CheckpointError("git-failed", "truncated cat-file header");
+    const header = output.subarray(offset, newline).toString("utf8");
+    const [id, type, sizeText] = header.split(" ");
+    if (type === "missing") {
+      throw new CheckpointError("missing-object", "the repository has no object " + String(id));
+    }
+    if (id === undefined || type === undefined || sizeText === undefined) {
+      throw new CheckpointError("git-failed", "unexpected cat-file header: " + header);
+    }
+    if (!/^[0-9a-f]{40}$/u.test(id) || !isGitObjectType(type)) {
+      throw new CheckpointError("git-failed", "unexpected cat-file header: " + header);
+    }
+    const size = Number(sizeText);
+    if (!Number.isSafeInteger(size) || size < 0) {
+      throw new CheckpointError("git-failed", "unexpected cat-file size: " + sizeText);
+    }
+    const start = newline + 1;
+    const end = start + size;
+    if (end >= output.length) throw new CheckpointError("git-failed", "truncated cat-file body");
+    objects.push({ type, content: new Uint8Array(output.subarray(start, end)) });
+    offset = end + 1;
+  }
+  return objects;
 }
 
 /**

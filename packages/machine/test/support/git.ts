@@ -11,11 +11,35 @@ import { join } from "node:path";
  * later store. The repository is created inside a scenario's root, which the scenario removes.
  */
 
+/**
+ * The environment every fixture's git runs in, with the repository variables removed.
+ *
+ * @remarks
+ * A `GIT_DIR` or `GIT_WORK_TREE` inherited from the process that starts the tests (a commit hook)
+ * would make `git init` in a temp directory describe and commit to the *inherited* repository
+ * instead. Removing them makes each fixture's git resolve its own repository, the only one it may
+ * write.
+ */
+const fixtureEnv = (): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+  ]) {
+    delete env[name];
+  }
+  return env;
+};
+
 /** Run git in a directory and return its stdout. */
 function git(root: string, args: readonly string[]): string {
   return execFileSync("git", ["-C", root, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    env: fixtureEnv(),
   });
 }
 

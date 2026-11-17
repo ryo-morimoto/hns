@@ -1,4 +1,5 @@
 import type { D1Binding } from "@hns/store";
+import type { ArtifactsBinding } from "../artifacts/repos.ts";
 
 /**
  * The subset of the Cloudflare bindings the edge uses.
@@ -118,4 +119,21 @@ export interface WorkerEnv {
    * 0148 supplies the enrollment and rotation.
    */
   readonly HNS_CONTROL_PLANE_KEY?: string | undefined;
+  /**
+   * The Artifacts namespace that holds the workspace mirrors.
+   *
+   * @remarks
+   * The Workspace object reads it to get-or-create one repository per workspace and to issue the
+   * short-lived push token a checkpoint's prepare answer carries (0246). Optional, like every
+   * binding: absent means no mirror target is issued, and the checkpoint path is unaffected.
+   */
+  readonly ARTIFACTS?: ArtifactsBinding | undefined;
+  /**
+   * The Artifacts mirror's kill switch: `"on"` mirrors, anything else does not.
+   *
+   * @remarks
+   * The smallest switch (0249 adds the workspace override and the metrics). It is read by the
+   * Workspace object when it is constructed; off never changes a checkpoint's answer.
+   */
+  readonly ARTIFACTS_MIRROR?: string | undefined;
 }

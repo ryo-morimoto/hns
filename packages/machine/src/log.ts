@@ -6,6 +6,7 @@ import {
   levelOfStatus,
   ObsRequestIdSchema,
   obsPath,
+  parseObsLog,
   type ObsLogEntry,
 } from "@hns/core";
 import type { OperationName } from "./wire.ts";
@@ -84,4 +85,40 @@ export function machineEntry(input: MachineLogInput): ObsLogEntry {
  */
 export function writeMachineLog(entry: ObsLogEntry): void {
   process.stderr.write(formatObsLog(entry) + "\n");
+}
+
+/** What a redaction replaces a secret with in text the agent is about to write. */
+export const REDACTED = "***";
+
+/**
+ * Build a sink that never writes a secret.
+ *
+ * @param sink - The sink to write to after redaction.
+ * @param secrets - The values that must not appear; empty and undefined values are ignored.
+ * @returns A sink whose every line has each secret replaced before it is formatted and written.
+ *
+ * @remarks
+ * The log entry is an allowlisted shape, so a secret cannot arrive as a field. This guard covers
+ * the other route: a secret that a message, a path, or a future field carried as text. The
+ * replacement runs on the stringified entry rather than on its fields, so a nested detail value
+ * is covered too. A secret of one character would redact almost everything, so values shorter
+ * than four characters are ignored; a real token is far longer.
+ *
+ * @internal
+ */
+export function redactingSink(
+  sink: MachineLogSink,
+  secrets: readonly (string | undefined)[],
+): MachineLogSink {
+  const known = secrets.filter(
+    (secret): secret is string => secret !== undefined && secret.length >= 4,
+  );
+  if (known.length === 0) return sink;
+  return (entry) => {
+    // The redaction runs on the formatted line: that JSON is the one place every allowlisted
+    // field's text is, and the parse below returns it to the entry shape the sink writes.
+    let text = formatObsLog(entry);
+    for (const secret of known) text = text.split(secret).join(REDACTED);
+    sink(parseObsLog(JSON.parse(text)));
+  };
 }

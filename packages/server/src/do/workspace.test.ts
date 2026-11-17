@@ -1,4 +1,6 @@
 import {
+  ARTIFACTS_MAX_BLOB_BYTES,
+  CheckpointPrepareAnswerSchema,
   CheckpointPrepareResultSchema,
   CheckpointRecordSchema,
   IsoTimestampSchema,
@@ -8,6 +10,13 @@ import {
   type CheckpointPrepareResult,
   type LeaseRefusal,
 } from "@hns/core";
+import { mirrorRef, reviewSourceFor } from "@hns/workspace/mirror";
+import { ARTIFACTS_REMOTE_LIMITS, artifactsRepoName } from "../artifacts/repos.ts";
+import {
+  artifactError,
+  fakeArtifactsBinding,
+  type FakeArtifactsBinding,
+} from "../../test/support/artifacts.ts";
 import { checkpointPackKey } from "@hns/workspace/objects";
 import type { JournalOutcomeEntry } from "@hns/store";
 import { expect, test } from "vitest";
@@ -22,7 +31,7 @@ import { base64Of, fakeMachine, versionOfText } from "../../test/support/machine
 import type { PackBucket } from "../checkpoint/transport.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { Journal } from "./journal.ts";
-import { Workspace } from "./workspace.ts";
+import { Workspace, type WorkspaceBindings } from "./workspace.ts";
 
 const LeaseOk = v.object({
   ok: v.literal(true),
@@ -1191,15 +1200,12 @@ test("a failed machine checkpoint is a refusal and records no checkpoint", async
 // Catches the mirror's failure reaching the checkpoint's answer: a push that failed is recorded
 // on the checkpoint, and the checkpoint stays answered.
 test("a failed mirror is recorded and does not fail the checkpoint", async () => {
-  const h = await harnessWithEnrolledMachine();
+  const h = await harnessWithMirror();
   try {
-    const { workspace, key } = h;
-    await acquire(workspace, leaseBody());
-    await prepare(h, "run-1");
-    await workspace.fetch(await packRequest("run-1", packBytes(8), key));
-    await workspace.fetch(
-      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 5 }),
-    );
+    const { workspace } = h;
+    const record0 = await checkpointOnce(h, "run-1");
+    // The binding's log holds the commit: a `mirrored` report is confirmed against it.
+    h.artifacts?.push(artifactsRepoName("w1"), mirrorRef("run-1"), record0.commit);
     const moved = await workspace.fetch(
       post("/rpc/checkpoint/mirror", {
         workspaceId: "w1",
@@ -1267,6 +1273,403 @@ test("a complete whose watermark cannot move leaves no record", async () => {
     expect(refused.status).toBe(409);
     expect(h.journal.watermark()).toBeUndefined();
     expect(await checkpointRecordOfRun(h, "run-1")).toBeNull();
+  } finally {
+    h.close();
+  }
+});
+/**
+ * The mirror's C-series tests (0246).
+ *
+ * The C1 / C4 / C5 decisions are the Workspace object's, so they run against the real object with
+ * a fake `ARTIFACTS`; the push itself is the machine's and is exercised over a real git remote in
+ * `packages/server/test/integration/mirror.test.ts`.
+ */
+
+/**
+ * A checkpoint harness whose object has the Artifacts binding and the switch set.
+ *
+ * `artifacts` is optional because the unbound deployment is the same harness minus the fake; a
+ * test that asserts what the binding was asked reads it where it supplied one.
+ */
+interface MirrorHarness extends CheckpointHarness {
+  readonly artifacts?: FakeArtifactsBinding | undefined;
+}
+
+async function harnessWithMirror(
+  options: {
+    readonly enabled?: boolean;
+    readonly binding?: FakeArtifactsBinding;
+  } = {},
+): Promise<MirrorHarness> {
+  let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+  const opened = openSqliteState();
+  const machine = fakeMachine();
+  const packs = fakePackBucket();
+  const artifacts = options.binding ?? fakeArtifactsBinding({ now: () => nowMs });
+  const workspace = new Workspace(opened.state, {
+    now: () => nowMs,
+    leaseTtlMs: 1_000,
+    packs,
+    files: machine,
+    artifacts,
+    artifactsMirror: options.enabled ?? true,
+  });
+  const journal = new Journal(opened.state.storage, { now: () => nowMs });
+  const deviceKey = await deviceKeyFromSeed(7);
+  enrollMachine(opened.sql, "m1", deviceKey.publicKey);
+  return {
+    workspace,
+    journal,
+    machine,
+    packs,
+    artifacts,
+    sql: opened.sql,
+    key: deviceKey,
+    rows: opened.rows,
+    advance(ms) {
+      nowMs += ms;
+    },
+    close: opened.close,
+  };
+}
+
+/**
+ * The prepare answer as the contract spells it, mirror included.
+ *
+ * The object answers a checkpoint from its lease holder or its recorded machine, so a prepare
+ * acquires the lease first when the test has not: that is the order a Run takes in production.
+ */
+async function preparedAnswer(h: MirrorHarness, runId = "run-1") {
+  const held = await h.workspace.fetch(post("/rpc/lease/acquire", leaseBody()));
+  if (!held.ok) expect(v.parse(Refused, await held.json()).code).toBe("lease_not_held");
+  const response = await h.workspace.fetch(
+    post("/rpc/checkpoint/prepare", { workspaceId: "w1", runId }),
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  return v.parse(CheckpointPrepareAnswerSchema, await response.json());
+}
+
+/** Run one checkpoint to complete and return the record. */
+async function checkpointOnce(h: MirrorHarness, runId = "run-1") {
+  const answer = await preparedAnswer(h, runId);
+  const uploaded = await h.workspace.fetch(
+    await packRequest(runId, packBytes(answer.checkpoint.packBytes), h.key),
+  );
+  expect(uploaded.status, await uploaded.clone().text()).toBe(200);
+  const completed = await h.workspace.fetch(
+    post("/rpc/checkpoint/complete", { workspaceId: "w1", runId, throughSeq: 5 }),
+  );
+  expect(completed.status, await completed.clone().text()).toBe(200);
+  return v.parse(CheckpointRecordSchema, v.parse(CheckpointOk, await completed.json()).checkpoint);
+}
+// C1: Catches a prepare that offers no target (the machine can never push), a name outside
+// Artifacts' rule, a repository not created, or a token that lives longer than the push.
+test("a prepare issues a target through the codec and creates the repository once", async () => {
+  const h = await harnessWithMirror();
+  try {
+    const answer = await preparedAnswer(h);
+    expect(answer.mirror, "a prepare within the limits carries a target").toBeDefined();
+    const target = answer.mirror;
+    if (target === undefined) return;
+    const name = artifactsRepoName("w1");
+    expect(name).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$/u);
+    expect(h.artifacts?.creates).toStrictEqual([name]);
+    expect(target.remote).toBe("https://git.example/git/ns/" + name + ".git");
+    expect(target.ref).toBe("refs/heads/hns/run/run-1");
+    expect(target.token.length).toBeGreaterThan(0);
+    // 900 seconds of slack from the object's clock, not the repository's default day.
+    expect(target.expiresAt).toBe("2026-01-01T00:15:00.000Z");
+
+    // A second prepare of the same Run does not create a second repository.
+    await preparedAnswer(h);
+    expect(h.artifacts?.creates).toHaveLength(1);
+  } finally {
+    h.close();
+  }
+});
+
+// C5: Catches a token reaching the stored record or the Journal, or the checkpoint's own answer
+// being rewritten by the mirror.
+test("the token is in the prepare answer and nowhere that is stored", async () => {
+  const h = await harnessWithMirror();
+  try {
+    const answer = await preparedAnswer(h);
+    const token = answer.mirror?.token;
+    expect(token).toBeDefined();
+    const record = await checkpointOnce(h);
+    expect(record.mirror.status).toBe("pending");
+    const stored = checkpointRecordOfRun(h, "run-1");
+    expect(stored).not.toBeNull();
+    expect(stored).not.toContain(String(token));
+    const rows = h.rows("SELECT run_id, prepare, record FROM checkpoint_run");
+    expect(JSON.stringify(rows)).not.toContain(String(token));
+    const journal = JSON.stringify((await h.journal.read()).entries);
+    expect(journal).not.toContain(String(token));
+    // The record's own shape is the contract's: a token offered under a record key is dropped.
+    expect(Object.keys(v.parse(CheckpointRecordSchema, { ...record, token })).sort()).toStrictEqual(
+      ["commit", "maxBlobBytes", "mirror", "objectCount", "packBytes", "packKey", "ref", "runId"],
+    );
+  } finally {
+    h.close();
+  }
+});
+
+// C4: Catches a run over Artifacts' per-file limit being offered a target and pushed, or being
+// recorded `pending` so its review would wait for a push that can never fit.
+test("a run over the 32 MiB file limit is skipped and its review falls back to the machine", async () => {
+  const h = await harnessWithMirror();
+  try {
+    await acquire(h.workspace, leaseBody());
+    h.machine.checkpointNext({
+      commit: "1".repeat(40),
+      maxBlobBytes: ARTIFACTS_MAX_BLOB_BYTES + 1,
+      packBytes: 8,
+    });
+    const answer = await preparedAnswer(h);
+    expect(answer.mirror).toBeUndefined();
+    const uploaded = await h.workspace.fetch(await packRequest("run-1", packBytes(8), h.key));
+    expect(uploaded.status).toBe(200);
+    const completed = await h.workspace.fetch(
+      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 5 }),
+    );
+    const record = v.parse(
+      CheckpointRecordSchema,
+      v.parse(CheckpointOk, await completed.json()).checkpoint,
+    );
+    expect(record.mirror).toStrictEqual({
+      status: "skipped",
+      failure: "too_large",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(reviewSourceFor(record.mirror)).toBe("machine");
+    // At the limit exactly, the run is offered a target: the bound is inclusive.
+    h.machine.checkpointNext({
+      commit: "2".repeat(40),
+      maxBlobBytes: ARTIFACTS_MAX_BLOB_BYTES,
+      packBytes: 8,
+    });
+    expect((await preparedAnswer(h, "run-2")).mirror).toBeDefined();
+    expect(reviewSourceFor({ status: "mirrored", updatedAt: record.mirror.updatedAt })).toBe(
+      "artifacts",
+    );
+  } finally {
+    h.close();
+  }
+});
+
+// C4: Catches a pack over the 64 MiB push limit going to Artifacts; the contract's pack limit is
+// the checkpoint's and the mirror's one number.
+test("a run over the 64 MiB pack limit is skipped", async () => {
+  const h = await harnessWithMirror();
+  try {
+    await acquire(h.workspace, leaseBody());
+    h.machine.checkpointNext({
+      commit: "3".repeat(40),
+      maxBlobBytes: 1024,
+      packBytes: MAX_CHECKPOINT_PACK_BYTES + 1,
+    });
+    expect((await preparedAnswer(h)).mirror).toBeUndefined();
+    expect(ARTIFACTS_REMOTE_LIMITS.packBytes).toBe(MAX_CHECKPOINT_PACK_BYTES);
+  } finally {
+    h.close();
+  }
+});
+
+// C2 (Worker half): Catches a `mirrored` report the Worker records without asking the binding's
+// log — a machine's word is not the proof, and a failed confirmation must land as a failure.
+test("a mirrored report the binding's log cannot confirm is refused and recorded failed", async () => {
+  const h = await harnessWithMirror();
+  try {
+    const record = await checkpointOnce(h);
+    const report = (status: string) =>
+      h.workspace.fetch(
+        post("/rpc/checkpoint/mirror", { workspaceId: "w1", runId: "run-1", status }),
+      );
+    // The binding holds the commit at another ref, not at the Run's: nothing confirms it.
+    h.artifacts?.push(artifactsRepoName("w1"), mirrorRef("run-2"), record.commit);
+    const refused = await report("mirrored");
+    expect(refused.status, await refused.clone().text()).toBe(409);
+    const stored = v.parse(
+      CheckpointRecordSchema,
+      JSON.parse(String(checkpointRecordOfRun(h, "run-1"))),
+    );
+    expect(stored.mirror).toMatchObject({ status: "failed", failure: "unknown" });
+    // With the commit at the ref the report is accepted, and the record says mirrored.
+    h.artifacts?.push(artifactsRepoName("w1"), mirrorRef("run-1"), record.commit);
+    expect((await report("pending")).status).toBe(200);
+    const mirrored = await report("mirrored");
+    expect(mirrored.status, await mirrored.clone().text()).toBe(200);
+    expect(
+      v.parse(CheckpointRecordSchema, v.parse(MirrorOk, await mirrored.json()).checkpoint).mirror
+        .status,
+    ).toBe("mirrored");
+  } finally {
+    h.close();
+  }
+});
+
+// C3 / kill switch: Catches a switch that is ignored (a target offered with the mirror off), or a
+// prepare that fails when Artifacts is unbound.
+test("the kill switch and a missing binding both answer no target and still checkpoint", async () => {
+  const switchedOff = await harnessWithMirror({ enabled: false });
+  const unbound = await harnessWithMirrorWithoutBinding();
+  for (const h of [switchedOff, unbound]) {
+    try {
+      const answer = await preparedAnswer(h);
+      expect(answer.mirror).toBeUndefined();
+      const record = await checkpointOnce(h);
+      expect(record.mirror.status).toBe("pending");
+      expect(reviewSourceFor(record.mirror)).toBe("machine");
+    } finally {
+      h.close();
+    }
+  }
+  // The switch is read before the binding is touched: no repository was even looked for.
+  expect(switchedOff.artifacts?.creates).toStrictEqual([]);
+  expect(switchedOff.artifacts?.tokens).toStrictEqual([]);
+});
+
+// C3 / kill switch (deploy path): Catches a deploy switch that is ignored or misread — the object
+// is built from the bindings alone, as the Worker builds it, so the text values are what decide.
+test("ARTIFACTS_MIRROR decides the mirror: off, on, and anything else", async () => {
+  for (const [value, mirrors] of [
+    ["off", false],
+    [undefined, false],
+    ["ON", false],
+    ["on", true],
+  ] as const) {
+    const h = await harnessFromBindings(value === undefined ? {} : { ARTIFACTS_MIRROR: value });
+    try {
+      const answer = await preparedAnswer(h);
+      expect(answer.mirror === undefined, String(value)).toBe(!mirrors);
+      expect(h.artifacts.creates.length > 0, String(value)).toBe(mirrors);
+      const record = await checkpointOnce(h);
+      expect(record.mirror.status, String(value)).toBe("pending");
+    } finally {
+      h.close();
+    }
+  }
+});
+
+/**
+ * A harness constructed the way the deploy constructs the object: bindings only, no options.
+ *
+ * @param bindings - The environment's `ARTIFACTS_MIRROR` (the kill switch).
+ *
+ * @remarks
+ * The option form (`artifactsMirror`) is a test seam; production reads the text binding, so this
+ * is the only place the switch's own value is exercised. A test that only used the option would
+ * pass with a deploy switch that is ignored.
+ */
+async function harnessFromBindings(
+  bindings: WorkspaceBindings,
+): Promise<CheckpointHarness & { readonly artifacts: FakeArtifactsBinding }> {
+  let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+  const opened = openSqliteState();
+  const machine = fakeMachine();
+  const packs = fakePackBucket();
+  const artifacts = fakeArtifactsBinding({ now: () => nowMs });
+  const workspace = new Workspace(opened.state, {
+    now: () => nowMs,
+    leaseTtlMs: 1_000,
+    packs,
+    files: machine,
+    ...bindings,
+    ARTIFACTS: artifacts,
+  });
+  const journal = new Journal(opened.state.storage, { now: () => nowMs });
+  const deviceKey = await deviceKeyFromSeed(7);
+  enrollMachine(opened.sql, "m1", deviceKey.publicKey);
+  return {
+    workspace,
+    journal,
+    machine,
+    packs,
+    artifacts,
+    sql: opened.sql,
+    key: deviceKey,
+    rows: opened.rows,
+    advance(ms) {
+      nowMs += ms;
+    },
+    close: opened.close,
+  };
+}
+
+/** A harness with the switch on and no `ARTIFACTS` binding, as a deployment without Artifacts. */
+async function harnessWithMirrorWithoutBinding(): Promise<CheckpointHarness> {
+  let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+  const opened = openSqliteState();
+  const machine = fakeMachine();
+  const packs = fakePackBucket();
+  const workspace = new Workspace(opened.state, {
+    now: () => nowMs,
+    leaseTtlMs: 1_000,
+    packs,
+    files: machine,
+    artifactsMirror: true,
+  });
+  const journal = new Journal(opened.state.storage, { now: () => nowMs });
+  const deviceKey = await deviceKeyFromSeed(7);
+  enrollMachine(opened.sql, "m1", deviceKey.publicKey);
+  return {
+    workspace,
+    journal,
+    machine,
+    packs,
+    sql: opened.sql,
+    key: deviceKey,
+    rows: opened.rows,
+    advance(ms) {
+      nowMs += ms;
+    },
+    close: opened.close,
+  };
+}
+
+// C3: Catches a binding failure reaching the checkpoint's answer, or being rounded to a target.
+test("an Artifacts failure answers no target and the checkpoint still completes", async () => {
+  const now = (): number => Date.parse("2026-01-01T00:00:00.000Z");
+  const binding = fakeArtifactsBinding({ now });
+  binding.failNextCreate(artifactError("UPSTREAM_UNAVAILABLE"));
+  const h = await harnessWithMirror({ binding });
+  try {
+    const answer = await preparedAnswer(h);
+    expect(answer.mirror).toBeUndefined();
+    const record = await checkpointOnce(h);
+    expect(record.mirror.status).toBe("pending");
+    // The next prepare reuses nothing it could not create: it creates and offers a target.
+    expect((await preparedAnswer(h, "run-2")).mirror).toBeDefined();
+  } finally {
+    h.close();
+  }
+});
+
+// C3: Catches a mirror report that is not idempotent (a resent "mirrored" after a lost answer
+// answered as a conflict), or one that rewrites why a failed mirror failed.
+test("a resent mirror report is the recorded state, and a different failure is refused", async () => {
+  const h = await harnessWithMirror();
+  try {
+    const record0 = await checkpointOnce(h);
+    h.artifacts?.push(artifactsRepoName("w1"), mirrorRef("run-1"), record0.commit);
+    const report = (status: string, failure?: string) =>
+      h.workspace.fetch(
+        post("/rpc/checkpoint/mirror", { workspaceId: "w1", runId: "run-1", status, failure }),
+      );
+    const failed = await report("failed", "push_rejected");
+    expect(failed.status).toBe(200);
+    const again = await report("failed", "push_rejected");
+    expect(again.status, await again.clone().text()).toBe(200);
+    const otherReason = await report("failed", "network");
+    expect(otherReason.status).toBe(409);
+    // A retry only leaves failed for pending: mirrored is written from there, as the push path does.
+    expect((await report("pending")).status).toBe(200);
+    const mirrored = await report("mirrored");
+    expect(mirrored.status, await mirrored.clone().text()).toBe(200);
+    const resent = await report("mirrored");
+    expect(resent.status, await resent.clone().text()).toBe(200);
+    const last = await report("skipped");
+    expect(last.status).toBe(409);
   } finally {
     h.close();
   }

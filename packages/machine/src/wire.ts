@@ -5,6 +5,7 @@ import {
   CheckpointPackUploadResultSchema,
   CheckpointPrepareResultSchema,
   MACHINE_RPC_PATH,
+  MIRROR_FAILURES,
   MachineReadResultSchema,
   MachineWriteRequestSchema,
   OBS_REQUEST_ID_PATTERN,
@@ -14,6 +15,7 @@ import type {
   CheckpointPackUploadResult,
   CheckpointPrepareResult,
   JsonValue,
+  MirrorFailure,
   MachineReadResult,
   MachineWriteRequest,
   SignedHeaders,
@@ -157,7 +159,15 @@ export function checkpointPackPath(runId: string): string {
 }
 
 /** The operations the agent answers; each is one closed member. */
-export const OPERATION_NAMES = ["health", "stat", "read", "list", "write", "checkpoint"] as const;
+export const OPERATION_NAMES = [
+  "health",
+  "stat",
+  "read",
+  "list",
+  "write",
+  "checkpoint",
+  "mirror",
+] as const;
 
 /** One operation name. */
 export type OperationName = (typeof OPERATION_NAMES)[number];
@@ -184,6 +194,40 @@ const CheckpointRequestSchema: v.GenericSchema<unknown, CheckpointRequest> = v.o
   committedAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
 });
 
+/**
+ * Push one checkpoint commit to Artifacts, as the Worker asks for it.
+ *
+ * @remarks
+ * The Worker builds this from the `MirrorTarget` its prepare answered with and the commit that
+ * prepare reported. `token` is a secret: the agent uses it in the push's environment and does not
+ * copy it into its log or its answer (the answer names the status, the ref, and the commit only).
+ * `ref` must be a branch under `refs/heads/`: a private ref cannot be read back through the
+ * binding, so a push to one would be a mirror nothing could confirm.
+ */
+export interface MirrorRequest {
+  readonly op: "mirror";
+  /** The workspace's git repository is ROOT; `committedAt` is not needed because C exists. */
+  readonly runId: string;
+  readonly remote: string;
+  /** The write token; a secret, valid only for the push. */
+  readonly token: string;
+  readonly ref: string;
+  /** The commit C the ref must land on. */
+  readonly commit: string;
+  /** When the token stops working (ISO 8601). Advisory: the push itself decides. */
+  readonly expiresAt: string;
+}
+
+const MirrorRequestSchema: v.GenericSchema<unknown, MirrorRequest> = v.object({
+  op: v.literal("mirror"),
+  runId: v.pipe(v.string(), v.minLength(1)),
+  remote: v.pipe(v.string(), v.minLength(1), v.maxLength(2048)),
+  token: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)),
+  ref: v.pipe(v.string(), v.startsWith("refs/heads/"), v.maxLength(1024)),
+  commit: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/u)),
+  expiresAt: v.pipe(v.string(), v.minLength(1)),
+});
+
 /** The closed request body: an operation and the ROOT-relative path it names. */
 export type Operation =
   | { readonly op: "health" }
@@ -191,7 +235,8 @@ export type Operation =
   | { readonly op: "read"; readonly path: string }
   | { readonly op: "list"; readonly path: string }
   | MachineWriteRequest
-  | CheckpointRequest;
+  | CheckpointRequest
+  | MirrorRequest;
 
 const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
   v.variant("op", [
@@ -202,6 +247,7 @@ const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
   ]),
   MachineWriteRequestSchema,
   CheckpointRequestSchema,
+  MirrorRequestSchema,
 ]);
 
 /**
@@ -268,6 +314,30 @@ export type CheckpointResult = CheckpointPrepareResult;
 
 /** What the pack upload reports: the Run and the bytes the body delivered. */
 export type CheckpointPackResult = CheckpointPackUploadResult;
+
+/**
+ * What the mirror operation reports: the status the contract records, and never the token.
+ *
+ * @remarks
+ * This is the push's answer, not the recorded state: the Worker reports it to the Workspace
+ * object (`/rpc/checkpoint/mirror`), which applies the transition table. `status` is `skipped`
+ * when the machine decides the run is over Artifacts' limits, so a skipped run costs no push.
+ */
+export type MirrorResult =
+  | {
+      readonly status: "mirrored";
+      readonly ref: string;
+      readonly commit: string;
+    }
+  | {
+      readonly status: "skipped";
+      readonly reason: "too_large";
+    }
+  | {
+      readonly status: "failed";
+      readonly failure: MirrorFailure;
+      readonly ref: string;
+    };
 
 /**
  * A successful answer: the operation name and its result, which is JSON on the
@@ -436,4 +506,34 @@ export function parseCheckpointResult(value: JsonValue): CheckpointResult {
  */
 export function parseCheckpointPackResult(value: JsonValue): CheckpointPackResult {
   return v.parse(CheckpointPackUploadResultSchema, value);
+}
+
+/** The mirror answer's shape: the contract's statuses, and the failures it may name. */
+const MirrorResultSchema: v.GenericSchema<unknown, MirrorResult> = v.variant("status", [
+  v.object({
+    status: v.literal("mirrored"),
+    ref: v.pipe(v.string(), v.minLength(1)),
+    commit: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/u)),
+  }),
+  v.object({ status: v.literal("skipped"), reason: v.literal("too_large") }),
+  v.object({
+    status: v.literal("failed"),
+    failure: v.picklist(MIRROR_FAILURES),
+    ref: v.pipe(v.string(), v.minLength(1)),
+  }),
+]);
+
+/**
+ * Parse the result of a mirror answer.
+ *
+ * @param value - A success envelope's `result`.
+ * @returns The status, the commit when it mirrored, and the closed failure when it did not.
+ * @throws When the value is not a mirror result, or names a failure outside the contract's.
+ *
+ * @remarks
+ * The parser is the closed vocabulary's, so a machine that invented a failure word cannot have
+ * it recorded: the answer would be refused at the boundary instead of stored.
+ */
+export function parseMirrorResult(value: JsonValue): MirrorResult {
+  return v.parse(MirrorResultSchema, value);
 }

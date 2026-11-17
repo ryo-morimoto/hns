@@ -13,13 +13,22 @@ export { ED25519_PUBLIC_KEY_BYTES, verificationKey } from "./control-plane.ts";
 export type { ControlPlaneKeys } from "./control-plane.ts";
 export { DEFAULT_LIMITS, InFlight, resolveLimits } from "./limits.ts";
 export type { Limits } from "./limits.ts";
-export { machineEntry, requestIdOf, writeMachineLog } from "./log.ts";
+export { REDACTED, machineEntry, redactingSink, requestIdOf, writeMachineLog } from "./log.ts";
 export type { MachineLogInput, MachineLogSink } from "./log.ts";
 export { runOperation } from "./operations.ts";
 export type { OperationResult } from "./operations.ts";
 // The list is the core model's (the Journal's stored reasons are derived from the same one);
 // re-exported so a caller importing the agent's surface reads one vocabulary.
 export { MACHINE_REFUSALS as REFUSAL_CODES } from "@hns/core";
+// The mirror's ref rule and push, so the Worker that issues a target and the machine that pushes
+// derive the same branch name from one Run id.
+export { mirrorRef } from "@hns/workspace/mirror";
+export { confirmMirror, pushCheckpoint } from "@hns/workspace/mirror-push";
+export type {
+  MirrorConfirmRequest,
+  MirrorPushOutcome,
+  MirrorPushRequest,
+} from "@hns/workspace/mirror-push";
 export { MachineRefusal, refusalStatus } from "./refusal.ts";
 export type { RefusalCode } from "./refusal.ts";
 export {

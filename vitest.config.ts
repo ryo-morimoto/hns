@@ -53,6 +53,18 @@ const alias: readonly SourceAlias[] = [
     find: /^@hns\/workspace\/pack$/,
     replacement: source("./packages/workspace/src/pack.ts"),
   },
+  {
+    // The mirror's rules are pure (no node:), so the Worker imports them from the root entry's
+    // neighbour rather than through the push, which spawns git.
+    find: /^@hns\/workspace\/mirror$/,
+    replacement: source("./packages/workspace/src/mirror.ts"),
+  },
+  {
+    // The push spawns git, so it is its own subpath like the checkpoint. The alias is the file
+    // name, not the export path: a pattern can hold \/ and "push", not a nested export key.
+    find: /^@hns\/workspace\/mirror-push$/,
+    replacement: source("./packages/workspace/src/mirror-push.ts"),
+  },
   { find: /^@hns\/agent$/, replacement: source("./packages/agent/src/index.ts") },
   {
     find: /^@hns\/agent\/session$/,

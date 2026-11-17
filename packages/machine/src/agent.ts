@@ -11,7 +11,13 @@ import { ConnectionGate } from "./connection.ts";
 import { normalizeRelative } from "./containment.ts";
 import { InFlight, resolveLimits } from "./limits.ts";
 import type { Limits } from "./limits.ts";
-import { machineEntry, requestIdOf, writeMachineLog, type MachineLogSink } from "./log.ts";
+import {
+  machineEntry,
+  redactingSink,
+  requestIdOf,
+  writeMachineLog,
+  type MachineLogSink,
+} from "./log.ts";
 import { runOperation } from "./operations.ts";
 import { MachineRefusal, refusalStatus } from "./refusal.ts";
 import { RequestVerifier } from "./signature.ts";
@@ -260,6 +266,9 @@ async function handleRequest(
   const started = Date.now();
   let fsPath = MACHINE_RPC_PATH;
   let op: OperationName | undefined;
+  // A mirror's token is redacted from this request's log line even if a later field ever carried
+  // it; the guard is set before the body is parsed so no failure path can log ahead of it.
+  let mirrorToken: string | undefined;
   if (request.method !== "POST") {
     sendRefusal(response, new MachineRefusal("method_not_allowed", "the agent answers POST only"), {
       allow: "POST",
@@ -310,6 +319,7 @@ async function handleRequest(
     }
     const operation = parseOperation(body);
     op = operation.op;
+    if (operation.op === "mirror") mirrorToken = operation.token;
     fsPath = logPathOf(operation);
     const result = await runOperation(
       operation,
@@ -327,7 +337,16 @@ async function handleRequest(
   } finally {
     clearTimeout(timer);
     context.inFlight.leave();
-    logRequest(request, response, context, started, fsPath, op);
+    logRequest(
+      request,
+      response,
+      mirrorToken === undefined
+        ? context
+        : { ...context, onLog: redactingSink(context.onLog, [mirrorToken]) },
+      started,
+      fsPath,
+      op,
+    );
   }
 }
 
@@ -468,7 +487,8 @@ async function servePackUpload(
 function logPathOf(operation: Operation): string {
   if (operation.op === "health") return "/";
   // A checkpoint names a Run, not a file; the log shows it below ROOT like any other path.
-  if (operation.op === "checkpoint") return "/" + operation.runId;
+  // A mirror names the same Run, and its line names neither the remote nor the token.
+  if (operation.op === "checkpoint" || operation.op === "mirror") return "/" + operation.runId;
   // A write names a project and a file; the log shows the resolved path, like a read does.
   const project = operation.op === "write" ? operation.projectRoot : "";
   try {

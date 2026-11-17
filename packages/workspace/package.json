@@ -27,6 +27,16 @@
       "types": "./dist/objects.d.ts",
       "import": "./dist/objects.js"
     },
+    "./mirror": {
+      "source": "./src/mirror.ts",
+      "types": "./dist/mirror.d.ts",
+      "import": "./dist/mirror.js"
+    },
+    "./mirror-push": {
+      "source": "./src/mirror-push.ts",
+      "types": "./dist/mirror-push.d.ts",
+      "import": "./dist/mirror-push.js"
+    },
     "./pack": {
       "source": "./src/pack.ts",
       "types": "./dist/pack.d.ts",

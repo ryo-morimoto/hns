@@ -59,6 +59,12 @@ export const workerFor = (deployment: Deployment): DeployedWorker => {
       GATEWAY: bindings.worker({ worker: gatewayWorkerName(deployment.workerName) }),
       // The web build (`npm run build -w @hns/web`) writes deploy/assets; the edge serves it.
       ASSETS: bindings.assets(),
+      // The Artifacts namespace that holds one mirror repository per workspace (0246). The
+      // Workspace object creates the repository lazily and issues a short-lived push token from it.
+      ARTIFACTS: bindings.artifacts({ namespace: deployment.workerName }),
+      // The mirror's kill switch: "on" mirrors, anything else does not. The mirror is never on
+      // the checkpoint's path, so switching it off changes no acknowledgement.
+      ARTIFACTS_MIRROR: bindings.text(process.env.ARTIFACTS_MIRROR === "on" ? "on" : "off"),
     },
   };
   return deployment.domain === undefined ? worker : { ...worker, domains: [deployment.domain] };
