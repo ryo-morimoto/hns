@@ -33,3 +33,8 @@
 2. 実装: まとまった変更をまとめて編集（edit 回数 113/本 を減らす）。テストは絞って回し、**最後に 1 回 full check**（25 回/本 → 5 回以下）。
 3. 報告: 結論 → 証拠（数値・file:line）→ 未確認 → 判断が必要な事項だけ質問。中間報告は設計 checkpoint と完了の 2 回まで。
 4. lead: 受入と契約の照合 → 独立レビュー → PASS で rebase → gate → ff merge → Result 記録（1〜4 分で済む）。
+
+## L1（test 基盤）完了 — 32e1d6b
+
+- #5 in-test build: 12 → 0、1 package 1 回、assertion / テスト名の差分 0、standalone が dist なしで green（server 359 / machine 60 / workspace 84）。孤児ロックは 1ms で乗っ取り（修正前は Atomics.wait で返らない）。910 tests。wall は 52.5s（変わらない。速くならなかったことを記録）。
+- review の低: commit message / measurements の「readLock がディレクトリを読んで EISDIR」という因果は、**fd2a896 には readLock が無く**、この修正の途中案の話。正しくは「ロックに owner 記録が無く、乗っ取りが何を置き換えたか判定できなかった」。measurements の文を直す（次回の L1 追記で）。25s の記録も「返らない」に訂正。
