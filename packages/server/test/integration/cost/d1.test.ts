@@ -16,12 +16,11 @@ const running = (): CostHarness => {
   return harness;
 };
 
-// cf dev shares the machine with the gateway and session suites, which build packages and
-// start their own dev servers; two attempts plus a migration can exceed the default hook budget.
+// cf dev serializes on the machine's inspector port, so the start can queue behind another suite.
 beforeAll(async () => {
   if (!enabled) return;
   harness = await startCost();
-}, 180_000);
+}, 300_000);
 
 afterAll(async () => {
   const current = harness;

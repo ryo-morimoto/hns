@@ -1,13 +1,9 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import * as v from "valibot";
+import { CF_DEV_WORK_DIR, startCfDev, type CfDev } from "../../../../../tools/test/cf-dev.ts";
 
-const ROOT = resolve(import.meta.dirname, "../../../../..");
-const CF = join(ROOT, "node_modules", ".bin", "cf");
-const WORK = join(ROOT, "tools", "deploy", ".work");
 const READY_TIMEOUT_MS = 40_000;
 
 /** The provider key the test deployment configures; no real key is ever used. */
@@ -102,61 +98,6 @@ export interface GatewayHarness {
   call(path: string, body?: string): Promise<Response>;
   dispose(): Promise<void>;
 }
-
-interface Running {
-  readonly child: ChildProcess;
-  readonly output: () => string;
-}
-
-const collect = (child: ChildProcess): Running => {
-  let text = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  return { child, output: () => text };
-};
-
-const healthy = async (port: number, running: Running): Promise<boolean> => {
-  if (running.child.exitCode !== null) {
-    throw new Error("cf dev exited before becoming ready:\n" + running.output());
-  }
-  try {
-    const response = await fetch("http://127.0.0.1:" + String(port) + "/health");
-    return response.ok;
-  } catch {
-    return false;
-  }
-};
-
-const stop = async (running: Running | undefined): Promise<void> => {
-  const child = running?.child;
-  if (child === undefined || child.pid === undefined || child.exitCode !== null) return;
-  const pid = child.pid;
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-  const exited = new Promise<void>((resolveExit) => {
-    child.once("exit", () => resolveExit());
-  });
-  await Promise.race([
-    exited,
-    new Promise<void>((resolveTimeout) =>
-      setTimeout(() => {
-        try {
-          process.kill(-pid, "SIGKILL");
-        } catch {
-          child.kill("SIGKILL");
-        }
-        resolveTimeout();
-      }, 5_000),
-    ),
-  ]);
-};
 
 const config = (upstream: string): string =>
   [
@@ -283,9 +224,8 @@ const worker = [
  * root with a `wrangler` dependency; `node_modules` points at the deploy project's install.
  */
 export async function startGateway(upstream: string): Promise<GatewayHarness> {
-  if (!existsSync(CF)) throw new Error("cf is not installed");
-  await mkdir(WORK, { recursive: true });
-  const directory = await mkdtemp(join(WORK, "gateway-"));
+  await mkdir(CF_DEV_WORK_DIR, { recursive: true });
+  const directory = await mkdtemp(join(CF_DEV_WORK_DIR, "gateway-"));
   await writeFile(
     join(directory, "package.json"),
     JSON.stringify({
@@ -298,53 +238,16 @@ export async function startGateway(upstream: string): Promise<GatewayHarness> {
   await symlink(join("..", "..", "node_modules"), join(directory, "node_modules"));
   await writeFile(join(directory, "cloudflare.config.ts"), config(upstream));
   await writeFile(join(directory, "worker.ts"), worker);
-  // Two shared addresses can make cf dev exit during startup: the HTTP port taken between the
-  // probe and the bind, and the debug inspector, which wrangler fixes at 9229 for every instance.
-  // The other integration suites run their own dev servers beside this one, so either can be
-  // lost. That is a lost shared resource, not a product failure: start again on a fresh HTTP
-  // port and report the output if both lose.
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const port = await freePort();
-    const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
-      cwd: directory,
-      detached: true,
-      env: {
-        ...process.env,
-        XDG_CONFIG_HOME: join(directory, "config"),
-        XDG_CACHE_HOME: join(directory, "cache"),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const running = collect(child);
-    const deadline = Date.now() + READY_TIMEOUT_MS;
-    let ready = false;
-    while (Date.now() < deadline) {
-      try {
-        if (await healthy(port, running)) {
-          ready = true;
-          break;
-        }
-      } catch {
-        // The child exited during startup; let the retry take a fresh port.
-        break;
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    }
-    if (ready) return harness(directory, running, port);
-    await stop(running);
-    if (attempt === 2) {
-      throw new Error("cf dev did not become ready:\n" + running.output());
-    }
-  }
-  throw new Error("cf dev did not become ready");
+  const dev = await startCfDev({ cwd: directory, readyTimeoutMs: READY_TIMEOUT_MS });
+  return harness(directory, dev);
 }
 
 const expectOk = (response: Response): void => {
   if (!response.ok) throw new Error("the test route failed: " + String(response.status));
 };
 
-const harness = (directory: string, running: Running, port: number): GatewayHarness => {
-  const base = "http://127.0.0.1:" + String(port);
+const harness = (directory: string, dev: CfDev): GatewayHarness => {
+  const base = dev.url;
   const post = (path: string, body: string): Promise<Response> =>
     fetch(base + path, {
       method: "POST",
@@ -372,18 +275,8 @@ const harness = (directory: string, running: Running, port: number): GatewayHarn
         body,
       }),
     async dispose() {
-      await stop(running);
+      await dev.stop();
       await rm(directory, { recursive: true, force: true });
     },
   };
 };
-
-const freePort = async (): Promise<number> =>
-  await new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const port = v.parse(v.object({ port: v.number() }), server.address()).port;
-      server.close(() => resolvePort(port));
-    });
-  });

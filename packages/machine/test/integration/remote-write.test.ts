@@ -1,14 +1,18 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { startMachineAgent, type MachineAgent, type MachineLogSink } from "../../src/index.ts";
 import type { JsonValue, ObsLogEntry } from "@hns/core";
 import assert from "node:assert/strict";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import * as v from "valibot";
+import {
+  CF_DEV_WORK_DIR,
+  isCfDevInstalled,
+  startCfDev,
+  type CfDev,
+} from "../../../../tools/test/cf-dev.ts";
 
 /**
  * The real path, end to end: a cf dev Worker's Workspace object calls a real machine agent
@@ -22,9 +26,7 @@ import * as v from "valibot";
  */
 
 const ROOT = resolve(import.meta.dirname, "../../../..");
-const CF = join(ROOT, "node_modules", ".bin", "cf");
-const WORK = join(ROOT, "tools", "deploy", ".work");
-const TIMEOUT_MS = 180_000;
+const TIMEOUT_MS = 300_000;
 const READY_TIMEOUT_MS = 40_000;
 const MACHINE_ID = "machine-1";
 
@@ -109,12 +111,7 @@ const Apply = v.object({
 });
 const Refused = v.object({ ok: v.literal(false), code: v.string() });
 
-interface Running {
-  readonly child: ChildProcess;
-  readonly output: () => string;
-}
-
-let running: Running | undefined;
+let running: CfDev | undefined;
 let machine: MachineAgent | undefined;
 let machineRoot = "";
 let agentUrl = "";
@@ -124,28 +121,8 @@ const machineLogs: ObsLogEntry[] = [];
 
 const onMachineLog: MachineLogSink = (entry) => machineLogs.push(entry);
 
-async function freePort(): Promise<number> {
-  return await new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = v.safeParse(
-        v.object({ port: v.pipe(v.number(), v.integer()) }),
-        server.address(),
-      );
-      if (!address.success) {
-        server.close();
-        reject(new Error("could not allocate a port"));
-        return;
-      }
-      const port = address.output.port;
-      server.close(() => resolvePort(port));
-    });
-  });
-}
-
 function build(): void {
-  if (!existsSync(CF)) return;
+  if (!isCfDevInstalled()) return;
   for (const name of ["@hns/core", "@hns/store", "@hns/agent", "@hns/server"]) {
     execFileSync("npm", ["run", "build", "-w", name], {
       cwd: ROOT,
@@ -171,8 +148,8 @@ function rawPublicKey(publicKey: ReturnType<typeof generateKeyPairSync>["publicK
 }
 
 async function writeProject(agentUrl: string, seed: string): Promise<string> {
-  await mkdir(WORK, { recursive: true });
-  const dir = await mkdtemp(join(WORK, "machine-remote-"));
+  await mkdir(CF_DEV_WORK_DIR, { recursive: true });
+  const dir = await mkdtemp(join(CF_DEV_WORK_DIR, "machine-remote-"));
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({
@@ -186,73 +163,6 @@ async function writeProject(agentUrl: string, seed: string): Promise<string> {
   await writeFile(join(dir, "cloudflare.config.ts"), configFor(agentUrl, seed));
   await writeFile(join(dir, "worker.ts"), WORKER);
   return dir;
-}
-
-function collect(child: ChildProcess): Running {
-  let text = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  return { child, output: () => text };
-}
-
-async function start(dir: string, port: number): Promise<Running> {
-  const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
-    cwd: dir,
-    detached: true,
-    env: {
-      ...process.env,
-      XDG_CONFIG_HOME: join(dir, "config"),
-      XDG_CACHE_HOME: join(dir, "cache"),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const target = collect(child);
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (target.child.exitCode !== null) {
-      throw new Error("cf dev exited before becoming ready:\n" + target.output());
-    }
-    try {
-      const response = await fetch("http://127.0.0.1:" + String(port) + "/health");
-      if (response.ok) return target;
-    } catch {
-      // Not listening yet.
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-  }
-  await stop(target);
-  throw new Error("cf dev did not become ready:\n" + target.output());
-}
-
-async function stop(target: Running | undefined): Promise<void> {
-  const child = target?.child;
-  if (child === undefined || child.pid === undefined || child.exitCode !== null) return;
-  const pid = child.pid;
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-  const exited = new Promise<void>((resolveExit) => {
-    child.once("exit", () => resolveExit());
-  });
-  await Promise.race([
-    exited,
-    new Promise<void>((resolveTimeout) =>
-      setTimeout(() => {
-        try {
-          process.kill(-pid, "SIGKILL");
-        } catch {
-          child.kill("SIGKILL");
-        }
-        resolveTimeout();
-      }, 5_000),
-    ),
-  ]);
 }
 
 async function call<T>(
@@ -294,7 +204,7 @@ function applyBody(overrides: Record<string, string> = {}): JsonValue {
 beforeAll(async () => {
   build();
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  machineRoot = await mkdtemp(join(ROOT, "tools", "deploy", ".work", "machine-root-"));
+  machineRoot = await mkdtemp(join(CF_DEV_WORK_DIR, "machine-root-"));
   await mkdir(join(machineRoot, "project"));
   machine = await startMachineAgent({
     root: machineRoot,
@@ -315,7 +225,7 @@ async function newProject(): Promise<string> {
 }
 
 afterAll(async () => {
-  await stop(running);
+  await running?.stop();
   running = undefined;
   await machine?.close();
   machine = undefined;
@@ -323,12 +233,13 @@ afterAll(async () => {
   if (machineRoot !== "") await rm(machineRoot, { recursive: true, force: true });
 });
 
-test.skipIf(!existsSync(CF))(
+test.skipIf(!isCfDevInstalled())(
   "a save travels from the Workspace object to the machine and back",
   async () => {
     if (machine === undefined) throw new Error("setup failed");
-    const port = await freePort();
-    running = await start(await newProject(), port);
+    const cwd = await newProject();
+    running = await startCfDev({ cwd, readyTimeoutMs: READY_TIMEOUT_MS });
+    const port = running.port;
     try {
       const lease = await call(port, "POST", "/t/rpc/lease/acquire", Lease, {
         workspaceId: "w1",
@@ -434,19 +345,20 @@ test.skipIf(!existsSync(CF))(
           String(durations.length),
       );
     } finally {
-      await stop(running);
+      await running?.stop();
       running = undefined;
     }
   },
   TIMEOUT_MS,
 );
 
-test.skipIf(!existsSync(CF))(
+test.skipIf(!isCfDevInstalled())(
   "a stopped machine leaves reads unreadable and saves unknown",
   async () => {
     if (machine === undefined) throw new Error("setup failed");
-    const port = await freePort();
-    running = await start(await newProject(), port);
+    const cwd = await newProject();
+    running = await startCfDev({ cwd, readyTimeoutMs: READY_TIMEOUT_MS });
+    const port = running.port;
     try {
       await call(port, "POST", "/t/rpc/lease/acquire", Lease, {
         workspaceId: "w1",
@@ -471,7 +383,7 @@ test.skipIf(!existsSync(CF))(
       );
       assert.equal(write.result.status, "unknown");
     } finally {
-      await stop(running);
+      await running?.stop();
       running = undefined;
     }
   },

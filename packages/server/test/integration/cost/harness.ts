@@ -1,13 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import * as v from "valibot";
+import { CF_DEV_WORK_DIR, startCfDev, type CfDev } from "../../../../../tools/test/cf-dev.ts";
 
-const ROOT = resolve(import.meta.dirname, "../../../../..");
-const CF = join(ROOT, "node_modules", ".bin", "cf");
-const WORK = join(ROOT, "tools", "deploy", ".work");
 const READY_TIMEOUT_MS = 30_000;
 
 /** The limits the harness can set; every field defaults to the seeded value. */
@@ -78,87 +73,6 @@ export interface CostHarness {
   /** Empty the ledger and restore the seeded limits, so one test cannot leak into the next. */
   reset(): Promise<void>;
   dispose(): Promise<void>;
-}
-
-interface Running {
-  readonly child: ChildProcess;
-  readonly output: () => string;
-}
-
-const collect = (child: ChildProcess): Running => {
-  let text = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  return { child, output: () => text };
-};
-
-const healthy = async (port: number, running: Running): Promise<boolean> => {
-  if (running.child.exitCode !== null) {
-    throw new Error("cf dev exited before becoming ready:\n" + running.output());
-  }
-  try {
-    // Bound the probe: a socket that accepts but never answers must not hold the start loop
-    // past its own deadline.
-    const response = await fetch("http://127.0.0.1:" + String(port) + "/health", {
-      signal: AbortSignal.timeout(2_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-};
-
-const stop = async (running: Running | undefined): Promise<void> => {
-  const child = running?.child;
-  if (child === undefined || child.pid === undefined || child.exitCode !== null) return;
-  const pid = child.pid;
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-  const exited = new Promise<void>((resolveExit) => {
-    child.once("exit", () => resolveExit());
-  });
-  await Promise.race([
-    exited,
-    new Promise<void>((resolveTimeout) =>
-      setTimeout(() => {
-        try {
-          process.kill(-pid, "SIGKILL");
-        } catch {
-          child.kill("SIGKILL");
-        }
-        resolveTimeout();
-      }, 5_000),
-    ),
-  ]);
-};
-
-/**
- * Take a port below the kernel's ephemeral range.
- *
- * @remarks
- * The gateway and session suites let the kernel choose (32768 and up), so choosing from this
- * fixed range cannot race with them between the probe and cf dev's bind.
- */
-async function freePort(): Promise<number> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const port = 18_100 + Math.floor(Math.random() * 900);
-    const free = await new Promise<boolean>((resolveTry) => {
-      const server = createServer();
-      server.once("error", () => resolveTry(false));
-      server.listen(port, "127.0.0.1", () => {
-        server.close(() => resolveTry(true));
-      });
-    });
-    if (free) return port;
-  }
-  throw new Error("could not allocate a port for the cost project");
 }
 
 const CONFIG = [
@@ -345,9 +259,8 @@ const expectOk = (response: Response): void => {
  * needs its own project root with a `wrangler` dependency.
  */
 export async function startCost(): Promise<CostHarness> {
-  if (!existsSync(CF)) throw new Error("cf is not installed");
-  await mkdir(WORK, { recursive: true });
-  const directory = await mkdtemp(join(WORK, "cost-"));
+  await mkdir(CF_DEV_WORK_DIR, { recursive: true });
+  const directory = await mkdtemp(join(CF_DEV_WORK_DIR, "cost-"));
   await writeFile(
     join(directory, "package.json"),
     JSON.stringify({
@@ -360,49 +273,12 @@ export async function startCost(): Promise<CostHarness> {
   await symlink(join("..", "..", "node_modules"), join(directory, "node_modules"));
   await writeFile(join(directory, "cloudflare.config.ts"), CONFIG);
   await writeFile(join(directory, "worker.ts"), WORKER);
-  // Two shared addresses can make cf dev exit during startup: the HTTP port taken between the
-  // probe and the bind, and the debug inspector, which wrangler fixes at 9229 for every instance
-  // (a forwarded --inspector-port is ignored). The other integration suites run their own dev
-  // servers beside this one, so either can be lost. That is a lost shared resource, not a
-  // product failure: start again on a fresh HTTP port and report the output if both lose.
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const port = await freePort();
-    const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
-      cwd: directory,
-      detached: true,
-      env: {
-        ...process.env,
-        XDG_CONFIG_HOME: join(directory, "config"),
-        XDG_CACHE_HOME: join(directory, "cache"),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const running = collect(child);
-    const deadline = Date.now() + READY_TIMEOUT_MS;
-    let ready = false;
-    while (Date.now() < deadline) {
-      try {
-        if (await healthy(port, running)) {
-          ready = true;
-          break;
-        }
-      } catch {
-        // The child exited during startup; let the retry take a fresh port.
-        break;
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    }
-    if (ready) return harness(directory, running, port);
-    await stop(running);
-    if (attempt === 2) {
-      throw new Error("cf dev did not become ready:\n" + running.output());
-    }
-  }
-  throw new Error("cf dev did not become ready");
+  const dev = await startCfDev({ cwd: directory, readyTimeoutMs: READY_TIMEOUT_MS });
+  return harness(directory, dev);
 }
 
-const harness = (directory: string, running: Running, port: number): CostHarness => {
-  const base = "http://127.0.0.1:" + String(port);
+const harness = (directory: string, dev: CfDev): CostHarness => {
+  const base = dev.url;
   const post = (path: string, body: string): Promise<Response> =>
     fetch(base + path, {
       method: "POST",
@@ -445,7 +321,7 @@ const harness = (directory: string, running: Running, port: number): CostHarness
       expectOk(await post("/reset", "{}"));
     },
     async dispose() {
-      await stop(running);
+      await dev.stop();
       await rm(directory, { recursive: true, force: true });
     },
   };

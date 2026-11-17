@@ -1,7 +1,5 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { LEASE_REFUSALS } from "@hns/core";
@@ -9,10 +7,15 @@ import { LEASE_REFUSALS } from "@hns/core";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import * as v from "valibot";
 
+import {
+  CF_DEV_WORK_DIR,
+  isCfDevInstalled,
+  startCfDev,
+  type CfDev,
+} from "../../../../tools/test/cf-dev.ts";
+
 const ROOT = resolve(import.meta.dirname, "../../../..");
-const CF = join(ROOT, "node_modules", ".bin", "cf");
-const WORK = join(ROOT, "tools", "deploy", ".work");
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = 300_000;
 const READY_TIMEOUT_MS = 40_000;
 
 const CONFIG = [
@@ -116,38 +119,11 @@ const Watermark = v.object({
 });
 const Conflict = v.object({ ok: v.literal(false), code: v.string() });
 
-interface Running {
-  readonly child: ChildProcess;
-  readonly output: () => string;
-  /** The HTTP port this attempt settled on; a retry may move it. */
-  readonly port: number;
-}
-
 let project: string | undefined;
-let running: Running | undefined;
-
-async function freePort(): Promise<number> {
-  return await new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = v.safeParse(
-        v.object({ port: v.pipe(v.number(), v.integer()) }),
-        server.address(),
-      );
-      if (!address.success) {
-        server.close();
-        reject(new Error("could not allocate a port"));
-        return;
-      }
-      const port = address.output.port;
-      server.close(() => resolvePort(port));
-    });
-  });
-}
+let running: CfDev | undefined;
 
 function build(): void {
-  if (!existsSync(CF)) return;
+  if (!isCfDevInstalled()) return;
   for (const name of ["@hns/core", "@hns/store", "@hns/agent", "@hns/server"]) {
     execFileSync("npm", ["run", "build", "-w", name], {
       cwd: ROOT,
@@ -158,8 +134,8 @@ function build(): void {
 }
 
 async function writeProject(): Promise<string> {
-  await mkdir(WORK, { recursive: true });
-  const dir = await mkdtemp(join(WORK, "workspace-do-"));
+  await mkdir(CF_DEV_WORK_DIR, { recursive: true });
+  const dir = await mkdtemp(join(CF_DEV_WORK_DIR, "workspace-do-"));
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({
@@ -174,102 +150,6 @@ async function writeProject(): Promise<string> {
   await writeFile(join(dir, "cloudflare.config.ts"), CONFIG);
   await writeFile(join(dir, "worker.ts"), WORKER);
   return dir;
-}
-
-async function collect(
-  child: ChildProcess,
-): Promise<{ readonly child: ChildProcess; readonly output: () => string }> {
-  let text = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  return { child, output: () => text };
-}
-
-async function health(port: number, target: Running): Promise<boolean> {
-  if (target.child.exitCode !== null) {
-    throw new Error("cf dev exited before becoming ready:\n" + target.output());
-  }
-  try {
-    const response = await fetch("http://127.0.0.1:" + String(port) + "/health");
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Start cf dev on a fresh port.
- *
- * @remarks
- * Two shared addresses can make cf dev exit during startup: the HTTP port taken between the
- * probe and the bind, and the debug inspector, which wrangler fixes at 9229 for every instance.
- * The other integration suites run their own dev servers beside this one, so either can be
- * lost. That is a lost shared resource, not a product failure: retry on a fresh port.
- */
-async function start(dir: string): Promise<Running> {
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const port = await freePort();
-    const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
-      cwd: dir,
-      detached: true,
-      env: {
-        ...process.env,
-        XDG_CONFIG_HOME: join(dir, "config"),
-        XDG_CACHE_HOME: join(dir, "cache"),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const target: Running = { ...(await collect(child)), port };
-    const deadline = Date.now() + READY_TIMEOUT_MS;
-    let ready = false;
-    while (Date.now() < deadline) {
-      try {
-        if (await health(port, target)) {
-          ready = true;
-          break;
-        }
-      } catch {
-        // The child exited during startup; let the retry take a fresh port.
-        break;
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    }
-    if (ready) return target;
-    await stop(target);
-    if (attempt === 2) throw new Error("cf dev did not become ready:\n" + target.output());
-  }
-  throw new Error("cf dev did not become ready");
-}
-
-async function stop(target: Running | undefined): Promise<void> {
-  const child = target?.child;
-  if (child === undefined || child.pid === undefined || child.exitCode !== null) return;
-  const pid = child.pid;
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-  const exited = new Promise<void>((resolveExit) => {
-    child.once("exit", () => resolveExit());
-  });
-  await Promise.race([
-    exited,
-    new Promise<void>((resolveTimeout) =>
-      setTimeout(() => {
-        try {
-          process.kill(-pid, "SIGKILL");
-        } catch {
-          child.kill("SIGKILL");
-        }
-        resolveTimeout();
-      }, 5_000),
-    ),
-  ]);
 }
 
 async function send(
@@ -321,16 +201,16 @@ beforeAll(() => {
 });
 
 afterAll(async () => {
-  await stop(running);
+  await running?.stop();
   running = undefined;
   if (project !== undefined) await rm(project, { recursive: true, force: true });
 });
 
-test.skipIf(!existsSync(CF))(
+test.skipIf(!isCfDevInstalled())(
   "the Workspace DO fences the old epoch and keeps the lease across a restart",
   async () => {
     project = await writeProject();
-    running = await start(project);
+    running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
     const firstPort = running.port;
     try {
       const first = await call(firstPort, "POST", "/t/rpc/lease/acquire", Lease, leaseBody());
@@ -349,9 +229,9 @@ test.skipIf(!existsSync(CF))(
       expect(stale.status).toBe(409);
       expect(v.parse(Refused, JSON.parse(stale.text)).code).toBe("lease_epoch_stale");
 
-      await stop(running);
+      await running.stop();
       running = undefined;
-      running = await start(project);
+      running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
       const secondPort = running.port;
 
       // Catches: a lease that lives only in memory, not in the object's SQLite.
@@ -367,18 +247,18 @@ test.skipIf(!existsSync(CF))(
       const resumed = await call(secondPort, "POST", "/t/rpc/lease/acquire", Lease, leaseBody());
       expect(resumed.lease.epoch).toBe(3);
     } finally {
-      await stop(running);
+      await running?.stop();
       running = undefined;
     }
   },
   TIMEOUT_MS,
 );
 
-test.skipIf(!existsSync(CF))(
+test.skipIf(!isCfDevInstalled())(
   "the Workspace DO keeps the journal watermark across a restart",
   async () => {
     project = await writeProject();
-    running = await start(project);
+    running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
     const firstPort = running.port;
     try {
       const written = await call(firstPort, "POST", "/t/rpc/journal/watermark", Watermark, {
@@ -396,9 +276,9 @@ test.skipIf(!existsSync(CF))(
       expect(lower.status).toBe(409);
       expect(v.parse(Conflict, JSON.parse(lower.text)).code).toBe("conflict");
 
-      await stop(running);
+      await running.stop();
       running = undefined;
-      running = await start(project);
+      running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
       const secondPort = running.port;
 
       // Catches: a watermark that lives only in memory, not in the object's SQLite.
@@ -413,7 +293,7 @@ test.skipIf(!existsSync(CF))(
       });
       expect(same.watermark.throughSeq).toBe(7);
     } finally {
-      await stop(running);
+      await running?.stop();
       running = undefined;
     }
   },
@@ -424,11 +304,11 @@ const Migration = v.object({
   rows: v.array(v.object({ sql: v.string() })),
 });
 
-test.skipIf(!existsSync(CF))(
+test.skipIf(!isCfDevInstalled())(
   "the journal table is rebuilt from the previous DDL inside a transaction",
   async () => {
     project = await writeProject();
-    running = await start(project);
+    running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
     const port = running.port;
     try {
       const response = await fetch("http://127.0.0.1:" + String(port) + "/migrate");
@@ -437,7 +317,7 @@ test.skipIf(!existsSync(CF))(
       // Catches: a workerd SQLite build that refuses DDL (rename/copy/drop) in a transaction.
       expect(body.rows[0]?.sql).toContain("'denied'");
     } finally {
-      await stop(running);
+      await running?.stop();
       running = undefined;
     }
   },

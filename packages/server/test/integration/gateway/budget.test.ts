@@ -47,11 +47,12 @@ const count = async (responses: Promise<Response>[]): Promise<Map<number, number
   return tally;
 };
 
+// cf dev serializes on the machine's inspector port, so the start can queue behind another suite.
 beforeAll(async () => {
   if (!enabled) return;
   provider = await startFakeProvider();
   gateway = await startGateway(provider.url);
-});
+}, 300_000);
 
 afterAll(async () => {
   const current = gateway;

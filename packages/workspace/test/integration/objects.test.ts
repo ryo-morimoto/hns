@@ -1,18 +1,20 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { gitObjectId } from "../../src/objects.ts";
 import type { GitObject } from "../../src/objects.ts";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import * as v from "valibot";
+import {
+  CF_DEV_WORK_DIR,
+  isCfDevInstalled,
+  startCfDev,
+  type CfDev,
+} from "../../../../tools/test/cf-dev.ts";
 
 const ROOT = resolve(import.meta.dirname, "../../../..");
-const CF = join(ROOT, "node_modules", ".bin", "cf");
-const WORK = join(ROOT, "tools", "deploy", ".work");
-const TIMEOUT_MS = 240_000;
+const TIMEOUT_MS = 300_000;
 const READY_TIMEOUT_MS = 60_000;
 const BUCKET = "hns-objects-test";
 
@@ -94,35 +96,10 @@ const Put = v.object({ id: v.string(), key: v.string() });
 const Listed = v.object({ keys: v.array(v.string()) });
 const Packed = v.object({ commit: v.string(), key: v.string(), uploaded: v.boolean() });
 
-interface Running {
-  readonly child: ChildProcess;
-  readonly output: () => string;
-}
-
 let project: string | undefined;
 let repo = "";
-let running: Running | undefined;
+let running: CfDev | undefined;
 let port = 0;
-
-async function freePort(): Promise<number> {
-  return await new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = v.safeParse(
-        v.object({ port: v.pipe(v.number(), v.integer()) }),
-        server.address(),
-      );
-      if (!address.success) {
-        server.close();
-        reject(new Error("could not allocate a port"));
-        return;
-      }
-      const selected = address.output.port;
-      server.close(() => resolvePort(selected));
-    });
-  });
-}
 
 function build(): void {
   // Only this package: the server's integration tests build the packages they need, and two
@@ -135,8 +112,8 @@ function build(): void {
 }
 
 async function writeProject(): Promise<string> {
-  await mkdir(WORK, { recursive: true });
-  const dir = await mkdtemp(join(WORK, "objects-"));
+  await mkdir(CF_DEV_WORK_DIR, { recursive: true });
+  const dir = await mkdtemp(join(CF_DEV_WORK_DIR, "objects-"));
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({
@@ -151,77 +128,6 @@ async function writeProject(): Promise<string> {
   await writeFile(join(dir, "cloudflare.config.ts"), CONFIG);
   await writeFile(join(dir, "worker.ts"), WORKER);
   return dir;
-}
-
-async function collect(child: ChildProcess): Promise<Running> {
-  let text = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    text += chunk.toString();
-  });
-  return { child, output: () => text };
-}
-
-async function health(target: Running): Promise<boolean> {
-  if (target.child.exitCode !== null) {
-    throw new Error("cf dev exited before becoming ready:\n" + target.output());
-  }
-  try {
-    const response = await fetch("http://127.0.0.1:" + String(port) + "/health");
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function start(dir: string): Promise<Running> {
-  const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
-    cwd: dir,
-    detached: true,
-    env: {
-      ...process.env,
-      XDG_CONFIG_HOME: join(dir, "config"),
-      XDG_CACHE_HOME: join(dir, "cache"),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const target = await collect(child);
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (await health(target)) return target;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-  }
-  await stop(target);
-  throw new Error("cf dev did not become ready:\n" + target.output());
-}
-
-async function stop(target: Running | undefined): Promise<void> {
-  const child = target?.child;
-  if (child === undefined || child.pid === undefined || child.exitCode !== null) return;
-  const pid = child.pid;
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-  const exited = new Promise<void>((resolveExit) => {
-    child.once("exit", () => resolveExit());
-  });
-  await Promise.race([
-    exited,
-    new Promise<void>((resolveTimeout) =>
-      setTimeout(() => {
-        try {
-          process.kill(-pid, "SIGKILL");
-        } catch {
-          child.kill("SIGKILL");
-        }
-        resolveTimeout();
-      }, 5_000),
-    ),
-  ]);
 }
 
 const base = (): string => "http://127.0.0.1:" + String(port);
@@ -265,24 +171,24 @@ const git = (args: readonly string[], input?: Uint8Array): string => {
 };
 
 beforeAll(async () => {
-  if (!existsSync(CF)) return;
+  if (!isCfDevInstalled()) return;
   build();
   project = await writeProject();
   repo = await mkdtemp(join(tmpdir(), "hns-objects-git-"));
   execFileSync("git", ["init", "-q"], { cwd: repo });
-  port = await freePort();
-  running = await start(project);
+  running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
+  port = running.port;
 }, TIMEOUT_MS);
 
 afterAll(async () => {
-  await stop(running);
+  await running?.stop();
   running = undefined;
   if (project !== undefined) await rm(project, { recursive: true, force: true });
   if (repo.length > 0) await rm(repo, { recursive: true, force: true });
 });
 
 // Catches: an object store wired to the wrong binding, or a put that does not round-trip.
-test.skipIf(!existsSync(CF))(
+test.skipIf(!isCfDevInstalled())(
   "the R2 binding stores and lists blobs by object id",
   async () => {
     const content = enc.encode("hello from r2\n");
@@ -315,7 +221,7 @@ test.skipIf(!existsSync(CF))(
 );
 
 // Catches: a pack R2 stores but git cannot read, or a checkpoint that is not keyed by its commit.
-test.skipIf(!existsSync(CF))(
+test.skipIf(!isCfDevInstalled())(
   "a checkpoint pack from the R2 binding is readable by git",
   async () => {
     const fileContent = enc.encode("hello from the checkpoint\n");
