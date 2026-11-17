@@ -34,7 +34,14 @@ test("a typed conversation failure is shown in the sidebar", async () => {
       return {
         projects: {
           __typename: "ProjectList",
-          projects: [{ id: "UHJvamVjdDpwcm9qZWN0LWhucw", name: "hns" }],
+          projects: [
+            {
+              id: "UHJvamVjdDpwcm9qZWN0LWhucw",
+              name: "hns",
+              workspaceRoot: "",
+              agentCwd: "",
+            },
+          ],
         },
       };
     }

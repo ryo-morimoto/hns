@@ -41,6 +41,14 @@ export interface LiveClient {
 export interface LiveClientOptions {
   readonly conversationId: string;
   readonly socket: LiveSocketFactory;
+  /**
+   * The project the conversation belongs to.
+   *
+   * @remarks
+   * Sent as `project` so the edge addresses that project's Session object (D080). Omitted keeps
+   * the legacy default object, which is what a client older than projects reaches.
+   */
+  readonly projectId?: string | undefined;
   /** Defaults to `/ws`. */
   readonly path?: string | undefined;
   /** Schedules a reconnect; tests inject a deterministic queue. */
@@ -80,8 +88,15 @@ export function browserLiveSocket(url: string): LiveSocketLike {
 }
 
 /** The reconnect URL: the current cursor lets the server correlate the resumed subscription. */
-function socketUrl(path: string, conversationId: string, cursor: string): string {
-  const params = new URLSearchParams({ conversationId });
+function socketUrl(
+  path: string,
+  conversationId: string,
+  projectId: string | undefined,
+  cursor: string,
+): string {
+  const params = new URLSearchParams();
+  if (projectId !== undefined) params.set("project", projectId);
+  params.set("conversationId", conversationId);
   if (cursor !== EMPTY_LIVE_CURSOR) params.set("cursor", cursor);
   return path + "?" + params.toString();
 }
@@ -123,7 +138,9 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
   const connect = (): void => {
     if (closed) return;
     cancelRetry = undefined;
-    const nextSocket = options.socket(socketUrl(path, options.conversationId, state.cursor));
+    const nextSocket = options.socket(
+      socketUrl(path, options.conversationId, options.projectId, state.cursor),
+    );
     socket = nextSocket;
     nextSocket.onopen = () => {
       if (socket !== nextSocket) return;

@@ -21,6 +21,13 @@ function clientWithQueue() {
   return { client, sockets, scheduled };
 }
 
+// Catches: a live socket that reaches the legacy Session object after any project switch.
+test("the client names the conversation's project on the socket", () => {
+  const { factory, sockets } = socketFactory();
+  createLiveClient({ conversationId: "2", projectId: "p1", socket: factory });
+  expect(sockets[0]?.url).toBe("/ws?project=p1&conversationId=2");
+});
+
 test("the client opens the conversation and applies the snapshot", () => {
   const { client, sockets } = clientWithQueue();
   expect(client.state.status).toBe("connecting");

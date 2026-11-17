@@ -6,6 +6,8 @@ import { initialLiveState, type LiveConversationState } from "./state.ts";
 export interface LiveConnectionOptions {
   /** Tests pass a fake; production uses the browser's WebSocket. */
   readonly socket?: LiveSocketFactory | undefined;
+  /** The project the conversation belongs to; sent so the edge picks that Session object. */
+  readonly projectId?: string | undefined;
 }
 
 /**
@@ -24,11 +26,13 @@ export function useLiveConnection(
   options: LiveConnectionOptions = {},
 ): LiveConversationState {
   const socket = options.socket;
+  const projectId = options.projectId;
   const [state, setState] = useState(initialLiveState);
 
   useEffect(() => {
     const client = createLiveClient({
       conversationId,
+      projectId,
       socket: socket ?? browserLiveSocket,
     });
     const unsubscribe = client.subscribe(setState);
@@ -37,7 +41,7 @@ export function useLiveConnection(
       unsubscribe();
       client.close();
     };
-  }, [conversationId, socket]);
+  }, [conversationId, projectId, socket]);
 
   return state;
 }

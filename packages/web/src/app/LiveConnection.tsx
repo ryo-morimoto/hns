@@ -27,11 +27,17 @@ function LiveConnectionView({ state }: { readonly state: LiveConversationState }
  */
 export function LiveConnection({
   conversationId,
+  projectId,
   socket,
 }: {
   readonly conversationId: string;
+  /** The project that owns the conversation; the edge addresses its Session object. */
+  readonly projectId?: string | undefined;
   readonly socket?: LiveSocketFactory | undefined;
 }): ReactElement {
-  const state = useLiveConnection(conversationId, socket === undefined ? {} : { socket });
+  const state = useLiveConnection(
+    conversationId,
+    projectId === undefined ? { socket } : { projectId, socket },
+  );
   return <LiveConnectionView state={state} />;
 }

@@ -19,6 +19,8 @@ export const SidebarProjectsFragment = graphql`
     projects {
       id
       name
+      workspaceRoot
+      agentCwd
     }
   }
 `;

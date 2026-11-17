@@ -16,6 +16,7 @@ import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
 import type { LiveSocketFactory } from "../live/client.ts";
 import { LiveConnection } from "./LiveConnection.tsx";
+import { ProjectWorkspaceProvider, type ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { QueryBoundary } from "./QueryBoundary.tsx";
 import {
   Sidebar,
@@ -181,6 +182,14 @@ function ShellFrame({
   const totals = totalsOf(summaries.data ?? []);
   const connection = projectsFailed ? "offline" : "online";
   const failed = conversationsFailed || tasksFailed;
+  const workspaceContext: ProjectWorkspace | null =
+    project === undefined
+      ? null
+      : {
+          projectId: project.id,
+          workspaceRoot: project.workspace_root,
+          agentCwd: project.agent_cwd,
+        };
 
   const sidebar = (
     <Sidebar
@@ -221,30 +230,35 @@ function ShellFrame({
 
       {mobile ? null : sidebar}
 
-      <main className="hns-shell__main">
-        {rawProjectId === null ? (
-          <EmptyState title="プロジェクトを選択" body="上のメニューからプロジェクトを選ぶ。" />
-        ) : projectKey === null ? (
-          <EmptyState title="プロジェクトが見つかりません" body="URL のプロジェクト ID が不正。" />
-        ) : project === undefined ? (
-          <EmptyState title="プロジェクトが見つかりません" body="サイドバーから選び直す。" />
-        ) : route.kind === "conversation" ? (
-          <ConversationView
-            project={project}
-            conversationId={route.conversationId}
-            title={conversationTitle}
-            liveSocket={liveSocket}
-          />
-        ) : (
-          <WorkspaceView project={project} conversations={conversations} tasks={tasks} />
-        )}
-      </main>
+      <ProjectWorkspaceProvider workspace={workspaceContext}>
+        <main className="hns-shell__main">
+          {rawProjectId === null ? (
+            <EmptyState title="プロジェクトを選択" body="上のメニューからプロジェクトを選ぶ。" />
+          ) : projectKey === null ? (
+            <EmptyState
+              title="プロジェクトが見つかりません"
+              body="URL のプロジェクト ID が不正。"
+            />
+          ) : project === undefined ? (
+            <EmptyState title="プロジェクトが見つかりません" body="サイドバーから選び直す。" />
+          ) : route.kind === "conversation" ? (
+            <ConversationView
+              project={project}
+              conversationId={route.conversationId}
+              title={conversationTitle}
+              liveSocket={liveSocket}
+            />
+          ) : (
+            <WorkspaceView project={project} conversations={conversations} tasks={tasks} />
+          )}
+        </main>
 
-      {panel === undefined ? null : (
-        <aside className="hns-shell__panel" aria-label="エディタパネル">
-          {panel}
-        </aside>
-      )}
+        {panel === undefined ? null : (
+          <aside className="hns-shell__panel" aria-label="エディタパネル">
+            {panel}
+          </aside>
+        )}
+      </ProjectWorkspaceProvider>
 
       {mobile && drawerOpen ? (
         <Drawer.Root open onOpenChange={setDrawerOpen} swipeDirection="left">
@@ -301,11 +315,15 @@ interface WorkspaceViewProps {
 }
 
 function WorkspaceView({ project, conversations, tasks }: WorkspaceViewProps): ReactElement {
+  const root = project.workspace_root === "" ? "machine ROOT" : project.workspace_root;
   return (
     <section className="hns-view" aria-labelledby="workspace-title">
       <h1 id="workspace-title">Workspace</h1>
       <p className="hns-view__meta">
         {project.name} · 会話 {conversations.length} · タスク {tasks.length}
+      </p>
+      <p className="hns-view__root" data-project-root={project.workspace_root}>
+        root: {root}
       </p>
       <p className="hns-view__note">Workspace の中身はこれから作る。ここは shell の確認用。</p>
     </section>
@@ -332,7 +350,11 @@ function ConversationView({
         {project.name} · {conversationId}
       </p>
       {liveSocket === undefined ? null : (
-        <LiveConnection conversationId={conversationId} socket={liveSocket} />
+        <LiveConnection
+          conversationId={conversationId}
+          projectId={project.id}
+          socket={liveSocket}
+        />
       )}
       <a className="hns-view__link" href={formatHash({ kind: "workspace", projectId: project.id })}>
         ワークスペースへ戻る

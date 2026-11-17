@@ -12,6 +12,10 @@ import { fromGlobalId } from "@hns/core/graphql";
 export interface ProjectLink {
   readonly id: ProjectId;
   readonly name: string;
+  /** The project's directory below the machine ROOT; empty is the ROOT itself. */
+  readonly workspace_root: string;
+  /** The directory the agent starts in; equal to `workspace_root` for now. */
+  readonly agent_cwd: string;
 }
 
 /** What the sidebar renders for a conversation. */
@@ -66,8 +70,18 @@ function taskStatusOf(value: TaskStatusName): TaskStatus {
  * The GraphQL boundary carries global ids; the routes and links use the model's raw ids, so the
  * decode happens here once instead of at every comparison.
  */
-export function projectLinkOf(view: { readonly id: string; readonly name: string }): ProjectLink {
-  return { id: v.parse(ProjectIdSchema, rawId(view.id, "Project")), name: view.name };
+export function projectLinkOf(view: {
+  readonly id: string;
+  readonly name: string;
+  readonly workspaceRoot: string;
+  readonly agentCwd: string;
+}): ProjectLink {
+  return {
+    id: v.parse(ProjectIdSchema, rawId(view.id, "Project")),
+    name: view.name,
+    workspace_root: view.workspaceRoot,
+    agent_cwd: view.agentCwd,
+  };
 }
 
 /** Map a conversation payload to what the sidebar renders. */

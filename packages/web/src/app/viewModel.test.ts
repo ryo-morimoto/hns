@@ -4,10 +4,19 @@ import { conversationLinkOf, projectLinkOf, taskLinkOf } from "./viewModel.ts";
 const PROJECT = "UHJvamVjdDpwcm9qZWN0LWhucw"; // base64url("Project:project-hns")
 const CONVERSATION = "Q29udmVyc2F0aW9uOmNvbnZlcnNhdGlvbi1pbnRlbnQ"; // base64url("Conversation:conversation-intent")
 
-test("a project payload maps to the model's raw id", () => {
-  expect(projectLinkOf({ id: PROJECT, name: "hns" })).toStrictEqual({
+test("a project payload maps to the model's raw id and root", () => {
+  expect(
+    projectLinkOf({
+      id: PROJECT,
+      name: "hns",
+      workspaceRoot: "projects/hns",
+      agentCwd: "projects/hns",
+    }),
+  ).toStrictEqual({
     id: "project-hns",
     name: "hns",
+    workspace_root: "projects/hns",
+    agent_cwd: "projects/hns",
   });
 });
 
@@ -31,8 +40,12 @@ test("a task payload maps the GraphQL enum back to the model's status", () => {
 
 // Catches: a malformed or mistyped global id rendered as if it were a real one.
 test("a malformed global id throws instead of rendering a broken link", () => {
-  expect(() => projectLinkOf({ id: "not-a-global-id", name: "x" })).toThrow(/malformed/u);
-  expect(() => projectLinkOf({ id: CONVERSATION, name: "x" })).toThrow(/malformed/u);
+  expect(() =>
+    projectLinkOf({ id: "not-a-global-id", name: "x", workspaceRoot: "", agentCwd: "" }),
+  ).toThrow(/malformed/u);
+  expect(() =>
+    projectLinkOf({ id: CONVERSATION, name: "x", workspaceRoot: "", agentCwd: "" }),
+  ).toThrow(/malformed/u);
 });
 
 // Catches: a status this build does not know silently becoming something else.

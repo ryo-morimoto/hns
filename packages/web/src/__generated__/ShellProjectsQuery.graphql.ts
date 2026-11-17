@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<49d4c5fb39cc9774dfe0e754263a56f3>>
+ * @generated SignedSource<<ba7e6214d67d2e6c07d533b1e04fda9b>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -135,6 +135,20 @@ return {
                     "kind": "ScalarField",
                     "name": "name",
                     "storageKey": null
+                  },
+                  {
+                    "alias": null,
+                    "args": null,
+                    "kind": "ScalarField",
+                    "name": "workspaceRoot",
+                    "storageKey": null
+                  },
+                  {
+                    "alias": null,
+                    "args": null,
+                    "kind": "ScalarField",
+                    "name": "agentCwd",
+                    "storageKey": null
                   }
                 ],
                 "storageKey": null
@@ -150,12 +164,12 @@ return {
     ]
   },
   "params": {
-    "cacheID": "c9e26e1c2996b7433d9cc3056376d605",
+    "cacheID": "c18c1be210aec0efb6ff1bc7525e738f",
     "id": null,
     "metadata": {},
     "name": "ShellProjectsQuery",
     "operationKind": "query",
-    "text": "query ShellProjectsQuery {\n  projects {\n    __typename\n    ... on ProjectList {\n      ...SidebarProjects\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n}\n\nfragment SidebarProjects on ProjectList {\n  projects {\n    id\n    name\n  }\n}\n"
+    "text": "query ShellProjectsQuery {\n  projects {\n    __typename\n    ... on ProjectList {\n      ...SidebarProjects\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n}\n\nfragment SidebarProjects on ProjectList {\n  projects {\n    id\n    name\n    workspaceRoot\n    agentCwd\n  }\n}\n"
   }
 };
 })();

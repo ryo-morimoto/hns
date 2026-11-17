@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -8,6 +8,8 @@ import { RelayEnvironmentProvider } from "react-relay";
 import { createTestEnvironment } from "../../test/support/relay.ts";
 import type { Environment } from "relay-runtime";
 import { workspaceFixture } from "../../test/support/workspaceFixtures.ts";
+import { toGlobalId } from "@hns/core/graphql";
+import { useProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { socketFactory } from "../../test/live/support.ts";
 import type { LiveSocketFactory } from "../live/client.ts";
 import { fixtureSummarySource } from "./fixtureSummaries.ts";
@@ -30,14 +32,26 @@ function setMobile(mobile: boolean): void {
 }
 
 /** Render the shell over an environment the test owns, so requests can be counted. */
-function renderShellWith(environment: Environment) {
+function renderShellWith(environment: Environment, panel?: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <RelayEnvironmentProvider environment={environment}>
       <QueryClientProvider client={queryClient}>
-        <Shell />
+        <Shell panel={panel} />
       </QueryClientProvider>
     </RelayEnvironmentProvider>,
+  );
+}
+
+/** The editor-slot stand-in: it renders the project context the shell provides. */
+function RootProbe(): ReactElement {
+  const workspace = useProjectWorkspace();
+  return (
+    <p data-testid="project-probe">
+      {workspace === null
+        ? "none"
+        : workspace.projectId + ":" + workspace.workspaceRoot + ":" + workspace.agentCwd}
+    </p>
   );
 }
 
@@ -131,6 +145,29 @@ test("the project menu switches the URL", async () => {
     expect(window.location.hash).toBe("#/p/project-scratch");
     expect(document.body.textContent ?? "").toMatch(/scratch · 会話 0 · タスク 0/u);
   });
+});
+
+// Catches: a project switch that leaves the main region or the editor slot on the old root.
+test("project switch changes the workspace root and the editor slot's target", async () => {
+  const { environment, calls } = createTestEnvironment(workspaceFixture);
+  renderShellWith(environment, <RootProbe />);
+  await screen.findByRole("heading", { name: "Workspace" });
+  expect(screen.getByTestId("project-probe").textContent).toBe("project-hns::");
+  expect(document.body.textContent ?? "").toMatch(/root: machine ROOT/u);
+
+  await userEvent.click(screen.getByRole("button", { name: "hns" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "scratch" }));
+
+  await waitFor(() => {
+    expect(screen.getByTestId("project-probe").textContent).toBe(
+      "project-scratch:projects/scratch:projects/scratch",
+    );
+    expect(document.body.textContent ?? "").toMatch(/root: projects\/scratch/u);
+  });
+  const workspaceCalls = calls.filter((call) => call.operation === "ShellWorkspaceQuery");
+  expect(workspaceCalls.at(-1)?.variables["projectId"]).toBe(
+    toGlobalId("Project", "project-scratch"),
+  );
 });
 
 test("the command entry calls its handler", async () => {

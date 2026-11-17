@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<c09a2199e99bf9dd642e27eac414c821>>
+ * @generated SignedSource<<34bb1be5e5c53d95abb64dece57d7ddd>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -12,8 +12,10 @@ import { ReaderFragment } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
 export type SidebarProjects$data = {
   readonly projects: ReadonlyArray<{
+    readonly agentCwd: string;
     readonly id: string;
     readonly name: string;
+    readonly workspaceRoot: string;
   }>;
   readonly " $fragmentType": "SidebarProjects";
 };
@@ -49,6 +51,20 @@ const node: ReaderFragment = {
           "kind": "ScalarField",
           "name": "name",
           "storageKey": null
+        },
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "workspaceRoot",
+          "storageKey": null
+        },
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "agentCwd",
+          "storageKey": null
         }
       ],
       "storageKey": null
@@ -58,6 +74,6 @@ const node: ReaderFragment = {
   "abstractKey": null
 };
 
-(node as any).hash = "d34859ba284bc80e41ed9a278f64d086";
+(node as any).hash = "b7896808dad779185ba71a1213e319ac";
 
 export default node;
