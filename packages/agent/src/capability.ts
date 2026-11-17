@@ -123,7 +123,6 @@ export interface BashArguments {
   readonly envelope: ExecEnvelope;
 }
 
-/** Every workspace tool's arguments. */
 /** The model's arguments of a bash call, before the agent adds the envelope. */
 export interface BashInput {
   readonly command: string;
@@ -149,16 +148,10 @@ const WriteFileSchema: v.GenericSchema<unknown, WriteFileArguments> = v.strictOb
  * `bash`'s schema: the model's arguments, parsed, without the envelope the agent adds.
  *
  * @remarks
- * `timeoutMs` is a positive whole number of milliseconds. pi-durable may already have rounded a
- * fraction; the call is hashed over the whole number, which is what runs.
- */
-/**
- * `bash`'s schema: the model's arguments, parsed, without the envelope the agent adds.
- *
- * @remarks
- * `timeoutMs` alone: pi-durable's bash takes `timeout` in seconds, but that is the agent's boundary to
- * convert, not a second name for the model to write. A call that writes `timeout` is refused here as
- * an unknown key (`INVALID_ARGUMENTS`), before anything is hashed or run.
+ * `timeoutMs` alone: a positive whole number of milliseconds. pi-durable's bash takes `timeout` in
+ * seconds, but that is the agent's boundary to convert (`harnessArguments`), not a second name for the
+ * model to write: a call that writes `timeout` is refused here as an unknown key (the agent refuses it
+ * before admission too), so the call is hashed over one spelling of its timeout and nothing runs.
  */
 const BashSchema: v.GenericSchema<unknown, BashInput> = v.strictObject({
   command: v.pipe(v.string(), v.minLength(1)),
@@ -660,7 +653,13 @@ async function canonicalForWrite(
     : parent;
 }
 
-/** What the audit sink receives: one event, appended before the call runs or before its result returns. */
+/**
+ * What the audit sink receives: one event, appended before the call runs or before its result returns.
+ *
+ * @remarks
+ * The event is the contract's, except for a refused call's row, which has no hashes (see
+ * {@link AuditRow}); the contract's type is claimed where the row is handed to the sink.
+ */
 export type AuditSink = (event: AuditEvent) => Promise<void>;
 
 /** Where audit events say they came from. */
@@ -995,11 +994,11 @@ export async function appendEvent(
       : { ...base, callHash: shared.callHash, argsHash: shared.argsHash };
   // The contract puts the decision on `tool.result` only (`AuditEvent`): a `tool.call` says what was
   // about to run, and the decision is judged once the run is over.
-  const eventRow: AuditEvent =
+  const eventRow =
     event === "tool.call"
       ? toAuditEvent(row, "tool.call")
       : toAuditEvent(row, "tool.result", decision, outcome);
-  await audit(eventRow);
+  await audit(asAuditEvent(eventRow));
 }
 
 /**
@@ -1012,33 +1011,94 @@ export async function appendEvent(
  * @returns The event the audit sink receives.
  *
  * @remarks
- * SAFETY: the row carries every field `AuditEventBase` has. When the call had a hash, the hash members
- * are on the row too; a refused call's row leaves them out, which the contract's type does not allow
- * yet (the 0220 proposal in this lane's Result). The object is exactly what this function builds.
+ * The row is what the contract's event is, **with one known gap**: a refused call's row has no
+ * `callHash` or `argsHash`, which `AuditEventBase` requires. The gap is stated here rather than
+ * papered over with empty strings — `""` is not a hash and the contract's schema refuses it — so the
+ * value passed on is an `AuditRow`, and the contract's `AuditEvent` type is claimed only at this
+ * one call, where the 0220 proposal (this lane's Result) makes those two members optional. The audit
+ * sink's consumer (0222) parses what it stores; until the proposal lands, a refused row is the one
+ * it must accept without hashes.
  */
-function toAuditEvent(row: AuditRow, event: "tool.call"): ToolCallAuditEvent;
+function toAuditEvent(
+  row: AuditRow,
+  event: "tool.call",
+): AuditRow & { readonly event: "tool.call" };
 function toAuditEvent(
   row: AuditRow,
   event: "tool.result",
   decision: PolicyDecision,
   outcome: RecordedOutcome,
-): ToolResultAuditEvent;
+): AuditRow & {
+  readonly event: "tool.result";
+  readonly decision: PolicyDecision;
+  readonly durationMs: number;
+};
+/**
+ * A row as one of the contract's audit events.
+ *
+ * @param row - The fields this module wrote for one step of a call.
+ * @param event - Which step it is.
+ * @param decision - The decision, for a `tool.result`.
+ * @param outcome - The duration, for a `tool.result`.
+ * @returns The event the audit sink receives.
+ *
+ * @remarks
+ * The row is what the contract's event is, **with one known gap**: a refused call's row has no
+ * `callHash` or `argsHash`, which `AuditEventBase` requires. The gap is stated here rather than
+ * papered over with empty strings — `""` is not a hash and the contract's schema refuses it — so the
+ * value passed on is an `AuditRow`, and the contract's `AuditEvent` type is claimed only at this
+ * one call, where the 0220 proposal (this lane's Result) makes those two members optional. The audit
+ * sink's consumer (0222) parses what it stores; until the proposal lands, a refused row is the one
+ * it must accept without hashes.
+ */
+function toAuditEvent(
+  row: AuditRow,
+  event: "tool.call",
+): AuditRow & { readonly event: "tool.call" };
+function toAuditEvent(
+  row: AuditRow,
+  event: "tool.result",
+  decision: PolicyDecision,
+  outcome: RecordedOutcome,
+): AuditRow & {
+  readonly event: "tool.result";
+  readonly decision: PolicyDecision;
+  readonly durationMs: number;
+};
 function toAuditEvent(
   row: AuditRow,
   event: "tool.call" | "tool.result",
   decision?: PolicyDecision,
   outcome?: RecordedOutcome,
-): AuditEvent {
+):
+  | (AuditRow & { readonly event: "tool.call" })
+  | (AuditRow & {
+      readonly event: "tool.result";
+      readonly decision: PolicyDecision;
+      readonly durationMs: number;
+    }) {
   if (event === "tool.call") {
-    // SAFETY: the row's fields are `AuditEventBase`'s, and only the two hash members may be absent (a
-    // refused call's row); the contract's type requires them, which the 0220 proposal changes.
-    return { ...row, event } as ToolCallAuditEvent;
+    // SAFETY: the row has `AuditEventBase`'s fields, and the two hash members only when the call had a
+    // hash; the returned type says the hashes are optional, so nothing downstream reads them as present.
+    return { ...row, event: "tool.call" };
   }
-  // SAFETY: the same row, plus the decision and the duration `ToolResultAuditEvent` adds.
   return {
     ...row,
-    event,
+    event: "tool.result",
     decision: decision ?? phase0Deny("unsupported", "the call was not decided"),
     durationMs: outcome?.durationMs ?? 0,
-  } as ToolResultAuditEvent;
+  };
+}
+
+/**
+ * The row as the contract's event type, for the sink.
+ *
+ * @param row - A row this module built; its hashes are absent only for a refused call.
+ * @returns The same value, typed as the contract's event.
+ */
+function asAuditEvent(row: AuditRow & { readonly event: "tool.call" | "tool.result" }): AuditEvent {
+  // SAFETY: the row is the contract's event with the two hash members possibly absent (a refused
+  // call), which the 0220 proposal makes optional; this is the single point where the type is
+  // claimed, and it is a claim the sink's consumer (0222) knows how to parse.
+  return row as AuditEvent;
 }

@@ -430,26 +430,49 @@ describe("bash's timeout vocabulary (B3)", () => {
       async ({ call, audits }) => {
         const outcome = await call("bash", { command: "true", timeout: 0.01 });
         expect(outcome.isError).toBe(true);
-        // The harness's own schema (the manifest's vocabulary) refuses it before any hook: nothing ran,
-        // and only the settled result is recorded.
+        expect(audits.map((event) => event.event)).toEqual(["tool.call", "tool.result"]);
         expect(decisionOf(audits)).toMatchObject({ outcome: "deny", code: "unsupported" });
-        expect(audits.map((event) => event.event)).toEqual(["tool.result"]);
+        // Nothing ran: the tool's own output never reached the model, and only the refusal did.
+        expect(outcome.result).not.toContain("timeout");
+        expect(lastEvent(audits, "tool.result")).toMatchObject({ durationMs: 0 });
+      },
+      { kind: "sandboxed" },
+    );
+  }, 30_000);
+
+  // Catches: a timeout that was admitted but never handed to the tool (an allow that did not run).
+  test("timeoutMs is admitted, runs, and its duration is the tool's", async () => {
+    await withTools(
+      async ({ call, audits }) => {
+        const outcome = await call("bash", { command: "true", timeoutMs: 12 });
+        expect(outcome.isError).toBe(false);
+        expect(decisionOf(audits)).toMatchObject({ outcome: "allow" });
+        expect(lastEvent(audits, "tool.call")?.argsHash).toMatch(/^[0-9a-f]{64}$/u);
+        expect(lastEvent(audits, "tool.result")).toMatchObject({ event: "tool.result" });
+      },
+      { kind: "sandboxed" },
+    );
+  }, 30_000);
+
+  test("a whole second is admitted and runs", async () => {
+    await withTools(
+      async ({ call }) => {
+        const outcome = await call("bash", { command: "true", timeoutMs: 1000 });
+        expect(outcome.isError).toBe(false);
       },
       { kind: "sandboxed" },
     );
   }, 30_000);
 
   // Catches: two spellings of one timeout hashing to one call.
-  test("0.0123 seconds and 12 milliseconds are different calls", async () => {
+  test("0.0123 seconds and 12 milliseconds are not the same call", async () => {
     await withTools(
       async ({ call, audits }) => {
         await call("bash", { command: "true", timeout: 0.0123 });
-        const refused = lastEvent(audits, "tool.call");
+        // The seconds form never became a call: its row carries no hash at all.
+        expect(lastEvent(audits, "tool.call")?.argsHash).toBeUndefined();
         await call("bash", { command: "true", timeoutMs: 12 });
-        const wholeCall = lastEvent(audits, "tool.call");
-        // The seconds form is not a call at all: it is refused, so it has no hash to confuse with 12ms.
-        expect(refused?.argsHash).toBeUndefined();
-        expect(wholeCall?.argsHash).toMatch(/^[0-9a-f]{64}$/u);
+        expect(lastEvent(audits, "tool.call")?.argsHash).toMatch(/^[0-9a-f]{64}$/u);
       },
       { kind: "sandboxed" },
     );
