@@ -1,6 +1,6 @@
 # 0160: UI の配信（Workers Assets・typed client）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D094
@@ -13,11 +13,11 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 
 ## Acceptance criteria
 
-- [ ] 静的アセットを Workers Assets で配信し、assets immutable / index no-cache にする
-- [ ] typed client は Relay の codegen（0180）から生成し、WS は 0159 の別の口として持つ
-- [ ] custom domain を既定にし、workers.dev は dev / CI にする
-- [ ] `/graphql` は 401、画面はクライアントで `/login` にルーティングし、元の deep link に戻る
-- [ ] XSS の面を確認（UI から exec に届くため、0158 / 0165 と突き合わせる）
+- [x] 静的アセットを Workers Assets で配信し、assets immutable / index no-cache にする
+- [x] typed client は Relay の codegen（0180）から生成し、WS は 0159 の別の口として持つ
+- [x] custom domain を既定にし、workers.dev は dev / CI にする
+- [x] `/graphql` は 401、画面はクライアントで `/login` にルーティングし、元の deep link に戻る
+- [x] XSS の面を確認（UI から exec に届くため、0158 / 0165 と突き合わせる）
 
 - 2026-11-17: 0127 の後に lead が `next` から `now` へ。UI を Worker から配信し、typed client と WS を組み合わせる。
 
@@ -146,10 +146,6 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 | T10 | C10 | 構成（domain / workers.dev / assets） | unit | `tools/deploy/config.test.ts` + `cf deploy --dry-run` の worker.config.json |
 | T11 | C11 | ゲート | static | `npm run check` |
 
-## Log
-
-- 2026-11-17: D094 で合意。U-01〜U-06 を決定し、`design: agreed` にした。
-
 ## やらないこと
 
 - 画面そのもの（0103〜0114）。
@@ -170,3 +166,16 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
   `Cache-Control: no-cache` と CSP / nosniff / Referrer-Policy / Permissions-Policy、`/assets/index-*.js` は
   200 に `public, max-age=31536000, immutable`、`/assets/missing.js` は 404（index でない）。
   `POST /graphql` は 401（`application/problem+json`）、`GET /graphql` は 405、`/api/unknown` は JSON 404。
+
+- 2026-11-17: D094 で合意。U-01〜U-06 を決定し、`design: agreed` にした。
+- 2026-11-17: reviewer-0160 PASS（blocking 0）。main へ ff 統合（da1484a）。main の gate は exit 0（829 tests / 39.7s）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0160、blocking 0）
+- reviewer: reviewer-0160（この変更を書いていない別エージェント）
+- HEAD: da1484a（main に ff 統合）
+- 受入: 5/5。gate は exit 0（829 tests / 128 files、main で 39.7s）。
+- 確認: deploy/assets の index + hashed JS/CSS（.map なし）、index no-cache / asset immutable / 未知 asset 404、SPA fallback が /graphql・/api・/ws を飲み込まない、custom domain 既定（HNS_DOMAIN 必須・fail closed）/ workers.dev は development のみ、POST /graphql 401 problem+json・GET 405・/api 404 JSON、401 → /login?next= と同一 origin の nextPathFrom、XSS の描画テストと sink の静的検査、CSP / nosniff / Referrer-Policy / Permissions-Policy。
+- 非 blocking（低 8、follow-up）: onUnauthorized が 401 ごとに呼ばれる（TSDoc は once）/ nextPathFrom の control char 分岐が未テスト / cloudflare.config の workersDev が domain 欠落で fail open になり得る（実経路は customDomainFor が fail closed）/ Accept の Vary と 404 の cache 指示 / 製品コメントの issue 番号 / nextPathFrom の呼び出しがテストのみ（0108 で再利用・touches 追記）/ docs/web-client-nfr の出力先が dist のまま / deploy stage の dry-run が development のみ。
+- 未確認: 実 deploy / DNS、実ブラウザの CSP 下の WS、401 → /login → deep link の E2E（画面は 0108）。
