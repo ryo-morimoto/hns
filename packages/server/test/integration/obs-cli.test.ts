@@ -16,6 +16,7 @@ const SCRIPT = fileURLToPath(new URL("../../../../tools/obs/trace.mjs", import.m
 interface Served {
   readonly url: string;
   readonly requests: string[];
+  readonly requestIds: (string | undefined)[];
   close(): Promise<void>;
 }
 
@@ -31,8 +32,11 @@ function portOf(server: ReturnType<typeof createServer>): number {
 /** Serve one /api/events body on loopback and record the query the command sent. */
 async function serve(events: readonly ObsLogEntry[]): Promise<Served> {
   const requests: string[] = [];
+  const requestIds: (string | undefined)[] = [];
   const server = createServer((request, response) => {
     requests.push(request.url ?? "");
+    const id = request.headers["x-request-id"];
+    requestIds.push(Array.isArray(id) ? id.join(",") : id);
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ ok: true, events }));
   });
@@ -42,6 +46,7 @@ async function serve(events: readonly ObsLogEntry[]): Promise<Served> {
   return {
     url: "http://127.0.0.1:" + String(portOf(server)),
     requests,
+    requestIds,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
@@ -118,6 +123,7 @@ test("the trace command names the hop where the request stopped", async () => {
     expect(run.stdout).toContain("not observed: fs");
     expect(run.stdout).toContain("conversation=2");
     expect(served.requests[0]).toContain("requestId=req-1");
+    expect(served.requestIds[0]).toBeUndefined();
   } finally {
     await served.close();
   }

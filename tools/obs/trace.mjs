@@ -59,7 +59,8 @@ async function main() {
   let response;
   try {
     response = await fetch(url, {
-      headers: { cookie, "x-request-id": requestId },
+      // No correlation header: the trace request is not part of the request being traced.
+      headers: { cookie },
       redirect: "error",
     });
   } catch (error) {
