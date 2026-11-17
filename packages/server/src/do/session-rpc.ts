@@ -147,7 +147,8 @@ async function bodyOf(
 > {
   const body = await readBody(request, DEFAULT_LIMITS.maxBodyBytes);
   if (!body.ok) {
-    // The body's own refusal: too large is a 413, a wrong media type a 415.
+    // The body read names its own failure: too large is `payload_too_large` (413), a wrong media
+    // type `unsupported_media_type` (415). The code is the status here, not `invalid_request`.
     return { ok: false, response: failure(body.code, "The request body was refused.") };
   }
   if (body.text.length === 0) {
@@ -232,11 +233,11 @@ export async function handleSessionRpc(
         const conversations = await session.listConversations(limit.value);
         return json({ ok: true, conversations });
       }
-      return failure("invalid_request", "Only GET and POST are allowed here.");
+      return failure("method_not_allowed", "Only GET and POST are allowed here.");
     }
     if (tail === undefined) {
       if (request.method !== "GET") {
-        return failure("invalid_request", "Only GET is allowed here.");
+        return failure("method_not_allowed", "Only GET is allowed here.");
       }
       const conversation = await session.getConversation(id);
       if (conversation === undefined) {
@@ -246,7 +247,7 @@ export async function handleSessionRpc(
     }
     if (tail === "transcript") {
       if (request.method !== "GET") {
-        return failure("invalid_request", "Only GET is allowed here.");
+        return failure("method_not_allowed", "Only GET is allowed here.");
       }
       const limit = limitOf(url, MAX_TRANSCRIPT_PAGE);
       if (!limit.ok) return limit.response;
@@ -255,7 +256,7 @@ export async function handleSessionRpc(
     }
     if (tail === "messages") {
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.");
+        return failure("method_not_allowed", "Only POST is allowed here.");
       }
       const body = await bodyOf(request);
       if (!body.ok) return body.response;
@@ -301,7 +302,7 @@ export async function handleSessionRpc(
     }
     if (tail === "abort") {
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.");
+        return failure("method_not_allowed", "Only POST is allowed here.");
       }
       const aborted = await session.abort(id);
       if (!aborted) return failure("not_found", "No conversation has this id.");

@@ -55,12 +55,12 @@ type ProjectList {
 }
 
 type QueryFailure {
-  code: QueryFailureCode!
+  code: QueryErrorCode!
   message: String!
 }
 
-enum QueryFailureCode {
-  INVALID_REQUEST
+enum QueryErrorCode {
+  INVALID_ARGUMENT
   LIMIT_EXCEEDED
   UNAVAILABLE
 }
@@ -98,13 +98,13 @@ type CreateProjectPayload {
 }
 
 type MutationFailure {
-  code: MutationFailureCode!
+  code: MutationErrorCode!
   message: String!
 }
 
-enum MutationFailureCode {
+enum MutationErrorCode {
   FORBIDDEN
-  INVALID_REQUEST
+  INVALID_ARGUMENT
   LIMIT_EXCEEDED
   UNAVAILABLE
 }

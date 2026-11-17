@@ -49,7 +49,7 @@ export const FAILURE_CODES = [
 export type FailureCode = (typeof FAILURE_CODES)[number];
 
 /** The faces that share the table. Each declares its own subset of {@link FAILURE_CODES}. */
-export const FAILURE_SURFACES = [
+const FAILURE_SURFACES = [
   "edge",
   "gateway",
   "files",
@@ -61,25 +61,23 @@ export const FAILURE_SURFACES = [
 /** One face of the server. */
 export type FailureSurface = (typeof FAILURE_SURFACES)[number];
 
-/** How a face carries its failure. */
-export const FAILURE_TRANSPORTS = [
-  /** An HTTP response whose status is the row's status. */
-  "http",
-  /** A member of a GraphQL result union inside a 200 response; the row has no status. */
-  "graphql",
-] as const;
+/** The transports a face can carry a failure on. */
+type FailureTransport = "http" | "graphql";
 
-/** How one failure reaches the caller. */
-export type FailureTransport = (typeof FAILURE_TRANSPORTS)[number];
-
-/** One row: what carries the code, and which face emits it. */
-interface FailureRow {
-  /** The HTTP status of the failure, or null when the transport has no status. */
-  readonly status: number | null;
-  readonly transport: FailureTransport;
-  /** The faces that answer with this code. */
-  readonly surfaces: readonly FailureSurface[];
-}
+/** One row: what carries the code, and which faces emit it. */
+type FailureRow =
+  | {
+      /** The HTTP status the face answers with. */
+      readonly status: number;
+      readonly transport: FailureTransport;
+      readonly surfaces: readonly FailureSurface[];
+    }
+  | {
+      /** A GraphQL failure is a union member of a 200 response, so it has no status. */
+      readonly status: null;
+      readonly transport: FailureTransport;
+      readonly surfaces: readonly FailureSurface[];
+    };
 
 /**
  * The table: every expected failure code mapped to the one status that carries it.
@@ -87,7 +85,7 @@ interface FailureRow {
  * @remarks
  * Adding a code means adding a row and at least one surface; `satisfies Record<FailureCode,
  * FailureRow>` makes a missing row or a missing surface a compile error. `status` is null only
- * when the transport has no HTTP answer (`transport: "graphql"`).
+ * when the transport has no HTTP answer, which is every GraphQL-only row.
  */
 export const FAILURE_STATUS = {
   unauthorized: { status: 401, transport: "http", surfaces: ["edge"] },

@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<d4314286f0dd1678b248dc7bebf8f4cf>>
+ * @generated SignedSource<<ba7e6214d67d2e6c07d533b1e04fda9b>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -10,7 +10,7 @@
 
 import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
-export type QueryFailureCode = "INVALID_REQUEST" | "LIMIT_EXCEEDED" | "UNAVAILABLE" | "%future added value";
+export type QueryErrorCode = "INVALID_ARGUMENT" | "LIMIT_EXCEEDED" | "UNAVAILABLE" | "%future added value";
 export type ShellProjectsQuery$variables = Record<PropertyKey, never>;
 export type ShellProjectsQuery$data = {
   readonly projects: {
@@ -18,7 +18,7 @@ export type ShellProjectsQuery$data = {
     readonly " $fragmentSpreads": FragmentRefs<"SidebarProjects">;
   } | {
     readonly __typename: "QueryFailure";
-    readonly code: QueryFailureCode;
+    readonly code: QueryErrorCode;
     readonly message: string;
   } | {
     // This will never be '%other', but we need some

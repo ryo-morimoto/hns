@@ -47,14 +47,13 @@ export class MachineRefusal extends Error {
  * The machine's status for each refusal code.
  *
  * @remarks
- * The machine cannot import the server (the dependency runs server → machine), so this is the
- * machine's side of the server's one table (`@hns/server` `failures/status.ts`): `unauthorized`,
- * `invalid_request`, `forbidden`, `not_found`, `method_not_allowed`, `internal`, and
- * `too_large` are the server's `payload_too_large` row by another spelling. The rest
- * (`stale_request`, `replayed`, `stale_connection`, `path_denied`, `busy`,
- * `deadline_exceeded`) are the machine's own: the server never answers them. The parity test
- * fixes every value to the one the switch below replaced, and `docs/observability.md` lists
- * them once. Adding a code without a status is a compile error rather than a silent 500.
+ * The dependency runs server → machine, so the machine cannot read the Worker's table; this is
+ * the machine's own declaration of its half of it. `too_large` is the machine's spelling of the
+ * Worker's `payload_too_large` (both 413). The codes the Worker also answers with keep the same
+ * status, and the machine-only ones (`stale_request`, `replayed`, `stale_connection`,
+ * `path_denied`, `busy`, `deadline_exceeded`) are declared here alone. The parity test fixes
+ * every value to the one the switch below replaced; adding a code without a status is a compile
+ * error rather than a silent 500.
  */
 const REFUSAL_STATUS = {
   unauthorized: 401,

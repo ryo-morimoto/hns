@@ -6,17 +6,20 @@ import { FAILURE_STATUS, type FailureCode, type FailureCodeOf } from "../failure
  * The GraphQL failure member: an enum of codes plus a message, for one result-union family.
  *
  * @param name - The object type name (`QueryFailure`, `MutationFailure`).
- * @param codes - The closed codes this family answers with, in the published order.
+ * @param codes - The codes this family answers with, in the published order; each must be a row
+ * the GraphQL face declares, which {@link allGraphqlCodes} proves.
  * @returns The object type; its enum is named `<name>Code` with values from `publicEnumName`.
  *
  * @remarks
  * The enum and object used to be written twice (`schema.ts` and `mutations/failure.ts`); this is
- * the single builder. The code type is the server-wide `FailureCodeOf<"graphql">`; a code that
- * the table does not give to the GraphQL face is refused here, so a published enum value always
- * has a row. GraphQL publishes one spelling per code (`invalid_request` → `INVALID_REQUEST`).
+ * the single builder. GraphQL publishes one spelling per code (`invalid_request` →
+ * `INVALID_REQUEST`), so a published enum value always has a row.
  * @internal
  */
-export function failureType(name: string, codes: readonly FailureCode[]): GraphQLObjectType {
+export function failureType(
+  name: string,
+  codes: readonly FailureCodeOf<"graphql">[],
+): GraphQLObjectType {
   const codeEnum = new GraphQLEnumType({
     name: name + "Code",
     values: Object.fromEntries(codes.map((code) => [publicEnumName(code), { value: code }])),
@@ -31,18 +34,29 @@ export function failureType(name: string, codes: readonly FailureCode[]): GraphQ
 }
 
 /**
- * Check that every code a family publishes is a row the GraphQL face declares.
+ * Check a family's code list and narrow it to the rows the GraphQL face declares.
  *
  * @param codes - The codes the family's enum carries.
+ * @returns The same codes, typed as the GraphQL face's vocabulary.
  * @throws Error when a code has no row for `graphql`, which is a table defect.
+ *
+ * @remarks
+ * Every code is checked against the table at run time before the list goes on; the throw is the
+ * only way a code the face does not declare can reach the published schema.
  * @internal
  */
-export function assertGraphqlCodes(codes: readonly FailureCode[]): readonly FailureCodeOf<"graphql">[] {
+export function allGraphqlCodes(
+  codes: readonly FailureCode[],
+): readonly FailureCodeOf<"graphql">[] {
   for (const code of codes) {
-    const row = FAILURE_STATUS[code];
-    if (!row.surfaces.some((surface) => surface === "graphql")) {
+    if (!FAILURE_STATUS[code].surfaces.some((surface) => surface === "graphql")) {
       throw new Error("GraphQL has no row for " + code);
     }
   }
-  return codes as readonly FailureCodeOf<"graphql">[];
+  return codes.filter(isGraphqlCode);
+}
+
+/** Whether one code is a row the GraphQL face declares. */
+function isGraphqlCode(code: FailureCode): code is FailureCodeOf<"graphql"> {
+  return FAILURE_STATUS[code].surfaces.some((surface) => surface === "graphql");
 }

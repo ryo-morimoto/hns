@@ -123,7 +123,6 @@ function flaky(d1: FakeD1): FlakyBinding {
   };
 }
 
-
 function send(id: string): Request {
   return new Request("https://session/rpc/conversations/" + id + "/messages", {
     method: "POST",

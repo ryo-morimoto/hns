@@ -1,5 +1,5 @@
 import type { GraphQLObjectType } from "graphql";
-import { failureType, assertGraphqlCodes } from "../failure-type.ts";
+import { failureType, allGraphqlCodes } from "../failure-type.ts";
 import type { FailureCodeOf } from "../../failures/status.ts";
 
 /**
@@ -47,5 +47,5 @@ export function mutationFailure(code: MutationFailureCode, message: string): Mut
  */
 export const MutationFailureType: GraphQLObjectType = failureType(
   MUTATION_FAILURE_TYPE,
-  assertGraphqlCodes(MUTATION_FAILURE_CODES),
+  allGraphqlCodes(MUTATION_FAILURE_CODES),
 );

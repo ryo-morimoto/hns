@@ -276,7 +276,8 @@ async function bodyOf(
 > {
   const body = await readBody(request, DEFAULT_LIMITS.maxBodyBytes);
   if (!body.ok) {
-    // The body's own refusal: too large is a 413, a wrong media type a 415.
+    // The body read names its own failure: too large is `payload_too_large` (413), a wrong media
+    // type `unsupported_media_type` (415). The code is the status here, not `invalid_request`.
     return { ok: false, response: failure(body.code, "The request body was refused.") };
   }
   if (body.text.length === 0) {
@@ -411,7 +412,7 @@ export class Workspace {
         return failure("not_found", "No Workspace RPC route matches this path.");
       }
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.");
+        return failure("method_not_allowed", "Only POST is allowed here.");
       }
       return await this.#apply(request);
     }
@@ -420,7 +421,7 @@ export class Workspace {
         return failure("not_found", "No Workspace RPC route matches this path.");
       }
       if (request.method !== "GET") {
-        return failure("invalid_request", "Only GET is allowed here.");
+        return failure("method_not_allowed", "Only GET is allowed here.");
       }
       return await this.#read(url, request);
     }
@@ -429,7 +430,7 @@ export class Workspace {
         return failure("not_found", "No Workspace RPC route matches this path.");
       }
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.");
+        return failure("method_not_allowed", "Only POST is allowed here.");
       }
       return await this.#watermark(request);
     }
@@ -439,7 +440,7 @@ export class Workspace {
         return failure("not_found", "No Workspace RPC route matches this path.");
       }
       if (request.method !== "POST") {
-        return failure("invalid_request", "Only POST is allowed here.");
+        return failure("method_not_allowed", "Only POST is allowed here.");
       }
       switch (action) {
         case "acquire":
@@ -961,7 +962,7 @@ function isLeaseAction(value: string | undefined): value is LeaseAction {
  *
  * @remarks
  * An applied, conflicted, or undecided outcome is the operation's own record, so it answers 200
- * with a `MutationResult`; only a recorded denial is a failure, and its status is the table's.
+ * with a `MutationResult`; a recorded denial is a failure, and its status is the table's.
  */
 function outcomeStatus(entry: JournalOutcomeEntry): number {
   switch (entry.status) {
@@ -1015,11 +1016,12 @@ function outcomeResponse(entry: JournalOutcomeEntry): Response {
     }
     case "denied": {
       // A refused-write outcome carries the machine's refusal code; a size refusal has its own
-      // status so a caller can distinguish "too big" from "not allowed".
+      // status so a caller can distinguish "too big" from "not allowed". Both read the table.
       if (entry.reason === "too_large") {
         return failure("payload_too_large", "The write is larger than the machine accepts.");
       }
-      return failure("denied", entry.reason ?? "denied");
+      const body = { ok: false, code: "denied", message: entry.reason ?? "denied" };
+      return json(body, outcomeStatus(entry));
     }
   }
 }

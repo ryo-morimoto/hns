@@ -11,7 +11,7 @@ import {
 } from "graphql";
 import { buildSchema, type MutationRootFactory } from "@hns/core/graphql";
 import type { GraphQLContext } from "./context.ts";
-import { failureType, assertGraphqlCodes } from "./failure-type.ts";
+import { failureType, allGraphqlCodes } from "./failure-type.ts";
 import { buildMutationRoot, MUTATION_MODULES, type MutationModule } from "./mutations/index.ts";
 import {
   resolveConversations,
@@ -29,7 +29,7 @@ export const SDL_COMMAND = "# Regenerate with npm run codegen.";
 const QUERY_FAILURE_CODES = ["invalid_request", "limit_exceeded", "unavailable"] as const;
 
 /** The failure member every result union carries. */
-const QueryFailureType = failureType("QueryFailure", assertGraphqlCodes(QUERY_FAILURE_CODES));
+const QueryFailureType = failureType("QueryFailure", allGraphqlCodes(QUERY_FAILURE_CODES));
 
 /**
  * A model object type by GraphQL name.

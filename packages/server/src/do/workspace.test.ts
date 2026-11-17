@@ -731,3 +731,62 @@ test("a too-large write is a 413 denial", async () => {
     h.close();
   }
 });
+// Catches: a method mismatch answering 400 because the failure was named invalid_request; the
+// status the RPC answered with before the code table is 405 (read from 236aa2e).
+test("a method mismatch is a 405 with method_not_allowed", async () => {
+  const h = harness();
+  try {
+    await acquire(h.workspace, leaseBody());
+    const cases = [
+      ["PUT /rpc/apply", "https://workspace/rpc/apply", { method: "PUT" }],
+      ["POST /rpc/read", "https://workspace/rpc/read?projectRoot=&path=a.txt", { method: "POST" }],
+      ["GET /rpc/journal/watermark", "https://workspace/rpc/journal/watermark", {}],
+      ["GET /rpc/lease/acquire", "https://workspace/rpc/lease/acquire", {}],
+    ] as const;
+    for (const [name, url, init] of cases) {
+      const response = await h.workspace.fetch(new Request(url, init));
+      expect(response.status, name).toBe(405);
+      expect(v.parse(ProtocolFailure, await response.json()).code, name).toBe("method_not_allowed");
+    }
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a non-JSON body refused with a status other than the 415 the RPC answered before the
+// table (the body read names `unsupported_media_type`; the status stays 415).
+test("a body of the wrong media type is a 415", async () => {
+  const h = harness();
+  try {
+    const response = await h.workspace.fetch(
+      new Request("https://workspace/rpc/lease/acquire", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "not json",
+      }),
+    );
+    expect(response.status).toBe(415);
+    expect(v.parse(ProtocolFailure, await response.json()).code).toBe("unsupported_media_type");
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: an oversized body refused with a status other than the 413 the RPC answered before
+// the table (the body read names `payload_too_large`; the status stays 413).
+test("an oversized body is a 413", async () => {
+  const h = harness();
+  try {
+    const response = await h.workspace.fetch(
+      new Request("https://workspace/rpc/lease/acquire", {
+        method: "POST",
+        headers: { "content-type": "application/json", "content-length": String(70 * 1024 * 1024) },
+        body: JSON.stringify({ workspaceId: "w1" }),
+      }),
+    );
+    expect(response.status).toBe(413);
+    expect(v.parse(ProtocolFailure, await response.json()).code).toBe("payload_too_large");
+  } finally {
+    h.close();
+  }
+});

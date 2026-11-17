@@ -93,35 +93,40 @@ index の `index.*` はこの節の対象ではない。`indexEntry`（`packages
 **code → status の表は `packages/server/src/failures/status.ts` の 1 か所だけ**で、各面は自分が返すコードの
 部分集合を型で宣言して表から引く（面のコードから数値の引数は消えた）。ここは表の読み方だけを書く。
 
-| code                 | status | 返す面                                                        |
-| -------------------- | ------ | ------------------------------------------------------------- |
-| `unauthorized`       | 401    | edge                                                          |
-| `invalid_request`    | 400    | edge / files / session-rpc / workspace-rpc、（GraphQL の引数不正） |
-| `forbidden`          | —      | GraphQL の MutationFailure のみ（union のメンバー、HTTP は 200） |
-| `not_found`          | 404    | edge / gateway / files / session-rpc / workspace-rpc          |
-| `method_not_allowed` | 405    | edge / gateway / session-rpc / workspace-rpc                  |
-| `conflict`           | 409    | files / workspace-rpc                                         |
-| `denied`             | 400    | files / workspace-rpc（machine が書く前に断った）             |
-| `payload_too_large`  | 413    | edge / gateway / files / session-rpc / workspace-rpc          |
-| `unsupported_media_type` | 415 | edge / gateway / files / session-rpc / workspace-rpc         |
-| `upgrade_required`   | 426    | edge                                                          |
-| `not_implemented`    | 501    | edge                                                          |
-| `budget_exceeded`    | 429    | gateway                                                       |
-| `limit_exceeded`     | 429    | session-rpc（月次上限）、GraphQL（要求が面の上限超え）       |
-| `limit_unavailable`  | 503    | session-rpc                                                   |
-| `stopped`            | 503    | gateway                                                       |
-| `unavailable`        | 503    | edge / gateway / files / session-rpc / workspace-rpc / GraphQL |
-| `timeout`            | 504    | edge                                                          |
-| `upstream`           | 502    | gateway                                                       |
-| `internal`           | 500    | edge / files / session-rpc / workspace-rpc                    |
-| `lease_not_held` / `lease_expired` / `lease_epoch_stale` | 409 | files / workspace-rpc |
-| `stale_request` / `replayed` / `stale_connection` / `path_denied` / `busy` / `deadline_exceeded` | machine の `refusal.ts` の部分集合（server は返さない） | machine |
+| code | status | transport | 返す面 |
+| --- | --- | --- | --- |
+| `unauthorized` | 401 | http | edge |
+| `invalid_request` | 400 | http | edge / files / session-rpc / workspace-rpc |
+| `forbidden` | — | graphql | GraphQL の MutationFailure のみ（union のメンバー） |
+| `not_found` | 404 | http | edge / gateway / files / session-rpc / workspace-rpc |
+| `method_not_allowed` | 405 | http | edge / gateway / session-rpc / workspace-rpc |
+| `conflict` | 409 | http | files / workspace-rpc |
+| `denied` | 400 | http | files / workspace-rpc（machine が書く前に断った） |
+| `payload_too_large` | 413 | http | edge / gateway / files / session-rpc / workspace-rpc |
+| `unsupported_media_type` | 415 | http | edge / gateway / files / session-rpc / workspace-rpc |
+| `upgrade_required` | 426 | http | edge |
+| `not_implemented` | 501 | http | edge |
+| `budget_exceeded` | 429 | http | gateway |
+| `limit_exceeded` | 429 | http | session-rpc（月次上限）。GraphQL は union のメンバー |
+| `limit_unavailable` | 503 | http | session-rpc |
+| `stopped` | 503 | http | gateway |
+| `unavailable` | 503 | http | edge / gateway / files / session-rpc / workspace-rpc / GraphQL |
+| `timeout` | 504 | http | edge |
+| `upstream` | 502 | http | gateway |
+| `internal` | 500 | http | edge / files / session-rpc / workspace-rpc |
+| `lease_not_held` / `lease_expired` / `lease_epoch_stale` | 409 | http | files / workspace-rpc |
+| machine 独自（`stale_request` / `replayed` / `stale_connection` / `path_denied` / `busy` / `deadline_exceeded`） | `refusal.ts` の部分集合 | http | machine（server は返さない） |
 
+- **status 列が `—` の行は transport が `graphql`**。GraphQL の失敗は HTTP status を持たず、結果 union の
+  メンバーとして 200 のエンベロープに入る。表の型も status と transport を組で持つので、status の無い行に
+  `http` を書くとコンパイルエラーになる。
+- `invalid_request` は REST（400、HTTP 要求が不正）と GraphQL（`INVALID_REQUEST`、フィールドの引数が不正）で
+  **同じ綴り・同じ status、意味は別**。面ごとのコード集合は閉じたまま分けている。
+- `method_not_allowed` は method の不一致（405）。base では `invalid_request` の別 status として 405 を渡していたが、
+  code で表すようにした（status は不変）。body 拒否は `payload_too_large`（413）と
+  `unsupported_media_type`（415）で、これも code が status を決める。
 - **綴りは 1 つ**。GraphQL の `QueryFailureCode` / `MutationFailureCode` も REST と同じ `invalid_request`（enum は
-  `INVALID_REQUEST`）を使う。意味は面で違う（GraphQL は「フィールドの引数が不正」、REST は「HTTP 要求が不正」）が、
-  同じ 400 に写像し、面ごとのコード集合は閉じたまま分けている。
-- **GraphQL の失敗は HTTP status を持たない**。結果 union のメンバーとして 200 のエンベロープに入る。
-  表の GraphQL 行は status を持てない（型で `transport: "graphql"`）。
+  `INVALID_REQUEST`）を使う。GraphQL 専用の `forbidden` は union のメンバーだけ。
 - machine は server を import できない（依存は server → machine）。machine の `refusal.ts` が同じ code の部分集合を
   宣言し、値は `packages/machine/src/refusal.test.ts` が修正前の switch の値と 1:1 で固定している。上表の
   `unauthorized` / `invalid_request` / `forbidden` / `not_found` / `method_not_allowed` / `internal` は machine も返し、

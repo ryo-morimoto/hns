@@ -186,6 +186,27 @@ test("an unexpected failure is a generic 500", async () => {
   }
 });
 
+// Catches: a method mismatch answering 400 because the failure was named invalid_request; the
+// status the RPC answered with before the code table is 405 (read from 236aa2e).
+test("a method mismatch is a 405 with method_not_allowed", async () => {
+  const fake = fakeSession();
+  const cases = [
+    ["PUT /rpc/conversations", "https://session/rpc/conversations", { method: "PUT" }],
+    [
+      "POST /rpc/conversations/2/transcript",
+      "https://session/rpc/conversations/2/transcript",
+      { method: "POST" },
+    ],
+    ["GET /rpc/conversations/2/messages", "https://session/rpc/conversations/2/messages", {}],
+    ["GET /rpc/conversations/2/abort", "https://session/rpc/conversations/2/abort", {}],
+  ] as const;
+  for (const [name, url, init] of cases) {
+    const response = await handleSessionRpc(new Request(url, init), fake.session);
+    expect(response.status, name).toBe(405);
+    expect(await response.json(), name).toMatchObject({ code: "method_not_allowed" });
+  }
+});
+
 test("a non-JSON body is refused", async () => {
   const fake = fakeSession();
   const response = await handleSessionRpc(
@@ -193,6 +214,7 @@ test("a non-JSON body is refused", async () => {
     fake.session,
   );
   expect(response.status).toBe(415);
+  expect(await response.json()).toMatchObject({ code: "unsupported_media_type" });
 });
 
 test("an oversized body is refused", async () => {
@@ -202,6 +224,7 @@ test("an oversized body is refused", async () => {
     fake.session,
   );
   expect(response.status).toBe(413);
+  expect(await response.json()).toMatchObject({ code: "payload_too_large" });
 });
 /** One settled input answer the RPC can read. */
 type SendResult = Awaited<ReturnType<AgentSession["send"]>>;
