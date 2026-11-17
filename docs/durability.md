@@ -209,7 +209,7 @@ checkpoint 自体の保持（何個残し、いつ捨てるか）は [0168](../w
 1. C を R2 から展開（object を引く）
 2. J を seq 順に再生（256KB 超の本文は R2 から引く）
 3. 未確定の intent は `unknown` として照合（INV-04）
-4. 復元先の root 同一性を `.hns/root.json` で確認（INV-02 の類推）
+4. 復元先の root 同一性を `.hns/root.json` で確認（INV-02）
 
 **戻らないもの**: U（最後の checkpoint 以降の agent の shell 変更）、未送信のブラウザ編集。
 **戻るもの**: ack 済みの保存（byte 一致）、Run 終了時点までのツリー、会話、Journal の確定分。
@@ -238,23 +238,22 @@ R2 を使う理由は金額ではなく、**128MB のメモリ上限と復帰時
 
 ## 8. セキュリティ・観測・運用
 
-- 正本への経路は Worker / DO / machine の署名付き経路だけ。R2 と DO を公開しない。root の同一性は `.hns/root.json` で確認する（INV-02 の類推）。
+- 正本への経路は Worker / DO / machine の署名付き経路だけ。R2 と DO を公開しない。root の同一性は `.hns/root.json` で確認する（INV-02）。
 - Journal に秘密を入れない。本文の暗号化は provider に委ね、鍵は [0143](../work/issues/0143-secret-placement.md) に従う。
 - 観測: `workspaceId` / `runId` / `operationId` / `seq` / watermark を相関 ID に載せる。ack の p95、Journal の行数、checkpoint の成否、restore 演習の結果を記録する（[0162](../work/issues/0162-observability-hops.md) / [0163](../work/issues/0163-cost-and-limits.md)）。
 - ack の p95 が 150ms を超える、Journal が単調に増える、checkpoint が失敗する、のいずれかで §10 の撤退条件を検討する。
 
 ## 9. 不変条件
 
-| ID     | 条件                                                                                                    |
-| ------ | ------------------------------------------------------------------------------------------------------- |
-| INV-03 | 版付き書き込みは古い内容を黙って上書きしない。比較は Workspace DO の直列化とマシンの再ハッシュの二段    |
-| INV-04 | 再送は既存結果を返すか照合する。**intent が先、outcome が後**                                           |
-| INV-05 | checkpoint と外部 Mutation は別トランザクション。**U は Run 境界で commit 化されるまで durable でない** |
-| INV-06 | Progress は永続化済みの事実（J とイベント）から復元できる                                               |
-| INV-09 | 正本は `(C, J)`。ツリーは写像であり、失ってよい                                                         |
-| INV-10 | ack は単一システムで閉じる（DO の 1 トランザクション、または R2 → DO の順）                             |
-| INV-13 | 書き込みの権利は lease で 1 台に閉じる。未取得・期限切れ・古い epoch は fail closed                      |
-| INV-11 | 索引は写し。正本は DO にあり、D1 の索引は DO から作り直せる。索引の更新失敗は操作を止めない               |
+定義は [invariants.md](invariants.md) が唯一の台帳。この節の範囲で効くのは次の 7 つ。
+
+- **INV-03** 版付き書き込みは古い内容を黙って上書きしない（§3.1）。
+- **INV-04** 再送は既存結果を返すか照合する（§3.1 の窓）。
+- **INV-05** checkpoint と外部 Mutation は別トランザクション（§5）。
+- **INV-06** Progress は J とイベントから復元できる。
+- **INV-09** 正本は `(C, J)`。ツリーは写像（§1–§2）。
+- **INV-10** ack は単一システムで閉じる（DO の 1 トランザクション、または R2 → DO）。
+- **INV-11** 索引は写し。D1 の索引は DO から作り直せる（§5 の切り詰め）。
 
 ## 10. 撤退条件
 

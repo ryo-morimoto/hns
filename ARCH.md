@@ -71,21 +71,11 @@ passkey・hooks・health / metrics / usage・machine agent・ファイルのバ�
 
 ## 不変条件
 
-| ID | 条件 |
-| --- | --- |
-| INV-01 | Agent Run は認可済み Workspace と Execution Target に紐づく |
-| INV-02 | Machine Agent は Mutation 時に Root と権限を検証する |
-| INV-03 | 版付き書き込みは古い内容を黙って上書きしない（Workspace DO の直列化と、マシンの再ハッシュの二段） |
-| INV-04 | 再送は既存結果を返すか照合する。盲目的に再適用しない（intent が先、outcome が後） |
-| INV-05 | Checkpoint と外部 Mutation は別トランザクション。**U は Run 境界で commit 化されるまで durable でない** |
-| INV-06 | Progress は永続化済みの事実（J とイベント）から復元できる |
-| INV-07 | Editor の dirty Buffer は外部変更で黙って上書きされない |
-| INV-08 | User Task と Durable 内部 Task は別 ID・別ライフサイクル |
-| INV-09 | 正本は `(C, J)`。作業ツリーは写像であり、失ってよい |
-| INV-10 | ack は単一システムで閉じる（DO の 1 トランザクション、または R2 → DO の順） |
-| INV-11 | 実行中の状態は DO、確定したレコードは D1。どちらも他方の複製を正本にしない |
-| INV-12 | migration は新規テーブルと nullable / 既定値付きの新列のみ（加算）。古い build は新しい DB を開かない（fail closed） |
-| INV-13 | 書き込みの権利は lease で 1 台に閉じる。未取得・期限切れ・古い epoch は fail closed |
+INV-01〜13 の定義は [docs/invariants.md](docs/invariants.md) が唯一の台帳。ここには要約だけを置く。
+
+- **正本**は `(C, J)`。実行中の状態は DO、確定したレコードは D1（INV-09、INV-12）。索引は写し（INV-11）。
+- **書き込み**は版付きで、古い内容を黙って上書きしない（INV-03）。権利は lease で 1 台に閉じる（INV-13）。
+- **再送**は既存結果を返すか照合する（INV-04）。ack は単一システムで閉じる（INV-10）。
 
 ## Phases
 
