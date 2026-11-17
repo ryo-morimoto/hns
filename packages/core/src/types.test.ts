@@ -31,9 +31,15 @@ test("the machine and the Journal take the unknown reasons from one list", () =>
   expect(MUTATION_UNKNOWN_REASONS).toStrictEqual(["io", "crash", "timeout"]);
 });
 
-// Catches: an index event written as free JSON under a name the log would refuse when read back.
+// Catches: an index event written as free JSON under a name the log would refuse when read back,
+// including the legacy-row count the drain adds.
 test("the index events are in the closed event vocabulary", () => {
-  for (const name of ["index.rebuilt", "index.drain.failed", "index.state.failed"]) {
+  for (const name of [
+    "index.rebuilt",
+    "index.drain.failed",
+    "index.state.failed",
+    "index.legacy_rows",
+  ]) {
     expect(EVENT_NAMES).toContain(name);
   }
 });

@@ -29,6 +29,13 @@ export const OBS_DETAIL_KEYS = [
   "conversationId",
   "runId",
   "bytes",
+  // The index's counts: rows left waiting, written, removed, or found under an older object's
+  // metadata. Counts only, so a line still cannot carry content.
+  "pending",
+  "indexed",
+  "removed",
+  "rows",
+  "attempt",
 ] as const;
 /** One allowed detail key. */
 export type ObsDetailKey = (typeof OBS_DETAIL_KEYS)[number];
