@@ -96,6 +96,62 @@ test("a project row without a canonical root fails closed", async () => {
   }
 });
 
+// Catches: the index rebuild dropping existing conversations, or leaving the old single-column key
+// so two projects cannot both hold the same local id.
+test("the index migration keeps every conversation and scopes the key to the project", async () => {
+  await harness.reset();
+  const sql = createSql(harness.db);
+  try {
+    await migrate(
+      sql,
+      MIGRATIONS.filter((migration) => migration.version <= 4),
+    );
+    await sql.run("INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)", [
+      "a",
+      "a",
+      "2026-01-01T00:00:00.000Z",
+    ]);
+    await sql.run("INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)", [
+      "b",
+      "b",
+      "2026-01-01T00:00:00.000Z",
+    ]);
+    await sql.run(
+      "INSERT INTO conversations (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ["1", "a", "kept", "2026-01-02T00:00:00.000Z", null],
+    );
+    await migrate(sql, MIGRATIONS);
+    expect(
+      await sql.all(
+        "SELECT id, project_id, title, created_at, updated_at, indexed_at FROM conversations",
+      ),
+    ).toStrictEqual([
+      {
+        id: "1",
+        project_id: "a",
+        title: "kept",
+        created_at: "2026-01-02T00:00:00.000Z",
+        updated_at: null,
+        indexed_at: null,
+      },
+    ]);
+    // The same local id under another project is a different conversation (D080).
+    await sql.run(
+      "INSERT INTO conversations (id, project_id, title, created_at) VALUES (?, ?, ?, ?)",
+      ["1", "b", "other", "2026-01-03T00:00:00.000Z"],
+    );
+    expect(await sql.all("SELECT COUNT(*) AS count FROM conversations")).toStrictEqual([
+      { count: 2 },
+    ]);
+    await sql.run("DELETE FROM projects WHERE id = ?", ["a"]);
+    expect(await sql.all("SELECT id, project_id FROM conversations")).toStrictEqual([
+      { id: "1", project_id: "b" },
+    ]);
+  } finally {
+    await sql.close();
+  }
+});
+
 // Catches: a gap or duplicate that silently skips a version, or a validation that runs after
 // the first statement (which would leave schema_migrations behind on a refused list).
 test.each([

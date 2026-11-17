@@ -77,10 +77,10 @@ test("deleting a project cascades to tasks and conversations", async () => {
       title: "chat",
     });
     expect((await store.tasks.list(project.id)).length).toBe(1);
-    expect((await store.conversations.list({ projectId: project.id })).length).toBe(1);
+    expect((await store.conversations.page({ projectId: project.id })).items.length).toBe(1);
     await store.projects.delete(project.id);
     expect((await store.tasks.list(project.id)).length).toBe(0);
-    expect((await store.conversations.list({ projectId: project.id })).length).toBe(0);
+    expect((await store.conversations.page({ projectId: project.id })).items.length).toBe(0);
   });
 });
 

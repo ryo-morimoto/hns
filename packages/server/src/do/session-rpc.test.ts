@@ -64,6 +64,9 @@ function fakeSession(overrides: Partial<AgentSession> = {}): Fake {
       throw new InvalidConversationIdError(id);
     },
     abort: async () => false,
+    pendingIndex: async () => ({ entries: [], remaining: 0, legacy: 0 }),
+    markIndexed: async () => undefined,
+    indexRows: async () => [CONVERSATION],
     wake: (): Wake => ({ active: false }),
     resume: () => undefined,
     close: async () => undefined,

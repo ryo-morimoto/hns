@@ -1,13 +1,17 @@
 import * as v from "valibot";
 import { ProjectIdSchema, type ProjectId } from "@hns/core";
 import { fromGlobalId, type GlobalIdResult } from "@hns/core/graphql";
-import type { GraphQLContext } from "./context.ts";
+import type { ConversationCursor } from "@hns/store";
+import type { ConversationReadQuery, GraphQLContext } from "./context.ts";
+import { decodeCursor, encodeCursor } from "./cursor.ts";
 import { queryFailure, QueryReadError, type QueryFailureView } from "./failures.ts";
 import {
   conversationView,
+  indexStateView,
   projectView,
   taskView,
   type ConversationView,
+  type IndexStateView,
   type ProjectView,
   type TaskView,
 } from "./views.ts";
@@ -22,8 +26,11 @@ interface ProjectListArguments extends ListArguments {
   readonly projectId?: string | null | undefined;
 }
 
-/** The one project id that existed before per-project Session objects. */
-const DEFAULT_PROJECT_ID = "default";
+/** The conversation list's cursor and title search. */
+interface ConversationArguments extends ProjectListArguments {
+  readonly after?: string | null | undefined;
+  readonly q?: string | null | undefined;
+}
 
 interface ProjectListSuccess {
   readonly __typename: "ProjectList";
@@ -33,6 +40,12 @@ interface ProjectListSuccess {
 interface ConversationListSuccess {
   readonly __typename: "ConversationList";
   readonly conversations: readonly ConversationView[];
+  /** The position to continue from, or null when this page is the last one. */
+  readonly nextCursor: string | null;
+}
+
+interface IndexStateSuccess extends IndexStateView {
+  readonly __typename: "IndexState";
 }
 
 interface TaskListSuccess {
@@ -44,6 +57,8 @@ interface TaskListSuccess {
 export type ProjectListResult = ProjectListSuccess | QueryFailureView;
 /** One result union member. */
 export type ConversationListResult = ConversationListSuccess | QueryFailureView;
+/** One result union member. */
+export type IndexStateResult = IndexStateSuccess | QueryFailureView;
 /** One result union member. */
 export type TaskListResult = TaskListSuccess | QueryFailureView;
 
@@ -116,6 +131,51 @@ function requiredProjectId(value: string | null | undefined): ProjectId {
 }
 
 /**
+ * Build the index read: the optional keys are present only when the client gave them.
+ *
+ * @internal
+ * @remarks
+ * `exactOptionalPropertyTypes` means a present key cannot hold `undefined`, so the four
+ * combinations are written out instead of spreading a conditional object.
+ */
+function readOf(
+  first: number,
+  after: ConversationCursor | undefined,
+  q: string | undefined,
+): ConversationReadQuery {
+  if (after === undefined) return q === undefined ? { first } : { first, q };
+  return q === undefined ? { first, after } : { first, after, q };
+}
+
+/**
+ * Decode the `after` argument.
+ *
+ * @internal
+ * @throws QueryReadError with `invalid_argument` when the value is present but is not a cursor.
+ * @returns The position, or undefined when the argument is absent.
+ */
+function cursorOf(after: string | null | undefined): ConversationCursor | undefined {
+  if (after === null || after === undefined) return undefined;
+  const cursor = decodeCursor(after);
+  if (cursor === undefined) {
+    throw new QueryReadError("invalid_argument", "after must be a conversation cursor.");
+  }
+  return cursor;
+}
+
+/**
+ * Normalise the `q` argument.
+ *
+ * @internal
+ * @returns The trimmed search term, or undefined when absent or empty.
+ */
+function searchOf(q: string | null | undefined): string | undefined {
+  if (q === null || q === undefined) return undefined;
+  const trimmed = q.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
+/**
  * Charge the page to the request's row budget before the read.
  *
  * @internal
@@ -180,43 +240,74 @@ export async function resolveTasks(
 }
 
 /**
- * Resolve `Query.conversations` from the Session Durable Object.
+ * Resolve `Query.conversations` from the D1 index.
  *
  * @param _source - Always undefined; Query fields have no parent value.
- * @param args - The project to scope to and the page size.
+ * @param args - The project to scope to, the page size, the keyset cursor, and a title search.
  * @param context - The request's reads and budget.
- * @returns The list, or a union failure for an invalid argument or an unreachable session.
+ * @returns The list with the next cursor, or a union failure.
  *
  * @remarks
- * The project is checked in D1 before the Session object is addressed, so an unknown id is a
- * typed `invalid_argument` and never creates an object (D080). The read then addresses the
- * project's own object, so another project's conversations never appear.
- *
- * The legacy default object is the one exception to "one object, one project": before per-project
- * objects, conversations created for any project lived there. Its reads keep the old filter so
- * those rows do not surface under the default project; objects for other projects are not
- * filtered, because a row from another project there is a defect that must not be hidden.
+ * The project is checked in D1 before the index is read, so an unknown id is a typed
+ * `invalid_argument` and never reaches a Durable Object (D080). The read is the index only: a
+ * conversation the Session has not written yet is missing here, and its detail still comes from
+ * the object. A cursor that is not one this server issued is refused, not guessed.
  */
 export async function resolveConversations(
   _source: undefined,
-  args: ProjectListArguments,
+  args: ConversationArguments,
   context: GraphQLContext,
 ): Promise<ConversationListResult> {
   const result = await guarded(async () => {
     const projectId = requiredProjectId(args.projectId);
-    const limit = pageSize(args.first, context.maxRowsPerList);
+    const first = pageSize(args.first, context.maxRowsPerList);
     const project = await context.reads.project(projectId);
     if (project === undefined) {
       throw new QueryReadError("invalid_argument", "No project has this id.");
     }
-    spend(context, limit);
-    const page = await context.reads.conversations(projectId, limit);
-    const conversations =
-      projectId === DEFAULT_PROJECT_ID
-        ? page.filter((conversation) => conversation.project_id === projectId)
-        : page;
-    return conversations.slice(0, limit).map(conversationView);
+    const after = cursorOf(args.after);
+    const q = searchOf(args.q);
+    spend(context, first);
+    const page = await context.reads.conversations(projectId, readOf(first, after, q));
+    return {
+      conversations: page.items.map(conversationView),
+      nextCursor: encodeCursor(page.nextCursor),
+    };
   });
   if (!result.ok) return result.failure;
-  return { __typename: "ConversationList", conversations: result.value };
+  return {
+    __typename: "ConversationList",
+    conversations: result.value.conversations,
+    nextCursor: result.value.nextCursor,
+  };
+}
+
+/**
+ * Resolve `Query.indexState` for one project's workspace.
+ *
+ * @param _source - Always undefined; Query fields have no parent value.
+ * @param args - The project whose Session object owns the index.
+ * @param context - The request's reads and budget.
+ * @returns The backlog and last failure, or a union failure for an unknown project.
+ *
+ * @remarks
+ * The caller is the workspace owner: the edge has already verified the session, and this build
+ * has one owner. Owner scoping by user arrives with the accounts face; until then the project
+ * check is what keeps one workspace's backlog from being read as another's.
+ */
+export async function resolveIndexState(
+  _source: undefined,
+  args: ProjectListArguments,
+  context: GraphQLContext,
+): Promise<IndexStateResult> {
+  const result = await guarded(async () => {
+    const projectId = requiredProjectId(args.projectId);
+    const project = await context.reads.project(projectId);
+    if (project === undefined) {
+      throw new QueryReadError("invalid_argument", "No project has this id.");
+    }
+    return context.reads.indexState(projectId);
+  });
+  if (!result.ok) return result.failure;
+  return { __typename: "IndexState", ...indexStateView(result.value) };
 }

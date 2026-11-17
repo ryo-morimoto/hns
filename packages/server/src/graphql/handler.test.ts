@@ -1,4 +1,6 @@
+import assert from "node:assert/strict";
 import { expect, test, vi } from "vitest";
+import * as v from "valibot";
 import type { JsonValue } from "@hns/core";
 import { toGlobalId } from "@hns/core/graphql";
 import { createEdge } from "../edge/handler.ts";
@@ -12,6 +14,16 @@ import { createGraphQLFace } from "./handler.ts";
 
 const PROJECTS =
   "{ projects { __typename ... on ProjectList { projects { id name workspaceRoot agentCwd egress createdAt } } ... on QueryFailure { code } } }";
+
+/** The list body a cursor test reads: the page's cursor and the ids it carried. */
+const CursorBodySchema = v.object({
+  data: v.object({
+    conversations: v.object({
+      conversations: v.array(v.object({ id: v.string() })),
+      nextCursor: v.nullable(v.string()),
+    }),
+  }),
+});
 
 /** The JSON body a test sends; mirrors the shape the face parses. */
 interface RequestBody {
@@ -67,39 +79,29 @@ test("projects are served from the injected read", async () => {
   });
 });
 
-// Catches: a conversation view that leaks snake_case, or the response losing the project scope.
-test("a project's conversations are served from that project's Session object", async () => {
-  const session = sessionWith(
-    new Response(
-      JSON.stringify({
-        ok: true,
-        conversations: [
-          {
-            id: "c1",
-            project_id: "p1",
-            title: "Mine",
-            created_at: "2026-01-01T00:00:00.000Z",
-            updated_at: null,
-            archived: false,
-            deleted_at: null,
-          },
-        ],
-      }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    ),
-  );
-  const send = edgeWith({ reads: { project: () => Promise.resolve(project("p1")) } });
-  const response = await send(
-    {
-      query:
-        '{ conversations(projectId: "' +
-        toGlobalId("Project", "p1") +
-        '") { __typename ... on ConversationList { conversations { id projectId title isArchived } } } }',
+// Catches: a conversation view that leaks snake_case, or the list read losing the project scope.
+test("a project's conversations are served from the D1 index", async () => {
+  const seen: { projectId: string; first: number }[] = [];
+  const send = edgeWith({
+    reads: {
+      project: () => Promise.resolve(project("p1")),
+      conversations: (projectId, query) => {
+        seen.push({ projectId, first: query.first });
+        return Promise.resolve({
+          items: [conversation("c1", "p1", "Mine")],
+          nextCursor: null,
+        });
+      },
     },
-    envWith({ session: session.namespace }),
-  );
+  });
+  const response = await send({
+    query:
+      '{ conversations(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '") { __typename ... on ConversationList { conversations { id projectId title isArchived } nextCursor } } }',
+  });
   expect(response.status).toBe(200);
-  expect(session.ids).toStrictEqual(["p1"]);
+  expect(seen).toStrictEqual([{ projectId: "p1", first: 100 }]);
   expect(await response.json()).toMatchObject({
     data: {
       conversations: {
@@ -112,82 +114,147 @@ test("a project's conversations are served from that project's Session object", 
             isArchived: false,
           },
         ],
+        nextCursor: null,
       },
     },
   });
 });
 
-// Catches: a Session read that fans out, drops the request id, or loses the RPC envelope.
-test("conversations are one Session RPC carrying the request id", async () => {
-  const session = sessionWith(
-    new Response(
-      JSON.stringify({
-        ok: true,
-        conversations: [
-          {
-            id: "c1",
-            project_id: "p1",
-            title: "One",
-            created_at: "2026-01-01T00:00:00.000Z",
-            updated_at: null,
-            archived: false,
-            deleted_at: null,
-          },
-        ],
-      }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    ),
-  );
-  const send = edgeWith({ reads: { project: () => Promise.resolve(project("p1")) } });
-  const response = await send(
-    {
-      query:
-        '{ conversations(projectId: "' +
-        toGlobalId("Project", "p1") +
-        '") { __typename ... on ConversationList { conversations { id } } } }',
+// Catches: a cursor the server cannot continue from, or an `after` silently ignored.
+test("a conversation page returns the next cursor and continues from it", async () => {
+  const seen: { after: string | undefined; q: string | undefined }[] = [];
+  const send = edgeWith({
+    reads: {
+      project: () => Promise.resolve(project("p1")),
+      conversations: (_projectId, query) => {
+        seen.push({ after: query.after?.updatedAt, q: query.q });
+        const newer = conversation("c2", "p1", "Newer", "2026-01-02T00:00:00.000Z");
+        const older = conversation("c1", "p1", "Older", "2026-01-01T00:00:00.000Z");
+        const next =
+          query.after === undefined
+            ? { updatedAt: "2026-01-02T00:00:00.000Z", id: newer.id }
+            : null;
+        return Promise.resolve({
+          items: query.after === undefined ? [newer] : [older],
+          nextCursor: next,
+        });
+      },
     },
-    envWith({ session: session.namespace }),
-  );
-  expect(response.status).toBe(200);
-  expect(session.ids).toStrictEqual(["p1"]);
-  expect(session.requests).toHaveLength(1);
-  const forwarded = session.requests[0];
-  if (forwarded === undefined) throw new Error("the Session RPC was not called");
-  expect(forwarded.url).toContain("/rpc/conversations?limit=");
-  expect(forwarded.headers.get("x-request-id")).toBe(response.headers.get("x-request-id"));
-  expect(await response.json()).toMatchObject({
+  });
+  const first = await send({
+    query:
+      '{ conversations(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '", first: 1) { __typename ... on ConversationList { conversations { id } nextCursor } } }',
+  });
+  expect(first.status).toBe(200);
+  const cursor = v.parse(CursorBodySchema, await first.json()).data.conversations.nextCursor;
+  assert.ok(cursor !== null);
+
+  const second = await send({
+    query:
+      '{ conversations(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '", first: 1, after: "' +
+      cursor +
+      '") { __typename ... on ConversationList { conversations { id } nextCursor } } }',
+  });
+  expect(second.status).toBe(200);
+  expect(seen).toStrictEqual([
+    { after: undefined, q: undefined },
+    { after: "2026-01-02T00:00:00.000Z", q: undefined },
+  ]);
+  expect(await second.json()).toMatchObject({
     data: {
       conversations: {
         __typename: "ConversationList",
         conversations: [{ id: toGlobalId("Conversation", "c1") }],
+        nextCursor: null,
       },
     },
   });
 });
 
-// Catches: a failed Session read shown as an empty list.
-test("a failed Session read is an unavailable union", async () => {
-  const session = sessionWith(new Response("boom", { status: 500 }));
-  const send = edgeWith({ reads: { project: () => Promise.resolve(project("p1")) } });
-  const response = await send(
-    {
-      query:
-        '{ conversations(projectId: "' +
-        toGlobalId("Project", "p1") +
-        '") { __typename ... on QueryFailure { code } } }',
+// Catches: a forged cursor read as the first page, hiding the fact that the client is lost.
+test("an invalid conversation cursor is a typed failure", async () => {
+  let reads = 0;
+  const send = edgeWith({
+    reads: {
+      project: () => Promise.resolve(project("p1")),
+      conversations: () => {
+        reads += 1;
+        return Promise.resolve({ items: [], nextCursor: null });
+      },
     },
-    envWith({ session: session.namespace }),
-  );
+  });
+  const response = await send({
+    query:
+      '{ conversations(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '", after: "not-a-cursor") { __typename ... on QueryFailure { code } } }',
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: { conversations: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+  });
+  expect(reads).toBe(0);
+});
+
+// Catches: a title search dropped on the way to the index, or run over the transcript.
+test("a title search is passed to the index read", async () => {
+  const searches: (string | undefined)[] = [];
+  const send = edgeWith({
+    reads: {
+      project: () => Promise.resolve(project("p1")),
+      conversations: (_projectId, query) => {
+        searches.push(query.q);
+        return Promise.resolve({ items: [], nextCursor: null });
+      },
+    },
+  });
+  const response = await send({
+    query:
+      '{ conversations(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '", q: "  budget ") { __typename ... on ConversationList { conversations { id } } } }',
+  });
+  expect(response.status).toBe(200);
+  expect(searches).toStrictEqual(["budget"]);
+});
+
+// Catches: a failed index read shown as an empty list.
+test("a failed index read is an unavailable union", async () => {
+  const send = edgeWith({
+    reads: {
+      project: () => Promise.resolve(project("p1")),
+      conversations: () => Promise.reject(new QueryReadError("unavailable", "boom")),
+    },
+  });
+  const response = await send({
+    query:
+      '{ conversations(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '") { __typename ... on QueryFailure { code } } }',
+  });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
     data: { conversations: { __typename: "QueryFailure", code: "UNAVAILABLE" } },
   });
 });
 
-// Catches: an unknown project id reaching idFromName, creating an empty Session object (D080).
+// Catches: an unknown project id reaching a read (or an object), inventing an empty list.
 test("conversations for an unknown project never address a Session object", async () => {
   const session = sessionWith();
-  const send = edgeWith({ reads: { project: () => Promise.resolve(undefined) } });
+  let reads = 0;
+  const send = edgeWith({
+    reads: {
+      project: () => Promise.resolve(undefined),
+      conversations: () => {
+        reads += 1;
+        return Promise.resolve({ items: [], nextCursor: null });
+      },
+    },
+  });
   const response = await send(
     {
       query:
@@ -201,39 +268,67 @@ test("conversations for an unknown project never address a Session object", asyn
   expect(await response.json()).toMatchObject({
     data: { conversations: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
   });
+  expect(reads).toBe(0);
   expect(session.ids).toStrictEqual([]);
   expect(session.requests).toStrictEqual([]);
 });
 
-// Catches: a conversation from another project surfacing under the legacy default object, which
-// held every project's conversations before objects were split.
-test("the legacy default object filters conversations by project", async () => {
+// Catches: an index state read for another workspace, or a backlog reported as an empty list.
+test("the index state is served for the requested project", async () => {
+  const seen: string[] = [];
   const send = edgeWith({
     reads: {
-      project: () => Promise.resolve(project("default")),
-      conversations: () =>
-        Promise.resolve([conversation("c1", "default"), conversation("c2", "other")]),
+      project: () => Promise.resolve(project("p1")),
+      indexState: (projectId) => {
+        seen.push(projectId);
+        return Promise.resolve({
+          pending: 2,
+          lastSyncedAt: "2026-01-02T00:00:00.000Z",
+          lastErrorCode: "d1_write_failed",
+          lastErrorAt: "2026-01-03T00:00:00.000Z",
+        });
+      },
     },
   });
   const response = await send({
     query:
-      '{ conversations(projectId: "' +
-      toGlobalId("Project", "default") +
-      '") { __typename ... on ConversationList { conversations { id projectId } } } }',
+      '{ indexState(projectId: "' +
+      toGlobalId("Project", "p1") +
+      '") { __typename ... on IndexState { pending lastSyncedAt lastErrorCode lastErrorAt } ... on QueryFailure { code } } }',
+  });
+  expect(response.status).toBe(200);
+  expect(seen).toStrictEqual(["p1"]);
+  expect(await response.json()).toMatchObject({
+    data: {
+      indexState: {
+        __typename: "IndexState",
+        pending: 2,
+        lastSyncedAt: "2026-01-02T00:00:00.000Z",
+        lastErrorCode: "d1_write_failed",
+        lastErrorAt: "2026-01-03T00:00:00.000Z",
+      },
+    },
+  });
+});
+
+// Catches: an index state for an unknown project invented as an empty one.
+test("an unknown project has no index state", async () => {
+  const send = edgeWith({
+    reads: {
+      project: () => Promise.resolve(undefined),
+      indexState: () =>
+        Promise.resolve({ pending: 0, lastSyncedAt: null, lastErrorCode: null, lastErrorAt: null }),
+    },
+  });
+  const response = await send({
+    query:
+      '{ indexState(projectId: "' +
+      toGlobalId("Project", "unknown") +
+      '") { __typename ... on QueryFailure { code } } }',
   });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
-    data: {
-      conversations: {
-        __typename: "ConversationList",
-        conversations: [
-          {
-            id: toGlobalId("Conversation", "c1"),
-            projectId: toGlobalId("Project", "default"),
-          },
-        ],
-      },
-    },
+    data: { indexState: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
   });
 });
 
@@ -355,7 +450,9 @@ test("an invalid query is refused with 400", async () => {
 
 // Catches: variable coercion and an unknown operation name reported as a server failure.
 test("input errors in variables and operationName are refused with 400", async () => {
-  const send = edgeWith({ reads: { conversations: () => Promise.resolve([]) } });
+  const send = edgeWith({
+    reads: { conversations: () => Promise.resolve({ items: [], nextCursor: null }) },
+  });
   const badVariable = await send({
     query: "query C($p: ID!) { conversations(projectId: $p) { __typename } }",
     variables: { p: null },

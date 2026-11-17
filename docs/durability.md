@@ -58,7 +58,7 @@ RPO 0 は hns が管理する故障クラス（プロセス / 電源 / マシン
 | Journal（intent / outcome / audit）      | Workspace DO（256KB 超の本文は R2、hash は DO） | —                       | checkpoint まで    |
 | イベント（Progress / 観測）              | Session DO                | —                       | 保持期間の後       |
 | 会話（transcript / inbox）               | Session DO（PiHarness）   | D1 の索引               | 失っては困る       |
-| 一覧・検索                               | —                         | **D1**                  | 再構築できる       |
+| 一覧・検索                               | —                         | **D1**（会話の索引、INV-11） | 再構築できる   |
 | Project / Task / Workflow 定義 / Machine | **D1**                    | —                       | 失っては困る       |
 | 未保存の編集                             | ブラウザ                  | —                       | 失ってよい         |
 | `.git` の ref                            | R2（commit として）       | マシン                  | ツリーから再生成   |
@@ -146,8 +146,14 @@ cover するには checkpoint の契機を増やすしかない（しない、�
 
 - ファイル: **マシンから読む**。R2 は読みの経路に入れない（U が見えない）
 - 会話: Session DO（PiHarness）
-- 一覧・検索: D1（遅れる）。開いている会話だけ DO
+- 一覧・検索: D1 の会話索引（遅れる）。開いている会話だけ DO
 - オフライン: 書けない・読めない。古い内容を出すより「繋がっていない」と言う
+
+会話の索引は D1 の `conversations` で、書き手は Session DO（0149 / D078）。索引の遅れは
+`index_state`（workspace ごとに1行、backlog と最後の成功・失敗）と `Query.indexState` で見る。
+索引は会話の turn の中で書くが、D1 の失敗で会話は止めない。dirty を残し、次の RPC か alarm で再送する。
+cold load では遅れを検出できないので、画面は「更新中」を live の delta が索引より新しいと観測した
+ときだけ出す。索引の列は会話モデル + `indexed_at` だけで、run の状態や machine は持たない。
 
 ## 5. checkpoint と J の切り詰め
 
@@ -248,6 +254,7 @@ R2 を使う理由は金額ではなく、**128MB のメモリ上限と復帰時
 | INV-09 | 正本は `(C, J)`。ツリーは写像であり、失ってよい                                                         |
 | INV-10 | ack は単一システムで閉じる（DO の 1 トランザクション、または R2 → DO の順）                             |
 | INV-13 | 書き込みの権利は lease で 1 台に閉じる。未取得・期限切れ・古い epoch は fail closed                      |
+| INV-11 | 索引は写し。正本は DO にあり、D1 の索引は DO から作り直せる。索引の更新失敗は操作を止めない               |
 
 ## 10. 撤退条件
 

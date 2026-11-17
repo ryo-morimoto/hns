@@ -4,6 +4,7 @@ import { configure, defineDoc, Harness, ROOT_CONVERSATION_ID } from "@earendil-w
 import type {
   ConversationId,
   ConversationView,
+  Cursor,
   EntryRecord,
   HarnessOptions,
   HarnessSettings,
@@ -31,6 +32,10 @@ export const MAX_TRANSCRIPT_PAGE = 200;
 export const DEFAULT_TRANSCRIPT_PAGE = 50;
 /** The longest user input accepted by one turn. */
 export const MAX_INPUT_LENGTH = 64 * 1024;
+/** The most conversations one index drain returns; the rest waits for the next drain. */
+export const DEFAULT_INDEX_BATCH = 50;
+/** The largest index batch a caller may ask for. */
+export const MAX_INDEX_BATCH = 500;
 
 /** What to create; projectId is the default project when absent. */
 export interface CreateConversationInput {
@@ -116,6 +121,25 @@ export interface AgentSession {
   watchConversation(id: string): Promise<AgentLiveWatch>;
   /** Abort the conversation's ordinary run; false when the conversation is absent. */
   abort(id: string): Promise<boolean>;
+  /**
+   * Conversations whose D1 index row is behind their metadata, at most `limit` per call.
+   *
+   * @remarks
+   * A row is dirty while `dirtyAt` is set, and every row is dirty until it has been written once
+   * (`indexedAt` absent), which is the backfill. The caller writes the rows, then calls
+   * {@link markIndexed}; a failure between the two only leaves the row dirty again.
+   */
+  pendingIndex(limit?: number): Promise<PendingIndex>;
+  /**
+   * Record that these versions reached D1.
+   *
+   * @remarks
+   * A dirty mark is cleared only when it still equals the written version, so a turn that
+   * committed during the drain stays dirty. The indexed version is recorded either way.
+   */
+  markIndexed(entries: readonly IndexMark[]): Promise<void>;
+  /** Every conversation from storage and its metadata, for a full index rebuild. */
+  indexRows(): Promise<readonly Conversation[]>;
   /** What the next host wakeup is for, if anything. */
   wake(): Wake;
   /** Enable scheduling; idempotent. */
@@ -142,17 +166,51 @@ export class ConversationNotFoundError extends Error {
 
 interface ConversationMetadata extends JsonObject {
   readonly title: string;
-  readonly projectId: string;
+  /**
+   * The conversation's project; absent on rows written before projects were per object.
+   *
+   * @remarks
+   * A missing value is read as the default project, not as corruption: the row was written by
+   * an older build that had only one project. Any other non-string still fails the parse.
+   */
+  readonly projectId?: string;
   /** The project root copied at creation; absent means it was not known (fail closed). */
   readonly workspaceRoot?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly isArchived: boolean;
   readonly deletedAt: string | null;
+  /** The `updatedAt` that has not reached the D1 index yet; internal outbox. */
+  readonly dirtyAt?: string;
+  /** The version that did reach the D1 index; absent means it never did (backfill). */
+  readonly indexedAt?: string;
 }
 
 interface ConversationIndex extends JsonObject {
   readonly items: Record<string, ConversationMetadata>;
+}
+
+/** One conversation whose D1 index row is behind its metadata. */
+export interface PendingIndexEntry {
+  readonly conversation: Conversation;
+  /** The `updatedAt` the row must be written with; `markIndexed` clears only a matching dirty. */
+  readonly version: string;
+}
+
+/** What one drain has to write, and what is left for the next one. */
+export interface PendingIndex {
+  /** Rows to write now, at most the requested batch. */
+  readonly entries: readonly PendingIndexEntry[];
+  /** Rows still waiting after this batch. */
+  readonly remaining: number;
+  /** Rows in this batch whose metadata had no project and were indexed under the default one. */
+  readonly legacy: number;
+}
+
+/** The version a drain wrote for one conversation. */
+export interface IndexMark {
+  readonly id: string;
+  readonly version: string;
 }
 
 /**
@@ -168,7 +226,9 @@ const ConversationIndexDoc = defineDoc<ConversationIndex>({
   version: 1,
   scope: "session",
   initial: () => ({ items: {} }),
-  checkpointWhen: () => false,
+  // The index is a small map rewritten often; a base every 32 deltas keeps the stored revision
+  // bounded without paying a full rewrite per turn (D078 U-03).
+  checkpointWhen: (_value, _ops, info) => info.deltasSinceBase >= 32,
 });
 
 const CreateInputSchema: v.GenericSchema<unknown, CreateConversationInput> = v.object({
@@ -213,13 +273,26 @@ function cap(value: number | undefined, fallback: number, maximum: number): numb
 function toConversation(id: ConversationId, meta: ConversationMetadata): Conversation {
   return {
     id: v.parse(ConversationIdSchema, String(id)),
-    project_id: v.parse(ProjectIdSchema, meta.projectId),
+    project_id: v.parse(ProjectIdSchema, meta.projectId ?? "default"),
     title: meta.title,
     created_at: isoTimestamp(meta.createdAt),
     updated_at: isoTimestamp(meta.updatedAt),
     archived: meta.isArchived,
     deleted_at: meta.deletedAt === null ? null : isoTimestamp(meta.deletedAt),
   };
+}
+
+/**
+ * The version a drain must write for one row, or undefined when the index is current.
+ *
+ * @internal
+ * @remarks
+ * A dirty row wins over the indexed version; a row that was never written is dirty at its
+ * `updatedAt` (the backfill); a row whose `indexedAt` matches its `updatedAt` is in sync.
+ */
+function pendingVersion(meta: ConversationMetadata): string | undefined {
+  if (meta.dirtyAt !== undefined) return meta.dirtyAt;
+  return meta.indexedAt === undefined ? meta.updatedAt : undefined;
 }
 
 /**
@@ -280,9 +353,13 @@ async function writeMetadata(
 }
 
 /**
- * Update one conversation's timestamp in its own commit.
+ * Update one conversation's timestamp and mark it dirty for the D1 index.
  *
  * @internal
+ * @remarks
+ * `dirtyAt` and `updatedAt` are the same value: the outbox entry is the version that a drain
+ * writes, and `markIndexed` clears it only when it still matches.
+ *
  * @throws Error when the metadata index has no entry for the conversation.
  */
 async function touchMetadata(
@@ -297,7 +374,9 @@ async function touchMetadata(
     if (meta === undefined) {
       throw new Error("conversation metadata is missing: " + String(id));
     }
-    meta.updatedAt = nowIso();
+    const at = nowIso();
+    meta.updatedAt = at;
+    meta.dirtyAt = at;
   }, context);
 }
 
@@ -355,6 +434,7 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
         updatedAt: createdAt,
         isArchived: false,
         deletedAt: null,
+        dirtyAt: createdAt,
       };
       const metadata: ConversationMetadata =
         parsed.workspaceRoot === undefined
@@ -467,6 +547,63 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
       await touchMetadata(harness, conversation.id, nowIso, options.context);
       return true;
     },
+    async pendingIndex(limit?: number): Promise<PendingIndex> {
+      const batch = cap(limit, DEFAULT_INDEX_BATCH, MAX_INDEX_BATCH);
+      const index = await readIndex(harness, options.context);
+      const pending: { entry: PendingIndexEntry; legacy: boolean }[] = [];
+      for (const [id, meta] of Object.entries(index.items)) {
+        const version = pendingVersion(meta);
+        if (version === undefined) continue;
+        pending.push({
+          entry: { conversation: toConversation(conversationId(id), meta), version },
+          legacy: meta.projectId === undefined,
+        });
+      }
+      const now = pending.slice(0, batch);
+      return {
+        entries: now.map((item) => item.entry),
+        remaining: pending.length - now.length,
+        legacy: now.filter((item) => item.legacy).length,
+      };
+    },
+    async markIndexed(entries: readonly IndexMark[]): Promise<void> {
+      if (entries.length === 0) return;
+      await harness.commit(async (tx) => {
+        const doc = await tx.doc(ConversationIndexDoc);
+        for (const entry of entries) {
+          const meta = doc.items[entry.id];
+          if (meta === undefined) continue;
+          // Only the version that was written is cleared: a turn that committed during the
+          // drain has a newer dirtyAt and must be written again (CAS, D078).
+          if (meta.dirtyAt === entry.version) delete meta.dirtyAt;
+          meta.indexedAt = entry.version;
+        }
+      }, options.context);
+    },
+    async indexRows(): Promise<readonly Conversation[]> {
+      const index = await readIndex(harness, options.context);
+      const rows: Conversation[] = [];
+      let cursor: Cursor | undefined;
+      for (;;) {
+        const page = await options.storage.scanConversations(
+          { order: "ascending" },
+          MAX_CONVERSATION_PAGE,
+          cursor,
+          options.context,
+        );
+        for (const record of page.items) {
+          if (record.id === ROOT_CONVERSATION_ID) continue;
+          const meta = index.items[String(record.id)];
+          if (meta === undefined) {
+            throw new Error("conversation metadata is missing: " + String(record.id));
+          }
+          rows.push(toConversation(record.id, meta));
+        }
+        if (page.next === undefined) break;
+        cursor = page.next;
+      }
+      return rows;
+    },
     wake(): Wake {
       return harness.wake();
     },
@@ -477,4 +614,42 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
       await harness.close(options.context);
     },
   };
+}
+
+if (import.meta.vitest) {
+  const { expect, test } = import.meta.vitest;
+  const metadata = (overrides: Partial<ConversationMetadata> = {}): ConversationMetadata => ({
+    title: "chat",
+    projectId: "p1",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isArchived: false,
+    deletedAt: null,
+    ...overrides,
+  });
+
+  test("a metadata row from before projects reads as the default project", () => {
+    const legacy: ConversationMetadata = {
+      title: "chat",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      isArchived: false,
+      deletedAt: null,
+    };
+    expect(toConversation(conversationId("1"), legacy).project_id).toBe("default");
+  });
+
+  test("a dirty row is pending at its dirty version", () => {
+    expect(pendingVersion(metadata({ dirtyAt: "2026-01-02T00:00:00.000Z" }))).toBe(
+      "2026-01-02T00:00:00.000Z",
+    );
+  });
+
+  test("a row that was never indexed is pending at its update time", () => {
+    expect(pendingVersion(metadata())).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("a row indexed at its update time is not pending", () => {
+    expect(pendingVersion(metadata({ indexedAt: "2026-01-01T00:00:00.000Z" }))).toBeUndefined();
+  });
 }

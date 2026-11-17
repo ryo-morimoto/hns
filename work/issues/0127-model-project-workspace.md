@@ -263,4 +263,5 @@ C14 は 0157 / 0194 の執行側の受入で、0127 は model / API / DO / fixtu
 - ゲート: レビュー修正後の HEAD で `npm run check` exit 0（124 test files / 806 tests passed、51.6s。lint / fmt / codegen / typecheck / test（integration と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。
 - commits: `fab743a`（model / store / API）→ `595a2a0`（file API）→ `4369b35`（agent の cwd）→ `5501e57`（cf dev scaffold）→ `6686dda`（web 切替）→ 本 issue 記録。branch `issue/0127-model-project-workspace`、base main `2049a3c`。
 - 済み: commit 分割（既存 6 本 + レビュー修正の commit。hash は `git log` と Log を参照）。未実行: 再レビュー、main への rebase / merge（lead の統合レーン）。
+- follow-up（0149 で実施）: 0127 の時点では D1 の `conversations` の PK は `(id)` 単独のままだった。0149 が migration 0005 で `(project_id, id)` に張り替え、`indexed_at` を足した（D080 A2）。
 - follow-up: 0106（editor 本体）は Shell が渡す `ProjectWorkspace` context を読む。0148（machine registry）は cwd の選択を registry に替える。既存会話で root が無い場合の backfill は、公開口（会話作成 API）ができた時点で Worker が D1 から渡す。**Session DO は自分の project を束縛・検証しない**（DO 名と projectId の一致を DO 側で見ていない latent）ので、公開口で固定する。egress の執行（`deny` / `allowlist`）は 0147 / 0194。

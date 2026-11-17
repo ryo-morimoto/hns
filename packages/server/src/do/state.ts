@@ -17,6 +17,14 @@ export interface AlarmStorage {
  * tests provide this shape without a Workers type dependency.
  */
 export interface SessionState {
+  /**
+   * The object's identity; `name` is the Session object's name (the project id).
+   *
+   * @remarks
+   * Optional so a Node test can provide a fake state. The index records its backlog under this
+   * name, one row per workspace; without it the legacy name is used.
+   */
+  readonly id?: { readonly name?: string | undefined } | undefined;
   readonly storage: DurableObjectSqliteStorage & AlarmStorage;
   blockConcurrencyWhile<T>(run: () => Promise<T>): Promise<T>;
   abort(reason?: string): void;

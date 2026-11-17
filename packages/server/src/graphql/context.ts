@@ -1,12 +1,16 @@
 import * as v from "valibot";
-import type { Conversation, Project, ProjectId, Task } from "@hns/core";
-import { ConversationIdSchema, ProjectIdSchema } from "@hns/core";
-import type { Store } from "@hns/store";
+import type { Project, ProjectId, Task } from "@hns/core";
+import type {
+  ConversationCursor,
+  ConversationListQuery,
+  ConversationPage,
+  IndexStateRow,
+  Store,
+} from "@hns/store";
 import type { WorkerEnv } from "../edge/env.ts";
 import { createRowBudget, type RowBudget } from "../edge/limits.ts";
 import type { Session } from "../edge/session.ts";
 import { projectFor, storeFor, StoreUnavailableError } from "../edge/store.ts";
-import { sessionNameFor } from "../session-name.ts";
 import { QueryReadError } from "./failures.ts";
 
 /**
@@ -27,7 +31,29 @@ export interface GraphQLReads {
    */
   readonly project: (projectId: ProjectId) => Promise<Project | undefined>;
   readonly tasks: (projectId: ProjectId) => Promise<readonly Task[]>;
-  readonly conversations: (projectId: ProjectId, limit: number) => Promise<readonly Conversation[]>;
+  /**
+   * One page of the D1 conversation index, scoped to the project.
+   *
+   * @remarks
+   * The index is a copy: a conversation the Session has not written yet is missing here, and
+   * its detail still comes from the object. The read never addresses a Durable Object.
+   */
+  readonly conversations: (
+    projectId: ProjectId,
+    query: ConversationReadQuery,
+  ) => Promise<ConversationPage>;
+  /** The project's index backlog and last failure, one row per workspace. */
+  readonly indexState: (projectId: ProjectId) => Promise<IndexStateRow>;
+}
+
+/** What one conversation list read asks the index for. */
+export interface ConversationReadQuery {
+  /** Maximum rows; the resolver has already checked 1..maxRowsPerList. */
+  readonly first: number;
+  /** Return only rows after this keyset position. */
+  readonly after?: ConversationCursor | undefined;
+  /** Title substring; LIKE metacharacters match themselves. */
+  readonly q?: string | undefined;
 }
 
 /** What a resolver asks the store to write. */
@@ -134,77 +160,37 @@ async function storeCall<T>(
   }
 }
 
-// The list envelope the Session RPC returns; malformed JSON is a defect, not a client failure.
-const ConversationRpcSchema = v.object({
-  id: ConversationIdSchema,
-  project_id: ProjectIdSchema,
-  title: v.string(),
-  created_at: v.string(),
-  updated_at: v.nullable(v.string()),
-  archived: v.boolean(),
-  deleted_at: v.nullable(v.string()),
-});
-
-const ConversationListRpcSchema = v.object({
-  ok: v.literal(true),
-  conversations: v.array(ConversationRpcSchema),
-});
-
 /**
- * Read the newest conversations from the project's own Session Durable Object.
+ * Turn one resolver read into the store's query.
  *
  * @internal
  * @remarks
- * One RPC per request to `sessionNameFor(projectId)`. The object holds one project's
- * conversations (D080), so the read is isolated by the object. Until 0149 indexes conversations
- * in D1, this is still one page. The resolver checks the project exists first; this function
- * must never be the thing that creates an object for an unknown id.
+ * The optional fields are added one by one: `exactOptionalPropertyTypes` means a present key
+ * cannot hold `undefined`, so a spread of a conditional object would widen the type.
  */
-async function readConversations(
-  env: WorkerEnv,
-  requestId: string,
-  projectId: ProjectId,
-  limit: number,
-): Promise<readonly Conversation[]> {
-  const namespace = env.SESSION;
-  if (namespace === undefined) {
-    throw new QueryReadError("unavailable", "The session binding is not configured.");
+function pageQuery(projectId: ProjectId, query: ConversationReadQuery): ConversationListQuery {
+  if (query.after === undefined) {
+    return query.q === undefined
+      ? { projectId, limit: query.first }
+      : { projectId, limit: query.first, q: query.q };
   }
-  const url = "https://session.internal/rpc/conversations?limit=" + String(limit);
-  let response: Response;
-  try {
-    response = await namespace
-      .get(namespace.idFromName(sessionNameFor(projectId)))
-      .fetch(new Request(url, { method: "GET", headers: { "x-request-id": requestId } }));
-  } catch (error) {
-    console.error(
-      "graphql: session fetch failed",
-      requestId,
-      error instanceof Error ? error.name : "unknown",
-    );
-    throw new QueryReadError("unavailable", "The session could not be reached.");
-  }
-  if (response.status !== 200) {
-    throw new QueryReadError("unavailable", "The session read failed.");
-  }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new QueryReadError("unavailable", "The session returned an unreadable response.");
-  }
-  const parsed = v.safeParse(ConversationListRpcSchema, body);
-  if (!parsed.success) throw new Error("session RPC returned an invalid conversation list");
-  return parsed.output.conversations;
+  return query.q === undefined
+    ? { projectId, limit: query.first, after: query.after }
+    : { projectId, limit: query.first, after: query.after, q: query.q };
 }
 
-/** The production reads: D1 for projects and tasks, the project's Session DO for conversations. */
+/** The production reads: D1 for projects, tasks, and the conversation index. */
 function defaultReads(env: WorkerEnv, requestId: string): GraphQLReads {
   return {
     projects: () => storeCall(env, requestId, "read", (store) => store.projects.list()),
     project: (projectId) => storeFailure(requestId, () => projectFor(env, projectId)),
     tasks: (projectId) => storeCall(env, requestId, "read", (store) => store.tasks.list(projectId)),
-    conversations: (projectId, limit) => readConversations(env, requestId, projectId, limit),
+    conversations: (projectId, query) =>
+      storeCall(env, requestId, "read", (store) =>
+        store.conversations.page(pageQuery(projectId, query)),
+      ),
+    indexState: (projectId) =>
+      storeCall(env, requestId, "read", (store) => store.indexState.read(projectId)),
   };
 }
 
@@ -239,6 +225,7 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       project: readOverrides.project ?? reads.project,
       tasks: readOverrides.tasks ?? reads.tasks,
       conversations: readOverrides.conversations ?? reads.conversations,
+      indexState: readOverrides.indexState ?? reads.indexState,
     },
     writes: {
       createProject: writeOverrides.createProject ?? writes.createProject,

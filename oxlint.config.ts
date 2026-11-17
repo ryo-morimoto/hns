@@ -123,5 +123,24 @@ export default defineConfig({
         ],
       },
     },
+    {
+      // The Session object writes the index through the narrow subpath and reads no control
+      // data (0145's index exception, D078). The root would hand it every repository.
+      files: ["packages/server/src/do/session-index.ts"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["@hns/store"],
+                message:
+                  "the Session index uses @hns/store/conversation-index only (docs/durability.md)",
+              },
+            ],
+          },
+        ],
+      },
+    },
   ],
 });

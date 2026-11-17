@@ -16,6 +16,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./conversation-index": {
+      "source": "./src/conversation-index/index.ts",
+      "types": "./dist/conversation-index/index.d.ts",
+      "import": "./dist/conversation-index/index.js"
     }
   },
   "scripts": {

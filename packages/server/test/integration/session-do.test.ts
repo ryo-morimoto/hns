@@ -26,6 +26,7 @@ const CONFIG = [
   '    exports: { Session: exports.durableObject({ storage: "sqlite" }) },',
   "    env: {",
   '      SESSION: bindings.durableObject({ worker: "hns-session-do-test", exportName: "Session" }),',
+  '      DB: bindings.d1({ name: "hns-session-do-test" }),',
   '      HNS_ENV: bindings.text("dev"),',
   '      HNS_MODEL: bindings.text("faux/echo"),',
   '      HNS_SESSION_SECRET: bindings.text("test-secret-0123456789abcdef0123456789"),',
@@ -38,11 +39,17 @@ const CONFIG = [
 const WORKER = [
   'import worker, { Session } from "@hns/server";',
   "",
+  "interface Statement {",
+  "  all(): Promise<{ readonly results: readonly unknown[] }>;",
+  "  run(): Promise<unknown>;",
+  "}",
+  "",
   "interface Env {",
   "  readonly SESSION: {",
   "    idFromName(name: string): unknown;",
   "    get(id: unknown): { fetch(request: Request): Promise<Response> };",
   "  };",
+  "  readonly DB: { prepare(sql: string): Statement; exec(sql: string): Promise<unknown> };",
   "}",
   "",
   "export { Session };",
@@ -51,6 +58,19 @@ const WORKER = [
   "  async fetch(request: Request, env: Env): Promise<Response> {",
   "    const url = new URL(request.url);",
   '    if (url.pathname === "/health") return new Response("ok");',
+  '    if (url.pathname === "/d1") {',
+  '      const rows = await env.DB.prepare("SELECT project_id, id, title, indexed_at FROM conversations ORDER BY id").all();',
+  "      const state = await env.DB.prepare(\"SELECT pending, last_error_code FROM index_state WHERE workspace_id = 'default'\").all();",
+  "      return Response.json({ rows: rows.results, state: state.results });",
+  "    }",
+  '    if (url.pathname === "/old-schema") {',
+  "      await env.DB.exec(\"CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL); CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT, archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)), deleted_at TEXT); INSERT INTO projects (id, name, created_at) VALUES ('default', 'default', '2026-01-01T00:00:00.000Z'); INSERT INTO conversations (id, project_id, title, created_at) VALUES ('7', 'default', 'legacy', '2026-01-01T00:00:00.000Z');\");",
+  "      return Response.json({ ok: true });",
+  "    }",
+  '    if (url.pathname === "/seed") {',
+  "      await env.DB.prepare(\"INSERT OR IGNORE INTO projects (id, name, created_at, workspace_root, egress) VALUES ('default', 'default', '2026-01-01T00:00:00.000Z', '', 'inherit')\").run();",
+  "      return Response.json({ ok: true });",
+  "    }",
   '    if (url.pathname.startsWith("/t/")) {',
   '      const forwarded = new Request("https://session" + url.pathname.slice(2) + url.search, request);',
   '      return env.SESSION.get(env.SESSION.idFromName("default")).fetch(forwarded);',
@@ -316,6 +336,18 @@ const Transcript = v.object({
   ok: v.literal(true),
   entries: v.array(v.object({ kind: v.string() })),
 });
+const Seeded = v.object({ ok: v.literal(true) });
+const IndexDump = v.object({
+  rows: v.array(
+    v.object({
+      project_id: v.string(),
+      id: v.string(),
+      title: v.string(),
+      indexed_at: v.nullable(v.string()),
+    }),
+  ),
+  state: v.array(v.object({ pending: v.number(), last_error_code: v.nullable(v.string()) })),
+});
 const Snapshot = v.object({
   type: v.literal("snapshot"),
   protocol: v.literal(1),
@@ -456,6 +488,66 @@ test.skipIf(!existsSync(CF) || !HAS_WEBSOCKET)(
       expect(reopened.cursor).not.toBe("0");
       expect(reopened.entries.filter((entry) => entry.kind === "pi.assistant")).toHaveLength(2);
       reconnect.close();
+    } finally {
+      await stop(running);
+      running = undefined;
+    }
+  },
+  TIMEOUT_MS,
+);
+
+// Catches: an index write that never reaches D1, or a failed write that is never retried.
+test.skipIf(!existsSync(CF))(
+  "the Session DO writes the conversation index into D1 and retries after a failure",
+  async () => {
+    project = await writeProject();
+    running = await start(project);
+    const port = running.port;
+    try {
+      const created = await call(port, "POST", "/t/rpc/conversations", Create, {
+        title: "Indexed",
+      });
+      const id = created.conversation.id;
+      // The object migrated D1 on open. A deployment seeds the project row from the edge; here
+      // nothing has, so the first index write fails its foreign key and stays dirty.
+      const before = await call(port, "GET", "/d1", IndexDump);
+      expect(before.rows).toStrictEqual([]);
+      expect(before.state).toStrictEqual([{ pending: 1, last_error_code: "d1_write_failed" }]);
+
+      await call(port, "POST", "/seed", Seeded);
+      await call(port, "POST", "/t/rpc/conversations/" + id + "/messages", Send, { text: "hi" });
+
+      const after = await call(port, "GET", "/d1", IndexDump);
+      expect(after.rows).toStrictEqual([
+        { project_id: "default", id, title: "Indexed", indexed_at: expect.any(String) },
+      ]);
+      expect(after.state).toStrictEqual([{ pending: 0, last_error_code: null }]);
+    } finally {
+      await stop(running);
+      running = undefined;
+    }
+  },
+  TIMEOUT_MS,
+);
+
+// Catches: the index migration losing a conversation written under the old single-column key.
+test.skipIf(!existsSync(CF))(
+  "the index migration rebuilds a database created with the old conversations key",
+  async () => {
+    project = await writeProject();
+    running = await start(project);
+    const port = running.port;
+    try {
+      await call(port, "POST", "/old-schema", Seeded);
+      const created = await call(port, "POST", "/t/rpc/conversations", Create, {
+        title: "After",
+      });
+      const id = created.conversation.id;
+      const dump = await call(port, "GET", "/d1", IndexDump);
+      expect(dump.rows).toStrictEqual([
+        { project_id: "default", id, title: "After", indexed_at: expect.any(String) },
+        { project_id: "default", id: "7", title: "legacy", indexed_at: null },
+      ]);
     } finally {
       await stop(running);
       running = undefined;

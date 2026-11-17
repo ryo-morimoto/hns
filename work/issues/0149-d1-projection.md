@@ -1,11 +1,11 @@
 # 0149: 会話の索引（D1）
 
 status: open
-priority: next
+priority: now
 design: agreed
 design-ref: D078
 depends-on: 0146, 0150, 0189
-touches: packages/agent/src/session.ts, packages/agent/test/integration/session.test.ts, packages/server/src/do/, packages/server/src/graphql/, packages/store/src/, packages/store/package.json, packages/store/tsdown.config.ts, oxlint.config.ts, docs/durability.md
+touches: packages/agent/src/session.ts, packages/agent/src/session.test.ts, packages/agent/test/integration/session.test.ts, packages/server/src/do/, packages/server/src/graphql/, packages/server/test/, packages/store/src/, packages/store/test/, packages/store/package.json, packages/store/tsdown.config.ts, oxlint.config.ts, vitest.config.ts, packages/web/schema.graphql, docs/durability.md, work/issues/0127-model-project-workspace.md
 
 ## Goal
 
@@ -154,9 +154,118 @@ Node SQLite の実 storage で 1 text turn を測った（faux、`openSession`�
 - 会話本文の全文検索。
 - 集計・分析（0162 / 0163）。
 
+## 追記（2026-11-17 / lead）
+
+0160 / 0181 の後に `next` から `now` へ。D1 の会話索引は 0043 の E2E と 0104 / 0105 の一覧の前提。
+
 ## Log
 
 - 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
 - 2026-11-07: 範囲を会話・run の索引に縮小。制御データは D1 直（D049）。
 - 2026-11-17: 設計案を追加（レビュー待ち）。既存の `conversations` を索引にし、DO の `dirtyAt` から再送する形にした。
 - 2026-11-17: ユーザーの設計レビューで合意（D078）。U-01〜U-04 を決定し、`design: agreed` にした。
+
+## Design（実装、2026-11-17）
+
+D078 の合意を、実装の形に落としたもの。逸脱は「D078 からの差分」に書く。
+
+### 前提の訂正
+
+0127 の時点で D1 の `conversations` の PK は `(id)` 単独だった（A2 の PK 変更は未実施）。0149 の migration 0005 で張り替える。0127 の Result に follow-up として追記した。
+
+### 書き込み（D078 決定 2）
+
+- Session DO は `env.DB` に **直接**書く。Worker RPC は使わない（turn の中で書くため往復を増やさない）。0145 の索引例外。
+- 狭い writer は `@hns/store/conversation-index` の1つ: `upsert` / `remove` / `replaceAll` / `state` / `writeState`。DO は root を import しない（`packages/server/src/do/session-index.ts` に oxlint の no-restricted-imports）。
+- metadata doc（`hns.conversation.index`）に内部 `dirtyAt` と `indexedAt` を足す。公開 `Conversation` には出さない。create / send / abort の commit で `dirtyAt = updatedAt`。
+- `pendingIndex(limit)` は dirty（`dirtyAt` あり）と未索引（`indexedAt` なし = backfill）を返す。1回の drain は 50 行まで（CPU を turn に持ち込まない）。
+- 順序: `pendingIndex` → D1 upsert（単調 `WHERE excluded.updated_at >= COALESCE(conversations.updated_at, conversations.created_at)`）→ `markIndexed(entries)`（`dirtyAt === version` のときだけ消す CAS。`indexedAt` は書いた version で更新）。
+- 失敗: 行は書けたが CAS が失敗した場合も dirty を残す。D1 が失敗したら dirty を残し、次の会話 RPC（2xx）か alarm で再送する。**チャットは止めない。**
+- metadata doc の `checkpointWhen` は `deltasSinceBase >= 32`（revision を有界にする）。
+- `index_state` は workspace（= Session DO 名）ごとに1行。backlog の発生・解消とエラーの遷移だけ書く（毎 turn は書かない）。成功で `last_synced_at` と `pending = 0`、失敗で `last_error_code = d1_write_failed` と `pending`。
+
+### 読み（D078 決定 3）
+
+- `Query.conversations(projectId, first, after, q)` は D1 の索引だけを読む。DO RPC は使わない。詳細は DO。
+- keyset `(COALESCE(updated_at, created_at), id)` 降順。`nextCursor` は base64url の `[updatedAt, id]`。無効は `invalid_argument`。`first` は 1..100。
+- `q` は title の部分一致（LIKE の escape は store）。本文の全文検索はしない。
+- 未知の projectId は 0127 と同じく **D1 を読む前に** `invalid_argument`（DO を作らない）。
+- 一覧に出るのは `indexed_at` が入った行だけ（索引に書かれた行）。legacy の未索引行は backfill が上書きする。
+- 同時更新: 行が前へ動くと、その1回の走査では見えないことがある（重複もし得る）。無限ループと恒久的な欠落を作らないことだけを固定する。
+
+### 鮮度（D078 決定 4）
+
+- 索引はその turn の中で書く。遅れるのは D1 障害のときだけ。
+- cold load では遅れを検出できない。0149 は `index_state` と `Query.indexState` を出すところまで。画面の「更新中」は live の delta が索引より新しいことを観測したときだけ（0159 / 0181、UI は 0104 / 0105）。行は `updatedAt` の相対時刻を出し、freshness を偽装しない。
+
+### 再構築（D078 決定 5）
+
+- DO の内部 RPC `POST /rpc/reindex`（公開しない）。`indexRows()`（storage の全 conversation + metadata）から全行を upsert し、**その DO の project** の行だけを「metadata に無いもの」として消す。legacy default DO に混在する他 project の行は upsert のみ（その project の DO が新しい行を書いている可能性があるため消さない）。
+- `replaceAll` は強制 upsert（reindex は正本）。drain の upsert だけが単調。
+
+### migration 0005
+
+- `conversations` を再作成して PK を `(project_id, id)` にし、`indexed_at TEXT`（NULL = 未索引）を足す。既存行は全部コピーする。旧 PK は新 PK の上位集合なので衝突しない。衝突したら batch が rollback し、store は開かない（fail closed、半端な DB を残さない）。
+- 索引 `conversations_activity (project_id, updated_at DESC, id)`。`index_state (workspace_id PK, pending, last_synced_at, last_error_code, last_error_at, updated_at)`。
+- legacy の行は `indexed_at = NULL`。backfill の対象で、一覧には出ない。
+
+### GraphQL
+
+- `ConversationList` に `nextCursor: String`。`Query.conversations` に `after` / `q`。
+- `Query.indexState(projectId): IndexStateResult`（`IndexState | QueryFailure`）。`pending` / `lastSyncedAt` / `lastErrorCode` / `lastErrorAt`。owner は現状セッション（単一 owner）。ユーザー単位の scope は accounts 面で足す。
+- SDL が変わるので `packages/web/schema.graphql` を codegen で再生成する。
+
+### D078 からの差分（報告済み・承認済み）
+
+- 0039 の `/api/metrics`（`hns_index_pending` / `hns_index_stale_seconds`）は 0162 の obs 面（DO ローカル SQLite、D1 を読まない）なので 0149 では実装しない。0149 は構造化ログ + `index_state` + `Query.indexState` までを証拠にする。metrics は 0162 へ申し送り。
+- 専用の backoff alarm は作らない。harness の alarm と競合するため、再送は既存 alarm と次の会話 RPC で行う。索引の遅れの上限は「次の会話操作まで」で、alarm が動くのは run 中か wake があるとき。
+- metadata に `projectId` が無い古い行は `default` に寄せる（legacy default DO と同じ扱い）。件数は `index.legacy_rows` の構造化ログに出す。
+- drain の失敗で `index_state` を書けないこともある（D1 障害）。そのときは次の drain が状態を読み直す。
+
+## テスト条件
+
+| ID | 条件（Given → When → Then） | リスク | 出所 |
+| --- | --- | --- | --- |
+| C1 | 会話を作る / send する → drain → GraphQL の一覧 → D1 の行が出る（DO RPC を読まない） | 高 | 受入2・3 |
+| C2 | D1 の索引書き込みを失敗させる → send → 200 で chat は成功、dirty が残り `index_state.pending` が立つ → D1 回復 → 次の RPC → 行が出て pending が 0 | 高 | 受入2・9 |
+| C3 | 古い updatedAt の再送 → upsert → 新しい行が戻らない（単調）。reindex の強制 upsert は戻す | 高 | 受入2 |
+| C4 | drain 中に新しい turn → markIndexed（古い version）→ 新しい dirtyAt が消えない（CAS） | 高 | 受入2 |
+| C5 | 同時更新を挟んで cursor で辿る → 無限ループせず、動かなかった行は欠けない（動いた行は次の読みの先頭） | 中 | 受入5 |
+| C6 | 索引の1行を壊す → reindex → 一覧が DO の正本と一致し、正本に無い行は消える | 高 | 受入6 |
+| C7 | 既存の会話があり indexedAt が無い → 最初の drain → 全件が backfill される（batch 上限で分割） | 中 | 受入2 |
+| C8 | `q` に `%` / `_` / `\` → 部分一致 → ワイルドカードとして解釈しない | 低 | 受入4 |
+| C9 | metadata doc に 32 回書く → checkpoint → revision が 32 以下に戻る | 中 | 受入3 |
+| C10 | D1 を失敗させる → `index_state.pending` が立ち、成功で 0 に戻る。ログに本文・秘密が出ない | 高 | 受入9 |
+| C11 | project A と B の同じ会話 id → D1 の PK `(project_id, id)` で衝突せず、get は project で絞る | 高 | D080 |
+| C12 | 未知の projectId → `Query.conversations` / `Query.indexState` は `invalid_argument` で、索引を読まず DO も作らない | 高 | 0127 |
+| C13 | 無効な `after` → `invalid_argument`、索引を読まない | 高 | 受入5 |
+| C14 | 0001 の DDL で作った既存 DB → 0005 → 行が残り、`indexed_at` は NULL、同じ id を別 project に置ける | 高 | 受入1・migration |
+| C15 | `index_state` に記録が無い workspace → 0 と null（「同期済み」と偽らない）。GraphQL はそれを返す | 中 | 受入9 |
+| C16 | 既存の会話一覧（GraphQL の payload / enum / union）→ 形が変わらず、`nextCursor` が増えるだけ | 中 | 互換 |
+
+## テスト設計
+
+| ID | 条件 | 技法 | 層 | テスト |
+| --- | --- | --- | --- | --- |
+| T1 | C1・C2・C10 | 故障注入（D1 失敗 → 回復）+ 契約 | unit（実 SQLite の D1 fake + fake Session） | `packages/server/src/do/session-index.test.ts` "a successful turn writes its conversation into the D1 index" / "a D1 failure leaves the turn successful, the row dirty, and the backlog recorded" |
+| T2 | C3 | 単調性の境界 | integration（miniflare D1） | `packages/store/test/integration/store/conversation-index.test.ts` "an older row never overwrites a newer one" / "a rebuild replaces the stored row whatever its timestamp says" |
+| T3 | C4 | 競合（CAS） | unit（MemoryStorage + faux） | `packages/agent/src/session.test.ts` "a turn that commits during a drain is still pending afterwards" |
+| T4 | C5 | 競合 + 境界 | integration（miniflare D1） | `packages/store/test/integration/store/conversations.test.ts` "a keyset cursor pages through a stable list..." / "a row updated between pages does not stall or truncate the cursor walk" |
+| T5 | C6 | 故障注入（壊れた行） | unit（実 SQLite の D1 fake） | `packages/server/src/do/session-index.test.ts` "a rebuild repairs the index from the object's metadata" / "a rebuild that cannot read the object is a 500..." |
+| T6 | C7 | 状態遷移（backfill）+ 境界（batch） | unit（MemoryStorage + faux） | `packages/agent/src/session.test.ts` "a created conversation is pending until its version is marked indexed" / "a drain returns at most the requested batch and reports the rest" / in-source `pendingVersion` |
+| T7 | C8 | 同値分割（ワイルドカード） | integration（miniflare D1） | `packages/store/test/integration/store/conversations.test.ts` "conversations are registered, searched..." |
+| T8 | C9 | 状態遷移（checkpoint） | unit（MemoryStorage） | 0146 の row 予算テスト + `checkpointWhen` の実測（Result に数字）。専用の revision テストは置かない（doc の内部値で、契約は「有界」） |
+| T9 | C11・C14 | 状態遷移（migration）+ 分離 | integration（miniflare D1） | `packages/store/test/integration/store/migrate.test.ts` "the index migration keeps every conversation and scopes the key to the project" / `conversations.test.ts` "a conversation is fetched by its project and id pair" |
+| T10 | C12・C13 | 契約（拒否） | unit（edge + GraphQL） | `packages/server/src/graphql/handler.test.ts` "conversations for an unknown project never address a Session object" / "an invalid conversation cursor is a typed failure" / "an unknown project has no index state" |
+| T11 | C15 | 境界（記録なし） | integration（miniflare D1） | `conversation-index.test.ts` "the index state reads zeroed when absent and round-trips a transition" |
+| T12 | C16 | 契約（互換） | unit（GraphQL） | `handler.test.ts` "a project's conversations are served from the D1 index" / "a conversation page returns the next cursor and continues from it" |
+| T13 | 受入1・3・4・9 | ゲート | static / build | `npm run check` |
+| T14 | C1・C2・C14 | 実経路（workerd の Session DO + D1、旧 DDL からの 0005 再構築、FK 失敗 → 回復） | integration（cf dev） | `packages/server/test/integration/session-do.test.ts` "the Session DO writes the conversation index into D1 and retries after a failure" / "the index migration rebuilds a database created with the old conversations key" |
+
+層の判断: SQL・PK・migration・keyset・単調性は実 D1（miniflare の workerd）で証明し、DO と D1 binding の実経路（旧 DDL → 0005、FK 失敗 → 再送）は cf dev の1本で固定する。DO の drain / reindex / 状態遷移は実 SQLite の D1 fake と scripted Session で unit に置く。CAS と backfill は agent の unit（MemoryStorage）。GraphQL の契約は handler の unit。同じシナリオを複数の層で回さない。
+
+## Log（実装）
+
+- 2026-11-17: 実測（checkpoint の効果）。`hns.conversation.index` を 40 回書く（create 40 回）と、`document_revisions` の行は **7**（base + 直近の delta。32 delta で checkpoint し、それ以前の delta は畳まれる）。変更前は 1 行/turn で単調に増えた（0146 の実測で 120 turn → revision 121）。revision は 33 前後で有界になる。
+- 2026-11-17: 実装。store に migration 0005（PK 張り替え + `indexed_at` + `index_state`）と `conversation-index` の writer、keyset の repository、agent に `dirtyAt` / `indexedAt` / `pendingIndex` / `markIndexed` / `indexRows` と `checkpointWhen`、server に `SessionIndex`（drain / reindex / index_state）と `/rpc/reindex`、GraphQL に `nextCursor` / `after` / `q` / `Query.indexState`。`docs/durability.md` に INV-11。
+

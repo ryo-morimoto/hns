@@ -6,6 +6,7 @@ import {
   type ConversationRepository,
 } from "./repositories/conversations.ts";
 import { eventRepository, type EventRepository } from "./repositories/events.ts";
+import { indexStateRepository, type IndexStateRepository } from "./repositories/index-state.ts";
 import {
   projectRepository,
   taskRepository,
@@ -28,6 +29,8 @@ export interface Store {
   readonly projects: ProjectRepository;
   readonly tasks: TaskRepository;
   readonly conversations: ConversationRepository;
+  /** The conversation index's backlog and last failure, one row per workspace. */
+  readonly indexState: IndexStateRepository;
   readonly events: EventRepository;
   readonly workflows: WorkflowRepository;
   readonly automations: AutomationRepository;
@@ -67,6 +70,7 @@ export async function openStore(options: StoreOptions): Promise<Store> {
       projects,
       tasks: taskRepository(context),
       conversations: conversationRepository(context),
+      indexState: indexStateRepository(context),
       events: eventRepository(context),
       workflows: workflowRepository(context),
       automations: automationRepository(context),

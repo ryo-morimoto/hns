@@ -1,5 +1,6 @@
 import { toGlobalId } from "@hns/core/graphql";
 import type { Conversation, Project, Task } from "@hns/core";
+import type { IndexStateRow } from "@hns/store";
 
 /**
  * A `Project` as GraphQL serves it.
@@ -53,6 +54,24 @@ export function projectView(project: Project): ProjectView {
     agentCwd: project.agent_cwd,
     egress: project.egress,
     createdAt: project.created_at,
+  };
+}
+
+/** The `IndexState` GraphQL shape: the conversation index's backlog and last failure. */
+export interface IndexStateView {
+  readonly pending: number;
+  readonly lastSyncedAt: string | null;
+  readonly lastErrorCode: string | null;
+  readonly lastErrorAt: string | null;
+}
+
+/** Map the index state to its GraphQL shape. */
+export function indexStateView(state: IndexStateRow): IndexStateView {
+  return {
+    pending: state.pending,
+    lastSyncedAt: state.lastSyncedAt,
+    lastErrorCode: state.lastErrorCode,
+    lastErrorAt: state.lastErrorAt,
   };
 }
 

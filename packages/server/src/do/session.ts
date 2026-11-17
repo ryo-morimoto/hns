@@ -4,6 +4,7 @@ import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/stora
 import type { AgentEvent } from "@hns/agent";
 import { openSession, type AgentLiveWatch, type AgentSession } from "@hns/agent/session";
 import { migrateStore } from "@hns/store";
+import { openConversationIndex } from "@hns/store/conversation-index";
 import { createCostGate, type CostGate } from "../cost/index.ts";
 import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { problem } from "../edge/problem.ts";
@@ -21,8 +22,10 @@ import {
   type LiveSocketPairFactory,
   type LiveUpgradeResponseFactory,
 } from "../ws.ts";
+import { LEGACY_SESSION_NAME } from "../session-name.ts";
 import { armWake } from "./alarm.ts";
 import { modelsFor } from "./models.ts";
+import { SessionIndex } from "./session-index.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
 import type { SessionEnv, SessionState } from "./state.ts";
 
@@ -104,6 +107,7 @@ export class Session {
   readonly #agentRequestIds = new Set<string>();
   #cost: CostGate | undefined;
   #obs: ObsStore | undefined;
+  #index: SessionIndex | undefined;
   #session: AgentSession | undefined;
   #closed = false;
 
@@ -171,6 +175,16 @@ export class Session {
         },
       });
       this.#session = session;
+      // The index is a copy: without the control database the object still runs, and the dirty
+      // rows wait for a deployment that has one (D078).
+      if (this.#env.DB !== undefined) {
+        this.#index = new SessionIndex({
+          session,
+          index: openConversationIndex(this.#env.DB),
+          workspaceId: this.#state.id?.name ?? LEGACY_SESSION_NAME,
+          now: this.#now,
+        });
+      }
       void session.closed.then((end) => {
         this.#closed = true;
         if (end.kind === "failed") this.#state.abort("harness failed");
@@ -227,6 +241,8 @@ export class Session {
         obs === undefined
           ? problem("unavailable", "The event log is not open.", path)
           : await handleObsRpc(request, obs);
+    } else if (path === "/rpc/reindex") {
+      response = await this.#reindex(request);
     } else {
       response = await handleSessionRpc(request, session, {
         cost: this.#cost,
@@ -234,8 +250,64 @@ export class Session {
           turnRequestId = id;
         },
       });
+      // The index write follows the commit, so the turn is durable before the copy is attempted;
+      // a D1 failure leaves the dirty mark and the next RPC or alarm retries (D078).
+      if (response.ok && path.startsWith("/rpc/conversations")) {
+        await this.#drain(request.headers.get(REQUEST_ID_HEADER) ?? "unattributed");
+      }
     }
     return this.#finished(request, response, started, turnRequestId);
+  }
+
+  /**
+   * Write the conversations whose D1 index row is behind, once.
+   *
+   * @param requestId - The correlation id of the request that triggered the drain.
+   *
+   * @remarks
+   * Never throws: the index records its own failure and the chat response is unaffected.
+   */
+  async #drain(requestId: string): Promise<void> {
+    const index = this.#index;
+    if (index === undefined) return;
+    try {
+      await index.drain(requestId);
+    } catch (error) {
+      console.error("session index drain failed", error instanceof Error ? error.name : "unknown");
+    }
+  }
+
+  /**
+   * Rebuild the index from the object's metadata.
+   *
+   * @remarks
+   * Internal only: the public trigger (ops / a GraphQL mutation) comes after the observability
+   * face (D078 decision 5). The object answers a count, and a failure is a 500, never a
+   * successful-looking empty rebuild.
+   */
+  async #reindex(request: Request): Promise<Response> {
+    const path = "/rpc/reindex";
+    if (request.method !== "POST") {
+      return problem("method_not_allowed", "Only POST is allowed here.", path);
+    }
+    const index = this.#index;
+    if (index === undefined) {
+      return problem("unavailable", "The conversation index is not configured.", path);
+    }
+    const requestId = request.headers.get(REQUEST_ID_HEADER) ?? "unattributed";
+    try {
+      const result = await index.reindex(requestId);
+      return new Response(JSON.stringify({ ok: true, ...result }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      });
+    } catch (error) {
+      console.error("session reindex failed", error instanceof Error ? error.name : "unknown");
+      return problem("internal", "The conversation index could not be rebuilt.", path);
+    }
   }
 
   /** Record one agent observation and remember its request for the turn's skip. */
@@ -397,6 +469,8 @@ export class Session {
       await armWake(this.#state.storage, { ...session.wake(), active: true }, Date.now());
       session.resume();
       await armWake(this.#state.storage, session.wake(), Date.now());
+      // A wake is the retry point for a drain that could not reach D1 during its turn.
+      await this.#drain("alarm");
     } catch (error) {
       console.error("session alarm failed", error instanceof Error ? error.name : "unknown");
       this.#state.abort("session alarm failed");

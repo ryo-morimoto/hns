@@ -43,7 +43,8 @@ enum TaskStatus {
 
 type Query {
   projects(first: Int): ProjectListResult!
-  conversations(projectId: ID!, first: Int): ConversationListResult!
+  conversations(projectId: ID!, first: Int, after: String, q: String): ConversationListResult!
+  indexState(projectId: ID!): IndexStateResult!
   tasks(projectId: ID!, first: Int): TaskListResult!
 }
 
@@ -68,6 +69,16 @@ union ConversationListResult = ConversationList | QueryFailure
 
 type ConversationList {
   conversations: [Conversation!]!
+  nextCursor: String
+}
+
+union IndexStateResult = IndexState | QueryFailure
+
+type IndexState {
+  pending: Int!
+  lastSyncedAt: String
+  lastErrorCode: String
+  lastErrorAt: String
 }
 
 union TaskListResult = TaskList | QueryFailure

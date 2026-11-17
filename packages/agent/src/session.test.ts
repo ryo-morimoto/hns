@@ -257,3 +257,66 @@ test("the watch carries the in-flight draft", async () => {
     await session.close();
   }
 });
+
+// Catches: a create that never reaches the index, so a fresh conversation is missing from the list.
+test("a created conversation is pending until its version is marked indexed", async () => {
+  await withSession(async ({ session }) => {
+    const conversation = await session.createConversation({ title: "Indexed" });
+    const pending = await session.pendingIndex();
+    expect(pending.entries).toHaveLength(1);
+    expect(pending.remaining).toBe(0);
+    expect(pending.legacy).toBe(0);
+    expect(pending.entries[0]?.conversation.id).toBe(conversation.id);
+    expect(pending.entries[0]?.version).toBe(conversation.created_at);
+
+    await session.markIndexed([{ id: conversation.id, version: conversation.created_at }]);
+    expect((await session.pendingIndex()).entries).toHaveLength(0);
+  });
+});
+
+// Catches: a drain that clears a newer turn's dirty mark, so the index keeps the old timestamp.
+test("a turn that commits during a drain is still pending afterwards", async () => {
+  await withSession(async ({ session, faux, advance }) => {
+    const conversation = await session.createConversation({ title: "Racing" });
+    const first = await session.pendingIndex();
+    const version = first.entries[0]?.version;
+    assert.ok(version !== undefined);
+
+    advance(60_000);
+    faux.setResponses([fauxAssistantMessage("hello")]);
+    await session.send(conversation.id, "hi");
+
+    // The drain wrote the version it read; the turn's newer version must survive the clear.
+    await session.markIndexed([{ id: conversation.id, version }]);
+    const pending = await session.pendingIndex();
+    expect(pending.entries).toHaveLength(1);
+    expect(pending.entries[0]?.version).toBe(new Date(START + 60_000).toISOString());
+  });
+});
+
+// Catches: a drain that writes every dirty row at once, so one backlog turn pays for all of them.
+test("a drain returns at most the requested batch and reports the rest", async () => {
+  await withSession(async ({ session }) => {
+    for (let index = 0; index < 3; index += 1) {
+      await session.createConversation({ title: "chat-" + String(index) });
+    }
+    const pending = await session.pendingIndex(1);
+    expect(pending.entries).toHaveLength(1);
+    expect(pending.remaining).toBe(2);
+  });
+});
+
+// Catches: a rebuild that only knows the newest page of conversations.
+test("indexRows returns every conversation for a rebuild", async () => {
+  await withSession(async ({ session, faux }) => {
+    const titles: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const conversation = await session.createConversation({ title: "chat-" + String(index) });
+      titles.push(conversation.title);
+      faux.setResponses([fauxAssistantMessage("ok")]);
+      await session.send(conversation.id, "hi");
+    }
+    const rows = await session.indexRows();
+    expect(rows.map((row) => row.title)).toStrictEqual(titles);
+  });
+});

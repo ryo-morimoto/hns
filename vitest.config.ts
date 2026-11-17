@@ -16,6 +16,10 @@ const alias = [
   },
   { find: /^@hns\/record$/, replacement: source("./packages/record/src/index.ts") },
   { find: /^@hns\/store$/, replacement: source("./packages/store/src/index.ts") },
+  {
+    find: /^@hns\/store\/conversation-index$/,
+    replacement: source("./packages/store/src/conversation-index/index.ts"),
+  },
   { find: /^@hns\/workspace$/, replacement: source("./packages/workspace/src/index.ts") },
   {
     find: /^@hns\/workspace\/sandbox$/,
