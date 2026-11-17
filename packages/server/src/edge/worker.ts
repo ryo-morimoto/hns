@@ -26,7 +26,7 @@ function sessionStub(env: WorkerEnv) {
 }
 
 /**
- * Forward \`/ws\` to the Session Durable Object.
+ * Forward `/ws` to the Session Durable Object.
  *
  * @internal
  * @remarks

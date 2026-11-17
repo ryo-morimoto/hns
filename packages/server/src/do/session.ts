@@ -234,9 +234,9 @@ export class Session {
   /** Record one internal RPC's hop and return the answer unchanged. */
   #finished(request: Request, response: Response, started: number): Response {
     const path = new URL(request.url).pathname;
-    // A turn's DO hop is the agent event (same request id), not a second row; `do.rpc` covers
-    // the internal RPCs that emit no agent event, so one hop is not double counted.
-    if (path.startsWith("/rpc/conversations")) return response;
+    // A turn's DO hop is the agent event (same request id), not a second row. Only the
+    // turn-bearing messages RPC is skipped; reads and the internal APIs still get `do.rpc`.
+    if (path.startsWith("/rpc/conversations/") && path.endsWith("/messages")) return response;
     const requestId = request.headers.get(REQUEST_ID_HEADER) ?? "unattributed";
     this.#append(doEntry(requestId, path, response.status, this.#now() - started, this.#now()));
     return response;
