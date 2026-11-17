@@ -1,7 +1,7 @@
 # 0148: Machine レジストリ（D1 + fetch）
 
 status: open
-priority: next
+priority: now
 design: agreed
 design-ref: D087
 depends-on: 0147, 0145, 0146, 0198
