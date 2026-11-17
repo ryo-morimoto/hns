@@ -90,6 +90,9 @@ Little's law は、系の中の変更数 `L` が、到着率 `λ` と滞在時�
 3. **統合**: 1本ずつ。rebase → `npm run check` → review PASS → merge。merge 後に main で再確認する。
 4. **終了**: レーンの状態、レビュー待ち、統合待ち、競合、翌日の統合順を BOARD に戻す。
 
+`npm run check` は build を test の前に含む。レーンでは事前に `npm run build` を実行しない。事前 build は
+check の build と合わせて build を二重に走らせ、full check を約 12s 伸ばす（[計測](../work/reviews/2026-11-18-measurements.md)）。
+
 ### 統合の順番
 
 - 依存が少ない → 多い。小さい → 大きい。
