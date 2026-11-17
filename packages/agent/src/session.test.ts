@@ -4,6 +4,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
+import type { AgentEvent } from "./events.ts";
 import { openSession } from "./session.ts";
 import type { AgentLiveView, AgentSession } from "./session.ts";
 
@@ -16,7 +17,10 @@ interface Fixture {
 const MODEL = { provider: "faux", modelId: "faux-1" };
 const START = 1_800_000_000_000;
 
-async function withSession(run: (fixture: Fixture) => Promise<void>): Promise<void> {
+async function withSession(
+  run: (fixture: Fixture) => Promise<void>,
+  events?: AgentEvent[],
+): Promise<void> {
   const faux = fauxProvider();
   const models = createModels();
   models.setProvider(faux.provider);
@@ -33,6 +37,12 @@ async function withSession(run: (fixture: Fixture) => Promise<void>): Promise<vo
       request += 1;
       return "request-" + request;
     },
+    onEvent:
+      events === undefined
+        ? undefined
+        : (event: AgentEvent) => {
+            events.push(event);
+          },
   });
   try {
     await run({
@@ -98,6 +108,22 @@ test("a turn is stored in the transcript and updates the conversation timestamp"
     assert.ok(updated !== undefined);
     expect(updated.updated_at).toBe(new Date(START + 60_000).toISOString());
   });
+});
+
+// Catches: the agent response losing the request id the DO needs to correlate the hop.
+test("a send reports the request id without making the text the log contract", async () => {
+  const events: AgentEvent[] = [];
+  await withSession(async ({ session, faux }) => {
+    const conversation = await session.createConversation({ title: "Correlated" });
+    faux.setResponses([fauxAssistantMessage("hello")]);
+    await session.send(conversation.id, "hi", "corr-1");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      event: "agent.response",
+      requestId: "corr-1",
+      text: "hello",
+    });
+  }, events);
 });
 
 test("an empty input is refused before a submission is admitted", async () => {

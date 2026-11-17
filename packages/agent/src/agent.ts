@@ -127,7 +127,13 @@ export async function openAgent(options: AgentOptions): Promise<Agent> {
       );
       const settlement = await submission.wait(options.context);
       const text = await lastAssistantText(conversation, options.context);
-      emit({ event: "agent.response", at: new Date().toISOString(), text });
+      emit({
+        event: "agent.response",
+        at: new Date().toISOString(),
+        text,
+        requestId,
+        conversationId: String(conversation.id),
+      });
       return { settlement, text };
     },
     async transcript(): Promise<readonly EntryRecord[]> {

@@ -8,7 +8,15 @@
  */
 export type AgentEvent =
   /** Before a tool executes. */
-  | { readonly event: "tool.call"; readonly at: string; readonly tool: string }
+  | {
+      readonly event: "tool.call";
+      readonly at: string;
+      readonly tool: string;
+      /** The correlation id of the turn, when the caller supplied one. */
+      readonly requestId?: string | undefined;
+      /** The conversation the tool ran for, when the caller supplied one. */
+      readonly conversationId?: string | undefined;
+    }
   | {
       /** After it returns; `ok` is false for an isError result, and `ms` is milliseconds. */
       readonly event: "tool.result";
@@ -16,12 +24,20 @@ export type AgentEvent =
       readonly tool: string;
       readonly ok: boolean;
       readonly ms: number;
+      /** The correlation id of the turn, when the caller supplied one. */
+      readonly requestId?: string | undefined;
+      /** The conversation the tool ran for, when the caller supplied one. */
+      readonly conversationId?: string | undefined;
     }
   | {
       /** After a send settles; `text` is what send returned, possibly "". */
       readonly event: "agent.response";
       readonly at: string;
       readonly text: string;
+      /** The correlation id of the turn, when the caller supplied one. */
+      readonly requestId?: string | undefined;
+      /** The conversation the turn ran for, when the caller supplied one. */
+      readonly conversationId?: string | undefined;
     };
 
 /**

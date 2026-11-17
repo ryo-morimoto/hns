@@ -395,6 +395,8 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
         event: "agent.response",
         at: new Date(clock()).toISOString(),
         text: answer,
+        requestId: request,
+        conversationId: String(conversation.id),
       });
       return { settlement, text: answer };
     },
