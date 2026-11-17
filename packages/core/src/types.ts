@@ -78,6 +78,8 @@ export const EVENT_NAMES = [
   "auth.denied",
   "http",
   "http.error",
+  "do.rpc",
+  "fs.op",
   "chat.submitted",
   "chat.settled",
   "chat.aborted",
