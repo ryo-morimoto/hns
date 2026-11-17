@@ -5,6 +5,7 @@ import { realpath, stat } from "node:fs/promises";
 import * as v from "valibot";
 import { Denied, FileFailure } from "@hns/workspace";
 import { ConnectionGate } from "./connection.ts";
+import { normalizeRelative } from "./containment.ts";
 import { InFlight, resolveLimits } from "./limits.ts";
 import type { Limits } from "./limits.ts";
 import { machineEntry, requestIdOf, writeMachineLog, type MachineLogSink } from "./log.ts";
@@ -13,7 +14,7 @@ import { MachineRefusal, refusalStatus } from "./refusal.ts";
 import { RequestVerifier } from "./signature.ts";
 import type { ControlPlaneKeys } from "./control-plane.ts";
 import { parseOperation, parseSignedHeaders } from "./wire.ts";
-import type { OperationName, RefusalBody, SuccessBody } from "./wire.ts";
+import type { Operation, OperationName, RefusalBody, SuccessBody } from "./wire.ts";
 
 /** The only address the agent ever listens on: cloudflared connects from here. */
 const HOST = "127.0.0.1";
@@ -248,7 +249,7 @@ async function handleRequest(
     }
     const operation = parseOperation(body);
     op = operation.op;
-    fsPath = operation.op === "health" ? "/" : "/" + operation.path;
+    fsPath = logPathOf(operation);
     const result = await runOperation(operation, context.root, context.limits, deadline.signal);
     sendJson(response, { ok: true, op, result }, context.limits);
   } catch (error) {
@@ -258,6 +259,29 @@ async function handleRequest(
     clearTimeout(timer);
     context.inFlight.leave();
     logRequest(request, response, context, started, fsPath, op);
+  }
+}
+
+/**
+ * The ROOT-relative path a log line names for one operation.
+ *
+ * @param operation - The parsed operation.
+ * @returns A path beginning with one separator, or / for health and an empty relative name.
+ *
+ * @remarks
+ * A wire path may begin with a separator (it means ROOT-relative), so the raw value cannot be
+ * concatenated. Normalization is attempted first because it is what the operation itself uses;
+ * an unusable path (for example one with ..) still gets a best-effort line: observation must
+ * not fail the request.
+ */
+function logPathOf(operation: Operation): string {
+  if (operation.op === "health") return "/";
+  try {
+    const relative = normalizeRelative(operation.path);
+    return relative === "" ? "/" : "/" + relative;
+  } catch {
+    const stripped = operation.path.replace(/^[/\\]+/u, "");
+    return stripped === "" ? "/" : "/" + stripped;
   }
 }
 

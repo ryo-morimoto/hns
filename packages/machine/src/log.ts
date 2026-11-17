@@ -35,8 +35,9 @@ export interface MachineLogInput {
  * @remarks
  * The header is **not** part of the signed message (0147 signs machineId, connection, seq,
  * timestamp, nonce, method, path, and the body hash only), so it is never used for
- * authentication and a tampered id is not a refusal. The machine also never generates an id:
- * only the Worker's edge mints one.
+ * authentication and a tampered id is not a refusal. The machine never generates one: the
+ * edge mints the HTTP correlation id, and an internal runtime that omits it gets its own turn
+ * id. A missing header is logged as null.
  */
 export function requestIdOf(headers: IncomingHttpHeaders): string | null {
   const raw = headers["x-request-id"];

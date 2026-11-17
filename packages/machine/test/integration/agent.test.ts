@@ -66,21 +66,25 @@ test("the request id and the fs path are logged without the content", async () =
       await writeFile(join(root, "a.txt"), "super-secret-content");
     },
     async (fixture) => {
-      const answer = await fixture.call({
-        body: JSON.stringify({ op: "read", path: "a.txt" }),
-        requestId: "corr-fs",
-      });
-      expect(answer.status).toBe(200);
-      await waitFor(() => logs.length > 0, "the fs log line");
-      const line = logs.at(-1);
-      expect(line).toMatchObject({
-        event: "fs.op",
-        hop: "fs",
-        requestId: "corr-fs",
-        path: "/a.txt",
-        status: 200,
-      });
-      expect(JSON.stringify(line)).not.toContain("super-secret-content");
+      // A leading separator is ROOT-relative on the wire; the log keeps exactly one.
+      for (const path of ["a.txt", "/a.txt", "\\a.txt"]) {
+        const before = logs.length;
+        const answer = await fixture.call({
+          body: JSON.stringify({ op: "read", path }),
+          requestId: "corr-fs",
+        });
+        expect(answer.status, path).toBe(200);
+        await waitFor(() => logs.length > before, "the fs log line");
+        const line = logs.at(-1);
+        expect(line, path).toMatchObject({
+          event: "fs.op",
+          hop: "fs",
+          requestId: "corr-fs",
+          path: "/a.txt",
+          status: 200,
+        });
+        expect(JSON.stringify(line)).not.toContain("super-secret-content");
+      }
     },
     { onLog: (entry) => logs.push(entry) },
   );
