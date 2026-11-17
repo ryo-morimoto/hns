@@ -146,7 +146,7 @@ cover するには checkpoint の契機を増やすしかない（しない、�
 
 machine の一覧と device key は **D1** が正本（`machines` / `machine_events`、migration 0008）。接続を保持する DO は作らない（D049）。
 
-- **登録**は人が行う。machine が作った device key の公開鍵を、サインインした人が browser から `Mutation.registerMachine` に渡す。秘密は machine から出ない。同じ name + 新しい公開鍵は **reimage**（同じ行の鍵を差し替え、旧鍵を即時無効、イベント1行）。`revoked` の name は再登録できない。
+- **登録**は人が行う。machine が作った device key の公開鍵を、サインインした人が browser から `Mutation.registerMachine` に渡す。秘密は machine から出ない。同じ name + 新しい公開鍵は **reimage**（同じ行の鍵を差し替え、旧鍵を即時無効、イベント1行）で、**できるのは登録した operator だけ**（`created_by` と actor の一致。B1：machine id・lease・probe 先を引き継ぐ操作なので、他人は `name_taken` で拒否）。`revoked` の name は再登録できない。
 - **失効**は `status = 'revoked'` で終端。registry は revoked の device key を返さないので、以後の署名は検証で落ちる（fail closed）。
 - **到達性**は観測。`Query.machines` の読み取り時に throttle（30 秒に1回までの lastSeen 書き込み）して `/rpc` の `health` を control-plane 署名で叩く。成功で `online`、失敗で `offline`。定期 probe は 0161。
 - **接続中の Run を park する**のは 0156 / 0157 の queue 側。0148 は状態と lookup だけを持ち、復帰の契機（0161 / 0157）に `machineId` と status を渡す。

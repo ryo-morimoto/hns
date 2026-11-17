@@ -1,4 +1,4 @@
-import { execute, parse } from "graphql";
+import { execute, GraphQLObjectType, parse } from "graphql";
 import * as v from "valibot";
 import { expect, test } from "vitest";
 import { encodeDeviceKey, type JsonValue } from "@hns/core";
@@ -61,13 +61,13 @@ async function run(
 }
 
 const REGISTER =
-  "mutation Register($input: RegisterMachineInput!) { registerMachine(input: $input) { __typename ... on RegisterMachinePayload { machine { id name hostname publicKey fingerprint status lastSeen keyAlgorithm agentVersion } reimaged previousFingerprint } ... on MutationFailure { code message } } }";
+  "mutation Register($input: RegisterMachineInput!) { registerMachine(input: $input) { __typename ... on RegisterMachinePayload { machine { id name hostname publicKey fingerprint status lastSeen keyAlgorithm agentVersion isMine } reimaged previousFingerprint } ... on MutationFailure { code message } } }";
 
 const REVOKE =
   "mutation Revoke($id: String!) { revokeMachine(id: $id) { __typename ... on RevokeMachinePayload { machine { id status } } ... on MutationFailure { code message } } }";
 
 const MACHINES =
-  "query Machines($first: Int) { machines(first: $first) { __typename ... on MachineList { machines { id name hostname publicKey fingerprint status lastSeen createdAt } } ... on QueryFailure { code message } } }";
+  "query Machines($first: Int) { machines(first: $first) { __typename ... on MachineList { machines { id name hostname fingerprint status lastSeen isMine createdAt } } ... on QueryFailure { code message } } }";
 
 /** Register a machine through the document, wrapping the values in the input object. */
 async function registerMachine(
@@ -91,6 +91,7 @@ const RegisterPayloadSchema = v.object({
       lastSeen: v.nullable(v.number()),
       keyAlgorithm: v.string(),
       agentVersion: v.string(),
+      isMine: v.boolean(),
     }),
     reimaged: v.boolean(),
     previousFingerprint: v.nullable(v.string()),
@@ -238,6 +239,107 @@ test("revokeMachine refuses the name and takes the key away", async () => {
         }),
       );
       expect(again.registerMachine.code).toBe("REVOKED");
+    } finally {
+      await store.close();
+    }
+  } finally {
+    await harness.dispose();
+  }
+});
+
+// Catches (B1): mallory reimaging a machine alice enrolled, through the public mutation.
+test("registerMachine refuses a reimage by another operator", async () => {
+  const harness = await createD1Harness();
+  harnessRef = harness;
+  try {
+    const store = await openStore({ d1: harness.db, now: clock(), newId: counter() });
+    try {
+      const aliceKey = await deviceKeyFromSeed(40);
+      const malloryKey = await deviceKeyFromSeed(41);
+      const args = { name: "claimed", hostname: "claimed.example.ts.net", agentVersion: "0.1.0" };
+      const enrolled = v.parse(
+        RegisterPayloadSchema,
+        await registerMachine(store, "alice", {
+          ...args,
+          publicKey: encodeDeviceKey(aliceKey.publicKey),
+        }),
+      ).registerMachine;
+      const refused = v.parse(
+        v.object({ registerMachine: FailureSchema }),
+        await registerMachine(store, "mallory", {
+          ...args,
+          hostname: "mallory.example.ts.net",
+          publicKey: encodeDeviceKey(malloryKey.publicKey),
+        }),
+      );
+      expect(refused.registerMachine.code).toBe("CONFLICT");
+      // Nothing moved: the key and hostname are alice's.
+      const [after] = await store.machines.list();
+      expect(after?.publicKey).toBe(encodeDeviceKey(aliceKey.publicKey));
+      expect(after?.hostname).toBe("claimed.example.ts.net");
+      expect(after?.owner).toBe("alice");
+      // The list tells alice it is hers and mallory that it is not, without either subject leaking.
+      const asAlice = v.parse(
+        v.object({
+          machines: v.object({
+            __typename: v.literal("MachineList"),
+            machines: v.array(v.object({ isMine: v.boolean() })),
+          }),
+        }),
+        await run(store, "alice", MACHINES, {}),
+      );
+      const asMallory = v.parse(
+        v.object({
+          machines: v.object({
+            __typename: v.literal("MachineList"),
+            machines: v.array(v.object({ isMine: v.boolean() })),
+          }),
+        }),
+        await run(store, "mallory", MACHINES, {}),
+      );
+      expect(asAlice.machines.machines[0]?.isMine).toBe(true);
+      expect(asMallory.machines.machines[0]?.isMine).toBe(false);
+      void enrolled;
+    } finally {
+      await store.close();
+    }
+  } finally {
+    await harness.dispose();
+  }
+});
+
+// Catches (NB2): the list serving the device key to every session.
+test("Query.machines does not serve the device key", async () => {
+  const harness = await createD1Harness();
+  harnessRef = harness;
+  try {
+    const store = await openStore({ d1: harness.db, now: clock(), newId: counter() });
+    try {
+      const key = await deviceKeyFromSeed(42);
+      await registerMachine(store, "owner", {
+        name: "secretkey",
+        hostname: "secretkey.example.ts.net",
+        publicKey: encodeDeviceKey(key.publicKey),
+        agentVersion: "0.1.0",
+      });
+      // The schema itself has no such field on the list type, so a document that asks for it
+      // fails validation (`execute` alone does not validate, so the schema is asked directly).
+      const listType = schema.getType("Machine");
+      expect(listType).toBeDefined();
+      const fields = listType instanceof GraphQLObjectType ? Object.keys(listType.getFields()) : [];
+      expect(fields).not.toContain("publicKey");
+      expect(fields).toContain("fingerprint");
+      // The list carries the fingerprint instead.
+      const listed = v.parse(
+        v.object({
+          machines: v.object({
+            __typename: v.literal("MachineList"),
+            machines: v.array(v.object({ id: v.string(), fingerprint: v.string() })),
+          }),
+        }),
+        await run(store, "owner", MACHINES, {}),
+      );
+      expect(listed.machines.machines[0]?.fingerprint).toMatch(/^ed25519:/u);
     } finally {
       await store.close();
     }

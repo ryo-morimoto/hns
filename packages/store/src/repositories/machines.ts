@@ -55,14 +55,18 @@ export interface MachineRepository {
    * Register a machine, or replace its key as a reimage.
    *
    * @param enrollment - The name, hostname, device public key, and agent version to store.
-   * @param actor - The session subject that asked; recorded in the event, never returned.
+   * @param actor - The session subject that asked; recorded as `created_by` and in the event, and
+   * it is the only subject allowed to reimage the machine later.
    * @returns A value: `enrolled` for a new row, `reimaged` (with the replaced fingerprint) for an
    * existing name, or one {@link MachineRegistryRefusal}.
    *
    * @remarks
-   * **Same name, new key is a reimage** (D087 U-02): the key is replaced in the same row, so the
-   * machine id (and every workspace that bound it) survives, and the old key stops verifying
-   * immediately. The event row keeps the replaced fingerprint so the change is visible.
+   * **Same name, new key is a reimage** (D087 U-02) **only for the operator who enrolled it**
+   * (B1). Replacing the key of an existing row hands over the machine id, every workspace bound to
+   * it, and the Worker's probe target (the hostname), so the right belongs to the enrollment's
+   * owner and nobody else: a different actor is refused with `name_taken`, because the name is
+   * already claimed by someone else. The event row keeps the replaced fingerprint so the change is
+   * visible.
    *
    * **Same name, same key is idempotent**: a browser that retried a registration does not get a
    * second event, and nothing is written.
@@ -155,6 +159,7 @@ const MachineRowSchema = v.object({
   agent_version: v.pipe(v.string(), v.minLength(1)),
   last_seen: v.nullable(v.pipe(v.number(), v.integer())),
   status: v.picklist(MACHINE_STATUSES),
+  created_by: v.pipe(v.string(), v.minLength(1)),
   created_at: IsoTimestampSchema,
   updated_at: IsoTimestampSchema,
 });
@@ -163,12 +168,6 @@ const MachineRowSchema = v.object({
 const KeyedStatusRowSchema = v.object({
   public_key: BlobSchema,
   status: v.picklist(MACHINE_STATUSES),
-});
-
-/** The row a probe reads before deciding whether to write. */
-const ProbeRowSchema = v.object({
-  status: v.picklist(MACHINE_STATUSES),
-  last_seen: v.nullable(v.pipe(v.number(), v.integer())),
 });
 
 /**
@@ -193,6 +192,7 @@ async function parseMachine(row: unknown): Promise<Machine> {
     agentVersion: parsed.agent_version,
     lastSeen: parsed.last_seen,
     status: parsed.status,
+    owner: parsed.created_by,
     createdAt: parsed.created_at,
     updatedAt: parsed.updated_at,
   };
@@ -272,8 +272,8 @@ export function machineRepository(context: StoreContext): MachineRepository {
           {
             sql:
               "INSERT INTO machines (id, name, hostname, public_key, key_algorithm, " +
-              "agent_version, last_seen, status, created_at, updated_at) " +
-              "VALUES (?, ?, ?, ?, ?, ?, NULL, 'offline', ?, ?) RETURNING *",
+              "agent_version, last_seen, status, created_by, created_at, updated_at) " +
+              "VALUES (?, ?, ?, ?, ?, ?, NULL, 'offline', ?, ?, ?) RETURNING *",
             params: [
               id,
               input.name,
@@ -281,6 +281,7 @@ export function machineRepository(context: StoreContext): MachineRepository {
               keyBlob(input.publicKey),
               DEVICE_KEY_ALGORITHM,
               input.agentVersion,
+              actor,
               at,
               at,
             ],
@@ -292,6 +293,10 @@ export function machineRepository(context: StoreContext): MachineRepository {
       }
       const current = await parseMachine(existing);
       if (current.status === "revoked") return "revoked";
+      // Only the operator who enrolled the machine may replace its key: the machine id, the
+      // workspaces bound to it, and the probe target all move with it (B1). The idempotent case is
+      // an actor's own retry, so it is checked against the owner too.
+      if (current.owner !== actor) return "name_taken";
       if (sameKey(current.publicKey, input.publicKey))
         return { kind: "enrolled", machine: current };
       const replaced: DeviceKeyFingerprint = current.fingerprint;
@@ -299,14 +304,30 @@ export function machineRepository(context: StoreContext): MachineRepository {
       // `last_seen` is cleared so the new key's first probe is what says the machine is up.
       const [rows] = await sql.batch([
         {
+          // The owner and status conditions are repeated in the statement so a row changed between
+          // the read above and this write is not reimaged: the read's check is the tested gate,
+          // and this is the second one that a concurrent write cannot slip past. D1 has no
+          // interactive transaction, so a batch is the only place the check and the write can
+          // share a statement.
           sql:
             "UPDATE machines SET hostname = ?, public_key = ?, agent_version = ?, " +
-            "last_seen = NULL, status = 'offline', updated_at = ? WHERE id = ? RETURNING *",
-          params: [input.hostname, keyBlob(input.publicKey), input.agentVersion, at, current.id],
+            "last_seen = NULL, status = 'offline', updated_at = ? " +
+            "WHERE id = ? AND created_by = ? AND status <> 'revoked' RETURNING *",
+          params: [
+            input.hostname,
+            keyBlob(input.publicKey),
+            input.agentVersion,
+            at,
+            current.id,
+            actor,
+          ],
         },
         eventStatement(current.id, current.name, "reimaged", actor, replaced, at),
       ]);
-      const machine = await parseMachine(rows?.[0]);
+      // Zero rows means the owner or the status moved between the read and the write; that is a
+      // claim by someone else, not a reimage.
+      if (rows?.[0] === undefined) return "name_taken";
+      const machine = await parseMachine(rows[0]);
       return { kind: "reimaged", machine, previousFingerprint: replaced };
     },
     async revoke(id, actor) {
@@ -340,22 +361,29 @@ export function machineRepository(context: StoreContext): MachineRepository {
       return bytes.byteLength === ED25519_PUBLIC_KEY_BYTES ? bytes : undefined;
     },
     async recordProbe(id, observation) {
-      const row = await sql.get("SELECT status, last_seen FROM machines WHERE id = ?", [id]);
-      if (row === undefined) return false;
-      const probe = v.parse(ProbeRowSchema, row);
-      if (probe.status === "revoked") return false;
       const next: MachineStatus = observation.reachable ? "online" : "offline";
-      const movedLastSeen =
-        observation.reachable &&
-        (probe.last_seen === null ||
-          observation.at - probe.last_seen >= MACHINE_LAST_SEEN_THROTTLE_MS);
-      // A probe that neither changes the status nor may move `last_seen` writes nothing: this is
-      // the delayed write the throttle exists for.
-      if (probe.status === next && !movedLastSeen) return false;
+      // One statement decides and writes: the row is never read first, so a revoke or a second
+      // probe between a read and a write cannot make this one write a stale `last_seen`. The
+      // WHERE carries the whole rule:
+      // - a revoked row is never written;
+      // - the row is written when the status changes, or (on a reachable probe) when the stored
+      //   `last_seen` is null or at least {@link MACHINE_LAST_SEEN_THROTTLE_MS} old.
+      // `last_seen` moves only on a reachable probe, so a failure never invents a sighting.
       const updated = await sql.run(
-        "UPDATE machines SET status = ?, last_seen = COALESCE(?, last_seen), updated_at = ? " +
-          "WHERE id = ? AND status <> 'revoked'",
-        [next, movedLastSeen ? observation.at : null, now(), id],
+        "UPDATE machines SET status = ?, last_seen = CASE WHEN ? = 1 THEN ? ELSE last_seen END, " +
+          "updated_at = ? WHERE id = ? AND status <> 'revoked' AND " +
+          "(status <> ? OR (? = 1 AND (last_seen IS NULL OR ? - last_seen >= ?)))",
+        [
+          next,
+          observation.reachable ? 1 : 0,
+          observation.at,
+          now(),
+          id,
+          next,
+          observation.reachable ? 1 : 0,
+          observation.at,
+          MACHINE_LAST_SEEN_THROTTLE_MS,
+        ],
       );
       return updated > 0;
     },

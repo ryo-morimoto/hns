@@ -67,6 +67,7 @@ test("the machines table has the registry's columns and no index of its own", as
       "agent_version",
       "last_seen",
       "status",
+      "created_by",
       "created_at",
       "updated_at",
     ]);
@@ -90,7 +91,7 @@ test("the status and algorithm are closed CHECKs and name is unique", async () =
     const key = new Uint8Array(32).buffer;
     const insert =
       "INSERT INTO machines (id, name, hostname, public_key, key_algorithm, agent_version, " +
-      "last_seen, status, created_at, updated_at) VALUES (?,?,?,?,?,?,NULL,?,?,?)";
+      "last_seen, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,NULL,?,?,?,?)";
     const at = "2026-01-01T00:00:00.000Z";
     await sql.run(insert, [
       "m1",
@@ -100,18 +101,61 @@ test("the status and algorithm are closed CHECKs and name is unique", async () =
       "ed25519",
       "0.1.0",
       "offline",
+      "alice",
       at,
       at,
     ]);
     await expect(
-      sql.run(insert, ["m2", "b", "b.example.ts.net", key, "ed25519", "0.1.0", "bogus", at, at]),
+      sql.run(insert, [
+        "m2",
+        "b",
+        "b.example.ts.net",
+        key,
+        "ed25519",
+        "0.1.0",
+        "bogus",
+        "alice",
+        at,
+        at,
+      ]),
     ).rejects.toThrow();
     await expect(
-      sql.run(insert, ["m3", "c", "c.example.ts.net", key, "rsa", "0.1.0", "offline", at, at]),
+      sql.run(insert, [
+        "m3",
+        "c",
+        "c.example.ts.net",
+        key,
+        "rsa",
+        "0.1.0",
+        "offline",
+        "alice",
+        at,
+        at,
+      ]),
     ).rejects.toThrow();
     // The UNIQUE name refuses a second row with the same name.
     await expect(
-      sql.run(insert, ["m4", "a", "a2.example.ts.net", key, "ed25519", "0.1.0", "offline", at, at]),
+      sql.run(insert, [
+        "m4",
+        "a",
+        "a2.example.ts.net",
+        key,
+        "ed25519",
+        "0.1.0",
+        "offline",
+        "mallory",
+        at,
+        at,
+      ]),
+    ).rejects.toThrow();
+    // `created_by` has no default: a row that does not name its operator is refused (B1).
+    await expect(
+      sql.run(
+        "INSERT INTO machines (id, name, hostname, public_key, key_algorithm, agent_version, " +
+          "last_seen, status, created_at, updated_at) VALUES ('m5','e','e.example.ts.net',?," +
+          "'ed25519','0',NULL,'offline',?,?)",
+        [key, at, at],
+      ),
     ).rejects.toThrow();
   });
 });

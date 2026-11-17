@@ -92,39 +92,70 @@ export function conversationView(conversation: Conversation): ConversationView {
  * A `Machine` as GraphQL serves it (0148).
  *
  * @remarks
- * The device key is the **public** half in the model's base64url spelling; the fingerprint is the
- * value a person compares with the machine. The control-plane key is never here: it is the
- * Worker's secret, and `GET /api/machines/keys` is where its public half is served.
+ * The device key is **not** here (NB2): a list is read by every session, and the key is the value
+ * a verifier matches, so the list carries the `fingerprint` a person compares and nothing more.
+ * The full public key leaves the registry only in `registerMachine`'s answer
+ * ({@link MachineRegistrationView}). The control-plane key is never in either: it is the Worker's
+ * secret, and `GET /api/machines/keys` is where its public half is served.
  */
 export interface MachineView {
   readonly id: string;
   readonly name: string;
   readonly hostname: string;
-  readonly publicKey: string;
   readonly fingerprint: string;
   readonly keyAlgorithm: Machine["keyAlgorithm"];
   readonly agentVersion: string;
   readonly lastSeen: number | null;
   readonly status: Machine["status"];
+  /** Whether the **requesting** session enrolled this machine; never another operator's subject. */
+  readonly isMine: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
 
-/** Map a machine to its GraphQL shape. */
-export function machineView(machine: Machine): MachineView {
+/**
+ * A `Machine` plus the public key, as `registerMachine` answers (NB2).
+ *
+ * @remarks
+ * The operator who just pasted the key needs to see what was stored, so this one answer carries
+ * it. It is the only place the key is returned; a list never does.
+ */
+export interface MachineRegistrationView extends MachineView {
+  readonly publicKey: string;
+}
+
+/**
+ * Map a machine to its GraphQL shape, without the device key and without anyone's subject.
+ *
+ * @param machine - The registry row.
+ * @param viewer - The requesting session's subject, used only to answer `isMine`.
+ * @returns The shape; `isMine` says whether this viewer enrolled it, and the owner's subject never
+ * leaves the server.
+ *
+ * @remarks
+ * `owner` is a session subject, which is a person's identity. A list is read by every session, so
+ * publishing it would let any operator enumerate who enrolled every machine. `isMine` carries the
+ * part a caller acts on: whether this is the machine they may reimage.
+ */
+export function machineView(machine: Machine, viewer: string): MachineView {
   return {
     id: toGlobalId("Machine", machine.id),
     name: machine.name,
     hostname: machine.hostname,
-    publicKey: machine.publicKey,
     fingerprint: machine.fingerprint,
     keyAlgorithm: machine.keyAlgorithm,
     agentVersion: machine.agentVersion,
     lastSeen: machine.lastSeen,
     status: machine.status,
+    isMine: machine.owner === viewer,
     createdAt: machine.createdAt,
     updatedAt: machine.updatedAt,
   };
+}
+
+/** Map a machine to the registration answer: the GraphQL shape plus its public key. */
+export function machineRegistrationView(machine: Machine, viewer: string): MachineRegistrationView {
+  return { ...machineView(machine, viewer), publicKey: machine.publicKey };
 }
 
 /** Map a task to its GraphQL shape. */

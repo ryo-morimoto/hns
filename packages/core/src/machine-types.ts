@@ -31,6 +31,8 @@ import { BASE64URL_ALPHABET, type IsoTimestamp } from "./codecs.ts";
  * `revoked` is **terminal**: a revoked machine's name cannot be enrolled again (a reimaged
  * machine takes a new name), and the registry returns no key for it. Adding a member requires
  * updating every exhaustive `switch` over `MachineStatus`.
+ *
+ * The vocabulary is stored state plus the reachability observation (see {@link Machine}).
  */
 export const MACHINE_STATUSES = ["online", "offline", "revoked"] as const;
 
@@ -169,6 +171,14 @@ export interface Machine {
   readonly lastSeen: number | null;
   /** The stored status; `revoked` is terminal. */
   readonly status: MachineStatus;
+  /**
+   * The session subject that enrolled the machine.
+   *
+   * @remarks
+   * The only operator who may replace this machine's key as a reimage (B1): the machine id, the
+   * workspaces bound to it, and the probe target move with the key.
+   */
+  readonly owner: string;
   /** When the row was created. */
   readonly createdAt: IsoTimestamp;
   /** When the row last changed. */

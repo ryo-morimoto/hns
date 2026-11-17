@@ -224,7 +224,7 @@ export async function resolveMachines(
     const limit = pageSize(args.first, context.maxRowsPerList);
     spend(context, limit);
     const machines = (await context.reads.machines()).slice(0, limit);
-    return machines.map(machineView);
+    return machines.map((machine) => machineView(machine, context.session.subject));
   });
   if (!result.ok) return result.failure;
   return { __typename: "MachineList", machines: result.value };

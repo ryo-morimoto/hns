@@ -17,14 +17,19 @@ import {
 } from "graphql";
 import type { GraphQLContext, MachineEnrollRefusal } from "../context.ts";
 import { QueryReadError } from "../failures.ts";
-import { machineView, type MachineView } from "../views.ts";
+import {
+  machineRegistrationView,
+  machineView,
+  type MachineRegistrationView,
+  type MachineView,
+} from "../views.ts";
 import { MutationFailureType, mutationFailure, type MutationFailureView } from "./failure.ts";
 import type { MutationModule } from "./index.ts";
 
 /** The successful member of `registerMachine`: the machine, and whether the key was replaced. */
 export interface RegisterMachinePayloadView {
   readonly __typename: "RegisterMachinePayload";
-  readonly machine: MachineView;
+  readonly machine: MachineRegistrationView;
   /** True when the name existed and the key was replaced as a reimage (D087 U-02). */
   readonly reimaged: boolean;
   /** The fingerprint of the key the reimage replaced, or null for a first enrollment. */
@@ -136,10 +141,21 @@ export function machinesModule(): MutationModule {
     ): GraphQLFieldConfigMap<undefined, GraphQLContext> => {
       const machine = objects.get("Machine");
       if (machine === undefined) throw new Error("the model has no GraphQL type Machine");
+      // The registration answer carries the public key (NB2): it is the one place a caller sees
+      // what was stored. The list type `Machine` deliberately has no such field.
+      const registeredMachine = new GraphQLObjectType({
+        name: "RegisteredMachine",
+        fields: {
+          ...machine.toConfig().fields,
+          // No `description`: the printed block form and oxfmt disagree on a long single-line
+          // description, and the schema artifact must be codegen output that is already formatted.
+          publicKey: { type: new GraphQLNonNull(GraphQLString) },
+        },
+      });
       const registerPayload = new GraphQLObjectType({
         name: "RegisterMachinePayload",
         fields: {
-          machine: { type: new GraphQLNonNull(machine) },
+          machine: { type: new GraphQLNonNull(registeredMachine) },
           reimaged: { type: new GraphQLNonNull(GraphQLBoolean) },
           previousFingerprint: { type: GraphQLString },
         },
@@ -228,7 +244,7 @@ export function machinesModule(): MutationModule {
             }
             return {
               __typename: "RegisterMachinePayload",
-              machine: machineView(outcome.machine),
+              machine: machineRegistrationView(outcome.machine, context.session.subject),
               reimaged: outcome.kind === "reimaged",
               previousFingerprint: outcome.kind === "reimaged" ? outcome.previousFingerprint : null,
             };
@@ -268,7 +284,10 @@ export function machinesModule(): MutationModule {
             if (revoked === undefined) {
               return mutationFailure("not_found", "No machine has this id.");
             }
-            return { __typename: "RevokeMachinePayload", machine: machineView(revoked) };
+            return {
+              __typename: "RevokeMachinePayload",
+              machine: machineView(revoked, context.session.subject),
+            };
           },
         },
       };

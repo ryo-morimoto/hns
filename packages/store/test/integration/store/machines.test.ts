@@ -8,6 +8,8 @@ import {
 } from "@hns/core";
 import { createD1Harness, type D1Harness } from "../harness.ts";
 import { createSql } from "../../../src/sql.ts";
+import { openStore } from "../../../src/store.ts";
+import { clock, counter } from "../../support.ts";
 import * as v from "valibot";
 import { afterAll, beforeAll } from "vitest";
 
@@ -160,6 +162,134 @@ test("a same-name enrollment with a new key is a reimage on the same row", async
     expect((await store.machines.list()).length).toBe(1);
     // The old key is gone: a verification against it has nothing to read.
     expect(await store.machines.deviceKey(enrolled.machine.id)).toStrictEqual(second.raw);
+  });
+});
+
+// Catches (B1): another operator replacing a machine's key and taking over its id, workspaces,
+// and probe hostname by reusing the victim's name.
+test("only the operator who enrolled a machine may reimage it", async () => {
+  await harness.withStore(async (store) => {
+    const victimKey = deviceKey(30);
+    const attackerKey = deviceKey(31);
+    const enrolled = await store.machines.enroll(
+      {
+        name: "victim",
+        hostname: "victim.example.ts.net",
+        publicKey: victimKey.text,
+        agentVersion: "0.1.0",
+      },
+      "alice",
+    );
+    if (
+      enrolled === "name_taken" ||
+      enrolled === "revoked" ||
+      enrolled === "invalid_request" ||
+      enrolled === "not_found"
+    ) {
+      throw new Error("unexpected refusal");
+    }
+    expect(enrolled.machine.owner).toBe("alice");
+    const before = enrolled.machine;
+    // mallory tries the same name with her own key and hostname: refused, nothing moves.
+    expect(
+      await store.machines.enroll(
+        {
+          name: "victim",
+          hostname: "mallory.example.ts.net",
+          publicKey: attackerKey.text,
+          agentVersion: "0.1.0",
+        },
+        "mallory",
+      ),
+    ).toBe("name_taken");
+    const after = await store.machines.get(before.id);
+    expect(after?.publicKey).toBe(victimKey.text);
+    expect(after?.hostname).toBe("victim.example.ts.net");
+    expect(after?.owner).toBe("alice");
+    expect(await store.machines.deviceKey(before.id)).toStrictEqual(victimKey.raw);
+    // alice, the owner, can reimage.
+    const reimaged = await store.machines.enroll(
+      enrollment({ name: "victim", key: attackerKey }),
+      "alice",
+    );
+    if (
+      reimaged === "name_taken" ||
+      reimaged === "revoked" ||
+      reimaged === "invalid_request" ||
+      reimaged === "not_found"
+    ) {
+      throw new Error("the owner was refused a reimage");
+    }
+    if (reimaged.kind !== "reimaged") throw new Error("a new key was not a reimage");
+    expect(reimaged.machine.id).toBe(before.id);
+    expect(await store.machines.deviceKey(before.id)).toStrictEqual(attackerKey.raw);
+    // Exactly one enrollment event and one reimage event: mallory left no trace.
+    const rows = await query(
+      EventRowSchema,
+      "SELECT kind, actor, detail FROM machine_events WHERE machine_id = ? ORDER BY rowid",
+      [before.id],
+    );
+    expect(rows.map((row) => row.kind)).toStrictEqual(["enrolled", "reimaged"]);
+    expect(rows.map((row) => row.actor)).toStrictEqual(["alice", "alice"]);
+  });
+});
+
+// Catches (B1, concurrent): two enrollments of one name at once leave one row owned by the same
+// operator, never two rows and never a row owned by neither.
+test("two concurrent enrollments of one name leave one row", async () => {
+  await harness.withStore(async (store) => {
+    const keyA = deviceKey(50);
+    const keyB = deviceKey(51);
+    const keyC = deviceKey(52);
+    const enrolled = await store.machines.enroll(
+      {
+        name: "raced",
+        hostname: "raced.example.ts.net",
+        publicKey: keyA.text,
+        agentVersion: "0.1.0",
+      },
+      "alice",
+    );
+    if (
+      enrolled === "name_taken" ||
+      enrolled === "revoked" ||
+      enrolled === "invalid_request" ||
+      enrolled === "not_found"
+    ) {
+      throw new Error("unexpected refusal");
+    }
+    // The condition lives in the UPDATE, not only in the read before it: a row that changes owner
+    // between alice's read and her write is not reimaged. Two stores race on one database.
+    const second = await openStore({ d1: harness.db, now: clock(), newId: counter() });
+    try {
+      const [first, again] = await Promise.all([
+        store.machines.enroll(
+          {
+            name: "raced",
+            hostname: "raced.example.ts.net",
+            publicKey: keyB.text,
+            agentVersion: "0.1.0",
+          },
+          "alice",
+        ),
+        second.machines.enroll(
+          {
+            name: "raced",
+            hostname: "raced.example.ts.net",
+            publicKey: keyC.text,
+            agentVersion: "0.1.0",
+          },
+          "alice",
+        ),
+      ]);
+      // Both are alice, so whoever wins, the row stays alice's and exactly one key is stored.
+      const after = await store.machines.get(enrolled.machine.id);
+      expect(after?.owner).toBe("alice");
+      expect([keyB.text, keyC.text]).toContain(after?.publicKey);
+      expect([first, again].length).toBe(2);
+    } finally {
+      await second.close();
+    }
   });
 });
 
@@ -318,7 +448,9 @@ test("each change leaves one event naming the actor, and a reimage keeps the rep
     ) {
       throw new Error("unexpected refusal");
     }
-    await store.machines.enroll(enrollment({ name: "audit", key: second }), "alice");
+    // The reimage is the enrolling operator's; a different actor is refused (B1) and leaves no
+    // event, which the assertions below depend on.
+    await store.machines.enroll(enrollment({ name: "audit", key: second }), "owner");
     await store.machines.revoke(enrolled.machine.id, "bob");
     const rows = await query(
       EventRowSchema,
@@ -326,7 +458,7 @@ test("each change leaves one event naming the actor, and a reimage keeps the rep
       [enrolled.machine.id],
     );
     expect(rows.map((row) => row.kind)).toStrictEqual(["enrolled", "reimaged", "revoked"]);
-    expect(rows.map((row) => row.actor)).toStrictEqual(["owner", "alice", "bob"]);
+    expect(rows.map((row) => row.actor)).toStrictEqual(["owner", "owner", "bob"]);
     expect(rows[1]?.detail).toBe(await deviceKeyFingerprint(first.raw));
   });
 });

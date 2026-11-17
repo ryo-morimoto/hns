@@ -38,6 +38,9 @@ machine の登録と到達性は **D1 のレコード**で保ち、接続を保�
 - **モデルの綴り**は `@hns/core` の `Machine`。`publicKey` は base64url（43 文字、パディングなし）の公開鍵で、**秘密は型に存在しない**。`fingerprint` は `ed25519:` + SHA-256 の先頭 16 バイト（hex）。
 - **登録は人**。machine が `hns machine enroll` で device key を作って公開鍵と fingerprint を表示し、サインインした人が browser から `Mutation.registerMachine` に貼る。秘密は machine から出ない。machine が自分で登録する enrollment token はまだ無い（必要になったら短命・一度きり・保存は hash）。
 - **同じ name + 新しい公開鍵は reimage**。同じ行の id を保ったまま鍵を差し替え、古い鍵を即時に無効化し、`machine_events` に旧 fingerprint と actor を1行残す。**同じ name + 同じ鍵は冪等**（何も書かない）。**revoked の name は再登録できない**（refusal は `revoked`、`name_taken` ではない）。
+- **reimage できるのは、その machine を登録した operator だけ**（`machines.created_by` と actor の一致。B1）。鍵の差し替えは machine id・それを束縛した workspace・Worker の probe 先（hostname）を一緒に渡すので、別の operator の要求は `name_taken` で拒否し、何も書かない。
+- **`publicKey` は一覧に載せない**（NB2）。一覧は `fingerprint` だけを返し、device 鍵の全体は `registerMachine` の応答にだけ載る。
+- **登録者の subject も一覧に載せない**。`machines.created_by` は session の subject（人の identity）で、一覧は全ての session が読む。代わりに **`isMine`**（その要求をした session が登録したか）を返し、他人が登録した machine の owner は分からないようにする。operator が知る必要があるのは「自分が reimage できる machine か」だけである。
 - **失効は即時**。`status = 'revoked'` は終端で、`deviceKey(id)` は revoked の machine に鍵を返さない。以後の署名は鍵が無いので検証で落ちる（fail closed）。
 - **到達性は観測、状態は保存**。`status` は `online` / `offline` / `revoked` の閉じた語彙。probe は `/rpc` に `{"op":"health"}` を control-plane 署名で送る（0147 の agent の唯一のルート。`/health` というパスは無い）。成功は `online` / lastSeen、失敗は `offline`。**lastSeen の書き込みは 30 秒に 1 回まで**（`MACHINE_LAST_SEEN_THROTTLE_MS`）で、状態も lastSeen も変わらない probe は何も書かない。probe の契機は **`Query.machines` の読み取り時**（throttle）。定期 probe は 0161。
 - **probe の呼び手は 0148 では一覧の読み取りだけ**。Worker→machine の transport（`server/src/machines/transport.ts`、control-plane 署名・timeout 3 秒・閉じた失敗）はここで実装するが、**Workspace DO が machine を呼ぶ配線（`op:mirror` と checkpoint の pack push）は 0249**。0246 の Result が「push の起動配線が無い」を 0249 の受入にしている。

@@ -32,6 +32,7 @@ function machine(overrides: Partial<Machine> = {}): Machine {
     agentVersion: "0.1.0",
     lastSeen: null,
     status: "offline",
+    owner: "owner",
     createdAt: isoTimestamp("2026-01-01T00:00:00.000Z"),
     updatedAt: isoTimestamp("2026-01-01T00:00:00.000Z"),
     ...overrides,
@@ -356,6 +357,14 @@ test("a probe records what the health call answered and never probes a revoked m
 // Catches: a probe that needs a path other than the agent's one route.
 test("the probe body is the agent's health operation under /rpc", () => {
   expect(new TextDecoder().decode(MACHINE_HEALTH_BODY)).toBe(JSON.stringify({ op: "health" }));
+});
+
+// Catches (B1): the registry port's callers being able to reimage someone else's machine.
+test("the registry port exposes no enroll or revoke, so a probe cannot change the registry", () => {
+  const port = machineKeyRegistry({
+    deviceKey: async () => undefined,
+  });
+  expect(Object.keys(port)).toStrictEqual(["deviceKey"]);
 });
 
 // Catches: a registry that hands a key to a verifier for a revoked or unknown machine.

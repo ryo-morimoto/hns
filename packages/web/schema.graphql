@@ -16,10 +16,10 @@ type Machine {
   fingerprint: String!
   hostname: String!
   id: ID!
+  isMine: Boolean!
   keyAlgorithm: String!
   lastSeen: Int
   name: String!
-  publicKey: String!
   status: MachineStatus!
   updatedAt: ID!
 }
@@ -261,9 +261,24 @@ input DecidePolicyInput {
 union RegisterMachineResult = RegisterMachinePayload | MutationFailure
 
 type RegisterMachinePayload {
-  machine: Machine!
+  machine: RegisteredMachine!
   reimaged: Boolean!
   previousFingerprint: String
+}
+
+type RegisteredMachine {
+  agentVersion: String!
+  createdAt: ID!
+  fingerprint: String!
+  hostname: String!
+  id: ID!
+  isMine: Boolean!
+  keyAlgorithm: String!
+  lastSeen: Int
+  name: String!
+  status: MachineStatus!
+  updatedAt: ID!
+  publicKey: String!
 }
 
 input RegisterMachineInput {

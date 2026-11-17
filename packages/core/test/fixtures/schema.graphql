@@ -16,10 +16,10 @@ type Machine {
   fingerprint: String!
   hostname: String!
   id: ID!
+  isMine: Boolean!
   keyAlgorithm: String!
   lastSeen: Int
   name: String!
-  publicKey: String!
   status: MachineStatus!
   updatedAt: ID!
 }

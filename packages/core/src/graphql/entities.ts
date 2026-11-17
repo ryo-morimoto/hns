@@ -67,22 +67,39 @@ export const MachineStatusEnum = enumOf("MachineStatus", MACHINE_STATUSES);
  *
  * @remarks
  * The registry row as an operator reads it: the id, the name, the tunnel's hostname, the device
- * key's **public** half (the spelling a person compares, never a secret), its fingerprint, the
- * agent version, when it was last seen (epoch milliseconds), and the status. `lastSeen` is nullable
- * before the first probe; `keyAlgorithm` stays a string so an unexpected algorithm is visible.
+ * key's **fingerprint** (the short value a person compares), the agent version, when it was last
+ * seen (epoch milliseconds), the status, and whether **this viewer** enrolled it. `lastSeen` is
+ * nullable before the first probe; `keyAlgorithm` stays a string so an unexpected algorithm is
+ * visible.
+ *
+ * **The device key itself is not here** (NB2). It is public key material, but it is also the
+ * identifier a verifier matches, and a list is readable by every session; the full key leaves the
+ * registry only in `registerMachine`'s answer, where the operator who just pasted it needs to see
+ * what was stored. The fingerprint is enough to compare two machines by eye.
+ *
+ * **The owner's subject is not here either** (review): `machines.created_by` is a session subject,
+ * which is a person's identity, and a list is read by every session. The list therefore carries
+ * `mine`, computed per request from the viewer's own subject, so an operator learns whether a
+ * machine is theirs (the one they may reimage) without learning who else enrolled the others.
+ * `mine` is the one field that is not a stored value: it is computed per request from the viewer's
+ * own subject, so the entity type here is the row plus that viewer fact (`Machine` supplies every
+ * field but `publicKey` and `owner`, and `mine` is added).
  */
-export const MachineEntity = defineEntity<Machine>({
+export const MachineEntity = defineEntity<
+  Omit<Machine, "publicKey" | "owner"> & { readonly mine: boolean }
+>({
   name: "Machine",
   fields: {
     id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
     name: { name: "name", kind: "scalar", type: "String", nonNull: true },
     hostname: { name: "hostname", kind: "scalar", type: "String", nonNull: true },
-    publicKey: { name: "publicKey", kind: "scalar", type: "String", nonNull: true },
     fingerprint: { name: "fingerprint", kind: "scalar", type: "String", nonNull: true },
     keyAlgorithm: { name: "keyAlgorithm", kind: "scalar", type: "String", nonNull: true },
     agentVersion: { name: "agentVersion", kind: "scalar", type: "String", nonNull: true },
     lastSeen: { name: "lastSeen", kind: "scalar", type: "Int", nonNull: false },
     status: { name: "status", kind: "enum", typeName: "MachineStatus", nonNull: true },
+    // The spec's boolean rule names it `is*`; the model's `mine` becomes `isMine` on the wire.
+    mine: { name: "isMine", kind: "scalar", type: "Boolean", nonNull: true },
     createdAt: { name: "createdAt", kind: "scalar", type: "ID", nonNull: true },
     updatedAt: { name: "updatedAt", kind: "scalar", type: "ID", nonNull: true },
   },
