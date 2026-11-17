@@ -4,13 +4,17 @@ import {
   MACHINE_REQUEST_VERSION,
   MACHINE_RPC_PATH,
   MACHINE_WRITE_UNKNOWN_REASONS,
+  SIGNED_FIELDS,
+  SIGNED_FIELD_BY_HEADER,
   SIGNED_HEADERS,
   SIGNED_HEADER_BY_FIELD,
+  SIGNATURE_HEADER,
   MachineReadResultSchema,
   MachineWriteRequestSchema,
   MachineWriteResultSchema,
   signatureMessage,
 } from "./machine.ts";
+import type { RequestSignature, SignedHeaders } from "./machine.ts";
 
 const writeRequest = {
   op: "write",
@@ -123,4 +127,25 @@ test("each signed field maps to its wire header", () => {
     signature: "x-hns-signature",
   });
   expect(Object.values(SIGNED_HEADER_BY_FIELD)).toStrictEqual([...SIGNED_HEADERS]);
+});
+
+// Catches: the verifier parsing a hand-written copy of the signed fields, which drifts from the
+// type the signer builds (a header renamed or a field added on one side only).
+test("the signed fields come from one header-to-field map", () => {
+  const inverse = Object.fromEntries(
+    Object.entries(SIGNED_FIELD_BY_HEADER).map(([header, field]) => [field, header]),
+  );
+  expect(SIGNED_HEADER_BY_FIELD).toStrictEqual({ ...inverse, signature: SIGNATURE_HEADER });
+  expect(SIGNED_FIELDS).toStrictEqual(Object.values(SIGNED_FIELD_BY_HEADER));
+  const sample: SignedHeaders = {
+    machineId: "m",
+    connection: "c",
+    seq: "1",
+    timestamp: "0",
+    nonce: "n",
+    "x-hns-signature": "s",
+  };
+  const { ["x-hns-signature"]: _signature, ...fields } = sample;
+  const signed: RequestSignature = { ...fields, method: "POST", path: "/rpc", bodyHash: "00" };
+  expect(Object.keys(signed)).toStrictEqual([...SIGNED_FIELDS, "method", "path", "bodyHash"]);
 });

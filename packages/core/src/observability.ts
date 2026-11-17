@@ -32,6 +32,22 @@ export const OBS_DETAIL_KEYS = [
 ] as const;
 /** One allowed detail key. */
 export type ObsDetailKey = (typeof OBS_DETAIL_KEYS)[number];
+/**
+ * The severity a hop records for one HTTP status.
+ *
+ * @param status - The status the hop answered with.
+ * @returns `error` from 500, `warn` from 400, otherwise `info`.
+ *
+ * @remarks
+ * The worker, the Durable Object, and the machine all classify a status this way, so one
+ * definition keeps the three logs comparable.
+ */
+export function levelOfStatus(status: number): EventLevel {
+  if (status >= 500) return "error";
+  if (status >= 400) return "warn";
+  return "info";
+}
+
 /** One detail value: an identifier, code, count, or flag. */
 export type ObsDetailValue = string | number | boolean | null;
 /** The allowlisted detail of one log line. */
@@ -93,15 +109,10 @@ export interface ObsLogEntry {
 
 const DetailValueSchema = v.union([v.string(), v.number(), v.boolean(), v.null()]);
 
-const DetailSchema: v.GenericSchema<unknown, ObsDetail> = v.object({
-  tool: v.optional(DetailValueSchema),
-  op: v.optional(DetailValueSchema),
-  ok: v.optional(DetailValueSchema),
-  code: v.optional(DetailValueSchema),
-  conversationId: v.optional(DetailValueSchema),
-  runId: v.optional(DetailValueSchema),
-  bytes: v.optional(DetailValueSchema),
-});
+/** The allowed detail keys, each optional; derived from {@link OBS_DETAIL_KEYS}. */
+const DetailSchema: v.GenericSchema<unknown, ObsDetail> = v.object(
+  Object.fromEntries(OBS_DETAIL_KEYS.map((key) => [key, v.optional(DetailValueSchema)])),
+);
 
 /**
  * The schema for one log line.

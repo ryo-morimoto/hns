@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 import { isoTimestamp } from "./codecs.ts";
 import {
   formatObsLog,
+  levelOfStatus,
+  OBS_DETAIL_KEYS,
   OBS_HOPS,
   OBS_MAX_EVENTS,
   OBS_MAX_PATH_LENGTH,
@@ -104,6 +106,30 @@ test("a path keeps only the pathname and is capped", () => {
   expect(obsPath("relative/path")).toBe("/relative/path");
   expect(obsPath("/" + "x".repeat(2_000))).toHaveLength(OBS_MAX_PATH_LENGTH);
   expect(obsPath("/a?x=1").includes("?")).toBe(false);
+});
+
+// Catches: a detail key the allowlist names but the schema drops (written by a caller and
+// silently lost), or a schema key the allowlist does not name (a key no caller may write).
+test("the detail schema allows exactly the allowlisted keys", () => {
+  const detail = Object.fromEntries(OBS_DETAIL_KEYS.map((key) => [key, 1]));
+  const line = parseObsLog({ ...entry(), detail: { ...detail, extra: 1 } });
+  expect(Object.keys(line.detail ?? {})).toStrictEqual([...OBS_DETAIL_KEYS]);
+  expect(line.detail).toStrictEqual(detail);
+});
+
+// Catches: one hop classifying a status differently from the others, so the same failure reads
+// as `warn` in one log and `error` in another.
+test("a status maps to one severity at the 400 and 500 boundaries", () => {
+  expect(
+    [200, 399, 400, 499, 500, 599].map((status) => [status, levelOfStatus(status)]),
+  ).toStrictEqual([
+    [200, "info"],
+    [399, "info"],
+    [400, "warn"],
+    [499, "warn"],
+    [500, "error"],
+    [599, "error"],
+  ]);
 });
 
 test("the retention, cap, and query constants are fixed", () => {

@@ -3,6 +3,7 @@ export * from "./codecs.ts";
 export * from "./durability.ts";
 export * from "./lease.ts";
 export * from "./machine.ts";
+export * from "./index-batch.ts";
 export * from "./observability.ts";
 export * from "./result.ts";
 export * from "./stream.ts";

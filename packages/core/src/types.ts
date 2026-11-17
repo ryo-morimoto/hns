@@ -106,6 +106,9 @@ export const EVENT_NAMES = [
   "workflow.node.started",
   "workflow.node.finished",
   "workflow.node.waiting",
+  "index.rebuilt",
+  "index.drain.failed",
+  "index.state.failed",
   "automation.created",
   "automation.fired",
   "automation.skipped",
@@ -411,9 +414,30 @@ export interface Firing {
  * @remarks
  * `io` means the workspace could not confirm the result, `crash` means it died mid-write, and
  * `timeout` means no answer arrived. In every case the write may have landed; read the file and
- * compare versions before retrying with the same operation id.
+ * compare versions before retrying with the same operation id. The machine's answer and the
+ * Journal's stored reason are this list, so a schema can be built from it instead of a copy.
  */
-export type MutationUnknownReason = "io" | "crash" | "timeout";
+export const MUTATION_UNKNOWN_REASONS = [
+  "io",
+  "crash",
+  "timeout",
+] as const satisfies readonly string[];
+
+/** Why a write's outcome is unknown (one member of {@link MUTATION_UNKNOWN_REASONS}). */
+export type MutationUnknownReason = (typeof MUTATION_UNKNOWN_REASONS)[number];
+
+/**
+ * The version value that means "no version": the name is free, or nothing was recorded.
+ *
+ * @remarks
+ * A version is opaque text, so absence cannot be `undefined` on the wire; it is this literal.
+ * An expected version, a conflict's current version, and a read's version are all
+ * {@link AbsentVersion}, and a caller branches on the text rather than on a missing field.
+ */
+export const ABSENT_VERSION = "absent";
+
+/** A content version, or {@link ABSENT_VERSION} when there is none. */
+export type AbsentVersion = string | typeof ABSENT_VERSION;
 
 /**
  * A versioned write's outcome. The workspace returns it; the editor consumes it.
@@ -435,8 +459,8 @@ export type MutationResult =
   | {
       status: "conflict";
       operationId: string;
-      /** The version found instead of the expected one. Nothing was written. */
-      currentVersion: string;
+      /** The version found instead of the expected one, or `"absent"`; nothing was written. */
+      currentVersion: AbsentVersion;
     }
   | {
       status: "unknown";
@@ -457,8 +481,8 @@ export interface FileRead {
   path: string;
   /** UTF-8 text. */
   content: string;
-  /** Opaque content version; compare it, do not parse it. */
-  version: string;
+  /** Opaque content version, or `"absent"`; compare it, do not parse it. */
+  version: AbsentVersion;
 }
 
 /**
