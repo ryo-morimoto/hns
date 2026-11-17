@@ -14,6 +14,10 @@ const alias = [
     find: /^@hns\/core\/graphql$/,
     replacement: source("./packages/core/src/graphql/index.ts"),
   },
+  {
+    find: /^@hns\/core\/capability$/,
+    replacement: source("./packages/core/src/capability/index.ts"),
+  },
   { find: /^@hns\/record$/, replacement: source("./packages/record/src/index.ts") },
   { find: /^@hns\/store$/, replacement: source("./packages/store/src/index.ts") },
   {
