@@ -497,14 +497,7 @@ function bashHarnessParameters(): JsonObject {
 export function workspaceTools(options: WorkspaceToolsOptions): Extension {
   const { workspace, shell } = options;
   const sinks = sinksOf(options);
-  const identities = new Map<string, ToolIdentity>();
-  const identityOf = async (name: string): Promise<ToolIdentity> => {
-    const cached = identities.get(name);
-    if (cached !== undefined) return cached;
-    const built = await manifestFor(definitionOf(toolId(name)));
-    identities.set(name, built);
-    return built;
-  };
+  const identityOf = identityLookup();
   const memory: CallMemory = new Map();
 
   const readDefinition = definitionOf("read_file");
@@ -566,10 +559,76 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
     const parameters: typeof bash.parameters = bashHarnessParameters();
     registrations.push({ ...bash, parameters });
   }
-  return defineExtension({
+  const extension = defineExtension({
     name: "hns-workspace",
     tools: registrations,
     hooks: [hook(ToolTask, toolHooks({ identityOf, sinks, env: shell.env, memory }))],
+  });
+  // What `withAuditSink` needs to rebuild the hooks: the pieces the caller's closures hold.
+  workspaceSpecs.set(extension, { shell });
+  return extension;
+}
+
+/**
+ * A tool-name-to-manifest lookup that computes each manifest once.
+ *
+ * @returns The lookup `toolHooks` takes.
+ *
+ * @remarks
+ * It is per extension: a Session that rebuilds the hooks (`withAuditSink`) gets its own, so no hash is
+ * shared across two registries.
+ */
+function identityLookup(): (name: string) => Promise<ToolIdentity> {
+  const identities = new Map<string, ToolIdentity>();
+  return async (name) => {
+    const cached = identities.get(name);
+    if (cached !== undefined) return cached;
+    const built = await manifestFor(definitionOf(toolId(name)));
+    identities.set(name, built);
+    return built;
+  };
+}
+
+/** What `withAuditSink` has to know about an extension to rebuild its hooks. */
+interface WorkspaceSpec {
+  readonly shell: ShellAccess;
+}
+
+/**
+ * The extensions this module built, and the pieces of the caller's closures their hooks read.
+ *
+ * @remarks
+ * A WeakMap so an extension that is dropped is collected with its entry, and so nothing outside this
+ * module can make an extension look like one of ours.
+ */
+const workspaceSpecs = new WeakMap<Extension, WorkspaceSpec>();
+
+/**
+ * The workspace-tools extension as the one with these sinks.
+ *
+ * @param extension - The extension `workspaceTools` returned.
+ * @param sinks - The observation and audit sinks its hooks record to.
+ * @returns A new extension with the same name, tools, and task, and hooks that use `sinks`.
+ *
+ * @remarks
+ * The Session owns the audit sink (it is the object that stores the rows) while the caller of
+ * `openSession` owns the tools' closures, so the session hands the sink in here rather than rebuilding
+ * the extension: the workspace, the shell, and the env are unchanged, and only what the hooks write to
+ * is. The call memory is fresh, which is what a new Session needs. A caller that does not hold an
+ * extension this was made by should use `workspaceTools({ audit })` instead.
+ */
+export function withAuditSink(extension: Extension, sinks: CallSinks): Extension {
+  const spec = workspaceSpecs.get(extension);
+  if (spec === undefined) {
+    throw new Error("the extension does not register the workspace tools");
+  }
+  const identityOf = identityLookup();
+  return defineExtension({
+    name: extension.name,
+    tools: extension.tools ?? [],
+    hooks: [
+      hook(ToolTask, toolHooks({ identityOf, sinks, env: spec.shell.env, memory: new Map() })),
+    ],
   });
 }
 

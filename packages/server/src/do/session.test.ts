@@ -1,11 +1,13 @@
 import type { ConversationId, EntryId, SubmissionId } from "@earendil-works/pi-durable";
 import type { AgentEvent } from "@hns/agent";
+import { isoTimestamp } from "@hns/core";
 import type { AgentSession } from "@hns/agent/session";
 import type { SessionEnv } from "./state.ts";
 import { expect, test, vi } from "vitest";
 import { openFakeD1 } from "../../test/support/d1.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { createObsStore } from "../obs/store.ts";
+import { auditSink, createPolicyAudit, type PolicyAudit } from "./audit.ts";
 import { ModelUnavailableError } from "./models.ts";
 import {
   CONVERSATION,
@@ -321,6 +323,129 @@ test("development without the control database still opens the Session", async (
   try {
     const response = await session.fetch(new Request("https://session/rpc/conversations"));
     expect(response.status).toBe(200);
+  } finally {
+    opened.close();
+  }
+});
+
+/**
+ * A table that reads and verifies the real one but refuses every append.
+ *
+ * @remarks
+ * The write failure a full disk or a locked database has: the read side still works, so a probe can
+ * show the rows that were written before the failure and none after it.
+ */
+function refusingAudit(audit: PolicyAudit): PolicyAudit {
+  return {
+    append: async () => Promise.reject(new Error("the audit table is full")),
+    list: (limit) => audit.list(limit),
+    verify: () => audit.verify(),
+  };
+}
+
+// Catches: the object opening without a policy audit, so no decision is ever recorded (0222).
+test("the Session opens the policy audit and hands its sink to the runtime", async () => {
+  const opened = objectState();
+  let handed: ReturnType<typeof auditSink> | undefined;
+  const session = new Session(opened.state, DEV, async (_state, _env, _hooks, audit) => {
+    handed = auditSink(audit);
+    return fakeSession().session;
+  });
+  try {
+    await session.fetch(new Request("https://session/rpc/conversations"));
+    expect(handed).toBeTypeOf("function");
+    const read = await session.fetch(new Request("https://session/rpc/policy/audit"));
+    expect(read.status).toBe(200);
+    expect(await read.json()).toStrictEqual({ ok: true, rows: [] });
+  } finally {
+    opened.close();
+  }
+});
+
+// C5: an append that fails refuses the call, and the refusal is the sink's rejection.
+test("C5: a tool.call the audit cannot append refuses the call, and no result is recorded", async () => {
+  const opened = objectState();
+  const real = createPolicyAudit(opened.storage);
+  let handed: ReturnType<typeof auditSink> | undefined;
+  const session = new Session(opened.state, DEV, async (_state, _env, _hooks, audit) => {
+    handed = auditSink(refusingAudit(audit));
+    return fakeSession().session;
+  });
+  try {
+    await session.fetch(new Request("https://session/rpc/conversations"));
+    expect(handed).toBeTypeOf("function");
+    const event = {
+      v: 1 as const,
+      event: "tool.call" as const,
+      eventId: "e1",
+      at: isoTimestamp("2026-11-17T12:00:00.000Z"),
+      workspaceId: "w",
+      sessionId: "s",
+      callId: "tool:1:a",
+      callHash: "1".repeat(64),
+      argsHash: "2".repeat(64),
+      toolId: "read_file" as const,
+      toolVersion: "1",
+      manifestHash: "3".repeat(64),
+      prevHash: null,
+      hash: "",
+    };
+    await expect(handed?.(event)).rejects.toThrow(/audit table is full/);
+    expect(await real.list()).toHaveLength(0);
+  } finally {
+    opened.close();
+  }
+});
+
+// C6: the RPC answers the object's rows ascending, within the limit, and refuses a bad limit.
+test("C6: GET /rpc/policy/audit answers ascending rows and a closed limit", async () => {
+  const opened = objectState();
+  let handed: ReturnType<typeof auditSink> | undefined;
+  const session = new Session(opened.state, DEV, async (_state, _env, _hooks, audit) => {
+    handed = auditSink(audit);
+    return fakeSession().session;
+  });
+  const event = (index: number) => ({
+    v: 1 as const,
+    event: "tool.call" as const,
+    eventId: "e" + String(index),
+    at: isoTimestamp("2026-11-17T12:00:00.000Z"),
+    workspaceId: "w",
+    sessionId: "s",
+    callId: "tool:" + String(index) + ":a",
+    callHash: "1".repeat(64),
+    argsHash: "2".repeat(64),
+    toolId: "read_file" as const,
+    toolVersion: "1",
+    manifestHash: "3".repeat(64),
+    prevHash: null,
+    hash: "",
+  });
+  try {
+    await session.fetch(new Request("https://session/rpc/conversations"));
+    for (let index = 1; index <= 3; index += 1) await handed?.(event(index));
+
+    const all = await session.fetch(new Request("https://session/rpc/policy/audit"));
+    expect(all.status).toBe(200);
+    // SAFETY: the route's body is this module's own JSON (`json(body)`), whose shape it wrote.
+    const body = (await all.json()) as { ok: boolean; rows: { seq: number; eventId: string }[] };
+    expect(body.ok).toBe(true);
+    expect(body.rows.map((row) => row.seq)).toStrictEqual([1, 2, 3]);
+    expect(body.rows.map((row) => row.eventId)).toStrictEqual(["e1", "e2", "e3"]);
+
+    const one = await session.fetch(new Request("https://session/rpc/policy/audit?limit=1"));
+    // SAFETY: as above: the route wrote this JSON.
+    const page = (await one.json()) as { rows: { seq: number }[] };
+    expect(page.rows.map((row) => row.seq)).toStrictEqual([3]);
+    const tooMany = await session.fetch(new Request("https://session/rpc/policy/audit?limit=201"));
+    expect(tooMany.status).toBe(400);
+    expect(await tooMany.json()).toMatchObject({ ok: false, code: "invalid_request" });
+    const zero = await session.fetch(new Request("https://session/rpc/policy/audit?limit=0"));
+    expect(zero.status).toBe(400);
+    const wrong = await session.fetch(
+      new Request("https://session/rpc/policy/audit", { method: "POST" }),
+    );
+    expect(wrong.status).toBe(405);
   } finally {
     opened.close();
   }

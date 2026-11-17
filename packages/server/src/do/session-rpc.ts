@@ -17,6 +17,7 @@ import { readBody } from "../edge/body.ts";
 import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
+import { AUDIT_MAX_LIMIT, denialOf, type AuditRow, type PolicyAudit } from "./audit.ts";
 import { ModelUnavailableError } from "./models.ts";
 
 /** The closed failure codes of the internal Session RPC. */
@@ -26,6 +27,16 @@ type SessionRpcCode = FailureCodeOf<"session-rpc">;
 export interface SessionRpcDependencies {
   /** The monthly cost gate; absent when the deployment binds no control database. */
   readonly cost?: CostGate | undefined;
+  /**
+   * The object's policy audit, for `GET /rpc/policy/audit`.
+   *
+   * @remarks
+   * The Session owns the table; this face reads it, which is why the audit is a dependency here rather
+   * than a member of `AgentSession`: the agent's public API does not grow for an internal reader
+   * (`docs/capability.md` §8, §10). Absent means the route answers `unavailable` rather than an
+   * empty list a caller could mistake for "no decisions were made".
+   */
+  readonly audit?: PolicyAudit | undefined;
   /**
    * The request id the turn actually used (body first, then the forwarded header).
    *
@@ -181,6 +192,100 @@ function failureOf(error: Error): Response | undefined {
   return undefined;
 }
 
+/** The default rows one audit read returns. */
+const AUDIT_DEFAULT_LIMIT = 50;
+
+/** One audit row as the RPC answers it: the chain's members, in the contract's spelling. */
+interface AuditRowJson {
+  readonly seq: number;
+  readonly eventId: string;
+  readonly at: string;
+  readonly event: "tool.call" | "tool.result";
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly callId: string;
+  readonly callHash?: string | undefined;
+  readonly argsHash?: string | undefined;
+  readonly toolId: string;
+  readonly toolVersion: string;
+  readonly manifestHash: string;
+  readonly decision?: unknown;
+  readonly durationMs?: number | undefined;
+  readonly grantId?: string | undefined;
+  readonly prevHash: string | null;
+  readonly hash: string;
+  /** A refusal's code, for a reader that wants only that. */
+  readonly denial?: string | undefined;
+}
+
+/**
+ * One stored row as the answer's JSON.
+ *
+ * @remarks
+ * The row is the contract's event plus `seq`. A refused call's hashes are left **out** (`callHash`
+ * and `argsHash` are absent, not `null` and not `""`, `AuditEventBase`); a `tool.call` has no
+ * decision and no duration. No argument, output, or secret is in the row to begin with.
+ */
+function auditRowJson(row: AuditRow): AuditRowJson {
+  const denial = denialOf(row);
+  const hashes =
+    row.callHash === null || row.argsHash === null
+      ? {}
+      : { callHash: row.callHash, argsHash: row.argsHash };
+  const decision =
+    row.decision === null ? {} : { decision: row.decision, durationMs: row.durationMs ?? 0 };
+  const grant = row.grantId === null ? {} : { grantId: row.grantId };
+  const refusal = denial === undefined ? {} : { denial };
+  return {
+    seq: row.seq,
+    eventId: row.eventId,
+    at: row.at,
+    event: row.event,
+    workspaceId: row.workspaceId,
+    sessionId: row.sessionId,
+    callId: row.callId,
+    ...hashes,
+    toolId: row.toolId,
+    toolVersion: row.toolVersion,
+    manifestHash: row.manifestHash,
+    ...decision,
+    ...grant,
+    prevHash: row.prevHash,
+    hash: row.hash,
+    ...refusal,
+  };
+}
+
+/**
+ * `GET /rpc/policy/audit?limit=`: the newest rows of the object's audit, oldest first.
+ *
+ * @param request - The internal request.
+ * @param audit - The object's audit, or undefined when it is not open.
+ * @returns `{ok:true, rows}` ascending by `seq`, or the typed failure.
+ *
+ * @remarks
+ * `limit` is 1..{@link AUDIT_MAX_LIMIT}, 50 when absent; anything else is `invalid_request`.
+ * Reading does not verify the chain: the page is what an operator reads, and the chain is checked by
+ * re-walking the table (0222's verifier).
+ */
+async function handleAuditRpc(
+  request: Request,
+  url: URL,
+  audit: PolicyAudit | undefined,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return failure("method_not_allowed", "Only GET is allowed here.");
+  }
+  if (audit === undefined) {
+    return failure("unavailable", "The policy audit is not open.");
+  }
+  const limit = limitOf(url, AUDIT_MAX_LIMIT);
+  if (!limit.ok) return limit.response;
+  const rows = await audit.list(limit.value ?? AUDIT_DEFAULT_LIMIT);
+  const body = { ok: true, rows: rows.map(auditRowJson) };
+  return json(body);
+}
+
 /**
  * Handle one internal Session RPC request.
  *
@@ -203,6 +308,14 @@ export async function handleSessionRpc(
 ): Promise<Response> {
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter((segment) => segment !== "");
+  if (segments[0] === "rpc" && segments[1] === "policy" && segments[2] === "audit") {
+    try {
+      return await handleAuditRpc(request, url, dependencies.audit);
+    } catch (error) {
+      if (error instanceof Error) console.error("session rpc failed", error.name);
+      return failure("internal", "Unexpected Session failure.");
+    }
+  }
   if (segments[0] !== "rpc" || segments[1] !== "conversations") {
     return failure("not_found", "No Session RPC route matches this path.");
   }

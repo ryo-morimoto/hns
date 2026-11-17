@@ -60,5 +60,5 @@ export {
 } from "./providers/opencode.ts";
 export type { OpenCodeModel, OpenCodeOptions } from "./providers/opencode.ts";
 export type { ShellAccess } from "./shell.ts";
-export { operationIdFor, toolNames, workspaceTools } from "./tools.ts";
+export { operationIdFor, toolNames, withAuditSink, workspaceTools } from "./tools.ts";
 export type { WorkspaceToolsOptions } from "./tools.ts";

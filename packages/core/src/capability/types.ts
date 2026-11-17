@@ -379,7 +379,24 @@ export interface DenyDecision {
 /** The result of authorizing one call. */
 export type PolicyDecision = AllowDecision | DenyDecision;
 
-/** What every audit event shares. */
+/**
+ * What every audit event shares.
+ *
+ * @remarks
+ * **A call that never became one has no hashes.** `callHash` and `argsHash` are present for a call
+ * that was admitted — the arguments parsed, the path was inside the root, the call had a canonical
+ * form — and absent for a refused one: `path_outside_root`, `unsupported` (an unknown key, a
+ * `timeout` in another unit, ill-typed arguments), or arguments pi-durable refused before the tool
+ * ran. Those rows still name the tool, its manifest, and the denial, because that is what an auditor
+ * needs; they cannot name the call, because there was no call to name and `argsHash` would hash
+ * arguments the tool never accepted (`docs/capability.md` §3, `docs/capability.md` §8). An empty
+ * string is **not** the absence: the member is left out, so a consumer reads "did a call exist"
+ * from the key's presence.
+ *
+ * The two hashes are optional together or present together; a schema cannot say that with two
+ * `optional` members, so the producers (`@hns/agent`'s `AuditRow`) write both or neither and the
+ * audit's verifier (`@hns/server`) records which it saw.
+ */
 export interface AuditEventBase {
   readonly v: 1;
   readonly eventId: string;
@@ -387,8 +404,10 @@ export interface AuditEventBase {
   readonly workspaceId: string;
   readonly sessionId: string;
   readonly callId: string;
-  readonly callHash: string;
-  readonly argsHash: string;
+  /** `callHash` of the call; absent when the call was refused (see the type's remarks). */
+  readonly callHash?: string | undefined;
+  /** `argsHash` of the call; absent when the call was refused (see the type's remarks). */
+  readonly argsHash?: string | undefined;
   readonly toolId: ToolId;
   readonly toolVersion: string;
   readonly manifestHash: string;

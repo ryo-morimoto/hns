@@ -1,6 +1,12 @@
 import type { Context } from "@earendil-works/chord";
 import type { Models } from "@earendil-works/pi-ai/models";
-import { configure, defineDoc, Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
+import {
+  configure,
+  createRegistry,
+  defineDoc,
+  Harness,
+  ROOT_CONVERSATION_ID,
+} from "@earendil-works/pi-durable";
 import type {
   ConversationId,
   ConversationView,
@@ -26,8 +32,41 @@ import {
 import * as v from "valibot";
 import type { AuditIdentity, AuditSink } from "./capability.ts";
 import type { AgentEventSink } from "./events.ts";
+import { withAuditSink } from "./tools.ts";
 import { lastAssistantText } from "./transcript.ts";
 import type { Turn } from "./turn.ts";
+
+/**
+ * Give the registry's workspace-tools extension the audit sink this Session writes to.
+ *
+ * @param reader - The registry the Session opens with.
+ * @param options - The Session's `onAudit` and its identity.
+ * @returns The registry to open, or the caller's when the Session records no audit.
+ *
+ * @remarks
+ * The tool hooks are the only place a call is audited (0221), and they belong to the extension, so the
+ * Session reaches the extension through the registry rather than rebuilding it: the tools' closures
+ * (the workspace, the shell, the env) are the caller's and are kept. An `onAudit` without an identity
+ * is a wiring defect and throws, as `workspaceTools` does; a Session with an audit but no workspace
+ * tools in its registry opens without one, which a caller can see by the rows it never gets.
+ */
+function withAudit(
+  reader: HarnessOptions["registry"],
+  options: SessionOptions,
+): HarnessOptions["registry"] {
+  const { onAudit, auditIdentity } = options;
+  if (onAudit === undefined) return reader;
+  if (auditIdentity === undefined) {
+    throw new Error("an audit sink needs the workspace and session it records under");
+  }
+  const registry = createRegistry();
+  for (const extension of reader.snapshot().installed()) {
+    registry.install(
+      withAuditSink(extension, { onEvent: options.onEvent, audit: onAudit, auditIdentity }),
+    );
+  }
+  return registry;
+}
 
 /** The maximum conversations a single list returns. */
 export const MAX_CONVERSATION_PAGE = 100;
@@ -74,15 +113,23 @@ export interface SessionOptions {
   readonly onEvent?: AgentEventSink | undefined;
   /**
    * Receives the capability contract's audit events for tool calls; awaited, so a rejected append
-   * refuses the call (0221 / 0222).
+   * refuses the call (fail closed, `docs/capability.md` §8).
    *
    * @remarks
-   * `openSession` carries the value for callers that read it; a Session runs the tools of the
-   * registry it is given, so the extension in that registry is where the sink is attached
-   * (`workspaceTools({ audit })`).
+   * The Session writes it into the workspace-tools extension of the registry it opens with
+   * (`withAudit`), so every conversation's tool hooks append `tool.call` before a call runs and
+   * `tool.result` before its result returns. That is how the Session Durable Object gives the agent
+   * its `policy_audit` sink (0222): the agent's tool code does not change, and a Session that is given
+   * no sink writes no audit row.
    */
-  readonly audit?: AuditSink | undefined;
-  /** What an audit event names; required when `audit` is given. */
+  readonly onAudit?: AuditSink | undefined;
+  /**
+   * What an audit event names; required when `onAudit` is given.
+   *
+   * @remarks
+   * The Session supplies the workspace and session ids and mints one event id per event, because the
+   * event id is what makes an append idempotent downstream.
+   */
   readonly auditIdentity?: AuditIdentity | undefined;
   readonly newRequestId?: (() => string) | undefined;
 }
@@ -418,7 +465,7 @@ export async function openSession(options: SessionOptions): Promise<AgentSession
     options.storage,
     {
       models: options.models,
-      registry: options.registry,
+      registry: withAudit(options.registry, options),
       settings: () => options.settings,
       env: options.env ?? (() => undefined),
       now: clock,

@@ -221,3 +221,50 @@ test("a policy revision, proposal, and audit event parse with and without their 
   ).toMatchObject({ event: "tool.result", durationMs: 7 });
   expect(v.safeParse(AuditEventSchema, { ...base, event: "tool.result" }).success).toBe(false);
 });
+
+// Catches: a refused call's row being unparseable, or an absent hash read as an empty one.
+test("an audit event carries the call's hashes, or none when the call was refused", () => {
+  const base = {
+    v: 1,
+    eventId: "e1",
+    at: "2026-01-01T00:00:00.000Z",
+    workspaceId: "w1",
+    sessionId: "s1",
+    callId: "tool:1:a",
+    toolId: "read_file",
+    toolVersion: "1",
+    manifestHash: "3".repeat(64),
+    prevHash: null,
+    hash: "4".repeat(64),
+  };
+  const callHash = "1".repeat(64);
+  const argsHash = "2".repeat(64);
+  // A call that was admitted names its hashes.
+  expect(
+    v.parse(AuditEventSchema, { ...base, callHash, argsHash, event: "tool.call" }),
+  ).toMatchObject({
+    callHash,
+    argsHash,
+  });
+  // A refused call never became one: the members are absent, not "".
+  const refused = v.parse(AuditEventSchema, {
+    ...base,
+    event: "tool.result",
+    decision: { outcome: "deny", code: "path_outside_root", message: "outside" },
+    durationMs: 0,
+  });
+  expect("callHash" in refused).toBe(false);
+  expect("argsHash" in refused).toBe(false);
+  // A present hash is still a hash: "" and a short value are refused.
+  expect(
+    v.safeParse(AuditEventSchema, { ...base, callHash: "", argsHash, event: "tool.call" }).success,
+  ).toBe(false);
+  expect(
+    v.safeParse(AuditEventSchema, {
+      ...base,
+      callHash: "1".repeat(63),
+      argsHash,
+      event: "tool.call",
+    }).success,
+  ).toBe(false);
+});

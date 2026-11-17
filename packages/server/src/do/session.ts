@@ -24,6 +24,7 @@ import {
 } from "../ws.ts";
 import { LEGACY_SESSION_NAME } from "../session-name.ts";
 import { armWake } from "./alarm.ts";
+import { auditEventIds, auditSink, createPolicyAudit, type PolicyAudit } from "./audit.ts";
 import { modelsFor } from "./models.ts";
 import { SessionIndex } from "./session-index.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
@@ -36,11 +37,18 @@ interface SessionHooks {
   readonly onEvent: (event: AgentEvent) => void;
 }
 
-/** Opens one runtime over a Durable Object state; tests substitute the storage. */
+/**
+ * Opens one runtime over a Durable Object state; tests substitute the storage.
+ *
+ * @remarks
+ * The policy audit is opened by the object before the runtime, so the runtime's job is to carry it to
+ * the agent (`openDurableSession`); a test's runtime can record what it was given instead.
+ */
 export type SessionRuntimeFactory = (
   state: SessionState,
   env: SessionEnv,
   hooks: SessionHooks,
+  audit: PolicyAudit,
 ) => Promise<AgentSession>;
 
 /** The host seams the Session takes from the Workers runtime; tests inject these. */
@@ -68,16 +76,25 @@ interface LiveEntry {
  * Open the production runtime: pi-durable on the object's SQLite storage.
  *
  * @internal
+ * @remarks
+ * The policy audit is the object's own table (`policy_audit`, beside the harness's prefixed tables),
+ * and its sink is what `openSession`'s `onAudit` is given: every `tool.call` and `tool.result`
+ * is appended before it settles the call, and an append that fails refuses the result rather than
+ * losing the row (`docs/capability.md` §8). The audit is not optional in production: without it the
+ * Session would run tools with no record of the decision, which is the fail-open this contract
+ * exists to prevent.
  */
 async function openDurableSession(
   state: SessionState,
   env: SessionEnv,
   hooks: SessionHooks,
+  audit: PolicyAudit,
 ): Promise<AgentSession> {
   const storage = await openDurableObjectSqliteStorage(state.storage, {
     prefix: "hns_session",
   });
   const { models, model } = modelsFor(env);
+  const ids = auditEventIds(state.id?.name ?? LEGACY_SESSION_NAME);
   return openSession({
     storage,
     models,
@@ -87,6 +104,12 @@ async function openDurableSession(
     onWake: hooks.onWake,
     onReport: hooks.onReport,
     onEvent: hooks.onEvent,
+    onAudit: auditSink(audit),
+    auditIdentity: {
+      workspaceId: state.id?.name ?? LEGACY_SESSION_NAME,
+      sessionId: state.id?.name ?? LEGACY_SESSION_NAME,
+      eventId: () => ids.next(),
+    },
   });
 }
 
@@ -112,6 +135,7 @@ export class Session {
   readonly #agentRequestIds = new Set<string>();
   #cost: CostGate | undefined;
   #obs: ObsStore | undefined;
+  #audit: PolicyAudit | undefined;
   #index: SessionIndex | undefined;
   #session: AgentSession | undefined;
   #closed = false;
@@ -139,6 +163,10 @@ export class Session {
       if (this.#env.HNS_ENV !== "dev" && this.#env.DB === undefined) {
         throw new Error("the control database binding is missing outside development");
       }
+      // Fail closed: a tool call may not run with no way to record its decision, so a table that
+      // cannot be opened stops the object here (docs/capability.md §8). It is the object's own SQLite,
+      // beside the harness's prefixed tables, and not D1 (D049).
+      this.#audit = createPolicyAudit(this.#state.storage);
       try {
         // The event table shares the Session's SQLite but not the harness prefix. A failed
         // open must not stop conversations: observation is a side effect, not a precondition.
@@ -168,26 +196,35 @@ export class Session {
           turnEnded: () => this.#drain("turn"),
         });
       }
-      const session = await this.#open(this.#state, this.#env, {
-        onWake: (wake) => {
-          void armWake(this.#state.storage, wake, Date.now()).catch((error) => {
+      // The audit is opened above, so it cannot be absent here; the check keeps the runtime's
+      // signature honest for a test that builds the object a different way.
+      const audit = this.#audit;
+      if (audit === undefined) throw new Error("the policy audit is not open");
+      const session = await this.#open(
+        this.#state,
+        this.#env,
+        {
+          onWake: (wake) => {
+            void armWake(this.#state.storage, wake, Date.now()).catch((error) => {
+              console.error(
+                "session wake arm failed",
+                error instanceof Error ? error.name : "unknown",
+              );
+            });
+          },
+          onReport: (report) => {
             console.error(
-              "session wake arm failed",
-              error instanceof Error ? error.name : "unknown",
+              "session report",
+              report.kind,
+              report.error instanceof Error ? report.error.name : "unknown",
             );
-          });
+          },
+          onEvent: (event) => {
+            this.#recordAgent(event);
+          },
         },
-        onReport: (report) => {
-          console.error(
-            "session report",
-            report.kind,
-            report.error instanceof Error ? report.error.name : "unknown",
-          );
-        },
-        onEvent: (event) => {
-          this.#recordAgent(event);
-        },
-      });
+        audit,
+      );
       this.#session = session;
       // The index is a copy: without the control database the object still runs, and the dirty
       // rows wait for a deployment that has one (D078).
@@ -265,6 +302,7 @@ export class Session {
     } else {
       response = await handleSessionRpc(request, session, {
         cost: this.#cost,
+        audit: this.#audit,
         onRequestId: (id) => {
           turnRequestId = id;
         },

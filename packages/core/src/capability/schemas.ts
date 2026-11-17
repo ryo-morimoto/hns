@@ -255,7 +255,14 @@ export const PolicyDecisionSchema: v.GenericSchema<unknown, PolicyDecision> = v.
   }),
 ]);
 
-/** What every audit event shares. */
+/**
+ * What every audit event shares.
+ *
+ * @remarks
+ * `callHash` and `argsHash` are optional because a refused call has neither: it never became a call
+ * with a canonical form to hash (`AuditEventBase`). A present one still has to be a hash — an empty
+ * string or a truncated value is refused — so the optional member means "absent", never "blank".
+ */
 const AuditEventBaseEntries = {
   v: v.literal(1),
   eventId: v.pipe(v.string(), v.minLength(1)),
@@ -263,8 +270,8 @@ const AuditEventBaseEntries = {
   workspaceId: v.pipe(v.string(), v.minLength(1)),
   sessionId: v.pipe(v.string(), v.minLength(1)),
   callId: v.pipe(v.string(), v.minLength(1)),
-  callHash: HashSchema,
-  argsHash: HashSchema,
+  callHash: v.optional(HashSchema),
+  argsHash: v.optional(HashSchema),
   toolId: v.picklist(TOOL_IDS),
   toolVersion: v.pipe(v.string(), v.minLength(1)),
   manifestHash: HashSchema,
