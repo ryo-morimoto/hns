@@ -202,7 +202,15 @@ const worker = [
   "  for (const migration of MIGRATIONS) {",
   '    for (const statement of migration.sql.split(";")) {',
   "      const sql = statement.trim();",
-  "      if (sql.length > 0) await db.prepare(sql).run();",
+  "      if (sql.length === 0) continue;",
+  "      try {",
+  "        await db.prepare(sql).run();",
+  "      } catch (error) {",
+  "        // This scaffold re-applies every migration on each test route, whereas the product",
+  "        // runner records versions. Only the ALTER that adds a column is not repeatable; a",
+  "        // dropped table is recreated by its own CREATE above. Any other failure is real.",
+  '        if (!String(error).includes("duplicate column name")) throw error;',
+  "      }",
   "    }",
   "  }",
   "};",
@@ -290,27 +298,45 @@ export async function startGateway(upstream: string): Promise<GatewayHarness> {
   await symlink(join("..", "..", "node_modules"), join(directory, "node_modules"));
   await writeFile(join(directory, "cloudflare.config.ts"), config(upstream));
   await writeFile(join(directory, "worker.ts"), worker);
-  const port = await freePort();
-  const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
-    cwd: directory,
-    detached: true,
-    env: {
-      ...process.env,
-      XDG_CONFIG_HOME: join(directory, "config"),
-      XDG_CACHE_HOME: join(directory, "cache"),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const running = collect(child);
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (await healthy(port, running)) {
-      return harness(directory, running, port);
+  // Two shared addresses can make cf dev exit during startup: the HTTP port taken between the
+  // probe and the bind, and the debug inspector, which wrangler fixes at 9229 for every instance.
+  // The other integration suites run their own dev servers beside this one, so either can be
+  // lost. That is a lost shared resource, not a product failure: start again on a fresh HTTP
+  // port and report the output if both lose.
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const port = await freePort();
+    const child = spawn(CF, ["dev", "--mode", "development", "--port", String(port)], {
+      cwd: directory,
+      detached: true,
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: join(directory, "config"),
+        XDG_CACHE_HOME: join(directory, "cache"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const running = collect(child);
+    const deadline = Date.now() + READY_TIMEOUT_MS;
+    let ready = false;
+    while (Date.now() < deadline) {
+      try {
+        if (await healthy(port, running)) {
+          ready = true;
+          break;
+        }
+      } catch {
+        // The child exited during startup; let the retry take a fresh port.
+        break;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
     }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    if (ready) return harness(directory, running, port);
+    await stop(running);
+    if (attempt === 2) {
+      throw new Error("cf dev did not become ready:\n" + running.output());
+    }
   }
-  await stop(running);
-  throw new Error("cf dev did not become ready:\n" + running.output());
+  throw new Error("cf dev did not become ready");
 }
 
 const expectOk = (response: Response): void => {
