@@ -16,14 +16,14 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
 
 ## 面
 
-| パス                           | メソッド       | 認証              | 動作                                                    |
-| ------------------------------ | -------------- | ----------------- | ------------------------------------------------------- |
-| `/graphql`                     | `POST`         | セッション cookie | 0145 では 501。schema / resolver は 0176                |
-| `/ws`                          | `GET`          | セッション cookie | Session DO へ転送。ライブ frame は core の `LiveFrame`  |
-| `/api/events` / `/api/metrics` | `GET`          | セッション cookie | Session DO の観測面（0162）                             |
-| `/api/workspaces/:id/files`    | `GET` / `POST` | セッション cookie | Workspace DO の版付き読み書き（`src/files/content.ts`） |
-| それ以外                       | `GET` / `HEAD` | 不要              | `ASSETS` へ委譲。配信設定は 0160                        |
-| その他の `/api/*`              | すべて         | —                 | 404                                                     |
+| パス                           | メソッド       | 認証              | 動作                                                                                                 |
+| ------------------------------ | -------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
+| `/graphql`                     | `POST`         | セッション cookie | 0145 では 501。schema / resolver は 0176                                                             |
+| `/ws`                          | `GET`          | セッション cookie | Session DO へ転送。ライブ frame は core の `LiveFrame`                                               |
+| `/api/events` / `/api/metrics` | `GET`          | セッション cookie | Session DO の観測面（0162）                                                                          |
+| `/api/workspaces/:id/files`    | `GET` / `POST` | セッション cookie | Workspace DO の版付き読み書き（`src/files/content.ts`）。`:id` は project id で、root は D1 から引く |
+| それ以外                       | `GET` / `HEAD` | 不要              | `ASSETS` へ委譲。配信設定は 0160                                                                     |
+| その他の `/api/*`              | すべて         | —                 | 404                                                                                                  |
 
 `OPTIONS` は 405 で、CORS ヘッダは返さない。デバッグ用の口は作らない。
 `ASSETS` の `notFoundHandling` は SPA fallback にしない（画面は hash router）。未知のパスを 200 にしない設定は 0160 が持つ。
@@ -66,6 +66,10 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
   `POST /rpc/journal/watermark`、`POST /rpc/lease/{acquire,renew,release}`。edge には公開しない。
 - 環境: `HNS_AGENT_URL`（machine の origin）と `HNS_CONTROL_PLANE_KEY`（Worker の secret。base64url の
   Ed25519 seed）。どちらか欠けるとファイル面は 503 で閉じる。machine の選択と鍵の配布は 0148。
+- **project root は client が決めない**: ファイル面は `:id`（project id）で D1 の `projects.workspace_root`
+  を引き、Workspace DO に渡す。公開 body / query に `projectRoot` を送ると 400。root は lexical 検証だけを
+  Worker が行い、実体（realpath / symlink / ROOT 外）は machine が ROOT を dirfd で解決して拒否する。
+  したがって createProject が通した root を machine が拒否することはある（fail closed）。
 
 ## D1 と DO
 

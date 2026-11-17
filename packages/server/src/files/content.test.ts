@@ -37,7 +37,9 @@ function harness(maxBodyBytes?: number): Harness {
       return stub;
     },
   };
-  const handler = createFilesFace();
+  const handler = createFilesFace({
+    projectRoot: (_env, projectId) => Promise.resolve(projectId === "w1" ? "project" : undefined),
+  });
   const limits = maxBodyBytes === undefined ? DEFAULT_LIMITS : { ...DEFAULT_LIMITS, maxBodyBytes };
   return {
     face: (request: FilesRequest) => handler(request, limits),
@@ -73,7 +75,6 @@ async function acquire(h: Harness): Promise<void> {
 }
 
 interface WriteBody {
-  readonly projectRoot: string;
   readonly path: string;
   readonly expectedVersion: string;
   readonly operationId: string;
@@ -82,7 +83,6 @@ interface WriteBody {
 
 function writeBody(overrides: Partial<WriteBody> = {}): WriteBody {
   return {
-    projectRoot: "project",
     path: "a.txt",
     expectedVersion: "absent",
     operationId: "op-1",
@@ -263,7 +263,7 @@ test("a read returns the text, its version, and an external change", async () =>
   try {
     await acquire(h);
     await h.face(requestFor(h, { method: "POST", body: writeBody() }));
-    const first = await h.face(requestFor(h, { query: { projectRoot: "project", path: "a.txt" } }));
+    const first = await h.face(requestFor(h, { query: { path: "a.txt" } }));
     expect(first.status).toBe(200);
     expect(v.parse(ReadOk, await first.json())).toStrictEqual({
       ok: true,
@@ -275,16 +275,12 @@ test("a read returns the text, its version, and an external change", async () =>
     h.machine.seed("project/a.txt", "changed");
     const second = v.parse(
       ReadOk,
-      await (
-        await h.face(requestFor(h, { query: { projectRoot: "project", path: "a.txt" } }))
-      ).json(),
+      await (await h.face(requestFor(h, { query: { path: "a.txt" } }))).json(),
     );
     expect(second.version).toBe(versionOfText("changed"));
     expect(second.externalChange).toBe(true);
     h.machine.seedRaw("project/a.txt", Buffer.from([0xff, 0xfe]).toString("base64"));
-    const binary = await h.face(
-      requestFor(h, { query: { projectRoot: "project", path: "a.txt" } }),
-    );
+    const binary = await h.face(requestFor(h, { query: { path: "a.txt" } }));
     expect(binary.status).toBe(415);
     expect(await binary.json()).toMatchObject({ code: "unsupported_media_type" });
   } finally {
@@ -346,9 +342,7 @@ test("a read the workspace refuses keeps its status", async () => {
   const h = harness();
   try {
     await acquire(h);
-    const response = await h.face(
-      requestFor(h, { query: { projectRoot: "project", path: "../secret" } }),
-    );
+    const response = await h.face(requestFor(h, { query: { path: "../secret" } }));
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ code: "invalid_request" });
   } finally {
@@ -363,9 +357,7 @@ test("a read beyond the bound is a 413", async () => {
     await acquire(h);
     await h.face(requestFor(h, { method: "POST", body: writeBody() }));
     h.machine.tooLargeNext();
-    const response = await h.face(
-      requestFor(h, { query: { projectRoot: "project", path: "a.txt" } }),
-    );
+    const response = await h.face(requestFor(h, { query: { path: "a.txt" } }));
     expect(response.status).toBe(413);
     expect(await response.json()).toMatchObject({ code: "payload_too_large" });
   } finally {
@@ -389,6 +381,85 @@ test("an answer that is not the workspace envelope is an internal error", async 
     expect(await response.json()).toMatchObject({ code: "internal" });
   } finally {
     h.close();
+  }
+});
+
+// Catches: a caller choosing the directory a write lands in by sending projectRoot.
+test("a write body that names projectRoot is refused", async () => {
+  const h = harness();
+  try {
+    await acquire(h);
+    const response = await h.face(
+      requestFor(h, {
+        method: "POST",
+        body: { ...writeBody(), projectRoot: "projects/sibling" },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "invalid_request" });
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a caller choosing the directory a read opens through the query string.
+test("a read query that names projectRoot is refused", async () => {
+  const h = harness();
+  try {
+    const response = await h.face(
+      requestFor(h, { query: { projectRoot: "projects/sibling", path: "a.txt" } }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "invalid_request" });
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: a request for a project D1 does not have reaching a Workspace object.
+test("an unknown project is a 404", async () => {
+  const h = harness();
+  try {
+    const response = await h.face(
+      requestFor(h, { workspaceId: "missing", query: { path: "a.txt" } }),
+    );
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: "not_found" });
+  } finally {
+    h.close();
+  }
+});
+
+// Catches: an unreadable project table reported as "no such project".
+test("a failed project lookup is a 503", async () => {
+  const opened = openSqliteState();
+  const machine = fakeMachine();
+  const workspace = new Workspace(opened.state, { files: machine });
+  const namespace: DurableObjectNamespace = {
+    idFromName: (name: string) => ({ name }),
+    get: () => ({ fetch: (request: Request) => workspace.fetch(request) }),
+  };
+  const handler = createFilesFace({
+    projectRoot: () => Promise.reject(new Error("db down")),
+  });
+  try {
+    const response = await handler(
+      {
+        request: new Request("https://hns.test/api/workspaces/w1/files?path=a.txt", {
+          headers: { "x-request-id": "request-1" },
+        }),
+        env: { WORKSPACE: namespace },
+        session: { subject: "owner", expiresAt: Date.now() + 60_000 },
+        requestId: "request-1",
+        signal: new AbortController().signal,
+        workspaceId: "w1",
+      },
+      DEFAULT_LIMITS,
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "unavailable" });
+  } finally {
+    opened.close();
   }
 });
 

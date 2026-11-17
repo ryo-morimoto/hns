@@ -1,9 +1,11 @@
-import { LEASE_REFUSALS, OperationIdSchema } from "@hns/core";
+import { LEASE_REFUSALS, OperationIdSchema, ProjectIdSchema } from "@hns/core";
 import * as v from "valibot";
 import { readBody } from "../edge/body.ts";
-import type { DurableObjectStub } from "../edge/env.ts";
+import type { DurableObjectStub, WorkerEnv } from "../edge/env.ts";
 import type { FilesRequest } from "../edge/handler.ts";
 import type { EdgeLimits } from "../edge/limits.ts";
+import { storeFor } from "../edge/store.ts";
+import { ProjectParamSchema } from "../project-id.ts";
 
 /**
  * The closed failure codes the files face answers with.
@@ -30,10 +32,15 @@ const FILES_FAILURES = [
 /** One failure code of the files face. */
 type FilesFailure = (typeof FILES_FAILURES)[number];
 
-/** The body of a versioned write. */
-const WriteInput = v.object({
-  /** The project directory below the machine's ROOT; `""` is the root itself. */
-  projectRoot: v.string(),
+/**
+ * The body of a versioned write.
+ *
+ * @remarks
+ * Strict: the project root is not the caller's to choose. It comes from the project row the
+ * URL's workspace id names, so a body that still carries `projectRoot` is refused rather than
+ * silently ignored.
+ */
+const WriteInput = v.strictObject({
   path: v.pipe(v.string(), v.minLength(1)),
   /** The version the editor saw, or `"absent"`. */
   expectedVersion: v.pipe(v.string(), v.minLength(1)),
@@ -43,11 +50,83 @@ const WriteInput = v.object({
   content: v.string(),
 });
 
-/** The query of a read. */
-const ReadQuery = v.object({
-  projectRoot: v.optional(v.string(), ""),
+/** The query of a read; strict for the same reason as {@link WriteInput}. */
+const ReadQuery = v.strictObject({
   path: v.pipe(v.string(), v.minLength(1)),
 });
+
+/** The project root the Worker resolves for one project id. */
+type ProjectRootLookup = (env: WorkerEnv, projectId: string) => Promise<string | undefined>;
+
+/** The production lookup: the project's stored root. A missing project is undefined. */
+async function projectRootFromStore(
+  env: WorkerEnv,
+  projectId: string,
+): Promise<string | undefined> {
+  const store = await storeFor(env);
+  const project = await store.projects.get(v.parse(ProjectIdSchema, projectId));
+  return project?.workspace_root;
+}
+
+/** What the files face needs; tests replace the project lookup. */
+export interface FilesFaceOptions {
+  /** How the project's root is found; production reads D1. */
+  readonly projectRoot?: ProjectRootLookup | undefined;
+}
+
+/** The root for this request, or the refusal to answer with. */
+type ResolvedRoot =
+  | { readonly ok: true; readonly root: string }
+  | {
+      readonly ok: false;
+      readonly code: FilesFailure;
+      readonly message: string;
+      readonly status: number;
+    };
+
+/**
+ * Find the root of the project the request names.
+ *
+ * @internal
+ * @remarks
+ * The workspace id is the project id (D080 F2). A malformed id is a 400, an absent project a
+ * 404, and a store that cannot be read a 503: an outage must not read as "no such project".
+ * Nothing is forwarded to the Workspace object before this resolves.
+ */
+async function resolveRoot(
+  lookup: ProjectRootLookup,
+  request: FilesRequest,
+): Promise<ResolvedRoot> {
+  const parsed = v.safeParse(ProjectParamSchema, request.workspaceId);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      code: "invalid_request",
+      message: "The workspace id is not valid.",
+      status: 400,
+    };
+  }
+  let root: string | undefined;
+  try {
+    root = await lookup(request.env, parsed.output);
+  } catch (error) {
+    console.error(
+      "files: project read failed",
+      request.requestId,
+      error instanceof Error ? error.name : "unknown",
+    );
+    return {
+      ok: false,
+      code: "unavailable",
+      message: "The project could not be read.",
+      status: 503,
+    };
+  }
+  if (root === undefined) {
+    return { ok: false, code: "not_found", message: "No project has this id.", status: 404 };
+  }
+  return { ok: true, root };
+}
 
 /** A flat JSON answer body; every field of this face's envelope is text or boolean. */
 type FilesBody = { readonly [key: string]: string | boolean };
@@ -195,15 +274,19 @@ async function bodyOf<T>(
  * @remarks
  * The face owns the wire: it reads the caller's body with the edge's limits, parses it, forwards
  * a base64 body to the Workspace object (which appends the intent, applies it on the machine, and
- * settles the outcome), and maps the recorded outcome to HTTP. A conflict is 409, an unknown is
- * 504, and neither is ever reported as a save. Authentication and the method are the edge's job
- * (D059); an oversized or non-JSON body is this face's failure (413 / 415).
+ * settles the outcome), and maps the recorded outcome to HTTP. The project root is resolved here
+ * from the URL's workspace id (the project id): the caller never names a directory. A conflict is
+ * 409, an unknown is 504, and neither is ever reported as a save. Authentication and the method
+ * are the edge's job (D059); an oversized or non-JSON body is this face's failure (413 / 415).
  */
-export function createFilesFace(): (
-  request: FilesRequest,
-  limits: EdgeLimits,
-) => Promise<Response> {
+export function createFilesFace(
+  options: FilesFaceOptions = {},
+): (request: FilesRequest, limits: EdgeLimits) => Promise<Response> {
+  const lookup = options.projectRoot ?? projectRootFromStore;
   return async function files(request: FilesRequest, limits: EdgeLimits): Promise<Response> {
+    const resolved = await resolveRoot(lookup, request);
+    if (!resolved.ok) return fail(resolved.code, resolved.message, resolved.status);
+    const root = resolved.root;
     const stub = workspaceStub(request.env, request.workspaceId);
     if (stub === undefined) {
       // This face's failures are its own union, not the edge's problem+json (that is for
@@ -239,7 +322,7 @@ export function createFilesFace(): (
         body: JSON.stringify({
           workspaceId: request.workspaceId,
           operationId: input.operationId,
-          projectRoot: input.projectRoot,
+          projectRoot: root,
           path: input.path,
           expectedVersion: input.expectedVersion,
           content: toBase64(input.content),
@@ -292,12 +375,14 @@ export function createFilesFace(): (
     }
 
     const query = v.safeParse(ReadQuery, {
-      projectRoot: url.searchParams.get("projectRoot") ?? undefined,
       path: url.searchParams.get("path") ?? undefined,
     });
     if (!query.success) return fail("invalid_request", "The read query is not valid.", 400);
+    if (url.searchParams.has("projectRoot")) {
+      return fail("invalid_request", "The project root is not a request parameter.", 400);
+    }
     const parameters = new URLSearchParams({
-      projectRoot: query.output.projectRoot,
+      projectRoot: root,
       path: query.output.path,
     });
     const forwarded = new Request("https://workspace.internal/rpc/read?" + parameters.toString(), {
