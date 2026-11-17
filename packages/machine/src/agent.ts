@@ -7,6 +7,7 @@ import { Denied, FileFailure } from "@hns/workspace";
 import { ConnectionGate } from "./connection.ts";
 import { InFlight, resolveLimits } from "./limits.ts";
 import type { Limits } from "./limits.ts";
+import { machineEntry, requestIdOf, writeMachineLog, type MachineLogSink } from "./log.ts";
 import { runOperation } from "./operations.ts";
 import { MachineRefusal, refusalStatus } from "./refusal.ts";
 import { RequestVerifier } from "./signature.ts";
@@ -36,6 +37,14 @@ export interface MachineAgentOptions {
   readonly windowMs?: number | undefined;
   /** The bounds; the missing ones keep their defaults. */
   readonly limits?: Partial<Limits> | undefined;
+  /**
+   * Where one JSON line per request goes; defaults to stderr.
+   *
+   * @remarks
+   * The line is the same shape the server writes. The request id comes from the inbound
+   * `x-request-id` header, which is not signed and never used for authentication.
+   */
+  readonly onLog?: MachineLogSink | undefined;
 }
 
 /** A running agent. */
@@ -58,6 +67,7 @@ interface AgentContext {
   readonly verifier: RequestVerifier;
   readonly gate: ConnectionGate;
   readonly inFlight: InFlight;
+  readonly onLog: MachineLogSink;
 }
 
 /** The address Node reports after a successful listen. */
@@ -105,6 +115,7 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     }),
     gate: new ConnectionGate(),
     inFlight: new InFlight(limits.maxConcurrency),
+    onLog: options.onLog ?? writeMachineLog,
   };
   const server = createServer();
   server.on("request", (request: IncomingMessage, response: ServerResponse): void => {
@@ -198,18 +209,24 @@ async function handleRequest(
   response: ServerResponse,
   context: AgentContext,
 ): Promise<void> {
+  const started = Date.now();
+  let fsPath = "/rpc";
+  let op: OperationName | undefined;
   if (request.method !== "POST") {
     sendRefusal(response, new MachineRefusal("method_not_allowed", "the agent answers POST only"), {
       allow: "POST",
     });
+    logRequest(request, response, context, started, fsPath, op);
     return;
   }
   if (request.url !== RPC_PATH) {
     sendRefusal(response, new MachineRefusal("not_found", "the agent answers /rpc only"));
+    logRequest(request, response, context, started, fsPath, op);
     return;
   }
   if (!context.inFlight.enter()) {
     sendRefusal(response, new MachineRefusal("busy", "too many requests are in flight"));
+    logRequest(request, response, context, started, fsPath, op);
     return;
   }
   const deadline = new AbortController();
@@ -230,8 +247,9 @@ async function handleRequest(
       );
     }
     const operation = parseOperation(body);
+    op = operation.op;
+    fsPath = operation.op === "health" ? "/" : "/" + operation.path;
     const result = await runOperation(operation, context.root, context.limits, deadline.signal);
-    const op: OperationName = operation.op;
     sendJson(response, { ok: true, op, result }, context.limits);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
@@ -239,6 +257,45 @@ async function handleRequest(
   } finally {
     clearTimeout(timer);
     context.inFlight.leave();
+    logRequest(request, response, context, started, fsPath, op);
+  }
+}
+
+/**
+ * Write the fs hop line for one finished request.
+ *
+ * @param request - The incoming request, for the correlation header.
+ * @param response - The response, for the status.
+ * @param context - The agent context, including the sink.
+ * @param started - Epoch milliseconds before the request was read.
+ * @param path - The ROOT-relative operation path, or /rpc before one was parsed.
+ * @param op - The operation that ran, when it was parsed.
+ *
+ * @remarks
+ * Observation is a side effect: a throwing sink must not change the answer, so the failure is
+ * swallowed. The line carries no body, no content, and no token.
+ */
+function logRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: AgentContext,
+  started: number,
+  path: string,
+  op: OperationName | undefined,
+): void {
+  try {
+    context.onLog(
+      machineEntry({
+        requestId: requestIdOf(request.headers),
+        path,
+        status: response.statusCode,
+        durationMs: Date.now() - started,
+        op,
+        now: Date.now(),
+      }),
+    );
+  } catch {
+    // Observation must not turn a served request into a failure.
   }
 }
 

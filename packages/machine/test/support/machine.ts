@@ -6,7 +6,13 @@ import type { KeyObject } from "node:crypto";
 import { connect } from "node:net";
 import type { Socket } from "node:net";
 import { bodyHash, parseResponseBody, startMachineAgent } from "../../src/index.ts";
-import type { ControlPlaneKeys, Limits, MachineAgent, ResponseBody } from "../../src/index.ts";
+import type {
+  ControlPlaneKeys,
+  Limits,
+  MachineAgent,
+  MachineLogSink,
+  ResponseBody,
+} from "../../src/index.ts";
 import { controlPlaneKeys, generateControlPlaneKey, signRequest } from "./control-plane.ts";
 import type { ControlPlaneKeyPair } from "./control-plane.ts";
 
@@ -37,6 +43,8 @@ interface MachineCall {
   readonly signingKey?: KeyObject | undefined;
   /** Send no signature headers at all. */
   readonly unsigned?: boolean | undefined;
+  /** The correlation header; it is not part of the signed message. */
+  readonly requestId?: string | undefined;
 }
 
 /** What the agent answered, already parsed at the boundary. */
@@ -68,6 +76,7 @@ async function callMachine(
   const machineId = call.machineId ?? call.defaultMachineId;
   const signed = new TextEncoder().encode(call.signedBody ?? call.body);
   const headers = new Headers({ "content-type": "application/json" });
+  if (call.requestId !== undefined) headers.set("x-request-id", call.requestId);
   if (call.unsigned !== true) {
     const signature = signRequest(
       { machineId, connection, seq, timestamp, nonce, method, path, bodyHash: bodyHash(signed) },
@@ -113,6 +122,8 @@ export interface AgentSetup {
   /** The key the fixture signs with by default; defaults to the fresh key. */
   readonly signingKey?: KeyObject | undefined;
   readonly machineId?: string | undefined;
+  /** Where the agent's fs log lines go; defaults to stderr. */
+  readonly onLog?: MachineLogSink | undefined;
 }
 
 /**
@@ -138,6 +149,8 @@ export async function withAgent(
     controlPlane: setup.controlPlane ?? controlPlaneKeys([pair]),
     port: 0,
     limits: setup.limits ?? {},
+    // Integration tests are otherwise silent; a scenario that proves the log passes a sink.
+    onLog: setup.onLog ?? (() => undefined),
   });
   const signingKey = setup.signingKey ?? pair.privateKey;
   try {

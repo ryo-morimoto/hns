@@ -5,7 +5,7 @@ import { mkdir, realpath, symlink, truncate, writeFile } from "node:fs/promises"
 import { createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
-import type { JsonValue } from "@hns/core";
+import type { JsonValue, ObsLogEntry } from "@hns/core";
 import {
   parseHealthResult,
   parseListResult,
@@ -55,6 +55,52 @@ test("a signed health call is answered", async () => {
       expect(reported.root).toBe(await realpath(fixture.root));
       expect(reported.pid).toBe(process.pid);
     },
+  );
+});
+
+// Catches: the fs hop losing the Worker's correlation id or leaking the file content.
+test("the request id and the fs path are logged without the content", async () => {
+  const logs: ObsLogEntry[] = [];
+  await withAgent(
+    async ({ root }) => {
+      await writeFile(join(root, "a.txt"), "super-secret-content");
+    },
+    async (fixture) => {
+      const answer = await fixture.call({
+        body: JSON.stringify({ op: "read", path: "a.txt" }),
+        requestId: "corr-fs",
+      });
+      expect(answer.status).toBe(200);
+      await waitFor(() => logs.length > 0, "the fs log line");
+      const line = logs.at(-1);
+      expect(line).toMatchObject({
+        event: "fs.op",
+        hop: "fs",
+        requestId: "corr-fs",
+        path: "/a.txt",
+        status: 200,
+      });
+      expect(JSON.stringify(line)).not.toContain("super-secret-content");
+    },
+    { onLog: (entry) => logs.push(entry) },
+  );
+});
+
+// Catches: the correlation header being treated as part of the signature or of authentication.
+test("a malformed correlation header changes neither the answer nor the signature", async () => {
+  const logs: ObsLogEntry[] = [];
+  await withAgent(
+    async () => {},
+    async (fixture) => {
+      const answer = await fixture.call({
+        body: health,
+        requestId: "bad id with spaces",
+      });
+      expect(answer.status).toBe(200);
+      await waitFor(() => logs.length > 0, "the fs log line");
+      expect(logs.at(-1)?.requestId).toBeNull();
+    },
+    { onLog: (entry) => logs.push(entry) },
   );
 });
 

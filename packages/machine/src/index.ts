@@ -8,6 +8,8 @@ export { ED25519_PUBLIC_KEY_BYTES, verificationKey } from "./control-plane.ts";
 export type { ControlPlaneKeys } from "./control-plane.ts";
 export { DEFAULT_LIMITS, InFlight, resolveLimits } from "./limits.ts";
 export type { Limits } from "./limits.ts";
+export { machineEntry, requestIdOf, writeMachineLog } from "./log.ts";
+export type { MachineLogInput, MachineLogSink } from "./log.ts";
 export { runOperation } from "./operations.ts";
 export type { OperationResult } from "./operations.ts";
 export { MachineRefusal, REFUSAL_CODES, refusalStatus } from "./refusal.ts";
