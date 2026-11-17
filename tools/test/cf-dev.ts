@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,20 +16,34 @@ export const CF_DEV_WORK_DIR = join(REPO_ROOT, "tools", "deploy", ".work");
 
 const CF = join(REPO_ROOT, "node_modules", ".bin", "cf");
 
-/** The lock every start takes; wrangler fixes one inspector port for every cf dev on the machine. */
-const LOCK_PATH = join(tmpdir(), "hns-cf-dev-inspector.lock");
+/** wrangler fixes the debug inspector here for every cf dev, so only one may run at a time. */
+const INSPECTOR_PORT = 9_229;
+
+/** The directory this user's lock lives in; the temp directory itself is shared by every user. */
+const LOCK_DIR = join(tmpdir(), "hns-cf-dev-" + String(process.getuid?.() ?? "shared"));
+const LOCK_PATH = join(LOCK_DIR, "inspector.lock");
 /** The short-lived guard that makes a takeover exclusive. */
 const TAKEOVER_PATH = LOCK_PATH + ".takeover";
 
 /** A record whose owner is gone, or that is this old, was abandoned by a worker that died. */
 const LOCK_STALE_MS = 10 * 60_000;
+/** A half-written record is replaced within milliseconds; it is only abandoned this long after. */
+const TORN_STALE_MS = 5_000;
 /** A guard section is three file operations; one left this long belongs to a dead worker. */
 const TAKEOVER_STALE_MS = 5_000;
-
+/**
+ * How long a start queues for the lock.
+ *
+ * @remarks
+ * A test that starts cf dev twice spends at most two of these plus four ready windows, which is
+ * what the restart suites' 300s timeout budgets for.
+ */
+const LOCK_TIMEOUT_MS = 60_000;
 const LOCK_POLL_MS = 250;
 const DEFAULT_MODE = "development";
 const DEFAULT_READY_TIMEOUT_MS = 60_000;
-const DEFAULT_LOCK_TIMEOUT_MS = 120_000;
+/** How long a start waits for the previous cf dev to release the inspector before spawning. */
+const INSPECTOR_WAIT_MS = 10_000;
 const HEALTH_POLL_MS = 100;
 const HEALTH_TIMEOUT_MS = 2_000;
 const KILL_TIMEOUT_MS = 5_000;
@@ -38,6 +52,9 @@ const KILL_POLLS = 50;
 const PORT_BASE = 18_100;
 const PORT_SPAN = 900;
 const PORT_ATTEMPTS = 20;
+/** Only this user reads the record, and only the owner is meant to write it. */
+const FILE_MODE = 0o600;
+const DIR_MODE = 0o700;
 
 /** Whether the cf CLI is installed, so a suite can skip instead of failing where it is not. */
 export const isCfDevInstalled = (): boolean => existsSync(CF);
@@ -46,14 +63,8 @@ export const isCfDevInstalled = (): boolean => existsSync(CF);
 export interface CfDevOptions {
   /** The cf project: its `cloudflare.config.ts`, entrypoint, and node_modules link. */
   cwd: string;
-  /** The configuration mode cf evaluates; every suite runs the development mode. */
-  mode?: string | undefined;
-  /** Bind this HTTP port instead of probing for a free one. */
-  port?: number | undefined;
   /** How long the child has to answer `/health` before the start counts as failed. */
   readyTimeoutMs?: number | undefined;
-  /** How long a start waits for another suite's cf dev before throwing. */
-  lockTimeoutMs?: number | undefined;
 }
 
 /** One running cf dev. */
@@ -81,10 +92,6 @@ type Attempt =
   | { readonly ok: true; readonly started: Started }
   | { readonly ok: false; readonly output: string };
 
-type Takeover =
-  | { readonly taken: false }
-  | { readonly taken: true; readonly orphan: LockRecord | undefined };
-
 const lockRecord = v.object({
   /** The process that took the lock: the worker that started the child. */
   pid: v.pipe(v.number(), v.integer(), v.minValue(1)),
@@ -96,12 +103,17 @@ const lockRecord = v.object({
   child: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
 });
 
-type LockRecord = v.InferOutput<typeof lockRecord>;
+/** One lock record. */
+export type LockRecord = v.InferOutput<typeof lockRecord>;
 
-type LockView =
+/** What the lock file says, with the age the decision needs. */
+export type LockSnapshot =
   | { readonly state: "absent" }
   | { readonly state: "held"; readonly record: LockRecord; readonly ageMs: number }
   | { readonly state: "unreadable"; readonly ageMs: number };
+
+/** What a start may do with a snapshot. */
+export type LockJudgement = "free" | "held" | "abandoned";
 
 interface InspectorLock {
   /** Record the child, so a lock abandoned by a dead worker can free the inspector port. */
@@ -109,8 +121,71 @@ interface InspectorLock {
   release(): Promise<void>;
 }
 
+type Takeover =
+  | { readonly taken: false }
+  | { readonly taken: true; readonly orphan: LockRecord | undefined };
+
 /** The lock this process holds, so a second start fails instead of waiting on itself. */
 let held: string | undefined;
+
+/** The lock directory, created once with the owner's mode before any record is written. */
+let lockDirectory: Promise<void> | undefined;
+
+/**
+ * Read one lock record.
+ *
+ * @remarks
+ * The record is external input: a torn write, an older shape, or another user's file parses to
+ * `null` and the caller decides from the age alone.
+ */
+export const parseLock = (text: string): LockRecord | null => {
+  try {
+    const parsed = v.safeParse(lockRecord, JSON.parse(text));
+    return parsed.success ? parsed.output : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * What a start may do with a lock snapshot.
+ *
+ * @remarks
+ * "free" is an absent record. A readable record is "held" while its owner lives and it is younger
+ * than {@link LOCK_STALE_MS}. A torn record is "held" for the few milliseconds a writer needs and
+ * "abandoned" after {@link TORN_STALE_MS}. Everything else is "abandoned": the owner died or the
+ * record outlived every suite. The judgement is a snapshot, so a takeover re-reads under the guard.
+ */
+export const judgeLock = (snapshot: LockSnapshot, ownerAlive: boolean): LockJudgement => {
+  switch (snapshot.state) {
+    case "absent":
+      return "free";
+    case "unreadable":
+      return snapshot.ageMs >= TORN_STALE_MS ? "abandoned" : "held";
+    case "held":
+      return snapshot.ageMs >= LOCK_STALE_MS || !ownerAlive ? "abandoned" : "held";
+  }
+};
+
+/**
+ * Whether a snapshot still describes the record a takeover judged abandoned.
+ *
+ * @remarks
+ * The guard makes the read and the replacement exclusive, but the record was judged before it was
+ * taken: another waiter may have replaced it, or its owner may have released and a new holder
+ * created. Only the record that was judged may be replaced, so a fresh record is never deleted —
+ * that window is what let two waiters hold the lock at once.
+ */
+export const sameRecord = (judged: LockSnapshot, current: LockSnapshot): boolean => {
+  switch (judged.state) {
+    case "absent":
+      return current.state === "absent";
+    case "unreadable":
+      return current.state === "unreadable" && current.ageMs >= TORN_STALE_MS;
+    case "held":
+      return current.state === "held" && current.record.token === judged.record.token;
+  }
+};
 
 /** The POSIX code a failed file call carried, when it carried one. */
 const errnoOf = (thrown: Error): string => {
@@ -141,6 +216,123 @@ const signalGroup = (pid: number, signal: NodeJS.Signals): void => {
   }
 };
 
+const ensureLockDirectory = async (): Promise<void> => {
+  lockDirectory ??= mkdir(LOCK_DIR, { recursive: true, mode: DIR_MODE }).then(() => undefined);
+  await lockDirectory;
+};
+
+const ageOf = async (path: string): Promise<number> => {
+  try {
+    return Date.now() - (await stat(path)).mtimeMs;
+  } catch {
+    // The file went away under the read; the caller sees it as free.
+    return 0;
+  }
+};
+
+const remove = async (path: string): Promise<void> => {
+  try {
+    await unlink(path);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (errnoOf(error) !== "ENOENT") throw error;
+  }
+};
+
+const readLock = async (): Promise<LockSnapshot> => {
+  let text: string;
+  try {
+    text = await readFile(LOCK_PATH, "utf8");
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (errnoOf(error) === "ENOENT") return { state: "absent" };
+    throw error;
+  }
+  const record = parseLock(text);
+  if (record === null) return { state: "unreadable", ageMs: await ageOf(LOCK_PATH) };
+  return { state: "held", record, ageMs: await ageOf(LOCK_PATH) };
+};
+
+const createLock = async (token: string, at: string): Promise<boolean> => {
+  await ensureLockDirectory();
+  try {
+    await writeFile(LOCK_PATH, JSON.stringify({ pid: process.pid, at, token }), {
+      flag: "wx",
+      mode: FILE_MODE,
+    });
+    return true;
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (errnoOf(error) !== "EEXIST") throw error;
+    return false;
+  }
+};
+
+/**
+ * Replace the record in one rename.
+ *
+ * @remarks
+ * The path never goes absent, so a waiter cannot create a second record between a delete and a
+ * create; readers see either the old record or the new one.
+ */
+const writeLock = async (token: string, at: string, child?: number): Promise<void> => {
+  await ensureLockDirectory();
+  const temporary = LOCK_PATH + "." + token + ".tmp";
+  const record: LockRecord =
+    child === undefined ? { pid: process.pid, at, token } : { pid: process.pid, at, token, child };
+  try {
+    await writeFile(temporary, JSON.stringify(record), { flag: "wx", mode: FILE_MODE });
+    await rename(temporary, LOCK_PATH);
+  } catch (error) {
+    await remove(temporary);
+    throw error;
+  }
+};
+
+const releaseLock = async (token: string): Promise<void> => {
+  if (held !== token) return;
+  held = undefined;
+  const current = await readLock();
+  if (current.state !== "held" || current.record.token !== token) return;
+  await remove(LOCK_PATH);
+};
+
+/** Take the guard that makes read-then-replace exclusive, or report that another waiter has it. */
+const takeGuard = async (): Promise<boolean> => {
+  await ensureLockDirectory();
+  try {
+    await writeFile(TAKEOVER_PATH, String(process.pid), { flag: "wx", mode: FILE_MODE });
+    return true;
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (errnoOf(error) !== "EEXIST") throw error;
+  }
+  if ((await ageOf(TAKEOVER_PATH)) < TAKEOVER_STALE_MS) return false;
+  console.log("[cf dev] taking over the guard an abandoned takeover left behind");
+  await remove(TAKEOVER_PATH);
+  return false;
+};
+
+/**
+ * Replace the record a start judged abandoned, exclusively.
+ *
+ * @remarks
+ * The record is re-read inside the guard and only replaced when {@link sameRecord} still holds, so a
+ * record another waiter already replaced is never touched. The new record exists before the orphan
+ * is killed, so a process this start signals is the one the replaced record named.
+ */
+const takeOver = async (token: string, at: string, judged: LockSnapshot): Promise<Takeover> => {
+  if (!(await takeGuard())) return { taken: false };
+  try {
+    const current = await readLock();
+    if (!sameRecord(judged, current)) return { taken: false };
+    await writeLock(token, at);
+    return { taken: true, orphan: judged.state === "held" ? judged.record : undefined };
+  } finally {
+    await remove(TAKEOVER_PATH);
+  }
+};
+
 /**
  * Whether that pid is still a cf dev.
  *
@@ -159,63 +351,6 @@ const isCfDevProcess = async (pid: number): Promise<boolean> => {
   return parts.includes("dev") && parts.some((part) => part === "cf" || part.endsWith("/cf"));
 };
 
-const ageOf = async (path: string): Promise<number> => {
-  try {
-    return Date.now() - (await stat(path)).mtimeMs;
-  } catch {
-    // The record went away under the read; the next probe sees the lock as free.
-    return 0;
-  }
-};
-
-const parseLock = (text: string): LockRecord | null => {
-  try {
-    const parsed = v.safeParse(lockRecord, JSON.parse(text));
-    return parsed.success ? parsed.output : null;
-  } catch {
-    // A torn write is not a record; its age decides whether it can be taken over.
-    return null;
-  }
-};
-
-const readLock = async (): Promise<LockView> => {
-  let text: string;
-  try {
-    text = await readFile(LOCK_PATH, "utf8");
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    if (errnoOf(error) === "ENOENT") return { state: "absent" };
-    throw error;
-  }
-  const record = parseLock(text);
-  if (record === null) return { state: "unreadable", ageMs: await ageOf(LOCK_PATH) };
-  return { state: "held", record, ageMs: await ageOf(LOCK_PATH) };
-};
-
-const createLock = async (token: string, at: string): Promise<boolean> => {
-  try {
-    await writeFile(LOCK_PATH, JSON.stringify({ pid: process.pid, at, token }), { flag: "wx" });
-    return true;
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    if (errnoOf(error) !== "EEXIST") throw error;
-    return false;
-  }
-};
-
-const releaseLock = async (token: string): Promise<void> => {
-  if (held !== token) return;
-  held = undefined;
-  const current = await readLock();
-  if (current.state !== "held" || current.record.token !== token) return;
-  try {
-    await unlink(LOCK_PATH);
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    if (errnoOf(error) !== "ENOENT") throw error;
-  }
-};
-
 /** Kill what a dead worker left behind, unless the pid no longer belongs to a cf dev. */
 const killAbandoned = async (record: LockRecord): Promise<void> => {
   const child = record.child;
@@ -232,49 +367,49 @@ const killAbandoned = async (record: LockRecord): Promise<void> => {
   }
 };
 
-const describeHolder = (view: LockView): string =>
-  view.state === "held"
-    ? "pid " + String(view.record.pid) + " since " + view.record.at
+const describeHolder = (snapshot: LockSnapshot): string =>
+  snapshot.state === "held"
+    ? "pid " + String(snapshot.record.pid) + " since " + snapshot.record.at
     : "an unreadable record";
+
+const timeoutError = (snapshot: LockSnapshot): Error =>
+  new Error(
+    "timed out after " +
+      String(LOCK_TIMEOUT_MS) +
+      "ms waiting for the cf dev inspector lock (held by " +
+      describeHolder(snapshot) +
+      ")",
+  );
 
 /**
  * Wait until no other cf dev holds the machine's inspector port.
  *
  * @remarks
- * The lock lives in the OS temp directory, so every worktree on the machine shares it. A record is
- * taken over when its owner is gone or the record outlived {@link LOCK_STALE_MS}; the takeover is
- * exclusive ({@link takeOver}) and a live holder is waited for, at most `timeoutMs`, with the wait
- * logged so a slow suite explains itself.
+ * The lock lives in this user's temp directory, so every worktree this user runs shares it. A record
+ * is taken over only through {@link takeOver}, after its owner is gone or the record outlived
+ * {@link LOCK_STALE_MS}; a live holder is waited for, at most {@link LOCK_TIMEOUT_MS}, and the wait
+ * is logged so a slow suite explains itself.
  *
- * @throws Error when the lock is still held after `timeoutMs`, or when this process already holds
- * it: a second cf dev would lose the inspector port to the first.
+ * @throws Error when the lock is still held after {@link LOCK_TIMEOUT_MS}, or when this process
+ * already holds it: a second cf dev would lose the inspector port to the first.
  */
-const acquireLock = async (timeoutMs: number): Promise<InspectorLock> => {
+const acquireLock = async (): Promise<InspectorLock> => {
   if (held !== undefined) {
     throw new Error("this process already holds the cf dev inspector lock; stop that cf dev first");
   }
   const token = randomUUID();
   const at = new Date().toISOString();
   const started = Date.now();
-  const deadline = started + timeoutMs;
+  const deadline = started + LOCK_TIMEOUT_MS;
   let announced = false;
   for (;;) {
     if (await createLock(token, at)) break;
     const current = await readLock();
-    if (current.state === "absent") continue;
-    const abandoned =
-      current.state === "unreadable"
-        ? current.ageMs >= LOCK_STALE_MS
-        : current.ageMs >= LOCK_STALE_MS || !pidAlive(current.record.pid);
-    if (!abandoned) {
-      if (Date.now() >= deadline) {
-        throw new Error(
-          "timed out after " +
-            String(timeoutMs) +
-            "ms waiting for the cf dev inspector lock held by " +
-            describeHolder(current),
-        );
-      }
+    const ownerAlive = current.state === "held" && pidAlive(current.record.pid);
+    const judgement = judgeLock(current, ownerAlive);
+    if (judgement === "free") continue;
+    if (judgement === "held") {
+      if (Date.now() >= deadline) throw timeoutError(current);
       if (!announced) {
         console.log("[cf dev] waiting for the inspector lock held by " + describeHolder(current));
         announced = true;
@@ -285,18 +420,10 @@ const acquireLock = async (timeoutMs: number): Promise<InspectorLock> => {
     console.log("[cf dev] taking over the inspector lock abandoned by " + describeHolder(current));
     const takeover = await takeOver(token, at, current);
     if (!takeover.taken) {
-      if (Date.now() >= deadline) {
-        throw new Error(
-          "timed out after " +
-            String(timeoutMs) +
-            "ms waiting for the cf dev inspector lock held by " +
-            describeHolder(current),
-        );
-      }
+      if (Date.now() >= deadline) throw timeoutError(current);
       await sleep(LOCK_POLL_MS);
       continue;
     }
-    // Our record is in place, so this is the child the replaced record named.
     if (takeover.orphan !== undefined) await killAbandoned(takeover.orphan);
     break;
   }
@@ -314,103 +441,46 @@ const acquireLock = async (timeoutMs: number): Promise<InspectorLock> => {
   };
 };
 
+const canBind = async (port: number): Promise<boolean> =>
+  await new Promise<boolean>((resolveProbe) => {
+    const server = createServer();
+    server.once("error", () => resolveProbe(false));
+    server.listen(port, "127.0.0.1", () => {
+      server.close(() => resolveProbe(true));
+    });
+  });
+
 /** Take a port below the kernel's ephemeral range. */
 const probePort = async (): Promise<number> => {
   for (let attempt = 0; attempt < PORT_ATTEMPTS; attempt += 1) {
     const port = PORT_BASE + Math.floor(Math.random() * PORT_SPAN);
-    const free = await new Promise<boolean>((resolveProbe) => {
-      const server = createServer();
-      server.once("error", () => resolveProbe(false));
-      server.listen(port, "127.0.0.1", () => {
-        server.close(() => resolveProbe(true));
-      });
-    });
-    if (free) return port;
+    if (await canBind(port)) return port;
   }
   throw new Error("could not find a free port for cf dev");
 };
 
-/** Remove a lock file, treating "already gone" as done. */
-const remove = async (path: string): Promise<void> => {
-  try {
-    await unlink(path);
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    if (errnoOf(error) !== "ENOENT") throw error;
-  }
-};
-
 /**
- * Replace the record in one rename.
+ * Wait until the inspector port can be bound.
  *
  * @remarks
- * The path never goes absent, so a waiter cannot create a second record between a delete and a
- * create; readers see either the old record or the new one.
+ * The lock is released when cf dev exits, not when workerd has let the inspector go, so the port is
+ * probed before the next spawn instead of leaning on the retry.
  */
-const writeLock = async (token: string, at: string, child?: number): Promise<void> => {
-  const temporary = LOCK_PATH + "." + token + ".tmp";
-  const record: LockRecord =
-    child === undefined ? { pid: process.pid, at, token } : { pid: process.pid, at, token, child };
-  try {
-    await writeFile(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 });
-    await rename(temporary, LOCK_PATH);
-  } catch (error) {
-    await remove(temporary);
-    throw error;
-  }
-};
-
-/** Take the guard that makes read-then-replace exclusive, or report that another waiter has it. */
-const takeGuard = async (): Promise<boolean> => {
-  try {
-    await writeFile(TAKEOVER_PATH, String(process.pid), { flag: "wx", mode: 0o600 });
-    return true;
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    if (errnoOf(error) !== "EEXIST") throw error;
-  }
-  if ((await ageOf(TAKEOVER_PATH)) < TAKEOVER_STALE_MS) return false;
-  console.log("[cf dev] taking over the guard an abandoned takeover left behind");
-  await remove(TAKEOVER_PATH);
-  return false;
-};
-
-/**
- * Whether a snapshot still describes the record a takeover judged abandoned.
- *
- * @remarks
- * The guard makes the read and the replacement exclusive, but the record was judged before it was
- * taken: another waiter may have replaced it, or its owner may have released and a new holder
- * created. Only the record that was judged may be replaced, so a fresh record is never deleted.
- */
-const sameRecord = (judged: LockView, current: LockView): boolean => {
-  switch (judged.state) {
-    case "absent":
-      return current.state === "absent";
-    case "unreadable":
-      return current.state === "unreadable" && current.ageMs >= LOCK_STALE_MS;
-    case "held":
-      return current.state === "held" && current.record.token === judged.record.token;
-  }
-};
-
-/**
- * Replace the record a start judged abandoned, exclusively.
- *
- * @remarks
- * The record is re-read inside the guard and only replaced when {@link sameRecord} still holds, so a
- * record another waiter already replaced is never touched. The new record exists before the orphan
- * is killed, so a process this start signals is the one the replaced record named.
- */
-const takeOver = async (token: string, at: string, judged: LockView): Promise<Takeover> => {
-  if (!(await takeGuard())) return { taken: false };
-  try {
-    const current = await readLock();
-    if (!sameRecord(judged, current)) return { taken: false };
-    await writeLock(token, at);
-    return { taken: true, orphan: judged.state === "held" ? judged.record : undefined };
-  } finally {
-    await remove(TAKEOVER_PATH);
+const waitForInspector = async (): Promise<void> => {
+  const deadline = Date.now() + INSPECTOR_WAIT_MS;
+  let announced = false;
+  while (!(await canBind(INSPECTOR_PORT))) {
+    if (Date.now() >= deadline) {
+      console.log(
+        "[cf dev] the inspector port is still busy after " + String(INSPECTOR_WAIT_MS) + "ms",
+      );
+      return;
+    }
+    if (!announced) {
+      console.log("[cf dev] waiting for the inspector port to be released");
+      announced = true;
+    }
+    await sleep(HEALTH_POLL_MS);
   }
 };
 
@@ -504,27 +574,28 @@ const handle = (started: Started, lock: InspectorLock): CfDev => {
  *
  * @remarks
  * The HTTP port is probed below the kernel's ephemeral range. The debug inspector is not: wrangler
- * fixes it at 9229 for every instance, so starts are serialized by an inter-process lock that this
- * call holds until {@link CfDev.stop}. A start that loses the inspector or its port to the machine
- * retries once on a fresh HTTP port, still inside the lock, and throws with the child's output
- * after that.
+ * fixes it at 9229 for every instance, so starts are serialized by a lock in this user's temp
+ * directory that this call holds until {@link CfDev.stop}. Before spawning, the inspector port is
+ * probed again, because the lock is released at cf dev's exit rather than at workerd's. A start that
+ * still loses the inspector or its port retries once on a fresh HTTP port, inside the lock, and
+ * throws with the child's output after that.
  *
- * Because the suites are serialized, a start inside a test queues behind the others; a test that
- * starts cf dev needs a timeout above this bound plus two ready windows, which the integration
- * suites allow with a few minutes each.
+ * Because the suites are serialized, a start inside a test queues behind the others: a test needs
+ * {@link LOCK_TIMEOUT_MS} plus two ready windows per start, which the restart suites' 300s budget
+ * covers for two starts.
  *
- * @throws Error when cf is not installed, when the inspector lock is still held after
- * `lockTimeoutMs`, or when both starts fail to answer `/health`.
+ * @throws Error when cf is not installed, when the lock is still held after {@link LOCK_TIMEOUT_MS},
+ * or when both starts fail to answer `/health`.
  */
 export async function startCfDev(options: CfDevOptions): Promise<CfDev> {
   if (!existsSync(CF)) throw new Error("cf is not installed");
-  const mode = options.mode ?? DEFAULT_MODE;
   const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
-  const lock = await acquireLock(options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS);
+  const lock = await acquireLock();
   /** One start; an exit or an unanswered health probe is reported as output, not an error. */
-  const start = async (requested: number | undefined): Promise<Attempt> => {
-    const port = requested ?? (await probePort());
-    const running = spawnCfDev(options.cwd, mode, port);
+  const start = async (): Promise<Attempt> => {
+    await waitForInspector();
+    const port = await probePort();
+    const running = spawnCfDev(options.cwd, DEFAULT_MODE, port);
     let ready: boolean;
     try {
       if (running.child.pid !== undefined) await lock.own(running.child.pid);
@@ -546,9 +617,9 @@ export async function startCfDev(options: CfDevOptions): Promise<CfDev> {
     return { ok: false, output };
   };
   try {
-    const first = await start(options.port);
+    const first = await start();
     if (first.ok) return handle(first.started, lock);
-    const second = await start(undefined);
+    const second = await start();
     if (second.ok) return handle(second.started, lock);
     throw new Error("cf dev did not become ready:\n" + second.output);
   } catch (error) {
