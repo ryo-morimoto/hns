@@ -16,7 +16,7 @@ import type { ProjectId } from "@hns/core";
 import * as v from "valibot";
 import { ProjectIdSchema } from "@hns/core";
 import { fromGlobalId } from "@hns/core/graphql";
-import { GLOB_CHARACTERS, normalizePath } from "@hns/core/capability";
+import { normalizePath } from "@hns/core/capability";
 import type { PolicyDocumentView } from "./views.ts";
 import { isPolicyProposalStatus } from "./views.ts";
 
@@ -69,7 +69,7 @@ export const PolicyProposalInputType = new GraphQLInputObjectType({
      *
      * @remarks
      * This is a **permission**, not a sandbox: whether the workspace has a sandbox is the server's
-     * fact (0226), and a proposal only says whether the policy allows a command to run on it. The
+     * fact, and a proposal only says whether the policy allows a command to run on it. The
      * document it builds is always `{kind: "exec", network: "none", writable: false}`, so a proposal
      * can turn `bash` on or off but cannot widen its envelope.
      */
@@ -242,18 +242,6 @@ function comparableRoots(roots: readonly string[]): Uncomparable {
   }
   return { ok: true };
 }
-
-/**
- * The characters that make a root a glob, as the contract spells them.
- *
- * @internal
- * @remarks
- * Re-exported from the contract (`@hns/core/capability`) rather than written here: a second copy
- * drifts, and a rule that recognized only `*` and `?` would let `a/{b,c}` through. The face does not
- * test these characters itself — {@link normalizePath} already refuses them — but the list is named
- * so a reader of this file can see that the rule is the contract's.
- */
-export const ROOT_GLOB_CHARACTERS = GLOB_CHARACTERS;
 
 /**
  * Build the stored document a proposal asks for, from the base it is built on.
