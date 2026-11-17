@@ -22,6 +22,9 @@ interface ProjectListArguments extends ListArguments {
   readonly projectId?: string | null | undefined;
 }
 
+/** The one project id that existed before per-project Session objects. */
+const DEFAULT_PROJECT_ID = "default";
+
 interface ProjectListSuccess {
   readonly __typename: "ProjectList";
   readonly projects: readonly ProjectView[];
@@ -189,6 +192,10 @@ export async function resolveTasks(
  * typed `invalid_argument` and never creates an object (D080). The read then addresses the
  * project's own object, so another project's conversations never appear.
  *
+ * The legacy default object is the one exception to "one object, one project": before per-project
+ * objects, conversations created for any project lived there. Its reads keep the old filter so
+ * those rows do not surface under the default project; objects for other projects are not
+ * filtered, because a row from another project there is a defect that must not be hidden.
  */
 export async function resolveConversations(
   _source: undefined,
@@ -203,8 +210,12 @@ export async function resolveConversations(
       throw new QueryReadError("invalid_argument", "No project has this id.");
     }
     spend(context, limit);
-    const conversations = (await context.reads.conversations(projectId, limit)).slice(0, limit);
-    return conversations.map(conversationView);
+    const page = await context.reads.conversations(projectId, limit);
+    const conversations =
+      projectId === DEFAULT_PROJECT_ID
+        ? page.filter((conversation) => conversation.project_id === projectId)
+        : page;
+    return conversations.slice(0, limit).map(conversationView);
   });
   if (!result.ok) return result.failure;
   return { __typename: "ConversationList", conversations: result.value };

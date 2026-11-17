@@ -204,6 +204,38 @@ test("conversations for an unknown project never address a Session object", asyn
   expect(session.requests).toStrictEqual([]);
 });
 
+// Catches: a conversation from another project surfacing under the legacy default object, which
+// held every project's conversations before objects were split.
+test("the legacy default object filters conversations by project", async () => {
+  const send = edgeWith({
+    reads: {
+      project: () => Promise.resolve(project("default")),
+      conversations: () =>
+        Promise.resolve([conversation("c1", "default"), conversation("c2", "other")]),
+    },
+  });
+  const response = await send({
+    query:
+      '{ conversations(projectId: "' +
+      toGlobalId("Project", "default") +
+      '") { __typename ... on ConversationList { conversations { id projectId } } } }',
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: {
+      conversations: {
+        __typename: "ConversationList",
+        conversations: [
+          {
+            id: toGlobalId("Conversation", "c1"),
+            projectId: toGlobalId("Project", "default"),
+          },
+        ],
+      },
+    },
+  });
+});
+
 // Catches: tasks read across projects, or a task status serialized as a free string.
 test("tasks are served from the injected read with the enum name", async () => {
   const send = edgeWith({
