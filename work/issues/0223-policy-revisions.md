@@ -1,6 +1,6 @@
 # 0223: ポリシー改訂・提案・承認（review token・CAS）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §6, §9
@@ -17,14 +17,14 @@ touches: packages/store/src/migrations/0003-policy.ts, packages/store/src/migrat
 
 ## Acceptance criteria
 
-- [ ] migration 0003 で 3 テーブルを加算する（既存テーブルを変えない）
-- [ ] `ensurePolicy(workspaceId)` が active を冪等に作り、revision 1 の既定（read/write は root、bash は sandbox 時のみ、egress なし）を返す
-- [ ] `propose(actor, input)` が pending を作り、baseRevision / baseHash / candidateHash / reviewToken を保存する
-- [ ] `decide(actor, input)` が `actor.kind === "human"` を要求し、active revision と review token を再計算して一致を要求する。CAS で active を切り替える
-- [ ] 差分を `narrowing` / `expansion` / `mixed` / `equal` / `unsupported` に分類し、unsupported は承認不可
-- [ ] agent の tool token では `decide` を呼べない（principal の型で表現する）
-- [ ] 失敗は `approval_stale` / `policy_denied` / `unsupported` の閉じた union で返す
-- [ ] `npm test -w @hns/store` と `npm test -w @hns/server` が通る
+- [x] migration 0003 で 3 テーブルを加算する（既存テーブルを変えない）
+- [x] `ensurePolicy(workspaceId)` が active を冪等に作り、revision 1 の既定（read/write は root、bash は sandbox 時のみ、egress なし）を返す
+- [x] `propose(actor, input)` が pending を作り、baseRevision / baseHash / candidateHash / reviewToken を保存する
+- [x] `decide(actor, input)` が `actor.kind === "human"` を要求し、active revision と review token を再計算して一致を要求する。CAS で active を切り替える
+- [x] 差分を `narrowing` / `expansion` / `mixed` / `equal` / `unsupported` に分類し、unsupported は承認不可
+- [x] agent の tool token では `decide` を呼べない（principal の型で表現する）
+- [x] 失敗は `approval_stale` / `policy_denied` / `unsupported` の閉じた union で返す
+- [x] `npm test -w @hns/store` と `npm test -w @hns/server` が通る
 
 ## テスト条件
 
@@ -71,3 +71,13 @@ touches: packages/store/src/migrations/0003-policy.ts, packages/store/src/migrat
 ## Log
 
 - 2026-11-17: 作成（D091）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0223。blocking 0。NB2/NB3 は統合前に修正 → 再レビュー PASS）
+- HEAD: 80cbf72（main に ff 統合）。gate は exit 0（1138 tests / 1139、main で 76.1s）。
+- 確認: migration 0007（issue の 0003 は古い表記。現行 0006 の次が 0007）で 3 テーブル + index、revision は**追記のみ**（書き換えるメソッドが無い）、`HumanPrincipal` は型で agent から構築不可 + **実行時検査**（消すとテストが落ちる）、`activate` は **INSERT を CAS の述語でガード**（実測: D1 の batch は 0 行更新で rollback しないため、CAS が負けたら**何も書かない**）、reviewToken の再計算、`unsupported` は提案と承認の両方で拒否。実 D1（workerd）で並行 ensure / 承認による hash 変化 / stale / agent 拒否 / glob。
+- 実測で分かったこと: **D1 の batch は 0 行更新で rollback しない**。だから「batch に入れる」だけでは孤児 revision が残る。INSERT 自体を CAS 述語で条件付けする形が正しい（`WHERE EXISTS (… revision=? AND hash=?)`）。
+- 修正した中 2 / 低 1: 承認の append と CAS の原子化、CAS 成功後は必ず成功を返す（`proposalStale`）で再試行の罠を塞ぐ、`FakeD1` を store の test support に移して**store → server の逆依存**を解消。
+- 非 blocking（follow-up）: 実 D1 の `proposalStale` 分岐が未到達（unit のみ）/ `baseHash` は `active.hash` を渡すほうが読める / `stale` と `exists` のメッセージが同じ / `activate` の pre-check の TSDoc / TTL 既定の二重化（0224）/ `HumanPrincipal` の柵の書き方 / 監査（`policy.approved`）と 0222 の鎖を繋ぐ経路が未定（0228）。
+- 未確認: レビュー担当が 1 回だけ 7 失敗の gate を見たが再現せず原因不明（以後 7 回連続 green）。CI で再発したらログを取る。
