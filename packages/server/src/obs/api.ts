@@ -42,9 +42,10 @@ function failure(
   request: Request,
   code: "invalid_request" | "not_found" | "method_not_allowed",
   detail: string,
+  allow = "GET",
 ): Response {
   const response = problem(code, detail, new URL(request.url).pathname);
-  if (code === "method_not_allowed") response.headers.set("allow", "GET");
+  if (code === "method_not_allowed") response.headers.set("allow", allow);
   return response;
 }
 
@@ -152,7 +153,12 @@ export async function handleObsRpc(request: Request, store: ObsStore): Promise<R
       store.append(parsed.entry);
       return json({ ok: true }, 201);
     }
-    return failure(request, "method_not_allowed", "Only GET and POST are allowed here.");
+    return failure(
+      request,
+      "method_not_allowed",
+      "Only GET and POST are allowed here.",
+      "GET, POST",
+    );
   }
   if (path === "/rpc/metrics") {
     if (request.method !== "GET") {

@@ -162,6 +162,8 @@ export function createObsStore(storage: ObsStorage, options: ObsStoreOptions = {
     stored = countOf(sql);
     sincePrune = 0;
   };
+  // Retention runs at open as well as on the append interval, so a quiet workspace still shrinks.
+  deleteOld();
 
   return {
     append(entry) {
@@ -223,7 +225,7 @@ export function createObsStore(storage: ObsStorage, options: ObsStoreOptions = {
       const since = new Date(now() - windowMs).toISOString();
       const durations = sql
         .exec(
-          "SELECT duration_ms AS ms FROM obs_events WHERE event = 'http' AND at >= ? AND duration_ms IS NOT NULL ORDER BY duration_ms",
+          "SELECT duration_ms AS ms FROM obs_events WHERE event IN ('http', 'http.error') AND at >= ? AND duration_ms IS NOT NULL ORDER BY duration_ms",
           since,
         )
         .toArray()
@@ -243,10 +245,10 @@ export function createObsStore(storage: ObsStorage, options: ObsStoreOptions = {
       return {
         windowMs,
         http: {
-          total: countWhere("event = 'http'"),
+          total: countWhere("event IN ('http', 'http.error')"),
           byStatus: sql
             .exec(
-              "SELECT status, COUNT(*) AS count FROM obs_events WHERE event = 'http' AND at >= ? AND status IS NOT NULL GROUP BY status",
+              "SELECT status, COUNT(*) AS count FROM obs_events WHERE event IN ('http', 'http.error') AND at >= ? AND status IS NOT NULL GROUP BY status",
               since,
             )
             .toArray()

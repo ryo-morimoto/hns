@@ -84,6 +84,17 @@ test("retention runs every N appends, not on each one", () => {
   });
 });
 
+// Catches: a quiet workspace keeping expired rows until the next append.
+test("opening the store prunes rows past the retention window", () => {
+  const { state, close } = openSqliteState();
+  const first = createObsStore(state.storage, { now: () => NOW, retentionDays: 1 });
+  first.append(entry({ at: isoTimestamp("2026-11-15T00:00:00.000Z") }));
+  first.append(entry());
+  const reopened = createObsStore(state.storage, { now: () => NOW, retentionDays: 1 });
+  expect(reopened.count()).toBe(1);
+  close();
+});
+
 test("prune deletes rows older than the window and reports the count", () => {
   withStore({ retentionDays: 1, pruneEvery: 100 }, (store, close) => {
     store.append(entry({ at: isoTimestamp("2026-11-15T00:00:00.000Z") }));
@@ -98,7 +109,7 @@ test("metrics aggregate the last 24 hours and report the retention facts", () =>
   withStore({}, (store, close) => {
     store.append(entry({ durationMs: 10, status: 200 }));
     store.append(entry({ durationMs: 20, status: 200 }));
-    store.append(entry({ durationMs: 30, status: 500, level: "error" }));
+    store.append(entry({ durationMs: 30, status: 500, level: "error", event: "http.error" }));
     store.append(entry({ durationMs: 40, status: 200 }));
     store.append(entry({ event: "tool.call", hop: "agent", status: undefined }));
     store.append(entry({ event: "tool.result", hop: "agent", level: "warn" }));
@@ -116,7 +127,8 @@ test("metrics aggregate the last 24 hours and report the retention facts", () =>
     expect(metrics.toolErrors).toBe(1);
     expect(metrics.agentResponses).toBe(1);
     expect(metrics.byHop).toContainEqual({ hop: "worker", count: 4 });
-    expect(metrics.byEvent).toContainEqual({ event: "http", count: 4 });
+    expect(metrics.byEvent).toContainEqual({ event: "http", count: 3 });
+    expect(metrics.byEvent).toContainEqual({ event: "http.error", count: 1 });
     expect(metrics.stored).toBe(7);
     expect(metrics.retentionDays).toBe(30);
     expect(metrics.maxEvents).toBe(5_000);
