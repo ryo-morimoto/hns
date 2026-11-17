@@ -394,8 +394,15 @@ export async function applyVersionedWrite(input: VersionedWriteInput): Promise<W
         await removeTemp(fd, temp);
         throw error;
       }
-      // A same-name swap after the rename leaves bytes the intent does not name.
-      const after = await versionAt(rootHandle, parent, name);
+      // A same-name swap after the rename leaves bytes the intent does not name, and a swap
+      // that makes the target unreadable is equally undecidable: neither is a denial, because
+      // the rename already happened.
+      let after: string;
+      try {
+        after = await versionAt(rootHandle, parent, name);
+      } catch {
+        return { status: "unknown", path: normalized, reason: "io" };
+      }
       if (after !== input.contentHash) {
         return { status: "unknown", path: normalized, reason: "io" };
       }

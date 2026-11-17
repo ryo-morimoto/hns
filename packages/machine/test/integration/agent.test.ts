@@ -426,6 +426,7 @@ test("reading and listing inside the root returns the bytes and their version", 
 // Catches: a write op that trusts the request's version, resolves a path outside the
 // project, or leaves a replaced target behind when it reports a conflict.
 test("a signed write applies once, conflicts on a stale version, and refuses an escape", async () => {
+  const logs: ObsLogEntry[] = [];
   await withAgent(
     async ({ root }) => {
       await mkdir(join(root, "one"));
@@ -457,8 +458,17 @@ test("a signed write applies once, conflicts on a stale version, and refuses an 
           ...overrides,
         });
 
-      const first = await fixture.call({ body: write() });
+      const first = await fixture.call({ body: write(), requestId: "corr-write" });
       expect(first.status).toBe(200);
+      // The fs hop names the project and the file, like a read logs its resolved path.
+      await waitFor(
+        () => logs.some((entry) => entry.requestId === "corr-write"),
+        "the write's fs log line",
+      );
+      expect(logs.find((entry) => entry.requestId === "corr-write")).toMatchObject({
+        hop: "fs",
+        path: "/one/a.txt",
+      });
       const applied = v.parse(MachineWriteResultSchema, resultOf(first));
       expect(applied).toStrictEqual({
         status: "applied",
@@ -511,6 +521,7 @@ test("a signed write applies once, conflicts on a stale version, and refuses an 
       );
       expect(read.version).toBe(versionOf("hello"));
     },
+    { onLog: (entry) => logs.push(entry) },
   );
 });
 

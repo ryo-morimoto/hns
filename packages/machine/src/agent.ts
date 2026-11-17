@@ -3,6 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { realpath, stat } from "node:fs/promises";
 import * as v from "valibot";
+import { MACHINE_RPC_PATH } from "@hns/core";
 import { Denied, FileFailure } from "@hns/workspace";
 import type { RootIdentity } from "@hns/workspace";
 import { ConnectionGate } from "./connection.ts";
@@ -19,9 +20,6 @@ import type { Operation, OperationName, RefusalBody, SuccessBody } from "./wire.
 
 /** The only address the agent ever listens on: cloudflared connects from here. */
 const HOST = "127.0.0.1";
-
-/** The only route the agent answers. */
-const RPC_PATH = "/rpc";
 
 /** How to start an agent. */
 export interface MachineAgentOptions {
@@ -217,7 +215,7 @@ async function handleRequest(
   context: AgentContext,
 ): Promise<void> {
   const started = Date.now();
-  let fsPath = "/rpc";
+  let fsPath = MACHINE_RPC_PATH;
   let op: OperationName | undefined;
   if (request.method !== "POST") {
     sendRefusal(response, new MachineRefusal("method_not_allowed", "the agent answers POST only"), {
@@ -226,7 +224,7 @@ async function handleRequest(
     logRequest(request, response, context, started, fsPath, op);
     return;
   }
-  if (request.url !== RPC_PATH) {
+  if (request.url !== MACHINE_RPC_PATH) {
     sendRefusal(response, new MachineRefusal("not_found", "the agent answers /rpc only"));
     logRequest(request, response, context, started, fsPath, op);
     return;
@@ -288,11 +286,18 @@ async function handleRequest(
  */
 function logPathOf(operation: Operation): string {
   if (operation.op === "health") return "/";
+  // A write names a project and a file; the log shows the resolved path, like a read does.
+  const project = operation.op === "write" ? operation.projectRoot : "";
   try {
-    const relative = normalizeRelative(operation.path);
+    const relative = normalizeRelative(
+      project === "" ? operation.path : project + "/" + operation.path,
+    );
     return relative === "" ? "/" : "/" + relative;
   } catch {
-    const stripped = operation.path.replace(/^[/\\]+/u, "");
+    const stripped = (project === "" ? operation.path : project + "/" + operation.path).replace(
+      /^[/\\]+/u,
+      "",
+    );
     return stripped === "" ? "/" : "/" + stripped;
   }
 }
