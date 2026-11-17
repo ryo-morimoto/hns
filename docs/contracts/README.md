@@ -8,6 +8,8 @@
 | Workspace のファイル（版 / absent / checkpoint） | [workspace.md](workspace.md) | `@hns/workspace`、`do/workspace`、`@hns/machine` | INV-03 / 04 / 05 |
 | Journal と索引（intent / outcome / watermark / dirtyAt） | [journal-index.md](journal-index.md) | `store/src/journal`、`do/journal`、`conversation-index`、`session-index` | INV-04 / 09 / 10 / 11 |
 | 観測（ObsLogEntry / 保持 / 測定窓） | [observability.md](observability.md) | `@hns/core` の observability、`server/src/obs`、`machine/src/log` | — |
+| GraphQL（面・失敗・上限） | [graphql.md](graphql.md) | `@hns/core/graphql`、`server/src/graphql` | — |
+| 認証（入口・セッション・署名） | [auth.md](auth.md) | `server/src/edge`、`@hns/core` の codecs | INV-01 |
 
 ## 規則
 
