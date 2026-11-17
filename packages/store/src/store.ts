@@ -6,6 +6,7 @@ import {
   type ConversationRepository,
 } from "./repositories/conversations.ts";
 import { indexStateRepository, type IndexStateRepository } from "./repositories/index-state.ts";
+import { machineRepository, type MachineRepository } from "./repositories/machines.ts";
 import { policyRepository, type PolicyRepository } from "./repositories/policy.ts";
 import {
   projectRepository,
@@ -46,6 +47,15 @@ export interface Store {
    * may be proposed and who may approve (`docs/capability.md` §6).
    */
   readonly policy: PolicyRepository;
+  /**
+   * The registered machines and the device key each signs with (0148).
+   *
+   * @remarks
+   * The registry is D1 rows plus a fetch, not a Durable Object (D049). Its `deviceKey` is what the
+   * Workspace object reads to verify a machine-signed pack; the face's list is what an operator
+   * reads, and a list read is also where the reachability probe is throttled (D087).
+   */
+  readonly machines: MachineRepository;
   /** Close the adapter. Calls made after this throw from the closed adapter. */
   close(): Promise<void>;
 }
@@ -85,6 +95,7 @@ export async function openStore(options: StoreOptions): Promise<Store> {
       workflows: workflowRepository(context),
       automations: automationRepository(context),
       policy: policyRepository(context),
+      machines: machineRepository(context),
       close: () => sql.close(),
     };
   } catch (error) {

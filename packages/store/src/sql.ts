@@ -1,8 +1,14 @@
 /* oxlint-disable anti-slop/no-unknown-returns --
    This is the D1 boundary: rows stay unknown until the caller runs the matching parse*.
 */
-/** Values the store binds into SQL. */
-type SqlValue = string | number | null;
+/**
+ * Values the store binds into SQL.
+ *
+ * @remarks
+ * `ArrayBuffer` is a BLOB column's value. The D1 binding accepts it, and the adapter parses rows
+ * at each caller's boundary (`machines.public_key` is the first column that stores bytes).
+ */
+type SqlValue = string | number | null | ArrayBuffer;
 
 /** One parameterised statement, executed by {@link Sql.batch}. */
 export interface SqlStatement {

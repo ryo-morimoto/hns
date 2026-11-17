@@ -46,8 +46,17 @@ export function isoTimestamp(value: string): IsoTimestamp {
  */
 export type OperationId = Brand<string, "OperationId">;
 
+/**
+ * The base64url alphabet, in one place: letters, digits, `_` and `-`.
+ *
+ * @remarks
+ * The operation id uses it, and so does a device key's spelling ({@link encodeDeviceKey}); one
+ * constant keeps the two from drifting.
+ */
+export const BASE64URL_ALPHABET = "A-Za-z0-9_-";
+
 /** The wire format, in one place: letters, digits, "_" and "-", 1 to 64 characters. */
-const OPERATION_ID_ALPHABET = "A-Za-z0-9_-";
+const OPERATION_ID_ALPHABET = BASE64URL_ALPHABET;
 const OPERATION_ID_MAX_LENGTH = 64;
 const OPERATION_ID = new RegExp(`^[${OPERATION_ID_ALPHABET}]{1,${OPERATION_ID_MAX_LENGTH}}$`);
 const NOT_OPERATION_ID = new RegExp(`[^${OPERATION_ID_ALPHABET}]`, "g");

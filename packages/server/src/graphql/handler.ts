@@ -229,6 +229,7 @@ export function createGraphQLFace(
       policy: dependencies.policy,
       maxRows: rows.maxRowsPerRequest,
       maxRowsPerList: rows.maxRowsPerList,
+      signal: request.signal,
     });
 
     let result: ExecutionResult;

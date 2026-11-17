@@ -1,5 +1,13 @@
 import * as v from "valibot";
-import type { Project, ProjectId, Task } from "@hns/core";
+import type {
+  Machine,
+  MachineEnrollment,
+  MachineRegistration,
+  MachineRegistryRefusal,
+  Project,
+  ProjectId,
+  Task,
+} from "@hns/core";
 import type {
   ConversationCursor,
   ConversationListQuery,
@@ -12,6 +20,7 @@ import { createRowBudget, type RowBudget } from "../edge/limits.ts";
 import type { Session } from "../edge/session.ts";
 import { projectFor, storeFor, StoreUnavailableError } from "../edge/store.ts";
 import { QueryReadError } from "./failures.ts";
+import { probeAll } from "../machines/probe.ts";
 import { policyFaceOver, type PolicyFace } from "./policy/face.ts";
 
 /**
@@ -45,6 +54,15 @@ export interface GraphQLReads {
   ) => Promise<ConversationPage>;
   /** The project's index backlog and last failure, one row per workspace. */
   readonly indexState: (projectId: ProjectId) => Promise<IndexStateRow>;
+  /**
+   * The registered machines, read from D1 (0148).
+   *
+   * @remarks
+   * A list is read from D1 directly (D049). The port is also where the reachability probe is
+   * throttled: the production port probes every non-revoked machine before it answers, and the
+   * registry's delayed write is what keeps a list read from amplifying writes (D087 U-03).
+   */
+  readonly machines: () => Promise<readonly Machine[]>;
 }
 
 /** What one conversation list read asks the index for. */
@@ -65,6 +83,14 @@ interface CreateProjectInput {
 }
 
 /**
+ * The refusals an enrollment can answer with.
+ *
+ * @remarks
+ * The registry's own closed vocabulary, minus `not_found` (an enrollment has no id to miss).
+ */
+export type MachineEnrollRefusal = MachineRegistryRefusal;
+
+/**
  * The writes one GraphQL request performs.
  *
  * @remarks
@@ -74,6 +100,26 @@ interface CreateProjectInput {
  */
 export interface GraphQLWrites {
   readonly createProject: (input: CreateProjectInput) => Promise<Project>;
+  /**
+   * Enroll a machine, or replace its key as a reimage (0148).
+   *
+   * @remarks
+   * The actor is the session subject that asked; the registry records it in the event and never
+   * returns it. The result is the registry's own union: `enrolled` / `reimaged` / a refusal, so
+   * the resolver maps one closed vocabulary to one union member.
+   */
+  readonly enrollMachine: (
+    enrollment: MachineEnrollment,
+    actor: string,
+  ) => Promise<MachineRegistration | MachineEnrollRefusal>;
+  /**
+   * Revoke a machine; undefined when no row has this id (0148).
+   *
+   * @remarks
+   * Revocation is immediate: the registry stops returning the device key for the machine, so its
+   * next signed request is refused.
+   */
+  readonly revokeMachine: (id: string, actor: string) => Promise<Machine | undefined>;
 }
 
 /** What one request carries into its resolvers. */
@@ -123,6 +169,14 @@ export interface GraphQLContextOptions {
   readonly policy: PolicyFace | undefined;
   readonly maxRows: number;
   readonly maxRowsPerList: number;
+  /**
+   * The request's abort signal, so a reachability probe cannot outlive the request.
+   *
+   * @remarks
+   * Optional: a test that replaced `reads.machines` never probes, and a probe without a signal is
+   * bounded by the transport's own 3-second deadline.
+   */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /**
@@ -198,8 +252,53 @@ function pageQuery(projectId: ProjectId, query: ConversationReadQuery): Conversa
     : { projectId, limit: query.first, after: query.after, q: query.q };
 }
 
+/**
+ * The production machine list: D1, then a throttled reachability probe (0148 / D087 U-03).
+ *
+ * @internal
+ * @remarks
+ * The list is read from D1 first, so the caller sees every machine even when a probe cannot reach
+ * one. The probes then run **concurrently** with the 3-second transport deadline; each records its
+ * observation through the registry's throttled write. When no control-plane key is configured the
+ * probes are skipped entirely: an unconfigured deployment must not turn every machine `offline`
+ * by probing with a key it does not have. A probe never fails the read.
+ */
+async function machineListRead(
+  env: WorkerEnv,
+  requestId: string,
+  signal: AbortSignal | undefined,
+): Promise<readonly Machine[]> {
+  const machines = await storeCall(env, requestId, "read", (store) => store.machines.list());
+  const controlPlaneKey = env.HNS_CONTROL_PLANE_KEY;
+  if (controlPlaneKey === undefined || controlPlaneKey.length === 0) return machines;
+  const store = await storeWith(env, requestId);
+  try {
+    await probeAll(machines, {
+      machines: store.machines,
+      controlPlaneKey,
+      requestId,
+      signal,
+    });
+    return await store.machines.list();
+  } catch (error) {
+    // A probe is an observation; a failure to store one must not hide the list.
+    console.error(
+      "graphql: machine probe failed",
+      requestId,
+      error instanceof Error ? error.name : "unknown",
+    );
+    return machines;
+  } finally {
+    await store.close();
+  }
+}
+
 /** The production reads: D1 for projects, tasks, and the conversation index. */
-function defaultReads(env: WorkerEnv, requestId: string): GraphQLReads {
+function defaultReads(
+  env: WorkerEnv,
+  requestId: string,
+  signal?: AbortSignal | undefined,
+): GraphQLReads {
   return {
     projects: () => storeCall(env, requestId, "read", (store) => store.projects.list()),
     project: (projectId) => storeFailure(requestId, () => projectFor(env, projectId)),
@@ -210,6 +309,7 @@ function defaultReads(env: WorkerEnv, requestId: string): GraphQLReads {
       ),
     indexState: (projectId) =>
       storeCall(env, requestId, "read", (store) => store.indexState.read(projectId)),
+    machines: () => machineListRead(env, requestId, signal),
   };
 }
 
@@ -246,13 +346,17 @@ function defaultPolicy(env: WorkerEnv, requestId: string): PolicyFace {
   };
 }
 
-/** The production writes: D1 for the project table. */
+/** The production writes: D1 for the project and machine tables. */
 function defaultWrites(env: WorkerEnv, requestId: string): GraphQLWrites {
   return {
     createProject: (input) =>
       storeCall(env, requestId, "write", (store) =>
         store.projects.create(input.name, input.workspaceRoot),
       ),
+    enrollMachine: (enrollment, actor) =>
+      storeCall(env, requestId, "write", (store) => store.machines.enroll(enrollment, actor)),
+    revokeMachine: (id, actor) =>
+      storeCall(env, requestId, "write", (store) => store.machines.revoke(id, actor)),
   };
 }
 
@@ -263,7 +367,7 @@ function defaultWrites(env: WorkerEnv, requestId: string): GraphQLWrites {
  * @returns The context; its reads are the overrides where given, the production reads otherwise.
  */
 export function createContext(options: GraphQLContextOptions): GraphQLContext {
-  const reads = defaultReads(options.env, options.requestId);
+  const reads = defaultReads(options.env, options.requestId, options.signal);
   const writes = defaultWrites(options.env, options.requestId);
   const policy = options.policy ?? defaultPolicy(options.env, options.requestId);
   const readOverrides = options.reads ?? {};
@@ -280,9 +384,12 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       tasks: readOverrides.tasks ?? reads.tasks,
       conversations: readOverrides.conversations ?? reads.conversations,
       indexState: readOverrides.indexState ?? reads.indexState,
+      machines: readOverrides.machines ?? reads.machines,
     },
     writes: {
       createProject: writeOverrides.createProject ?? writes.createProject,
+      enrollMachine: writeOverrides.enrollMachine ?? writes.enrollMachine,
+      revokeMachine: writeOverrides.revokeMachine ?? writes.revokeMachine,
     },
   };
 }

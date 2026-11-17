@@ -8,10 +8,12 @@ import { queryFailure, QueryReadError, type QueryFailureView } from "./failures.
 import {
   conversationView,
   indexStateView,
+  machineView,
   projectView,
   taskView,
   type ConversationView,
   type IndexStateView,
+  type MachineView,
   type ProjectView,
   type TaskView,
 } from "./views.ts";
@@ -53,6 +55,11 @@ interface TaskListSuccess {
   readonly tasks: readonly TaskView[];
 }
 
+interface MachineListSuccess {
+  readonly __typename: "MachineList";
+  readonly machines: readonly MachineView[];
+}
+
 /** One result union member. */
 export type ProjectListResult = ProjectListSuccess | QueryFailureView;
 /** One result union member. */
@@ -61,6 +68,8 @@ export type ConversationListResult = ConversationListSuccess | QueryFailureView;
 export type IndexStateResult = IndexStateSuccess | QueryFailureView;
 /** One result union member. */
 export type TaskListResult = TaskListSuccess | QueryFailureView;
+/** One result union member. */
+export type MachineListResult = MachineListSuccess | QueryFailureView;
 
 type Guarded<T> =
   | { readonly ok: true; readonly value: T }
@@ -190,6 +199,35 @@ function spend(context: GraphQLContext, rows: number): void {
   if (!context.budget.spend(rows)) {
     throw new QueryReadError("limit_exceeded", "This request reads more rows than it may.");
   }
+}
+
+/**
+ * Resolve `Query.machines`: the registry D1 holds, with a throttled reachability probe (0148).
+ *
+ * @param _source - Always undefined; Query fields have no parent value.
+ * @param args - The `first` page size.
+ * @param context - The request's reads and budget.
+ * @returns The list with each machine's status, or a union failure.
+ *
+ * @remarks
+ * The read is the registry, not a cached connection table (D049). The production port probes each
+ * non-revoked machine before it answers, so a status read here reflects the probe; the registry's
+ * 30-second throttle decides whether the probe moves `lastSeen` (D087 U-03). A revoked machine is
+ * listed as `REVOKED` and never probed.
+ */
+export async function resolveMachines(
+  _source: undefined,
+  args: ListArguments,
+  context: GraphQLContext,
+): Promise<MachineListResult> {
+  const result = await guarded(async () => {
+    const limit = pageSize(args.first, context.maxRowsPerList);
+    spend(context, limit);
+    const machines = (await context.reads.machines()).slice(0, limit);
+    return machines.map(machineView);
+  });
+  if (!result.ok) return result.failure;
+  return { __typename: "MachineList", machines: result.value };
 }
 
 /**

@@ -16,9 +16,12 @@ export type MutationFailureCode = FailureCodeOf<"graphql">;
 
 /** One expected Mutation failure; the client branches on it instead of reading a message. */
 const MUTATION_FAILURE_CODES = [
+  "conflict",
   "forbidden",
   "invalid_request",
   "limit_exceeded",
+  "not_found",
+  "revoked",
   "unavailable",
 ] as const;
 

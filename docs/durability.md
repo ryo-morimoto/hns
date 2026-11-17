@@ -142,6 +142,15 @@ cover するには checkpoint の契機を増やすしかない（しない、�
 - 読み取りは lease を要さない。
 - 同じ workspace を2台から同時に編集することは要件2（複数マシンで Agent を動かす）に含まない。[ARCH.md](../ARCH.md) の要件2の行が正で、規則はこの節。
 
+### 3.5 machine の登録と到達性（0148）
+
+machine の一覧と device key は **D1** が正本（`machines` / `machine_events`、migration 0008）。接続を保持する DO は作らない（D049）。
+
+- **登録**は人が行う。machine が作った device key の公開鍵を、サインインした人が browser から `Mutation.registerMachine` に渡す。秘密は machine から出ない。同じ name + 新しい公開鍵は **reimage**（同じ行の鍵を差し替え、旧鍵を即時無効、イベント1行）。`revoked` の name は再登録できない。
+- **失効**は `status = 'revoked'` で終端。registry は revoked の device key を返さないので、以後の署名は検証で落ちる（fail closed）。
+- **到達性**は観測。`Query.machines` の読み取り時に throttle（30 秒に1回までの lastSeen 書き込み）して `/rpc` の `health` を control-plane 署名で叩く。成功で `online`、失敗で `offline`。定期 probe は 0161。
+- **接続中の Run を park する**のは 0156 / 0157 の queue 側。0148 は状態と lookup だけを持ち、復帰の契機（0161 / 0157）に `machineId` と status を渡す。
+- **Worker→machine の transport**（0249）は、この registry の `hostname` と control-plane 鍵で `/rpc` を呼ぶ。0148 は transport を実装し、Workspace DO の `op:mirror` と checkpoint の pack push への配線は 0249。
 ## 4. 読みの経路
 
 - ファイル: **マシンから読む**。R2 は読みの経路に入れない（U が見えない）

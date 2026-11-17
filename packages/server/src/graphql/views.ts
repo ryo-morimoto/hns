@@ -1,5 +1,5 @@
 import { toGlobalId } from "@hns/core/graphql";
-import type { Conversation, Project, Task } from "@hns/core";
+import type { Conversation, Machine, Project, Task } from "@hns/core";
 import type { IndexStateRow } from "@hns/store";
 
 /**
@@ -85,6 +85,45 @@ export function conversationView(conversation: Conversation): ConversationView {
     updatedAt: conversation.updated_at,
     isArchived: conversation.archived,
     deletedAt: conversation.deleted_at,
+  };
+}
+
+/**
+ * A `Machine` as GraphQL serves it (0148).
+ *
+ * @remarks
+ * The device key is the **public** half in the model's base64url spelling; the fingerprint is the
+ * value a person compares with the machine. The control-plane key is never here: it is the
+ * Worker's secret, and `GET /api/machines/keys` is where its public half is served.
+ */
+export interface MachineView {
+  readonly id: string;
+  readonly name: string;
+  readonly hostname: string;
+  readonly publicKey: string;
+  readonly fingerprint: string;
+  readonly keyAlgorithm: Machine["keyAlgorithm"];
+  readonly agentVersion: string;
+  readonly lastSeen: number | null;
+  readonly status: Machine["status"];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** Map a machine to its GraphQL shape. */
+export function machineView(machine: Machine): MachineView {
+  return {
+    id: toGlobalId("Machine", machine.id),
+    name: machine.name,
+    hostname: machine.hostname,
+    publicKey: machine.publicKey,
+    fingerprint: machine.fingerprint,
+    keyAlgorithm: machine.keyAlgorithm,
+    agentVersion: machine.agentVersion,
+    lastSeen: machine.lastSeen,
+    status: machine.status,
+    createdAt: machine.createdAt,
+    updatedAt: machine.updatedAt,
   };
 }
 

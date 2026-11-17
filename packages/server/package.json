@@ -31,6 +31,11 @@
       "source": "./src/checkpoint/face.ts",
       "types": "./dist/checkpoint/face.d.ts",
       "import": "./dist/checkpoint/face.js"
+    },
+    "./machines": {
+      "source": "./src/machines/index.ts",
+      "types": "./dist/machines/index.d.ts",
+      "import": "./dist/machines/index.js"
     }
   },
   "scripts": {

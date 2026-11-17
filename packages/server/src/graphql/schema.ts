@@ -16,6 +16,7 @@ import { buildMutationRoot, MUTATION_MODULES, type MutationModule } from "./muta
 import {
   resolveConversations,
   resolveIndexState,
+  resolveMachines,
   resolveProjects,
   resolveTasks,
 } from "./resolvers.ts";
@@ -101,6 +102,7 @@ function buildQuery(objects: ReadonlyMap<string, GraphQLObjectType>): GraphQLObj
     },
   });
   const taskList = listPayload("TaskList", "tasks", objectType(objects, "Task"));
+  const machineList = listPayload("MachineList", "machines", objectType(objects, "Machine"));
   const indexState = new GraphQLObjectType({
     name: "IndexState",
     fields: {
@@ -141,6 +143,11 @@ function buildQuery(objects: ReadonlyMap<string, GraphQLObjectType>): GraphQLObj
           first: { type: GraphQLInt },
         },
         resolve: resolveTasks,
+      },
+      machines: {
+        type: new GraphQLNonNull(resultUnion("MachineListResult", machineList)),
+        args: { first: { type: GraphQLInt } },
+        resolve: resolveMachines,
       },
       // The policy fields own their payload and failure types (`./policy/`), so this root only
       // names them; their union member is `PolicyFailure`, not the `QueryFailure` above.

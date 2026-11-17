@@ -19,6 +19,8 @@
 
 - **Worker → machine（inbound）**: control-plane の Ed25519 秘密鍵（Worker の secret）で署名し、machine は enrollment で配られた公開鍵で検証する（D100）。`x-request-id` は署名対象にしない。
 - **machine → Worker**: device 鍵（マシンの 0600、公開鍵は Machine レコード）。inbound の検証には使わない。
+- **machine の device 公開鍵の置き場**（0148）: `machines.public_key`（D1、32 バイトの BLOB）。秘密は machine の 0600。`GET /api/machines/keys` は control-plane の**公開鍵だけ**を返し、session を要求する（D059）。失効は `status = 'revoked'` で、registry が鍵を返さなくなる。
+
 
 ## 秘密
 

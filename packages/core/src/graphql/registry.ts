@@ -1,5 +1,6 @@
 // The model types that the SDL may reference. Adding an entity to the schema means
 // adding it here, so an object field cannot point at a type that is not registered.
+import type { Machine, MachineStatus } from "../machine-types.ts";
 import type { Conversation, Project, ProjectEgress, Task, TaskStatus } from "../types.ts";
 
 /**
@@ -16,6 +17,8 @@ export interface EntityRegistry {
   readonly Project: Project;
   readonly Conversation: Conversation;
   readonly Task: Task;
+  /** The machine registry's row (0148): no ROOT, and no secret. */
+  readonly Machine: Machine;
 }
 
 /**
@@ -30,4 +33,6 @@ export interface EntityRegistry {
 export interface EnumRegistry {
   readonly ProjectEgress: ProjectEgress;
   readonly TaskStatus: TaskStatus;
+  /** `online` / `offline` / `revoked`; `revoked` is terminal. */
+  readonly MachineStatus: MachineStatus;
 }

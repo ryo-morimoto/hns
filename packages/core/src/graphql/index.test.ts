@@ -87,6 +87,8 @@ test("ids are exposed as ID and the brand is not part of the contract", () => {
   const typeNames = [...sdl.matchAll(/^(?:type|enum) (\w+)/gmu)].map((match) => match[1]);
   expect(typeNames).toStrictEqual([
     "Conversation",
+    "Machine",
+    "MachineStatus",
     "Project",
     "ProjectEgress",
     "Task",

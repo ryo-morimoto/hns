@@ -1,3 +1,5 @@
+import { MACHINE_STATUSES } from "../machine-types.ts";
+import type { Machine } from "../machine-types.ts";
 import { PROJECT_EGRESS_POLICIES, TASK_STATUSES } from "../types.ts";
 import type { Conversation, Project, Task } from "../types.ts";
 import { defineEntity, enumOf } from "./spec.ts";
@@ -57,10 +59,39 @@ export const TaskEntity = defineEntity<Task>({
   },
 });
 
+/** The `MachineStatus` GraphQL enum; values keep the model's declaration order. */
+export const MachineStatusEnum = enumOf("MachineStatus", MACHINE_STATUSES);
+
+/**
+ * The `Machine` GraphQL type (0148).
+ *
+ * @remarks
+ * The registry row as an operator reads it: the id, the name, the tunnel's hostname, the device
+ * key's **public** half (the spelling a person compares, never a secret), its fingerprint, the
+ * agent version, when it was last seen (epoch milliseconds), and the status. `lastSeen` is nullable
+ * before the first probe; `keyAlgorithm` stays a string so an unexpected algorithm is visible.
+ */
+export const MachineEntity = defineEntity<Machine>({
+  name: "Machine",
+  fields: {
+    id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
+    name: { name: "name", kind: "scalar", type: "String", nonNull: true },
+    hostname: { name: "hostname", kind: "scalar", type: "String", nonNull: true },
+    publicKey: { name: "publicKey", kind: "scalar", type: "String", nonNull: true },
+    fingerprint: { name: "fingerprint", kind: "scalar", type: "String", nonNull: true },
+    keyAlgorithm: { name: "keyAlgorithm", kind: "scalar", type: "String", nonNull: true },
+    agentVersion: { name: "agentVersion", kind: "scalar", type: "String", nonNull: true },
+    lastSeen: { name: "lastSeen", kind: "scalar", type: "Int", nonNull: false },
+    status: { name: "status", kind: "enum", typeName: "MachineStatus", nonNull: true },
+    createdAt: { name: "createdAt", kind: "scalar", type: "ID", nonNull: true },
+    updatedAt: { name: "updatedAt", kind: "scalar", type: "ID", nonNull: true },
+  },
+});
+
 /** The model entities the SDL exposes, in declaration order. */
-export const ENTITIES = [ProjectEntity, ConversationEntity, TaskEntity] as const;
+export const ENTITIES = [ProjectEntity, ConversationEntity, TaskEntity, MachineEntity] as const;
 /** The model enums the SDL exposes, in declaration order. */
-export const ENUMS = [TaskStatusEnum, ProjectEgressEnum] as const;
+export const ENUMS = [TaskStatusEnum, ProjectEgressEnum, MachineStatusEnum] as const;
 
 /**
  * Model types that the SDL does not carry yet, with the reason.

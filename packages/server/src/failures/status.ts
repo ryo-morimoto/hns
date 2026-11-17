@@ -37,6 +37,7 @@ export const FAILURE_CODES = [
   "budget_exceeded",
   "limit_exceeded",
   "limit_unavailable",
+  "revoked",
   "stopped",
   "unavailable",
   "timeout",
@@ -104,14 +105,18 @@ export const FAILURE_STATUS = {
   not_found: {
     status: 404,
     transport: "http",
-    surfaces: ["edge", "gateway", "files", "session-rpc", "workspace-rpc"],
+    surfaces: ["edge", "gateway", "files", "session-rpc", "workspace-rpc", "graphql"],
   },
   method_not_allowed: {
     status: 405,
     transport: "http",
     surfaces: ["edge", "gateway", "session-rpc", "workspace-rpc"],
   },
-  conflict: { status: 409, transport: "http", surfaces: ["files", "workspace-rpc"] },
+  conflict: {
+    status: 409,
+    transport: "http",
+    surfaces: ["files", "workspace-rpc", "graphql"],
+  },
   // A definite refusal the machine decided before writing; the write did not happen.
   denied: { status: 400, transport: "http", surfaces: ["files", "workspace-rpc"] },
   payload_too_large: {
@@ -131,6 +136,10 @@ export const FAILURE_STATUS = {
   // (a union member, no status).
   limit_exceeded: { status: 429, transport: "http", surfaces: ["session-rpc", "graphql"] },
   limit_unavailable: { status: 503, transport: "http", surfaces: ["session-rpc"] },
+  // The machine's identity is gone: a revoked machine cannot be re-enrolled under its name and
+  // its key is never handed out again. Retrying changes nothing, which is why it is not
+  // `conflict`. GraphQL carries it as a union member (no HTTP status).
+  revoked: { status: 409, transport: "http", surfaces: ["graphql"] },
   stopped: { status: 503, transport: "http", surfaces: ["gateway"] },
   unavailable: {
     status: 503,

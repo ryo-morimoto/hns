@@ -77,6 +77,14 @@ export interface HandlerDependencies {
    * bytes are forwarded unchanged; the object authenticates them.
    */
   readonly checkpoints?: ((request: CheckpointRequest) => Promise<Response>) | undefined;
+  /**
+   * The machines face (0148): the control-plane public keys a machine enrolls with.
+   *
+   * @remarks
+   * Optional, like every face. It is served only to a session (D059): the keys are public but the
+   * deployment they name is not, and the edge answers 401 before this handler runs.
+   */
+  readonly machineKeys?: ((request: EdgeRequest) => Promise<Response>) | undefined;
   /** Called once per request; production forwards the entry to the Session object. */
   readonly onResponse?: ((event: EdgeResponseEvent, env: WorkerEnv) => void) | undefined;
 }
@@ -347,6 +355,17 @@ async function route(
       workspaceId: checkpoints[1] ?? "",
       limits,
     });
+  }
+  if (path === "/api/machines/keys") {
+    if (request.method !== "GET") return methodNotAllowed("GET", path);
+    const session = await authenticate(request, env);
+    if (session === null) {
+      return problem("unauthorized", "A valid session cookie is required.", path);
+    }
+    if (dependencies.machineKeys === undefined) {
+      return problem("unavailable", "The machines face is not configured.", path);
+    }
+    return dependencies.machineKeys({ request, env, session, requestId, signal });
   }
   if (path === "/api/events" || path === "/api/metrics") {
     if (request.method !== "GET") return methodNotAllowed("GET", path);

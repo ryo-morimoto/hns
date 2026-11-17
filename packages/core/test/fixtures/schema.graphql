@@ -10,6 +10,26 @@ type Conversation {
   updatedAt: String
 }
 
+type Machine {
+  agentVersion: String!
+  createdAt: ID!
+  fingerprint: String!
+  hostname: String!
+  id: ID!
+  keyAlgorithm: String!
+  lastSeen: Int
+  name: String!
+  publicKey: String!
+  status: MachineStatus!
+  updatedAt: ID!
+}
+
+enum MachineStatus {
+  ONLINE
+  OFFLINE
+  REVOKED
+}
+
 type Project {
   agentCwd: String!
   createdAt: String!

@@ -6,6 +6,8 @@ export type { Store, StoreOptions } from "./store.ts";
 export { migrateStore } from "./migrate.ts";
 export type { D1Binding } from "./sql.ts";
 export type { ProjectRepository, TaskRepository } from "./repositories/projects.ts";
+export type { MachineProbeObservation, MachineRepository } from "./repositories/machines.ts";
+export { MACHINE_LAST_SEEN_THROTTLE_MS } from "./repositories/machines.ts";
 export type {
   ConversationCursor,
   ConversationListQuery,

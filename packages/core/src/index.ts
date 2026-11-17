@@ -5,6 +5,7 @@ export * from "./review.ts";
 export * from "./durability.ts";
 export * from "./lease.ts";
 export * from "./machine.ts";
+export * from "./machine-types.ts";
 export * from "./index-batch.ts";
 export * from "./observability.ts";
 export * from "./result.ts";

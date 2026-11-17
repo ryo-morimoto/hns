@@ -5,6 +5,7 @@ import { migration0004 } from "./0004-project-workspace.ts";
 import { migration0005 } from "./0005-conversation-index.ts";
 import { migration0006 } from "./0006-drop-legacy-events.ts";
 import { migration0007 } from "./0007-policy.ts";
+import { migration0008 } from "./0008-machines.ts";
 import type { Migration } from "./migration.ts";
 
 /**
@@ -22,4 +23,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration0005,
   migration0006,
   migration0007,
+  migration0008,
 ];

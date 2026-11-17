@@ -30,6 +30,20 @@
 - checkpoint（git）と pack upload は**deadline を分ける**（`timeoutMs` と `packUploadTimeoutMs`。既定 5 分）。**同時実行枠（`maxConcurrency`）は共有**する: pack の転送中は 1 枠を使い、上限に達していれば JSON の operation は待たずに `busy`（429）で返る。
 - 上限（`maxResponseBytes` など）は refusal の `too_large` / `deadline_exceeded` で返し、**fail closed**。
 
+## レジストリ（0148 / D087）
+
+machine の登録と到達性は **D1 のレコード**で保ち、接続を保持する DO は作らない（D049）。正本は `machines` と `machine_events`（migration 0008）。
+
+- **2方向の鍵、秘密はそれぞれの側に**。machine → Worker は **device key**（Ed25519）。秘密は machine の 0600、**公開鍵は `machines.public_key`（32 バイトの BLOB）**。Worker → machine は **control-plane key**。秘密は Worker の secret（`HNS_CONTROL_PLANE_KEY`）、公開鍵は `GET /api/machines/keys` で machine に配る。どちらの秘密も反対側に出さない。
+- **モデルの綴り**は `@hns/core` の `Machine`。`publicKey` は base64url（43 文字、パディングなし）の公開鍵で、**秘密は型に存在しない**。`fingerprint` は `ed25519:` + SHA-256 の先頭 16 バイト（hex）。
+- **登録は人**。machine が `hns machine enroll` で device key を作って公開鍵と fingerprint を表示し、サインインした人が browser から `Mutation.registerMachine` に貼る。秘密は machine から出ない。machine が自分で登録する enrollment token はまだ無い（必要になったら短命・一度きり・保存は hash）。
+- **同じ name + 新しい公開鍵は reimage**。同じ行の id を保ったまま鍵を差し替え、古い鍵を即時に無効化し、`machine_events` に旧 fingerprint と actor を1行残す。**同じ name + 同じ鍵は冪等**（何も書かない）。**revoked の name は再登録できない**（refusal は `revoked`、`name_taken` ではない）。
+- **失効は即時**。`status = 'revoked'` は終端で、`deviceKey(id)` は revoked の machine に鍵を返さない。以後の署名は鍵が無いので検証で落ちる（fail closed）。
+- **到達性は観測、状態は保存**。`status` は `online` / `offline` / `revoked` の閉じた語彙。probe は `/rpc` に `{"op":"health"}` を control-plane 署名で送る（0147 の agent の唯一のルート。`/health` というパスは無い）。成功は `online` / lastSeen、失敗は `offline`。**lastSeen の書き込みは 30 秒に 1 回まで**（`MACHINE_LAST_SEEN_THROTTLE_MS`）で、状態も lastSeen も変わらない probe は何も書かない。probe の契機は **`Query.machines` の読み取り時**（throttle）。定期 probe は 0161。
+- **probe の呼び手は 0148 では一覧の読み取りだけ**。Worker→machine の transport（`server/src/machines/transport.ts`、control-plane 署名・timeout 3 秒・閉じた失敗）はここで実装するが、**Workspace DO が machine を呼ぶ配線（`op:mirror` と checkpoint の pack push）は 0249**。0246 の Result が「push の起動配線が無い」を 0249 の受入にしている。
+- **一覧は D1 直**（`Query.machines`）。索引は作らない（D049）。
+- **0245 が読む「記録済み machine」**は `machines` の行である。Workspace DO の `#checkpointMachine()` は現在の lease 保持者 → 記録済み machine の順に読み、`#deviceKey()` は `SELECT public_key FROM machines WHERE id = ?` でこの表を見る。0245 のテストが手で作っている `machines` の DDL は、0008 の実表に寄せるのが正しい（その寄せ替えは 0245 のレーンの follow-up）。
+
 ## 変わったとき
 
 署名のメッセージ・ヘッダ・語彙を変えるなら、`core/machine.ts` と `machine/src/wire.ts` と `server/src/do/machine.ts` とこのファイルを同時に。**バイト列の互換はリリース前なので管理しない**が、変えたら test（`signature.test` / `wire.test`）で固定する。
