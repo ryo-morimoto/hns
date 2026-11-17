@@ -14,6 +14,8 @@ import {
 import type {
   AuditEvent,
   AuditEventBase,
+  ToolCallAuditEvent,
+  ToolResultAuditEvent,
   CallDigest,
   DenialCode,
   DenyDecision,
@@ -69,12 +71,13 @@ export const PHASE0_POLICY_HASH =
  * The code a refusal is recorded with when a call's arguments are not the shape the tool declares.
  *
  * @remarks
- * The contract's closed vocabulary has no code for a malformed argument: its denial codes begin after
- * the tool's schema accepted the call. `tool_disabled` says the tool is off, which is not what
- * happened, but it is the closest code and the message says what did. A dedicated code would be a
- * change to the contract's vocabulary (`DENIAL_CODES` / `DENIAL_RETRY`, 0220), proposed to its owner.
+ * The contract's closed vocabulary has no code for a malformed argument: `tool_disabled` means the
+ * tool is off (a policy question), and these arguments never became a call it could judge.
+ * `unsupported` is the contract's "cannot be decided as a call", which is what an unknown key or a
+ * `timeout` in another unit is. A dedicated code would be a change to the vocabulary (`DENIAL_CODES`
+ * / `DENIAL_RETRY`, 0220), proposed to its owner.
  */
-export const INVALID_ARGUMENTS: DenialCode = "tool_disabled";
+export const INVALID_ARGUMENTS: DenialCode = "unsupported";
 
 /**
  * The exec envelope a Phase 0 bash call runs in.
@@ -120,6 +123,7 @@ export interface BashArguments {
   readonly envelope: ExecEnvelope;
 }
 
+/** Every workspace tool's arguments. */
 /** The model's arguments of a bash call, before the agent adds the envelope. */
 export interface BashInput {
   readonly command: string;
@@ -147,6 +151,14 @@ const WriteFileSchema: v.GenericSchema<unknown, WriteFileArguments> = v.strictOb
  * @remarks
  * `timeoutMs` is a positive whole number of milliseconds. pi-durable may already have rounded a
  * fraction; the call is hashed over the whole number, which is what runs.
+ */
+/**
+ * `bash`'s schema: the model's arguments, parsed, without the envelope the agent adds.
+ *
+ * @remarks
+ * `timeoutMs` alone: pi-durable's bash takes `timeout` in seconds, but that is the agent's boundary to
+ * convert, not a second name for the model to write. A call that writes `timeout` is refused here as
+ * an unknown key (`INVALID_ARGUMENTS`), before anything is hashed or run.
  */
 const BashSchema: v.GenericSchema<unknown, BashInput> = v.strictObject({
   command: v.pipe(v.string(), v.minLength(1)),
@@ -684,6 +696,19 @@ export interface CallRecord {
   readonly sinks: CallSinks;
 }
 
+/**
+ * The fields of one audit row before its event and its decision.
+ *
+ * @remarks
+ * The contract's `AuditEventBase` requires `callHash` and `argsHash`; a refused call has neither,
+ * because it never became a call the contract can name (`argsHash` hashes arguments it does not
+ * have). This row leaves them out for a refusal and adds them for a call that was admitted.
+ */
+type AuditRow = Omit<AuditEventBase, "callHash" | "argsHash"> & {
+  readonly callHash?: string | undefined;
+  readonly argsHash?: string | undefined;
+};
+
 /** What one call is checked against: its tool, the call, where it runs, and where it is recorded. */
 export interface ToolCallSpec {
   readonly identity: ToolIdentity;
@@ -823,9 +848,8 @@ export async function admitCall(
   if (refusal === null && args !== undefined && call !== undefined) {
     return { ok: true, admitted: { call, args, decision } };
   }
-  // The refusal is the call's result, written here with its own code: the harness may settle a refused
-  // call with its own error, and this row is the contract's answer either way.
-  await appendEvent(record, call, decision, "tool.result", { ok: false, durationMs: 0 });
+  // The refusal's `tool.result` is written by `afterTool`, which is where every call's result is
+  // recorded: one `tool.call` and one `tool.result` per call, whichever way it settled.
   const rejected: Admission = {
     ok: false,
     refusal: refusal ?? refusalOf(phase0Deny("unsupported", "the call has no canonical form")),
@@ -932,7 +956,9 @@ export async function appendEvent(
     manifestHash: identity.manifestHash,
   };
   if (event === "tool.call") {
-    sinks.onEvent?.({ event, at, tool: record.name, ...shared, decision });
+    // The same reading as the audit: a `tool.call` says what is about to run; the decision is known
+    // once it settled, so only `tool.result` carries it.
+    sinks.onEvent?.({ event, at, tool: record.name, ...shared });
   } else {
     sinks.onEvent?.({
       event,
@@ -947,28 +973,72 @@ export async function appendEvent(
   }
   const { audit, auditIdentity } = sinks;
   if (audit === undefined || auditIdentity === undefined) return;
-  const base: AuditEventBase = {
+  // A refused call is not a call the contract can name: it has no `argsHash` or `callHash`, and "" is
+  // not a hash (`AuditEventSchema` wants 64 hex). The row carries the decision and its code instead;
+  // `docs/capability.md` §3 is proposed to say the hashes are absent for a refused call (0220).
+  const base: AuditRow = {
     v: 1,
     eventId: auditIdentity.eventId(),
     at,
     workspaceId: auditIdentity.workspaceId,
     sessionId: auditIdentity.sessionId,
     callId: record.callId,
-    // A call whose arguments have no canonical form has no hash; "" says so, as prevHash: null says
-    // an event is unchained. Its decision names unsupported.
-    callHash: shared.callHash ?? "",
-    argsHash: shared.argsHash ?? "",
     toolId: shared.toolId,
     toolVersion: shared.toolVersion,
     manifestHash: shared.manifestHash,
     prevHash: null,
     hash: "",
   };
+  const row: AuditRow =
+    shared.callHash === undefined || shared.argsHash === undefined
+      ? base
+      : { ...base, callHash: shared.callHash, argsHash: shared.argsHash };
   // The contract puts the decision on `tool.result` only (`AuditEvent`): a `tool.call` says what was
   // about to run, and the decision is judged once the run is over.
-  await audit(
+  const eventRow: AuditEvent =
     event === "tool.call"
-      ? { ...base, event }
-      : { ...base, event, decision, durationMs: outcome.durationMs },
-  );
+      ? toAuditEvent(row, "tool.call")
+      : toAuditEvent(row, "tool.result", decision, outcome);
+  await audit(eventRow);
+}
+
+/**
+ * A row as one of the contract's audit events.
+ *
+ * @param row - The fields this module wrote for one step of a call.
+ * @param event - Which step it is.
+ * @param decision - The decision, for a `tool.result`.
+ * @param outcome - The duration, for a `tool.result`.
+ * @returns The event the audit sink receives.
+ *
+ * @remarks
+ * SAFETY: the row carries every field `AuditEventBase` has. When the call had a hash, the hash members
+ * are on the row too; a refused call's row leaves them out, which the contract's type does not allow
+ * yet (the 0220 proposal in this lane's Result). The object is exactly what this function builds.
+ */
+function toAuditEvent(row: AuditRow, event: "tool.call"): ToolCallAuditEvent;
+function toAuditEvent(
+  row: AuditRow,
+  event: "tool.result",
+  decision: PolicyDecision,
+  outcome: RecordedOutcome,
+): ToolResultAuditEvent;
+function toAuditEvent(
+  row: AuditRow,
+  event: "tool.call" | "tool.result",
+  decision?: PolicyDecision,
+  outcome?: RecordedOutcome,
+): AuditEvent {
+  if (event === "tool.call") {
+    // SAFETY: the row's fields are `AuditEventBase`'s, and only the two hash members may be absent (a
+    // refused call's row); the contract's type requires them, which the 0220 proposal changes.
+    return { ...row, event } as ToolCallAuditEvent;
+  }
+  // SAFETY: the same row, plus the decision and the duration `ToolResultAuditEvent` adds.
+  return {
+    ...row,
+    event,
+    decision: decision ?? phase0Deny("unsupported", "the call was not decided"),
+    durationMs: outcome?.durationMs ?? 0,
+  } as ToolResultAuditEvent;
 }

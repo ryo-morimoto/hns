@@ -135,7 +135,8 @@ function sinksOf(options: WorkspaceToolsOptions): CallSinks {
 
 /** What one call's admission left for its result. */
 interface Admitted {
-  readonly call: CallIdentity;
+  /** The call's identity; absent for one `beforeTool` refused (it never became a hashed call). */
+  readonly call: CallIdentity | undefined;
   readonly decision: PolicyDecision;
   readonly startedAt: number;
 }
@@ -178,8 +179,9 @@ interface ToolHookOptions {
  *   vocabulary, not the model's.
  * - **invalid arguments** (pi-durable's own validation, before any hook): nothing ran, so only the
  *   harness's result is recorded after it settles.
- * - **an audit sink that rejects**: the rejection propagates out of the hook, which stops the call
- *   (fail closed) — nothing runs.
+ * - **a `tool.call` that cannot be written**: `beforeTool` throws, so nothing runs (fail closed).
+ *   **a `tool.result` that cannot be written**: `afterTool` replaces the result with a failure (B1):
+ *   pi-durable keeps the tool's result when a hook throws, so the failure has to be the result itself.
  */
 function toolHooks(options: ToolHookOptions): ToolHooks {
   const { identityOf, sinks, env, memory } = options;
@@ -205,10 +207,15 @@ function toolHooks(options: ToolHookOptions): ToolHooks {
       const model = modelArguments(identity.definition.toolId, call.arguments);
       const admission = await admitCall(spec, model);
       if (!admission.ok) {
-        // `admitCall` recorded both rows, with the denial's own code. The call does not run: throwing
-        // here settles it with the harness's own error, whose text is the refusal in words (A: the
-        // model's contract stays the harness's; the code is the audit's). `afterTool` records nothing.
-        throw new Error(refusalWording(admission.decision));
+        // The call does not run, and its refusal is the call's result: `afterTool` writes the
+        // `tool.result` from the entry remembered here, so its decision (the denial's own code) is the
+        // result's. Blocking gives the model the harness's own refusal, in words.
+        memory.set(call.id, {
+          call: undefined,
+          decision: admission.decision,
+          startedAt: Date.now(),
+        });
+        return { block: refusalWording(admission.decision) };
       }
       memory.set(call.id, {
         call: admission.admitted.call,
@@ -224,28 +231,51 @@ function toolHooks(options: ToolHookOptions): ToolHooks {
       const record = callRecordOf(call.id, identity);
       const known = memory.get(call.id);
       memory.delete(call.id);
-      if (known === undefined) {
+      const decision =
+        known?.decision ??
         // pi-durable refused the arguments before `beforeTool`: no `tool.call` names the call, and its
-        // result is still recorded, under the contract's code for an argument it cannot parse.
-        await appendEvent(
-          record,
-          undefined,
-          phase0Deny(INVALID_ARGUMENTS, "the arguments were refused before the tool ran"),
-          "tool.result",
-          {
-            ok: succeeded(result),
-            durationMs: 0,
-          },
-        );
+        // result is still recorded. (Not `tool_disabled`: that means the tool is off, not that the
+        // arguments were not a call.)
+        phase0Deny(INVALID_ARGUMENTS, "the arguments were refused before the tool ran");
+      const durationMs = known === undefined ? 0 : Date.now() - known.startedAt;
+      try {
+        await appendEvent(record, known?.call, decision, "tool.result", {
+          ok: succeeded(result),
+          durationMs,
+        });
         return undefined;
+      } catch (caught) {
+        // A caught value is unknown by definition; the message is the one thing worth reading.
+        const error = caught instanceof Error ? caught : new Error(String(caught));
+        // pi-durable turns a hook's throw into an `extension_error` and keeps the tool's own result, so
+        // a `tool.result` that could not be recorded is delivered as a failure result instead: the
+        // model does not read an output whose row is missing (fail closed, `docs/capability.md` §8).
+        const failed = failureReply({
+          ok: false,
+          status: "failed",
+          code: "audit_unavailable",
+          message: "the result of this call could not be recorded, so it is not returned",
+        });
+        // The hook API has no diagnostic channel of its own; the reason rides on the result it commits,
+        // where the UI reads `diagnostics` and the model reads the message.
+        return {
+          ...failed,
+          diagnostics: [
+            {
+              severity: "error" as const,
+              message: "the tool result could not be recorded: " + errorMessage(error),
+              code: "audit_unavailable",
+            },
+          ],
+        };
       }
-      await appendEvent(record, known.call, known.decision, "tool.result", {
-        ok: succeeded(result),
-        durationMs: Date.now() - known.startedAt,
-      });
-      return undefined;
     },
   };
+}
+
+/** A caught value's message, without its stack. */
+function errorMessage(error: Error): string {
+  return error.message;
 }
 
 /**
@@ -302,11 +332,10 @@ function isReadFileArguments(args: ModelArguments): args is ReadFileArguments {
  * `command` and whole `timeoutMs`.
  *
  * @remarks
- * pi-durable validates against the registration's JSON Schema with coercion, and its bash schema is
- * open, so what the hook sees is the model's own `timeoutMs` beside the `timeout` (seconds) it
- * coerced from it — an omitted one arrives as `Infinity`. This reads the model's name first and the
- * seconds only as a fallback, and rounds to whole milliseconds: the call is hashed over the timeout it
- * runs with, never a fraction, because the contract's canonical JSON holds safe integers only.
+ * pi-durable validates against the registration's JSON Schema with coercion, so what the hook sees is
+ * the model's `timeoutMs` (an omitted one may arrive as `Infinity`). That value is dropped; the call
+ * is hashed over the whole milliseconds the model wrote, never a fraction, because the contract's
+ * canonical JSON holds safe integers only.
  */
 function modelArguments(toolId: ToolId, args: ToolHookArguments): ModelArguments {
   return toolId === "bash" ? bashModelArguments(args) : fileModelArguments(args);
@@ -328,14 +357,27 @@ function fileModelArguments(args: ToolHookArguments): ModelArguments {
   return parsed.output;
 }
 
-/** The model's own bash arguments: `command`, and whole milliseconds from `timeoutMs` or `timeout`. */
+/**
+ * The model's own bash arguments: `command` and `timeoutMs` (whole milliseconds).
+ *
+ * @remarks
+ * A `timeout` (seconds) is not this tool's argument. When one arrives it is passed through as written
+ * so the tool's strict schema refuses it (a second name for the same value would let a fraction in
+ * under a vocabulary the model was never offered), and a refusal is a value, not a throw.
+ */
 function bashModelArguments(args: ToolHookArguments): ModelArguments {
   const parsed = v.safeParse(BashHarnessSchema, args);
   if (!parsed.success) throw new Error("a bash call arrived without its command");
-  const { command, timeoutMs, timeout } = parsed.output;
-  if (timeoutMs !== undefined) return { command, timeoutMs: Math.round(timeoutMs) };
-  if (timeout !== undefined) return { command, timeoutMs: Math.round(timeout * 1000) };
-  return { command };
+  const whole: ModelArguments = { command: parsed.output.command };
+  // A `timeout` (seconds) is not this tool's argument: it is passed through so the tool's strictObject
+  // refuses it, as a value. Every other key pi-durable coerced into its own schema is not the model's.
+  if ("timeout" in args) {
+    // SAFETY: the extra member is not a `BashInput`; it is carried for `admitCall` to refuse as an
+    // unknown key, which is the value path the model reads. `ModelArguments` names the admitted shapes.
+    return { ...whole, timeout: args["timeout"] } as ModelArguments & { readonly timeout: unknown };
+  }
+  if (parsed.output.timeoutMs === undefined) return whole;
+  return { command: parsed.output.command, timeoutMs: Math.round(parsed.output.timeoutMs) };
 }
 
 /** A filesystem call as pi-durable validated it: the tool's three string members and no others. */
@@ -345,11 +387,10 @@ const FileArgumentsSchema = v.object({
   expectedVersion: v.optional(v.string()),
 });
 
-/** A bash call as pi-durable validated it: its command, and either form of its timeout. */
+/** A bash call as pi-durable validated it: its command and the model's whole milliseconds. */
 const BashHarnessSchema = v.object({
   command: v.string(),
   timeoutMs: v.optional(v.number()),
-  timeout: v.optional(v.number()),
 });
 
 /**
@@ -368,7 +409,7 @@ function refusalWording(decision: PolicyDecision): string {
   if (decision.outcome !== "deny") return "the call was not allowed";
   const wording: Record<DenialCode, string> = {
     policy_denied: "the policy does not allow this call",
-    tool_disabled: "the arguments are not the shape the tool declares",
+    tool_disabled: "the tool is not enabled",
     scope_exceeded: "the call is outside the granted scope",
     manifest_mismatch: "the tool's contract does not match the one the call named",
     grant_invalid: "the grant is not valid",
@@ -381,7 +422,7 @@ function refusalWording(decision: PolicyDecision): string {
     command_not_allowed: "the command is not inside the exec envelope",
     egress_denied: "network egress is not granted",
     approval_stale: "the approval is for an older revision",
-    unsupported: "the arguments cannot be canonicalized as a call",
+    unsupported: "the arguments are not a call this tool declares",
   };
   return wording[decision.code];
 }
@@ -397,13 +438,13 @@ function toolId(name: string): ToolId {
 }
 
 /**
- * The schema pi-durable validates bash's calls with: the model's arguments, plus what the agent adds.
+ * The schema pi-durable validates bash's calls with.
  *
  * @remarks
- * The model writes `command` and `timeoutMs` (milliseconds, a whole number). The agent's `beforeTool`
- * hands `execute` the same call with `timeout` in seconds for pi-durable's bash, so both names are
- * declared here — `timeoutMs` stays the call's own value and `timeout` is what the tool runs with.
- * The model-facing form (`bashParameters`) declares only the two the model writes.
+ * The same vocabulary as the manifest's descriptor: `command` and `timeoutMs` (a whole number of
+ * milliseconds), and nothing else. pi-durable's own bash takes `timeout` in seconds; the agent
+ * converts the admitted `timeoutMs` as the arguments are handed to it (`harnessArguments`), so the
+ * model's value is never re-read from a second name and a fraction is never rounded into a call.
  */
 function bashHarnessParameters(): JsonObject {
   return {
@@ -416,7 +457,6 @@ function bashHarnessParameters(): JsonObject {
         maximum: MAX_TIMEOUT_MS,
         description: "The longest wait in milliseconds; omit to wait as the sandbox allows",
       },
-      timeout: { type: "number", minimum: 0, description: "The same wait in seconds" },
     },
     required: ["command"],
     additionalProperties: false,

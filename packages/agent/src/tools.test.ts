@@ -211,7 +211,7 @@ describe("arguments (C3)", () => {
       // was written, and only the settled result is recorded (with the contract's closest code).
       expect(events.filter((event) => event.event === "tool.call")).toEqual([]);
       expect(audits.map((event) => event.event)).toEqual(["tool.result"]);
-      expect(decisionOf(audits)).toMatchObject({ outcome: "deny", code: "tool_disabled" });
+      expect(decisionOf(audits)).toMatchObject({ outcome: "deny", code: "unsupported" });
     });
   });
 
@@ -245,7 +245,8 @@ describe("paths (C4)", () => {
         expect(outcome.result).toContain("inside the workspace root");
         expect(outcome.result).not.toContain(path);
         expect(decisionOf(audits)).toMatchObject({ outcome: "deny", code: "path_outside_root" });
-        expect(lastEvent(audits, "tool.call")?.argsHash).toBe("");
+        // A refused call never became one the contract can name: the row carries no hash at all.
+        expect(lastEvent(audits, "tool.call")?.argsHash).toBeUndefined();
       });
     });
   }
@@ -310,8 +311,9 @@ describe("audit (C6)", () => {
         callId: audits[0]?.callId,
         callHash: audits[0]?.callHash,
         manifestHash: audits[0]?.manifestHash,
-        decision: { outcome: "allow" },
       });
+      // The decision is judged once the call settled, so only `tool.result` carries it (N6).
+      expect(called !== undefined && "decision" in called).toBe(false);
       if (result?.event !== "tool.result") throw new Error("no tool.result observation");
       expect(result.durationMs).toBeTypeOf("number");
       expect(result.ok).toBe(true);
@@ -322,9 +324,30 @@ describe("audit (C6)", () => {
   test("a refusal records a call and a result with the denial", async () => {
     await withTools(async ({ call, audits }) => {
       await call("read_file", { path: "../x" });
-      expect(audits.map((event) => event.event).slice(0, 2)).toEqual(["tool.call", "tool.result"]);
+      expect(audits.map((event) => event.event)).toEqual(["tool.call", "tool.result"]);
       expect(decisionOf(audits)).toMatchObject({ outcome: "deny", code: "path_outside_root" });
     });
+  });
+});
+
+describe("a result whose row cannot be written (B1)", () => {
+  // Catches: pi-durable keeping the tool's own result when a hook throws, so an unrecorded output
+  // still reached the model.
+  test("a rejected tool.result audit replaces the result, and its output is not returned", async () => {
+    await withTools(
+      async ({ call }) => {
+        const outcome = await call("read_file", { path: "a.txt" });
+        expect(outcome.isError).toBe(true);
+        expect(outcome.result).toContain("could not be recorded");
+        // The file's content is what the tool had produced; it must not be what the model reads.
+        expect(outcome.result).not.toContain("v1");
+      },
+      {
+        audit: async (event) => {
+          if (event.event === "tool.result") throw new Error("audit is down");
+        },
+      },
+    );
   });
 });
 
@@ -394,6 +417,39 @@ describe("bash's arguments as the call names them", () => {
         expect(outcome.isError).toBe(false);
         expect(lastEvent(audits, "tool.call")?.toolId).toBe("bash");
         expect(lastEvent(audits, "tool.call")?.argsHash).toMatch(/^[0-9a-f]{64}$/u);
+      },
+      { kind: "sandboxed" },
+    );
+  }, 30_000);
+});
+
+describe("bash's timeout vocabulary (B3)", () => {
+  // Catches: a fractional timeout accepted under a second name and rounded into the call's hash.
+  test("a seconds timeout is refused on the real path, and nothing runs", async () => {
+    await withTools(
+      async ({ call, audits }) => {
+        const outcome = await call("bash", { command: "true", timeout: 0.01 });
+        expect(outcome.isError).toBe(true);
+        // The harness's own schema (the manifest's vocabulary) refuses it before any hook: nothing ran,
+        // and only the settled result is recorded.
+        expect(decisionOf(audits)).toMatchObject({ outcome: "deny", code: "unsupported" });
+        expect(audits.map((event) => event.event)).toEqual(["tool.result"]);
+      },
+      { kind: "sandboxed" },
+    );
+  }, 30_000);
+
+  // Catches: two spellings of one timeout hashing to one call.
+  test("0.0123 seconds and 12 milliseconds are different calls", async () => {
+    await withTools(
+      async ({ call, audits }) => {
+        await call("bash", { command: "true", timeout: 0.0123 });
+        const refused = lastEvent(audits, "tool.call");
+        await call("bash", { command: "true", timeoutMs: 12 });
+        const wholeCall = lastEvent(audits, "tool.call");
+        // The seconds form is not a call at all: it is refused, so it has no hash to confuse with 12ms.
+        expect(refused?.argsHash).toBeUndefined();
+        expect(wholeCall?.argsHash).toMatch(/^[0-9a-f]{64}$/u);
       },
       { kind: "sandboxed" },
     );
