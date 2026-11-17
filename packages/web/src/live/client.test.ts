@@ -1,3 +1,4 @@
+import type { LiveFrame } from "@hns/core";
 import { expect, test } from "vitest";
 import { createLiveClient, LIVE_RECONNECT_DELAYS_MS } from "./client.ts";
 import { snapshotFrame, socketFactory } from "../../test/live/support.ts";
@@ -106,6 +107,22 @@ test("retry clears the attempt count and opens a fresh socket", () => {
   client.retry();
   expect(client.state.attempt).toBe(0);
   expect(sockets).toHaveLength(2);
+});
+
+// Catches: a screen's frame handler never seeing a frame, or seeing a malformed one.
+test("the frame handler sees every parsed frame and nothing malformed", () => {
+  const frames: LiveFrame[] = [];
+  const { factory, sockets } = socketFactory();
+  createLiveClient({
+    conversationId: "2",
+    socket: factory,
+    onFrame: (frame) => frames.push(frame),
+  });
+  sockets[0]?.open();
+  sockets[0]?.message({ type: "mystery" });
+  expect(frames).toHaveLength(0);
+  sockets[0]?.message(snapshotFrame("1"));
+  expect(frames.map((frame) => frame.type)).toStrictEqual(["snapshot"]);
 });
 
 // Catches: a stale close from the replaced socket scheduling a second reconnect.

@@ -1,6 +1,8 @@
-import type { ReactElement } from "react";
+import { useEffect, useRef, type ReactElement } from "react";
+import { useRelayEnvironment } from "react-relay";
 import { explainConnection, type LiveConversationState } from "../live/state.ts";
 import type { LiveSocketFactory } from "../live/client.ts";
+import { applyLiveFrameToStore } from "../live/store.ts";
 import { useLiveConnection } from "../live/useLiveConnection.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
 
@@ -19,25 +21,43 @@ function LiveConnectionView({ state }: { readonly state: LiveConversationState }
  * The live status for one conversation.
  *
  * @param conversationId - The conversation to follow.
+ * @param projectId - The project that owns the conversation; the edge addresses its Session object.
  * @param socket - Test seam; production uses the browser's WebSocket.
+ * @param onReconnect - Called when a dropped connection is healthy again.
  *
  * @remarks
  * This is the component the conversation screen mounts. It deliberately owns the socket: a
- * workspace page does not pay for a subscription it never shows.
+ * workspace page does not pay for a subscription it never shows. The frames also patch the
+ * Relay store (the conversation's title in the sidebar's list); a reconnect reports upward so
+ * the open screen can refetch what the socket does not carry, such as conversations added
+ * while the connection was down.
  */
 export function LiveConnection({
   conversationId,
   projectId,
   socket,
+  onReconnect,
 }: {
   readonly conversationId: string;
-  /** The project that owns the conversation; the edge addresses its Session object. */
   readonly projectId?: string | undefined;
   readonly socket?: LiveSocketFactory | undefined;
+  readonly onReconnect?: (() => void) | undefined;
 }): ReactElement {
-  const state = useLiveConnection(
-    conversationId,
-    projectId === undefined ? { socket } : { projectId, socket },
-  );
+  const environment = useRelayEnvironment();
+  const state = useLiveConnection(conversationId, {
+    projectId,
+    socket,
+    onFrame: (frame) => {
+      applyLiveFrameToStore(environment, frame);
+    },
+  });
+  const previous = useRef(state.status);
+
+  useEffect(() => {
+    const reconnected = previous.current === "reconnecting" && state.status === "online";
+    previous.current = state.status;
+    if (reconnected) onReconnect?.();
+  }, [state.status, onReconnect]);
+
   return <LiveConnectionView state={state} />;
 }

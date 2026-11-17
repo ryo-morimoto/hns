@@ -1,9 +1,9 @@
 import { Drawer } from "@base-ui/react/drawer";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
 import type { ConversationLink, ProjectLink, TaskLink } from "./viewModel.ts";
 import { toGlobalId } from "@hns/core/graphql";
-import { useFragment, useLazyLoadQuery } from "react-relay";
+import { useFragment, useLazyLoadQuery, useRelayEnvironment } from "react-relay";
 import type { ShellProjectsQuery as ShellProjectsQueryType } from "../__generated__/ShellProjectsQuery.graphql";
 import type { ShellWorkspaceQuery as ShellWorkspaceQueryType } from "../__generated__/ShellWorkspaceQuery.graphql";
 import type { SidebarConversations$key } from "../__generated__/SidebarConversations.graphql";
@@ -15,6 +15,7 @@ import { formatHash } from "../routes/route.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
 import type { LiveSocketFactory } from "../live/client.ts";
+import { DEFAULT_FETCH_POLICY, subscribesToLive, useScreenRead } from "./freshness.ts";
 import { LiveConnection } from "./LiveConnection.tsx";
 import { ProjectWorkspaceProvider, type ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { QueryBoundary } from "./QueryBoundary.tsx";
@@ -69,14 +70,23 @@ export function Shell(props: ShellProps): ReactElement {
 /** Run the shell's two reads and hand the fragment refs to the frame. */
 function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellProps): ReactElement {
   const route = useRoute();
+  const environment = useRelayEnvironment();
   const projectKey = route.projectId === null ? null : projectIdFrom(route.projectId);
   const hasProject = projectKey !== null;
+  const projectsRead = useScreenRead(environment, "projects");
+  const workspaceRead = useScreenRead(environment, "workspace");
+  // A reconnect asks the open screen for a fresh list; the store stays on screen meanwhile.
+  const [reloads, setReloads] = useState(0);
+  const onReconnect = useCallback(() => {
+    setReloads((value) => value + 1);
+  }, []);
 
   const projects = useLazyLoadQuery<ShellProjectsQueryType>(
     ShellProjectsQuery,
     {},
     {
-      fetchPolicy: "store-or-network",
+      fetchPolicy: projectsRead.fetchPolicy,
+      fetchKey: projectsRead.fetchKey,
     },
   );
   const workspace = useLazyLoadQuery<ShellWorkspaceQueryType>(
@@ -86,7 +96,12 @@ function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellPro
       projectId: toGlobalId("Project", projectKey ?? "default"),
       hasProject,
     },
-    { fetchPolicy: "store-or-network" },
+    {
+      // Without a selected project the query selects nothing; asking the network for it would
+      // spend a request on an empty answer (0179), so the default policy answers from the store.
+      fetchPolicy: hasProject ? workspaceRead.fetchPolicy : DEFAULT_FETCH_POLICY,
+      fetchKey: workspaceRead.fetchKey + ":" + String(reloads),
+    },
   );
 
   const projectsRef = projects.projects.__typename === "ProjectList" ? projects.projects : null;
@@ -110,6 +125,7 @@ function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellPro
       tasksRef={tasksRef}
       tasksFailed={hasProject && tasksRef === null}
       liveSocket={liveSocket}
+      onReconnect={onReconnect}
     />
   );
 }
@@ -121,6 +137,8 @@ interface ShellFrameProps extends ShellProps {
   readonly conversationsFailed: boolean;
   readonly tasksRef: SidebarTasks$key | null;
   readonly tasksFailed: boolean;
+  /** Refetch the open screen after the live connection recovers. */
+  readonly onReconnect: () => void;
 }
 
 /** The presentational shell: top bar, sidebar, main region, and the drawer. */
@@ -135,6 +153,7 @@ function ShellFrame({
   tasksRef,
   tasksFailed,
   liveSocket,
+  onReconnect,
 }: ShellFrameProps): ReactElement {
   const route = useRoute();
   const mobile = useMediaQuery("(max-width: 768px)");
@@ -247,6 +266,7 @@ function ShellFrame({
               conversationId={route.conversationId}
               title={conversationTitle}
               liveSocket={liveSocket}
+              onReconnect={onReconnect}
             />
           ) : (
             <WorkspaceView project={project} conversations={conversations} tasks={tasks} />
@@ -335,6 +355,7 @@ interface ConversationViewProps {
   readonly conversationId: string;
   readonly title: string | undefined;
   readonly liveSocket: LiveSocketFactory | undefined;
+  readonly onReconnect: () => void;
 }
 
 function ConversationView({
@@ -342,6 +363,7 @@ function ConversationView({
   conversationId,
   title,
   liveSocket,
+  onReconnect,
 }: ConversationViewProps): ReactElement {
   return (
     <section className="hns-view" aria-labelledby="conversation-title">
@@ -349,11 +371,12 @@ function ConversationView({
       <p className="hns-view__meta">
         {project.name} · {conversationId}
       </p>
-      {liveSocket === undefined ? null : (
+      {liveSocket === undefined || !subscribesToLive("conversation") ? null : (
         <LiveConnection
           conversationId={conversationId}
           projectId={project.id}
           socket={liveSocket}
+          onReconnect={onReconnect}
         />
       )}
       <a className="hns-view__link" href={formatHash({ kind: "workspace", projectId: project.id })}>

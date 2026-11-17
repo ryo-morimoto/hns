@@ -1,4 +1,4 @@
-import { EMPTY_LIVE_CURSOR, parseLiveFrame } from "@hns/core";
+import { EMPTY_LIVE_CURSOR, parseLiveFrame, type LiveFrame } from "@hns/core";
 import { applyLiveFrame, initialLiveState, type LiveConversationState } from "./state.ts";
 
 /** What the server sends on a text frame; the live protocol has no binary frame. */
@@ -53,6 +53,14 @@ export interface LiveClientOptions {
   readonly path?: string | undefined;
   /** Schedules a reconnect; tests inject a deterministic queue. */
   readonly schedule?: LiveReconnectSchedule | undefined;
+  /**
+   * Called with every parsed frame before the state publishes.
+   *
+   * @remarks
+   * The conversation screen writes the frame's list fields into the Relay store here, so the
+   * sidebar sees a renamed conversation without a read. Dispatch is at most once per frame.
+   */
+  readonly onFrame?: ((frame: LiveFrame) => void) | undefined;
 }
 
 /** Build the browser socket adapter, so the client can keep a small structural socket type. */
@@ -157,11 +165,15 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
         publish({ ...state, error: "ライブ更新の形式が不正です。" });
         return;
       }
+      let frame: LiveFrame;
       try {
-        publish(applyLiveFrame(state, parseLiveFrame(value)));
+        frame = parseLiveFrame(value);
       } catch {
         publish({ ...state, error: "ライブ更新の形式が不正です。" });
+        return;
       }
+      options.onFrame?.(frame);
+      publish(applyLiveFrame(state, frame));
     };
     nextSocket.onclose = () => {
       if (socket !== nextSocket) return;

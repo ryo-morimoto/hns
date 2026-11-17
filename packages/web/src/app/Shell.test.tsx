@@ -3,18 +3,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, afterEach, beforeEach, test } from "vitest";
+import { expect, afterEach, beforeEach, test, vi } from "vitest";
 import { RelayEnvironmentProvider } from "react-relay";
-import { createTestEnvironment } from "../../test/support/relay.ts";
+import { createTestEnvironment, type GraphQLCall } from "../../test/support/relay.ts";
 import type { Environment } from "relay-runtime";
 import { workspaceFixture } from "../../test/support/workspaceFixtures.ts";
 import { toGlobalId } from "@hns/core/graphql";
 import { useProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { socketFactory } from "../../test/live/support.ts";
 import type { LiveSocketFactory } from "../live/client.ts";
+import type { LiveSnapshotFrame } from "@hns/core";
 import { fixtureSummarySource } from "./fixtureSummaries.ts";
+import { SLOW_SCREEN_TTL_MS } from "./freshness.ts";
 import { Shell } from "./Shell.tsx";
 import type { WorkspaceSummary } from "./workspaceSummary.ts";
+
+Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const originalMatchMedia = window.matchMedia;
 
@@ -32,12 +36,16 @@ function setMobile(mobile: boolean): void {
 }
 
 /** Render the shell over an environment the test owns, so requests can be counted. */
-function renderShellWith(environment: Environment, panel?: ReactNode) {
+function renderShellWith(
+  environment: Environment,
+  panel?: ReactNode,
+  liveSocket?: LiveSocketFactory,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <RelayEnvironmentProvider environment={environment}>
       <QueryClientProvider client={queryClient}>
-        <Shell panel={panel} />
+        <Shell panel={panel} liveSocket={liveSocket} />
       </QueryClientProvider>
     </RelayEnvironmentProvider>,
   );
@@ -77,9 +85,13 @@ function renderShell(
   );
 }
 
-// Catches: the sidebar reading something else than its own fragments, or a second open paying
-// for the same read again.
-test("the shell reads through Relay and a second open is answered from the store", async () => {
+function countOf(calls: readonly GraphQLCall[], operation: string): number {
+  return calls.filter((call) => call.operation === operation).length;
+}
+
+// Catches: the sidebar reading something else than its own fragments, or a revisit paying for
+// the project list that the TTL window is supposed to answer from the store.
+test("the shell reads through Relay and a revisit inside the TTL skips the project list", async () => {
   const { environment, calls } = createTestEnvironment(workspaceFixture);
   const first = renderShellWith(environment);
   expect(await screen.findByText("デザインシステムのレビュー")).toBeTruthy();
@@ -87,13 +99,101 @@ test("the shell reads through Relay and a second open is answered from the store
     "ShellProjectsQuery",
     "ShellWorkspaceQuery",
   ]);
-  const workspaceCalls = calls.filter((call) => call.operation === "ShellWorkspaceQuery");
-  expect(workspaceCalls).toHaveLength(1);
 
   first.unmount();
   renderShellWith(environment);
   expect(await screen.findByText("デザインシステムのレビュー")).toBeTruthy();
-  expect(calls).toHaveLength(2);
+  await waitFor(() => {
+    expect(countOf(calls, "ShellWorkspaceQuery")).toBe(2);
+  });
+  expect(countOf(calls, "ShellProjectsQuery")).toBe(1);
+});
+
+// Catches: a conversation list answered from the store and shown stale after a reconnect, or a
+// project list that revalidates when the user comes back to the tab inside its window.
+test("a TTL screen revalidates on focus only after its window", async () => {
+  const { environment, calls } = createTestEnvironment(workspaceFixture);
+  renderShellWith(environment);
+  await screen.findByText("デザインシステムのレビュー");
+  expect(countOf(calls, "ShellProjectsQuery")).toBe(1);
+
+  act(() => {
+    window.dispatchEvent(new Event("focus"));
+  });
+  expect(countOf(calls, "ShellProjectsQuery")).toBe(1);
+  expect(countOf(calls, "ShellWorkspaceQuery")).toBe(1);
+
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + SLOW_SCREEN_TTL_MS);
+  try {
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+  } finally {
+    clock.mockRestore();
+  }
+  await waitFor(() => {
+    expect(countOf(calls, "ShellProjectsQuery")).toBe(2);
+  });
+});
+
+// Catches: a live frame updating only the live panel, leaving the sidebar's title on the value
+// the last read returned.
+test("a live snapshot patches the conversation title without a read", async () => {
+  window.location.hash = "#/p/project-hns/c/conversation-intent";
+  const { environment, calls } = createTestEnvironment(workspaceFixture);
+  const { factory, sockets } = socketFactory();
+  renderShellWith(environment, undefined, factory);
+  expect(await screen.findByRole("heading", { name: "Web の土台" })).toBeTruthy();
+  await waitFor(() => {
+    expect(countOf(calls, "ShellWorkspaceQuery")).toBe(1);
+  });
+
+  const frame: LiveSnapshotFrame = {
+    type: "snapshot",
+    protocol: 1,
+    cursor: "1",
+    conversationId: "conversation-intent",
+    title: "名前が変わった会話",
+    entries: [],
+    draft: "",
+  };
+  act(() => {
+    sockets[0]?.open();
+    sockets[0]?.message(frame);
+  });
+
+  expect(await screen.findByRole("heading", { name: "名前が変わった会話" })).toBeTruthy();
+  expect(
+    screen.getAllByRole("link").some((link) => link.textContent === "名前が変わった会話"),
+  ).toBe(true);
+  expect(countOf(calls, "ShellWorkspaceQuery")).toBe(1);
+});
+
+// Catches: a reconnect that heals the socket but leaves the lists as they were before the drop,
+// so conversations added while offline never appear.
+test("a reconnect refetches the open screen's lists", async () => {
+  window.location.hash = "#/p/project-hns/c/conversation-intent";
+  const { environment, calls } = createTestEnvironment(workspaceFixture);
+  const { factory, sockets } = socketFactory();
+  renderShellWith(environment, undefined, factory);
+  expect(await screen.findByRole("heading", { name: "Web の土台" })).toBeTruthy();
+  act(() => {
+    sockets[0]?.open();
+  });
+
+  act(() => {
+    sockets[0]?.drop();
+  });
+  await waitFor(() => {
+    expect(sockets).toHaveLength(2);
+  });
+  act(() => {
+    sockets[1]?.open();
+  });
+
+  await waitFor(() => {
+    expect(countOf(calls, "ShellWorkspaceQuery")).toBe(2);
+  });
 });
 
 beforeEach(() => {
@@ -322,7 +422,6 @@ test("mobile opens the drawer from the top bar", async () => {
 });
 // Catches: the conversation route never mounting the live status, so a disconnected user sees nothing.
 test("a conversation route shows the live status when a socket is provided", async () => {
-  Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
   window.location.hash = "#/p/project-hns/c/conversation-intent";
   const { factory, sockets } = socketFactory();
   renderShell(undefined, undefined, undefined, factory);
