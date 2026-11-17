@@ -1,6 +1,10 @@
+import type { ConversationId, EntryId, SubmissionId } from "@earendil-works/pi-durable";
+import type { AgentEvent } from "@hns/agent";
+import type { AgentSession } from "@hns/agent/session";
 import { expect, test } from "vitest";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { createObsStore } from "../obs/store.ts";
+import { ModelUnavailableError } from "./models.ts";
 import {
   CONVERSATION,
   entry,
@@ -13,6 +17,51 @@ import {
 import { Session } from "./session.ts";
 
 const PATH = "https://session/ws?conversationId=" + CONVERSATION.id;
+
+/** A settled answer for the routes that succeed. */
+function answer(): Awaited<ReturnType<AgentSession["send"]>> {
+  // SAFETY: pi-durable allocates these ids as positive integers and the RPC reads only the
+  // settlement fields; the brands are compile-time only.
+  const settlement = {
+    id: 7 as SubmissionId,
+    conversationId: 2 as ConversationId,
+    type: "input",
+    status: "done",
+    entry: 3 as EntryId,
+    answer: 4 as EntryId,
+  } as const;
+  return { settlement, text: "answered" };
+}
+
+/** An object state over real SQLite with the alarm methods the Session arms. */
+function objectState() {
+  const opened = openSqliteState();
+  const storage = {
+    ...opened.state.storage,
+    getAlarm: async () => null,
+    setAlarm: async () => undefined,
+    deleteAlarm: async () => undefined,
+  };
+  return {
+    state: {
+      storage,
+      blockConcurrencyWhile: opened.state.blockConcurrencyWhile,
+      abort: () => undefined,
+    },
+    storage,
+    close: () => {
+      opened.close();
+    },
+  };
+}
+
+function send(id: string): Request {
+  return new Request("https://session/rpc/conversations/" + id + "/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-request-id": "req-1" },
+    body: JSON.stringify({ text: "hi" }),
+  });
+}
 
 function upgrade(): Request {
   return new Request(PATH, { headers: { upgrade: "websocket" } });
@@ -142,6 +191,59 @@ test("the Session records the DO hop and the agent event under one request id", 
     );
     expect(read.status).toBe(200);
     expect(JSON.stringify(await read.json())).not.toContain("super-secret-answer");
+  } finally {
+    opened.close();
+  }
+});
+
+// Catches: a successful turn writing both the agent event and a duplicate do.rpc row.
+test("a successful turn keeps one agent row and no do.rpc", async () => {
+  const opened = objectState();
+  const fake = fakeSession();
+  let emit: ((event: AgentEvent) => void) | undefined;
+  fake.session.send = async (_id: string, _text: string, requestId?: string) => {
+    emit?.({
+      event: "agent.response",
+      at: "2026-11-17T12:00:00.000Z",
+      text: "answer",
+      requestId: requestId ?? "missing",
+      conversationId: CONVERSATION.id,
+    });
+    return answer();
+  };
+  const session = new Session(opened.state, {}, async (_state, _env, hooks) => {
+    emit = hooks.onEvent;
+    return fake.session;
+  });
+  try {
+    const response = await session.fetch(send(CONVERSATION.id));
+    expect(response.status).toBe(200);
+    const store = createObsStore(opened.storage, {
+      now: () => Date.parse("2026-11-17T12:00:01.000Z"),
+    });
+    expect(store.list({ requestId: "req-1" }).map((line) => line.event)).toStrictEqual([
+      "agent.response",
+    ]);
+  } finally {
+    opened.close();
+  }
+});
+
+// Catches: a refused turn disappearing from the trace because the turn RPC was always skipped.
+test("a refused turn still logs the DO hop", async () => {
+  const opened = objectState();
+  const fake = fakeSession();
+  fake.session.send = async () => {
+    throw new ModelUnavailableError("no model");
+  };
+  const session = new Session(opened.state, {}, async () => fake.session);
+  try {
+    const response = await session.fetch(send(CONVERSATION.id));
+    expect(response.status).toBe(503);
+    const store = createObsStore(opened.storage, {
+      now: () => Date.parse("2026-11-17T12:00:01.000Z"),
+    });
+    expect(store.list({ requestId: "req-1" }).map((line) => line.event)).toStrictEqual(["do.rpc"]);
   } finally {
     opened.close();
   }

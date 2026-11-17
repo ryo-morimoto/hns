@@ -101,6 +101,7 @@ export class Session {
   readonly #upgradeResponse: LiveUpgradeResponseFactory;
   readonly #ready: Promise<void>;
   readonly #live = new Map<LiveSocket, LiveEntry>();
+  readonly #agentRequestIds = new Set<string>();
   #cost: CostGate | undefined;
   #obs: ObsStore | undefined;
   #session: AgentSession | undefined;
@@ -166,7 +167,7 @@ export class Session {
           );
         },
         onEvent: (event) => {
-          this.#append(agentEntry(event));
+          this.#recordAgent(event);
         },
       });
       this.#session = session;
@@ -217,6 +218,7 @@ export class Session {
       );
     }
     let response: Response;
+    let turnRequestId: string | undefined;
     if (path === "/ws") {
       response = await this.#openLive(request, session);
     } else if (path === "/rpc/events" || path === "/rpc/metrics") {
@@ -226,18 +228,40 @@ export class Session {
           ? problem("unavailable", "The event log is not open.", path)
           : await handleObsRpc(request, obs);
     } else {
-      response = await handleSessionRpc(request, session, { cost: this.#cost });
+      response = await handleSessionRpc(request, session, {
+        cost: this.#cost,
+        onRequestId: (id) => {
+          turnRequestId = id;
+        },
+      });
     }
-    return this.#finished(request, response, started);
+    return this.#finished(request, response, started, turnRequestId);
+  }
+
+  /** Record one agent observation and remember its request for the turn's skip. */
+  #recordAgent(event: AgentEvent): void {
+    if (event.requestId !== undefined) this.#agentRequestIds.add(event.requestId);
+    this.#append(agentEntry(event));
   }
 
   /** Record one internal RPC's hop and return the answer unchanged. */
-  #finished(request: Request, response: Response, started: number): Response {
+  #finished(
+    request: Request,
+    response: Response,
+    started: number,
+    turnRequestId?: string,
+  ): Response {
     const path = new URL(request.url).pathname;
-    // A turn's DO hop is the agent event (same request id), not a second row. Only the
-    // turn-bearing messages RPC is skipped; reads and the internal APIs still get `do.rpc`.
-    if (path.startsWith("/rpc/conversations/") && path.endsWith("/messages")) return response;
     const requestId = request.headers.get(REQUEST_ID_HEADER) ?? "unattributed";
+    // A successful turn's DO hop is the agent event (same request id), so the row is not
+    // written twice. A refused turn wrote no agent event and still gets its `do.rpc` line,
+    // so a trace can see that the request reached the object and stopped there.
+    const turn = path.startsWith("/rpc/conversations/") && path.endsWith("/messages");
+    if (turn && response.status >= 200 && response.status < 300) {
+      if (turnRequestId !== undefined && this.#agentRequestIds.delete(turnRequestId)) {
+        return response;
+      }
+    }
     this.#append(doEntry(requestId, path, response.status, this.#now() - started, this.#now()));
     return response;
   }

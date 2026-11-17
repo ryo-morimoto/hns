@@ -31,6 +31,14 @@ type SessionRpcCode =
 export interface SessionRpcDependencies {
   /** The monthly cost gate; absent when the deployment binds no control database. */
   readonly cost?: CostGate | undefined;
+  /**
+   * The request id the turn actually used (body first, then the forwarded header).
+   *
+   * @remarks
+   * The Session uses it to match the agent event it just recorded, so a successful turn does
+   * not write a second `do.rpc` row. Called before the send; a refused turn still gets no skip.
+   */
+  readonly onRequestId?: ((requestId: string | undefined) => void) | undefined;
 }
 
 /**
@@ -260,6 +268,7 @@ export async function handleSessionRpc(
       // The edge forwards x-request-id on every RPC; a body id still wins for an internal caller.
       const headerId = request.headers.get(REQUEST_ID_HEADER);
       const requestId = parsed.output.requestId ?? headerId ?? undefined;
+      dependencies.onRequestId?.(requestId);
       const run = (): ReturnType<AgentSession["send"]> =>
         session.send(id, parsed.output.text, requestId);
       const turn =
