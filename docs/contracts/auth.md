@@ -21,6 +21,9 @@
 - **machine → Worker**: device 鍵（マシンの 0600、公開鍵は Machine レコード）。inbound の検証には使わない。
 - **machine の device 公開鍵の置き場**（0148）: `machines.public_key`（D1、32 バイトの BLOB）。秘密は machine の 0600。`GET /api/machines/keys` は control-plane の**公開鍵だけ**を返し、session を要求する（D059）。失効は `status = 'revoked'` で、registry が鍵を返さなくなる。
 
+## capability grant の発行を要求できるのは誰か（0224）
+
+`requestGrant`（Session DO の `POST /rpc/grants`）を呼べるのは、**session cookie を持つ人**だけである。Worker が session cookie を検証し、その subject を grant の `requestedBy` として object に渡し、object は body の `requestedBy` がこの subject（またはその subject の `agent:` 名前空間の agent）と一致すること、および Worker が session secret から導いたトークンを提示することを検査する。**project / machine の所有権の検査は未実装**なので、session を持つ人なら誰でも任意の project・任意の登録済み machine を名指しして grant を要求できる（machine の mutation と同じ状態）。grant は `requestedBy` と監査の行にこの subject で残る。所有権を認可に使うのは follow-up。
 
 ## 秘密
 

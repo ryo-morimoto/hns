@@ -23,6 +23,32 @@ import { QueryReadError } from "./failures.ts";
 import { probeAll } from "../machines/probe.ts";
 import { policyFaceOver, type PolicyFace } from "./policy/face.ts";
 import { grantPortOver, type GrantPort } from "./grants.ts";
+import { grantInternalToken } from "../do/grant-subject.ts";
+
+/**
+ * The grant route token one isolate sends, derived once from the session secret.
+ *
+ * @remarks
+ * The derivation is a SHA-256 of a fixed prefix and the secret; `createContext` is synchronous, so
+ * the port is given the promise and awaits it on the one path that needs it.
+ */
+const GRANT_TOKENS = new Map<string, Promise<string | undefined>>();
+
+/**
+ * The token for the environment's session secret.
+ *
+ * @param env - The Worker environment.
+ * @returns The token, or undefined when the environment has no secret.
+ */
+function grantTokenFor(env: WorkerEnv): Promise<string | undefined> {
+  const secret = env.HNS_SESSION_SECRET;
+  if (secret === undefined) return Promise.resolve(undefined);
+  const cached = GRANT_TOKENS.get(secret);
+  if (cached !== undefined) return cached;
+  const token = grantInternalToken(secret);
+  GRANT_TOKENS.set(secret, token);
+  return token;
+}
 
 /** A grant request as GraphQL carries it (0224); the port's input, re-exported for the mutation. */
 export type { GrantRequestRead, GrantRequestResult } from "./grants.ts";
@@ -182,6 +208,15 @@ export interface GraphQLContextOptions {
   readonly policy: PolicyFace | undefined;
   /** Replace the grant port; production builds it over the request's D1 and the SESSION binding. */
   readonly grants?: GrantPort | undefined;
+  /**
+   * The token the session object expects on the grant route, derived from `HNS_SESSION_SECRET`.
+   *
+   * @remarks
+   * Production passes what the edge derived once per isolate; a context built without it sends no
+   * token, and the object refuses (fail closed). A test that builds a context without a secret is
+   * therefore testing a refusal, which is what NB7 makes of a caller it cannot identify.
+   */
+  readonly grantToken?: string | undefined;
   readonly maxRows: number;
   readonly maxRowsPerList: number;
   /**
@@ -395,6 +430,7 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       project: reads.project,
       store: () => storeWith(options.env, options.requestId),
       signal: options.signal ?? new AbortController().signal,
+      token: options.grantToken ?? grantTokenFor(options.env),
     });
   const readOverrides = options.reads ?? {};
   const writeOverrides = options.writes ?? {};

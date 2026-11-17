@@ -26,6 +26,9 @@ export const FAILURE_CODES = [
   "unauthorized",
   "invalid_request",
   "forbidden",
+  // The grant route's own refusal of a caller that is not the Worker (0224, NB7). It is not a
+  // public failure: no edge route answers with it, and it is not the grant's denial vocabulary.
+  "forbidden_internal",
   "not_found",
   "method_not_allowed",
   "conflict",
@@ -102,6 +105,7 @@ export const FAILURE_STATUS = {
     surfaces: ["edge", "files", "session-rpc", "workspace-rpc", "graphql"],
   },
   forbidden: { status: 403, transport: "http", surfaces: ["graphql"] },
+  forbidden_internal: { status: 401, transport: "http", surfaces: ["session-rpc"] },
   not_found: {
     status: 404,
     transport: "http",

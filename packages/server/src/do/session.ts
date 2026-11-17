@@ -3,6 +3,7 @@ import { createRegistry, type Report, type Wake } from "@earendil-works/pi-durab
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import type { AgentEvent } from "@hns/agent";
 import { openSession, type AgentLiveWatch, type AgentSession } from "@hns/agent/session";
+import { isoTimestamp } from "@hns/core";
 import { migrateStore } from "@hns/store";
 import { openConversationIndex } from "@hns/store/conversation-index";
 import { createCostGate, type CostGate } from "../cost/index.ts";
@@ -28,6 +29,7 @@ import { armWake } from "./alarm.ts";
 import { auditEventIds, auditSink, createPolicyAudit, type PolicyAudit } from "./audit.ts";
 import { createSqliteGrantRecorder, openGrantTables } from "./grant-store.ts";
 import { createGrantPlane, type GrantPlane } from "./session-grants.ts";
+import { grantInternalToken } from "./grant-subject.ts";
 import { modelsFor } from "./models.ts";
 import { SessionIndex } from "./session-index.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
@@ -224,38 +226,62 @@ export class Session {
    * Revoke the grants a run held, because the run ended.
    *
    * @param runId - The conversation whose run ended.
-   * @returns The ids revoked; never throws (the revocation is best effort on the abort path, and a
-   * grant that outlives its run still ends at its own expiry, which is at most 60 seconds).
+   * @returns The grants revoked, and the ones whose revocation failed.
    *
    * @remarks
    * The abort path is the one the agent's own `abort` reaches: the run it ended held grants bound to
-   * its conversation id, and they are revoked here so a machine refuses them as `grant_revoked` from
-   * the moment the abort returns.
+   * its conversation id, and they are revoked **before the abort answers**, so a machine refuses them
+   * as `grant_revoked` from the moment the caller sees the abort succeed. A revocation that fails is
+   * recorded as `grant.revoke_failed` (the plane) and logged here with its name; the grant then lives
+   * until its own expiry, at most 60 seconds, which is the window the record exists for.
    */
-  async #revokeRun(runId: string): Promise<readonly string[]> {
+  async #revokeRun(runId: string): Promise<{
+    readonly revoked: readonly string[];
+    readonly failed: readonly string[];
+  }> {
     const grants = this.#grants;
-    if (grants === undefined) return [];
+    if (grants === undefined) return { revoked: [], failed: [] };
     try {
       return await grants.revokeRun(runId);
     } catch (error) {
       console.error("session grant revoke failed", error instanceof Error ? error.name : "unknown");
-      return [];
+      return { revoked: [], failed: [] };
     }
   }
 
-  /** Revoke every run's grants when the object closes; the conversations it knows are the runs. */
-  #revokeRuns(session: AgentSession): void {
-    void (async () => {
-      try {
-        const conversations = await session.listConversations();
-        for (const conversation of conversations) await this.#revokeRun(String(conversation.id));
-      } catch (error) {
-        console.error(
-          "session grant revoke failed",
-          error instanceof Error ? error.name : "unknown",
-        );
+  /**
+   * Revoke every run's grants when the object closes; the conversations it knows are the runs.
+   *
+   * @param session - The runtime, for the conversations.
+   * @returns The ids revoked across every run.
+   *
+   * @remarks
+   * The close path is awaited by the caller that closes the object, so a test can wait for it and a
+   * deployment's close does not answer before the revocations were attempted. A conversation list
+   * that cannot be read revokes nothing and is logged: the grants then end at their own expiry.
+   */
+  async #revokeRuns(session: AgentSession): Promise<readonly string[]> {
+    const revoked: string[] = [];
+    try {
+      const conversations = await session.listConversations();
+      for (const conversation of conversations) {
+        const outcome = await this.#revokeRun(String(conversation.id));
+        revoked.push(...outcome.revoked);
       }
-    })();
+    } catch (error) {
+      console.error("session grant revoke failed", error instanceof Error ? error.name : "unknown");
+    }
+    return revoked;
+  }
+
+  /**
+   * The token the Worker must present on the grant route.
+   *
+   * @returns The token, or undefined when the deployment has no session secret (the route then
+   * refuses every request: an object that cannot tell the Worker from anyone else issues nothing).
+   */
+  async #grantToken(): Promise<string | undefined> {
+    return await grantInternalToken(this.#env.HNS_SESSION_SECRET);
   }
 
   async #initialize(): Promise<void> {
@@ -350,7 +376,9 @@ export class Session {
       void session.closed.then((end) => {
         this.#closed = true;
         // The close is the end of every run in the object, so no grant bound to one may outlive it.
-        this.#revokeRuns(session);
+        // The close path is awaited (a failure is recorded, not swallowed); the close itself does not
+        // wait for it, because the harness has already stopped and the grant ends at its expiry.
+        void this.#revokeRuns(session);
         if (end.kind === "failed") this.#state.abort("harness failed");
       });
       await armWake(this.#state.storage, session.wake(), Date.now());
@@ -412,6 +440,7 @@ export class Session {
         cost: this.#cost,
         audit: this.#audit,
         grants: this.#grants,
+        grantToken: await this.#grantToken(),
         onRequestId: (id) => {
           turnRequestId = id;
         },
@@ -483,13 +512,19 @@ export class Session {
     this.#append(agentEntry(event));
   }
 
-  /** Record one internal RPC's hop and return the answer unchanged. */
-  #finished(
+  /**
+   * Record one internal RPC's hop and return the answer unchanged.
+   *
+   * @remarks
+   * Answers asynchronously: an abort's grants are revoked **before** the answer is handed back, so a
+   * caller that reads a successful abort knows the run's capabilities are gone.
+   */
+  async #finished(
     request: Request,
     response: Response,
     started: number,
     turnRequestId?: string,
-  ): Response {
+  ): Promise<Response> {
     const path = new URL(request.url).pathname;
     const requestId = request.headers.get(REQUEST_ID_HEADER) ?? "unattributed";
     // A successful turn's DO hop is the agent event (same request id), so the row is not
@@ -497,8 +532,10 @@ export class Session {
     // so a trace can see that the request reached the object and stopped there.
     // A run that ended revokes the grants it held: the abort route is the one a run's end reaches
     // the object through, so a grant bound to that conversation ends as the abort returns.
+    // The revocation is awaited, not fired and forgotten: the abort's answer is what tells the
+    // caller the run ended, so the grants it held are gone by the time that answer is read.
     const aborted = abortedConversation(path, request.method, response.status);
-    if (aborted !== undefined) void this.#revokeRun(aborted);
+    const revoked = aborted === undefined ? undefined : await this.#revokeRun(aborted);
     const turn = isTurn(path);
     if (turn && response.status >= 200 && response.status < 300) {
       if (turnRequestId !== undefined && this.#agentRequestIds.delete(turnRequestId)) {
@@ -506,6 +543,19 @@ export class Session {
       }
     }
     this.#append(doEntry(requestId, path, response.status, this.#now() - started, this.#now()));
+    if (revoked !== undefined && revoked.failed.length > 0) {
+      // The observation line names the count, not the ids: the audit row names the grant.
+      this.#append({
+        v: 1,
+        at: isoTimestamp(new Date(this.#now()).toISOString()),
+        level: "error",
+        event: "http.error",
+        hop: "do",
+        requestId,
+        path,
+        detail: { code: "grant_revoke_failed", rows: revoked.failed.length },
+      });
+    }
     return response;
   }
 

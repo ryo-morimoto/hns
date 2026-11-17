@@ -72,6 +72,14 @@ function auditEntryOf(attempt: GrantAttempt, eventId: string) {
  */
 export function createSqliteGrantRecorder(options: SqliteGrantRecorderOptions): GrantRecorder {
   return {
+    async recordRevokeFailure(failure) {
+      // The row is written even though the revocation did not happen: it is what an operator reads
+      // to see that a grant may outlive its run until its own expiry (at most 60 seconds).
+      await options.audit.append({
+        ...auditEntryOf(failure, options.eventId()),
+        event: "grant.revoke_failed",
+      });
+    },
     async record(attempt) {
       // One transaction for both writes, and the audit joins it rather than opening its own: the
       // object's storage runs one transaction at a time and does not nest them.

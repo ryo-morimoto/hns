@@ -256,7 +256,7 @@ test("a run's grant is revoked when the run ends", async () => {
         if (!issued.ok) throw new Error("refused: " + issued.decision.code);
         expect(await plane.boundTo("42")).toHaveLength(1);
         const revoked = await plane.revokeRun("42");
-        expect(revoked).toStrictEqual([issued.grant.payload.grantId]);
+        expect(revoked).toStrictEqual({ revoked: [issued.grant.payload.grantId], failed: [] });
         expect(await plane.boundTo("42")).toStrictEqual([]);
         const raw = await controlPlanePublicKey(SEED);
         if (raw === undefined) throw new Error("no public half");
@@ -284,7 +284,9 @@ test("a run's grant is revoked when the run ends", async () => {
           callHash: (await digestCall(call)).callHash,
           activePolicy: { revision: active.revision, hash: active.hash },
         };
-        expect(await authorizeCall({ ...base, revokedGrants: new Set(revoked) })).toMatchObject({
+        expect(
+          await authorizeCall({ ...base, revokedGrants: new Set(revoked.revoked) }),
+        ).toMatchObject({
           outcome: "deny",
           code: "grant_revoked",
         });

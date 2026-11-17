@@ -10,6 +10,9 @@ import type { WorkerEnv } from "../../src/edge/env.ts";
 import { createContext } from "../../src/graphql/context.ts";
 import { buildGraphQLSchema } from "../../src/graphql/schema.ts";
 import { envWith } from "../support/edge.ts";
+import { handleGrantsRpc } from "../../src/do/session-grants-rpc.ts";
+import type { GrantPlane } from "../../src/do/session-grants.ts";
+import { GRANT_INTERNAL_HEADER, GRANT_SUBJECT_HEADER } from "../../src/do/grant-subject.ts";
 
 /**
  * `requestGrant` over the real D1 and the production Worker port (0224).
@@ -231,6 +234,64 @@ test("the mutation forwards the active D1 revision and answers the object's gran
   } finally {
     await store.close();
   }
+});
+
+// NB7: the grant route is the Worker's. A request that does not prove it (no token, another
+// token, no subject, or a requester that is not the subject) is refused and issues nothing.
+test("the grant route refuses a caller that is not the Worker, and a requester that is not the subject", async () => {
+  const calls: unknown[] = [];
+  const plane: GrantPlane = {
+    request: async (input) => {
+      calls.push(input);
+      return {
+        ok: false,
+        decision: { outcome: "deny", code: "tool_disabled", message: "x" },
+        request: undefined,
+      };
+    },
+    boundTo: async () => [],
+    revokeRun: async () => ({ revoked: [], failed: [] }),
+  };
+  const body = JSON.stringify({
+    request: {},
+    snapshot: {},
+    requestedBy: { kind: "human", id: "owner" },
+  });
+  const send = async (headers: Record<string, string>) => {
+    const response = await handleGrantsRpc(
+      new Request("https://session.internal/rpc/grants", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body,
+      }),
+      plane,
+      { maxBodyBytes: 10_000, token: "the-worker-token" },
+    );
+    return { status: response.status, body: await response.json() };
+  };
+  const noToken = await send({ [GRANT_SUBJECT_HEADER]: "owner" });
+  expect(noToken.status).toBe(401);
+  const wrongToken = await send({
+    [GRANT_INTERNAL_HEADER]: "another",
+    [GRANT_SUBJECT_HEADER]: "owner",
+  });
+  expect(wrongToken.status).toBe(401);
+  const noSubject = await send({ [GRANT_INTERNAL_HEADER]: "the-worker-token" });
+  expect(noSubject.status).toBe(401);
+  const otherSubject = await send({
+    [GRANT_INTERNAL_HEADER]: "the-worker-token",
+    [GRANT_SUBJECT_HEADER]: "someone-else",
+  });
+  expect(otherSubject.status).toBe(401);
+  // Nothing reached the plane: no grant was even attempted.
+  expect(calls).toStrictEqual([]);
+  // The Worker itself is admitted, and the refusal is the plane's.
+  const admitted = await send({
+    [GRANT_INTERNAL_HEADER]: "the-worker-token",
+    [GRANT_SUBJECT_HEADER]: "owner",
+  });
+  expect(admitted.status).toBe(403);
+  expect(calls).toHaveLength(1);
 });
 
 // Catches: a grant forwarded for a project, a machine, or a tool the Worker cannot name.

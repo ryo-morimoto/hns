@@ -117,15 +117,16 @@ export interface GrantRequest {
   /** `manifestHash` of the tool the agent will run. */
   readonly manifestHash: string;
   /**
-   * The most output the caller wants a grant to cover.
+   * The most output the caller wants a grant to cover, or absent for the manifest's own bound.
    *
    * @remarks
    * This is the unit the issue left open; the contract decides it as **the model-facing JSON**, and
    * the grant takes the smaller of this and the manifest's `outputLimits.maxBytes`: a request
-   * cannot raise the bound above what the tool's contract promises. Zero is refused: a grant that
-   * may return no byte is not a capability.
+   * cannot raise the bound above what the tool's contract promises. **Absent means the manifest's
+   * own limit** (a caller that does not care about the byte bound does not have to know it);
+   * `0` is refused, because a grant that may return no byte is not a capability.
    */
-  readonly maxBytes: number;
+  readonly maxBytes?: number | undefined;
 }
 
 const NonEmpty = v.pipe(v.string(), v.minLength(1));
@@ -140,7 +141,7 @@ export const GrantRequestSchema: v.GenericSchema<unknown, GrantRequest> = v.stri
   // contracts declare (`tool_version`) instead of the request being refused as malformed.
   toolVersion: v.string(),
   manifestHash: HashSchema,
-  maxBytes: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  maxBytes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
 });
 
 /**
@@ -378,7 +379,11 @@ export async function issueGrant(
   const issuedAtMs = input.now();
   const ttl = toolPolicy.grantTtlSeconds;
   const maxCalls = toolPolicy.maxCallsPerGrant;
-  const maxBytes = Math.min(request.maxBytes, manifest.outputLimits.maxBytes);
+  // Absent means the manifest's own bound; a request can only lower it, never raise it (NB2).
+  const maxBytes =
+    request.maxBytes === undefined
+      ? manifest.outputLimits.maxBytes
+      : Math.min(request.maxBytes, manifest.outputLimits.maxBytes);
   if (!Number.isSafeInteger(issuedAtMs)) {
     return refused("grant_invalid", "the clock is not a time", request, policy);
   }
@@ -505,6 +510,17 @@ export interface GrantRecorder {
   revoke(grantId: string, at: IsoTimestamp): Promise<boolean>;
   /** The live grants bound to one run. */
   boundTo(runId: string): Promise<readonly GrantRecord[]>;
+  /**
+   * Record that a revocation could not be made.
+   *
+   * @param attempt - The revocation that failed: the grant, the run, and who asked.
+   * @remarks
+   * A revocation that throws is not silent: the grant lives until its own expiry (`expiresAt`, at
+   * most 60 seconds) and the machine accepts it until then, so the record is what lets an operator
+   * see that window. The write itself must not throw a second time into a path that is already
+   * failing: a failure to record is logged by the caller.
+   */
+  recordRevokeFailure(attempt: GrantAttempt): Promise<void>;
 }
 
 /** What the plane is built with. */
@@ -555,14 +571,26 @@ export interface GrantPlane {
    * Revoke every live grant bound to one run.
    *
    * @param runId - The run (its conversation id) that ended.
-   * @returns The ids this call revoked; a second call after the first revokes nothing.
+   * @returns The ids this call revoked and the grants whose revocation could not be made.
    *
    * @remarks
    * The reason a run ended (an abort, or the Session closing) is not a member of the grant: the grant
    * says when it was revoked, and the run's own history says why it ended. A revoked grant is refused
    * by the machine as `grant_revoked`, never as `grant_expired`, which is the fact an auditor needs.
+   *
+   * A revocation that fails is **not swallowed**: the grant is named in `failed` and the attempt is
+   * recorded in the issuance audit as `grant.revoke_failed`, because the grant then lives until its
+   * own expiry (at most 60 seconds) and that window is a fact an operator has to see.
    */
-  revokeRun(runId: string): Promise<readonly string[]>;
+  revokeRun(runId: string): Promise<GrantRevocation>;
+}
+
+/** What revoking one run's grants came to. */
+export interface GrantRevocation {
+  /** The grants this call revoked, in the order they were bound. */
+  readonly revoked: readonly string[];
+  /** The grants whose revocation threw; each is also recorded as `grant.revoke_failed`. */
+  readonly failed: readonly string[];
 }
 
 /** The workspace tools' manifests, built once per object. */
@@ -627,10 +655,39 @@ export function createGrantPlane(options: GrantPlaneOptions): GrantPlane {
       const at = isoTimestamp(new Date(now()).toISOString());
       const bound = await recorder.boundTo(runId);
       const revoked: string[] = [];
+      const failed: string[] = [];
       for (const record of bound) {
-        if (await recorder.revoke(record.grantId, at)) revoked.push(record.grantId);
+        try {
+          if (await recorder.revoke(record.grantId, at)) revoked.push(record.grantId);
+        } catch (error) {
+          failed.push(record.grantId);
+          // The row is the observation. If even that cannot be written, the caller logs it: this
+          // plane has no logger of its own and the Session's is the one a deployment reads.
+          await recorder.recordRevokeFailure({
+            workspaceId: options.workspaceId,
+            sessionId: options.sessionId,
+            requestedBy: record.requestedBy,
+            at,
+            issue: {
+              ok: false,
+              decision: deny(
+                "grant_invalid",
+                "the revocation failed: " + (error instanceof Error ? error.name : "unknown"),
+              ),
+              request: {
+                workspaceId: record.workspaceId,
+                sessionId: record.sessionId,
+                machineId: record.machineId,
+                toolId: record.toolId,
+                toolVersion: record.toolVersion,
+                manifestHash: record.manifestHash,
+                maxBytes: record.maxBytes,
+              },
+            },
+          });
+        }
       }
-      return revoked;
+      return { revoked, failed };
     },
   };
 }

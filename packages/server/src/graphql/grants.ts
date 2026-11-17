@@ -8,6 +8,7 @@ import type { WorkerEnv } from "../edge/env.ts";
 import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { principalOf } from "../policy/principals.ts";
 import type { PolicyFace } from "./policy/face.ts";
+import { GRANT_INTERNAL_HEADER, GRANT_SUBJECT_HEADER } from "../do/grant-subject.ts";
 import type { Store } from "@hns/store";
 
 /**
@@ -135,6 +136,14 @@ export interface GrantPortOptions {
   readonly store: () => Promise<Store>;
   /** The signal the request's deadline cancels. */
   readonly signal: AbortSignal;
+  /**
+   * The token the object expects from the Worker, derived from the session secret.
+   *
+   * @remarks
+   * Absent means the deployment has no secret, and the object refuses every grant request: the
+   * Worker proves who it is, not just that it can reach the binding (NB7).
+   */
+  readonly token?: string | Promise<string | undefined> | undefined;
 }
 
 /** The refusal the object's code maps to. */
@@ -207,15 +216,17 @@ export function grantPortOver(options: GrantPortOptions): GrantPort {
       // table, so the caller (which is the agent's runtime) sends its manifest hash and the byte
       // bound it wants, and the object checks both against the tool contract its tool actually
       // runs. Without a hash there is nothing to check, and the object answers `invalid_request`.
-      const request: GrantRequest = {
+      const base: GrantRequest = {
         workspaceId: projectId.output,
         sessionId: projectId.output,
         machineId: machine.id,
         toolId: toolId.output,
         toolVersion: input.toolVersion ?? "",
         manifestHash: input.manifestHash ?? "",
-        maxBytes: input.maxBytes ?? 0,
       };
+      // Absent means the manifest's own bound; the object applies it.
+      const request: GrantRequest =
+        input.maxBytes === undefined ? base : { ...base, maxBytes: input.maxBytes };
       const session = options.env.SESSION;
       if (session === undefined) {
         return { ok: false, code: "unavailable", message: "The Session binding is missing." };
@@ -235,7 +246,13 @@ export function grantPortOver(options: GrantPortOptions): GrantPort {
         response = await stub.fetch(
           new Request("https://session.internal/rpc/grants", {
             method: "POST",
-            headers: { "content-type": "application/json", [REQUEST_ID_HEADER]: options.requestId },
+            headers: {
+              "content-type": "application/json",
+              [REQUEST_ID_HEADER]: options.requestId,
+              // The object proves the caller is the Worker, and knows who it verified (NB7).
+              [GRANT_INTERNAL_HEADER]: (await options.token) ?? "",
+              [GRANT_SUBJECT_HEADER]: subject,
+            },
             body,
             signal: options.signal,
           }),

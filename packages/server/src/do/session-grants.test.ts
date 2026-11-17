@@ -335,6 +335,67 @@ test("C7: a malformed request is refused and no grant exists", async () => {
   expect(codeOf(swapped)).toBe("grant_invalid");
 });
 
+// NB1: the issuer verifies its own signature before it answers. A signer whose signature its own
+// key does not accept is a defect, and a grant that fails it is withheld.
+test("a signer whose signature does not verify issues no grant", async () => {
+  const lying: GrantSigner = {
+    alg: signer.alg,
+    keyId: signer.keyId,
+    sign: (payload) => signer.sign(payload),
+    verify: async () => false,
+  };
+  const issued = await issueGrant(
+    {
+      request: await requestOf(),
+      snapshot: await snapshotOf(policyDocument()),
+      now: () => NOW.getTime(),
+      signer: lying,
+    },
+    [READ_MANIFEST, BASH_MANIFEST],
+  );
+  expect(issued.ok).toBe(false);
+  if (issued.ok) return;
+  expect(issued.decision.code).toBe("grant_invalid");
+  // A signer that throws rather than answering is the same refusal, not a thrown request.
+  const failing: GrantSigner = {
+    alg: signer.alg,
+    keyId: signer.keyId,
+    sign: async () => {
+      throw new Error("no key");
+    },
+    verify: async () => true,
+  };
+  const thrown = await issueGrant(
+    {
+      request: await requestOf(),
+      snapshot: await snapshotOf(policyDocument()),
+      now: () => NOW.getTime(),
+      signer: failing,
+    },
+    [READ_MANIFEST],
+  );
+  expect(thrown.ok ? "issued" : thrown.decision.code).toBe("grant_invalid");
+});
+
+// NB2: a request can only lower the manifest's output bound, never raise it.
+test("a maxBytes above the manifest's bound is clamped to it", async () => {
+  const issued = await issue(await requestOf({ maxBytes: 999_999_999 }));
+  if (!issued.ok) throw new Error("refused: " + issued.decision.code);
+  expect(issued.grant.payload.maxBytes).toBe(READ_MANIFEST.outputLimits.maxBytes);
+  const lowered = await issue(await requestOf({ maxBytes: 1_024 }));
+  if (!lowered.ok) throw new Error("refused: " + lowered.decision.code);
+  expect(lowered.grant.payload.maxBytes).toBe(1_024);
+});
+
+// NB3: a caller that does not care about the byte bound does not send one, and gets the manifest's.
+test("an absent maxBytes is the manifest's own bound", async () => {
+  const request = await requestOf();
+  const { maxBytes: _maxBytes, ...withoutBound } = request;
+  const issued = await issue(withoutBound);
+  if (!issued.ok) throw new Error("refused: " + issued.decision.code);
+  expect(issued.grant.payload.maxBytes).toBe(READ_MANIFEST.outputLimits.maxBytes);
+});
+
 // The bounds: an exact scope, an empty byte bound, an algorithm the signer is not, a scope that
 // does not fit its tool.
 test("an exact scope is unsupported, an empty bound issues nothing, and alg is the signer's", async () => {
@@ -383,6 +444,73 @@ test("the snapshot schema is strict", async () => {
   expect(v.safeParse(PolicySnapshotSchema, snapshot).success).toBe(true);
 });
 
+// NB6: a revocation that throws is named and recorded, never swallowed, and the other grants of the
+// run are still revoked.
+test("a revocation that fails is recorded as grant.revoke_failed", async () => {
+  const recorded: string[] = [];
+  const attempts: GrantAttempt[] = [];
+  const stored: GrantRecord[] = [];
+  const recorder: GrantRecorder = {
+    async record(attempt) {
+      attempts.push(attempt);
+      if (!attempt.issue.ok) return undefined;
+      const payload = attempt.issue.grant.payload;
+      stored.push({
+        grantId: payload.grantId,
+        nonce: payload.nonce,
+        workspaceId: payload.workspaceId,
+        sessionId: payload.sessionId,
+        machineId: payload.machineId,
+        toolId: payload.toolId,
+        toolVersion: payload.toolVersion,
+        manifestHash: payload.manifestHash,
+        scope: payload.scope,
+        issuedAt: payload.issuedAt,
+        expiresAt: payload.expiresAt,
+        epoch: payload.epoch,
+        maxCalls: payload.maxCalls,
+        maxBytes: payload.maxBytes,
+        keyId: payload.keyId,
+        requestedBy: attempt.requestedBy,
+      });
+      return stored[stored.length - 1];
+    },
+    async revoke() {
+      throw new Error("the ledger is gone");
+    },
+    async boundTo(runId) {
+      return stored.filter(
+        (record) => record.requestedBy.runId === runId && record.revokedAt === undefined,
+      );
+    },
+    async recordRevokeFailure(attempt) {
+      recorded.push(
+        "grant.revoke_failed:" +
+          String(attempt.issue.ok ? undefined : attempt.issue.request?.manifestHash),
+      );
+    },
+  };
+  const plane = createGrantPlane({
+    signer,
+    recorder,
+    workspaceId: "w1",
+    sessionId: "s1",
+    now: () => NOW.getTime(),
+    eventId: () => crypto.randomUUID(),
+  });
+  const issued = await plane.request({
+    request: await requestOf(),
+    snapshot: await snapshotOf(policyDocument()),
+    requestedBy: { kind: "agent", id: "agent:1", runId: "9" },
+    manifests: [READ_MANIFEST],
+  });
+  if (!issued.ok) throw new Error("refused");
+  const outcome = await plane.revokeRun("9");
+  expect(outcome.revoked).toStrictEqual([]);
+  expect(outcome.failed).toStrictEqual([issued.grant.payload.grantId]);
+  expect(recorded).toStrictEqual(["grant.revoke_failed:" + issued.grant.payload.manifestHash]);
+});
+
 // The plane: what it records, and what a run's end revokes.
 test("the plane records every attempt and revokes a run's grants when the run ends", async () => {
   const attempts: GrantAttempt[] = [];
@@ -425,6 +553,7 @@ test("the plane records every attempt and revokes a run's grants when the run en
         (record) => record.requestedBy.runId === runId && record.revokedAt === undefined,
       );
     },
+    async recordRevokeFailure() {},
   };
   const plane = createGrantPlane({
     signer,
@@ -453,8 +582,8 @@ test("the plane records every attempt and revokes a run's grants when the run en
   if (!run.ok) throw new Error("refused");
   expect(await plane.boundTo("12")).toHaveLength(1);
   const revoked = await plane.revokeRun("12");
-  expect(revoked).toStrictEqual([run.grant.payload.grantId]);
-  expect(await plane.revokeRun("12")).toStrictEqual([]);
+  expect(revoked).toStrictEqual({ revoked: [run.grant.payload.grantId], failed: [] });
+  expect(await plane.revokeRun("12")).toStrictEqual({ revoked: [], failed: [] });
   // The revoked grant is refused as revoked, not as expired, by the contract's verifier.
   const call: ToolCall = {
     v: 1,
@@ -471,7 +600,7 @@ test("the plane records every attempt and revokes a run's grants when the run en
       key: await verifierKey(),
       now: new Date(NOW.getTime() + 1000),
       callHash: (await digestCall(call)).callHash,
-      revokedGrants: new Set(revoked),
+      revokedGrants: new Set(revoked.revoked),
       activePolicy: { revision: 7, hash: "f".repeat(64) },
     }),
   ).toMatchObject({ outcome: "deny", code: "grant_revoked" });

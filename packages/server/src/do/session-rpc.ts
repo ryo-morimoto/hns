@@ -56,6 +56,14 @@ export interface SessionRpcDependencies {
    * `requestGrant` mutation does, after it verified the person and the machine.
    */
   readonly grants?: GrantPlane | undefined;
+  /**
+   * The token the Worker must present on `POST /rpc/grants`, derived from the session secret.
+   *
+   * @remarks
+   * Absent (or undefined) means the object cannot tell the Worker from any other caller, and the
+   * grant route refuses every request (fail closed, NB7).
+   */
+  readonly grantToken?: string | undefined;
   /** The edge's per-request budgets, for the grant body. */
   readonly limits?: { readonly maxBodyBytes: number } | undefined;
 }
@@ -331,11 +339,10 @@ export async function handleSessionRpc(
   }
   if (segments[0] === "rpc" && segments[1] === "grants" && segments.length === 2) {
     try {
-      return await handleGrantsRpc(
-        request,
-        dependencies.grants,
-        dependencies.limits ?? DEFAULT_LIMITS,
-      );
+      return await handleGrantsRpc(request, dependencies.grants, {
+        ...(dependencies.limits ?? DEFAULT_LIMITS),
+        token: dependencies.grantToken,
+      });
     } catch (error) {
       if (error instanceof Error) console.error("session rpc failed", error.name);
       return failure("internal", "Unexpected Session failure.");

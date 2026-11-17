@@ -40,7 +40,7 @@ export interface GrantAuditEntry {
   readonly v: 1;
   readonly eventId: string;
   readonly at: IsoTimestamp;
-  readonly event: "grant.issued" | "grant.refused";
+  readonly event: "grant.issued" | "grant.refused" | "grant.revoke_failed";
   readonly workspaceId: string;
   readonly sessionId: string;
   readonly grantId: string | null;
@@ -194,7 +194,7 @@ const RowSchema = v.object({
   seq: v.number(),
   event_id: v.string(),
   at: v.string(),
-  event: v.picklist(["grant.issued", "grant.refused"]),
+  event: v.picklist(["grant.issued", "grant.refused", "grant.revoke_failed"]),
   workspace_id: v.string(),
   session_id: v.string(),
   grant_id: v.nullable(v.string()),
@@ -278,7 +278,8 @@ export function createGrantAudit(storage: GrantAuditStorage): GrantAudit {
       "seq INTEGER PRIMARY KEY AUTOINCREMENT, " +
       "event_id TEXT NOT NULL UNIQUE, " +
       "at TEXT NOT NULL, " +
-      "event TEXT NOT NULL CHECK (event IN ('grant.issued', 'grant.refused')), " +
+      "event TEXT NOT NULL CHECK (event IN ('grant.issued', 'grant.refused', " +
+      "'grant.revoke_failed')), " +
       "workspace_id TEXT NOT NULL, " +
       "session_id TEXT NOT NULL, " +
       "grant_id TEXT, " +

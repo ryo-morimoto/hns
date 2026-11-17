@@ -53,6 +53,16 @@ export interface SessionEnv {
   readonly HNS_MODEL?: string | undefined;
   readonly DB?: D1Binding | undefined;
   /**
+   * The session cookie's HMAC key, which the object derives the grant route's caller token from
+   * (0224, NB7).
+   *
+   * @remarks
+   * The Worker presents `sha256("hns.grant-rpc.v1:" + secret)` on `POST /rpc/grants`; the object
+   * derives the same value, so a request that is not the Worker's is refused even if it reached the
+   * object. Absent means the route refuses every request. Never logged.
+   */
+  readonly HNS_SESSION_SECRET?: string | undefined;
+  /**
    * The control-plane Ed25519 seed (base64url, 32 bytes) grants are signed with (0224).
    *
    * @remarks

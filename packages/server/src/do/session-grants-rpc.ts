@@ -1,6 +1,12 @@
 import * as v from "valibot";
 import { ToolManifestSchema, type SignedGrant, type ToolManifest } from "@hns/core/capability";
 import { readBody } from "../edge/body.ts";
+import {
+  GRANT_INTERNAL_HEADER,
+  GRANT_SUBJECT_HEADER,
+  checkRequester,
+  sameToken,
+} from "./grant-subject.ts";
 import type { GrantIssue, GrantPlane } from "./session-grants.ts";
 import type { GrantRequester } from "./grant-ledger.ts";
 
@@ -53,13 +59,23 @@ interface GrantsAnswer {
   readonly policyRevision?: number | undefined;
   readonly policyHash?: string | undefined;
   readonly revoked?: readonly string[];
+  /** The grants whose revocation failed; each is recorded as `grant.revoke_failed`. */
+  readonly revokeFailed?: readonly string[];
   /** Present with `tool_version`: the version the object's tool contracts declare. */
   readonly toolVersion?: string | undefined;
 }
 
-/** The failure code this route answers with; a subset of the Session RPC's closed vocabulary. */
+/** What the route needs: the body bound, and the token the Worker must present. */
+export interface GrantRpcLimits {
+  readonly maxBodyBytes: number;
+  /** `grantInternalToken(HNS_SESSION_SECRET)`; undefined means the object holds no secret. */
+  readonly token: string | undefined;
+}
+
+/** The failure code this route answers with; the Session RPC's vocabulary plus its own forbidding. */
 type GrantFailureCode =
   | "method_not_allowed"
+  | "forbidden_internal"
   | "unavailable"
   | "invalid_request"
   | "payload_too_large"
@@ -69,6 +85,9 @@ type GrantFailureCode =
 /** The failure status the Session RPC's table gives a code. */
 const FAILURE_STATUS: Readonly<Record<GrantFailureCode, number>> = {
   method_not_allowed: 405,
+  // 401: the caller is not the Worker (or is not the person it claims). Nothing in the public edge
+  // answers with this code; it is the grant route's own refusal of an internal caller.
+  forbidden_internal: 401,
   unavailable: 503,
   invalid_request: 400,
   payload_too_large: 413,
@@ -109,10 +128,19 @@ function refusalStatus(issue: GrantIssue): number {
 export async function handleGrantsRpc(
   request: Request,
   grants: GrantPlane | undefined,
-  limits: { readonly maxBodyBytes: number },
+  limits: GrantRpcLimits,
 ): Promise<Response> {
   if (request.method !== "POST") return failure("method_not_allowed", "Only POST is allowed here.");
   if (grants === undefined) return failure("unavailable", "The grant surface is not open.");
+  // The Worker proves itself and the person it verified: the route refuses anything it cannot tie to
+  // a session (NB7). A deployment without the secret proves nothing, so every request is refused.
+  if (!sameToken(request.headers.get(GRANT_INTERNAL_HEADER) ?? undefined, limits.token)) {
+    return failure("forbidden_internal", "This route is the Worker's, and the caller is not it.");
+  }
+  const subject = request.headers.get(GRANT_SUBJECT_HEADER);
+  if (subject === null || subject.length === 0) {
+    return failure("forbidden_internal", "The request names no verified subject.");
+  }
   const body = await readBody(request, limits.maxBodyBytes);
   if (!body.ok) return failure(body.code, "The request body is not acceptable.");
   let raw: unknown;
@@ -123,9 +151,18 @@ export async function handleGrantsRpc(
   }
   const parsed = v.safeParse(GrantsBodySchema, raw);
   if (!parsed.success) return failure("invalid_request", "Invalid grant input.");
+  const requester = checkRequester(parsed.output.requestedBy, subject);
+  if (requester !== "ok") {
+    return failure(
+      "forbidden_internal",
+      requester === "agent_for_human"
+        ? "only an agent of the verified subject may ask as an agent"
+        : "the requester is not the verified subject",
+    );
+  }
   if (parsed.output.revokeRun !== undefined) {
-    const revoked = await grants.revokeRun(parsed.output.revokeRun);
-    return json({ ok: true, revoked });
+    const revocation = await grants.revokeRun(parsed.output.revokeRun);
+    return json({ ok: true, revoked: revocation.revoked, revokeFailed: revocation.failed });
   }
   const issue = await grants.request({
     request: parsed.output.request,
