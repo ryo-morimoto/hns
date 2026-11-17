@@ -1,6 +1,6 @@
 # 0221: Agent のツール呼び出しに manifest と callHash を付ける（Phase 0）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §3–§4
@@ -17,17 +17,17 @@ touches: packages/agent/src/capability.ts, packages/agent/src/tools.ts, packages
 
 ## Acceptance criteria
 
-- [ ] bash の timeout は timeoutMs（safe integer）。小数の timeout（秒）は拒否し、pi-durable へはツール境界で ms→秒に変換する（JCS の safe integer 制約に合わせる）
+- [x] bash の timeout は timeoutMs（safe integer）。小数の timeout（秒）は拒否し、pi-durable へはツール境界で ms→秒に変換する（JCS の safe integer 制約に合わせる）
 
-- [ ] `read_file` / `write_file` / `bash` の `ToolManifest` を 1 箇所で組み立て、`manifestHash` を出す（説明・引数記述子・危険度・出力上限を含む）
-- [ ] 各呼び出しで `ToolCall` と `CallDigest` を作り、`callId` は pi-durable の call id から取る
-- [ ] 引数は `v.strictObject` で parse し、未知キーを拒否する
-- [ ] `read_file` / `write_file` のパスを正規化し、root 外・`..`・絶対パスを `path_outside_root` で拒否する
-- [ ] `bash` は sandbox があるときだけ登録し、Phase 0 の判定は `{kind:"exec",network:"none",writable:false}` の封筒にする
-- [ ] `AuditSink`（`AuditEvent => Promise<void>`）を `WorkspaceToolsOptions` / `openAgent` / `openSession` に通し、`tool.call` は **await してから**実行、`tool.result` は await してから返す
-- [ ] `tool.call` / `tool.result` に `callHash` / `argsHash` / `manifestHash` / `decision` / `durationMs` を載せ、**引数の生値は載せない**
-- [ ] 拒否は例外ではなく `{ok:false,status,code,message}` の値で返す
-- [ ] `npm test -w @hns/agent` と typecheck が通る
+- [x] `read_file` / `write_file` / `bash` の `ToolManifest` を 1 箇所で組み立て、`manifestHash` を出す（説明・引数記述子・危険度・出力上限を含む）
+- [x] 各呼び出しで `ToolCall` と `CallDigest` を作り、`callId` は pi-durable の call id から取る
+- [x] 引数は `v.strictObject` で parse し、未知キーを拒否する
+- [x] `read_file` / `write_file` のパスを正規化し、root 外・`..`・絶対パスを `path_outside_root` で拒否する
+- [x] `bash` は sandbox があるときだけ登録し、Phase 0 の判定は `{kind:"exec",network:"none",writable:false}` の封筒にする
+- [x] `AuditSink`（`AuditEvent => Promise<void>`）を `WorkspaceToolsOptions` / `openAgent` / `openSession` に通し、`tool.call` は **await してから**実行、`tool.result` は await してから返す
+- [x] `tool.call` / `tool.result` に `callHash` / `argsHash` / `manifestHash` / `decision` / `durationMs` を載せ、**引数の生値は載せない**
+- [x] 拒否は例外ではなく `{ok:false,status,code,message}` の値で返す
+- [x] `npm test -w @hns/agent` と typecheck が通る
 
 ## テスト条件
 
@@ -80,3 +80,12 @@ touches: packages/agent/src/capability.ts, packages/agent/src/tools.ts, packages
 - **0220 の契約（N1）**: `ToolCallAuditEvent` / `ToolResultAuditEvent` の `callHash` / `argsHash` を**拒否時のみ optional** にし、`docs/capability.md` §3 に「呼び出しが成立していない行は hash を持たない」と書く。現状は `HashSchema` が 64 hex を要求するため、拒否行（`path_outside_root` / `unsupported` / 引数不正）が parse できない。0221 は拒否行に hash を書かない（空文字も書かない）ことを選び、契約との差は `AuditRow` + `toAuditEvent` のコメントで明示している。担当は 0220 の契約の所有者。
 - **0220 の flake（N7）**: `packages/core/src/capability/grant.test.ts:202`（「a signature that does not verify is grant_invalid」）が**並列負荷で 1/2〜1/4 落ちる**（単独では 3+/3 pass）。0221 は `packages/core` を 1 バイトも変えていない。**0220 宛の issue として切り出す**（統合前の gate が不安定なため）。
 - **観測と監査の `decision`**: 受入 7 は「tool.call / tool.result に decision」だが、契約の `ToolCallAuditEvent` に `decision` が無いため、**観測イベントは tool.result のみ**（N6）、監査は拒否時の `decision` を持つ。契約を広げるかは N1 と同じ 0220 の判断。
+
+## Result
+
+- verdict: **PASS**（reviewer-0221。3 巡。blocking 3 → 1 → 0。実経路の probe と mutation probe で確認）
+- HEAD: 456f415（main に ff 統合）。gate は exit 0（1039 tests / 1 skip、main で 52.9s）。
+- 確認: manifest は 1 箇所から manifestHash / descriptionHash / parametersHash / risk / outputLimits、callId は pi-durable の call.id。引数は 3 つの strict schema。監査は `hook(ToolTask, {beforeTool, afterTool})` の外側で、`tool.call` を await してから実行（拒否なら実行しない）、`tool.result` を await。拒否は `beforeTool` の throw → モデルには harness の error（引数をエコーしない固定文言）、`code` は監査の `decision`。`timeoutMs`（整数 ms）で、小数の `timeout` は実経路で拒否。`parseJsonArguments` は raw の重複キーを拒否。
+- 3 巡で直したもの: (1) `afterTool` の throw が握られ結果の audit 失敗がモデルに届く（結果を失敗に差し替え）、(2) 拒否時の `tool.result` 2 行と `decision` の食い違い（1 対に）、(3) 小数 `timeout` の受理と hash の丸め（実経路で拒否）。再修正で harness の post-hook 再検証を踏んで `timeoutMs` が全滅した点（B3'）も直した。
+- 非 blocking（follow-up）: B1 の差し替えが harness の truncation 診断を落とす / `errorMessage` の 1 行ヘルパ / 拒否行の hash（0220 の契約、下記）。
+- 0220 への申し送り: 拒否行は hash を持てないので `callHash` / `argsHash` を**拒否時のみ optional** に（`docs/capability.md` §3）。core の flake は [0223n](0223n-capability-grant-flake.md) として起票済み。
