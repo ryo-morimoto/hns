@@ -1,11 +1,11 @@
 # 0127: Project と Workspace root の関連
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D080
 depends-on: 0033, 0047, 0145, 0146, 0159, 0198
-touches: packages/core/src/types.ts, packages/core/src/workspace-root.ts, packages/core/src/index.ts, packages/core/src/graphql/, packages/core/test/, packages/store/src, packages/store/test, packages/server/src, packages/server/test, packages/server/README.md, packages/agent/src/session.ts, packages/agent/src/session.test.ts, packages/web/src/app/, packages/web/src/live/, packages/web/src/__generated__/, packages/web/schema.graphql, packages/web/test/
+touches: packages/core/src/types.ts, packages/core/src/workspace-root.ts, packages/core/src/index.ts, packages/core/src/graphql/, packages/core/test/, packages/store/src, packages/store/test, packages/server/src, packages/server/test, packages/server/README.md, packages/agent/src/session.ts, packages/agent/src/session.test.ts, packages/web/src/app/, packages/web/src/live/, packages/web/src/__generated__/, packages/web/schema.graphql, packages/web/test/, docs/workspace.md
 
 ## Goal
 
@@ -14,12 +14,13 @@ UI のプロジェクト切替が、実際に別のファイル空間を開く�
 
 ## Acceptance criteria
 
-- [ ] Project に workspace root / agent cwd を持たせる（core / store / API）
-- [ ] root は許可された親配下に正規化。symlink / .. / 別ユーザーの path を拒否
-- [ ] 既存 project は現行 root を指す migration。不明な root は fail closed
-- [ ] 会話作成・Agent 起動・file API が project の root を使う
-- [ ] project 切替で workspace / conversation / editor の対象が変わる
-- [ ] テスト: 正規化、拒否、migration、別 project の分離
+- [x] Project に workspace root / agent cwd を持たせる（core / store / API）
+- [x] root は許可された親配下に正規化。symlink / .. / 別ユーザーの path を拒否
+- [x] 既存 project は現行 root を指す migration。不明な root は fail closed
+- [x] 会話作成・Agent 起動・file API が project の root を使う
+- [x] project 切替で workspace / conversation / editor の対象が変わる
+- [x] テスト: 正規化、拒否、migration、別 project の分離
+- [x] `Project.egress`（D080 U-06）を model / store / GraphQL に足す（執行は 0147 / 0194）
 
 - 2026-11-17: 0198（Mutation の骨格）の後に lead が `next` から `now` へ。最初の実 mutation（`createProject`）と project root の配線。
 
@@ -180,7 +181,12 @@ UI のプロジェクト切替が、実際に別のファイル空間を開く�
 - **file API**: 公開 body / query から `projectRoot` を消す。Worker が URL の workspaceId（= projectId, D080 F2）から D1 で root を引き、Workspace DO に渡す。client が `projectRoot` を送ったら無視せず 400（0157 の REST 形をこの issue で更新する）。
 - **会話の cwd**: create conversation RPC が workspaceRoot を受け、agent の会話メタデータ（内部、公開 Conversation には出さない）に保存し、agent の env builder に渡す。既存会話で root が無いときは env を作らない（fail closed）。
 - **1 project = 1 Session DO**: DO 名の決定は `session-name.ts` の1関数だけ。既定 project の id は `"default"` なので、既存の `SESSION_NAME = "default"` の DO をそのまま使い、新規 project は projectId の DO になる（既存会話を孤立させない）。edge（/ws・GraphQL）と web live は同じ関数を使う。project の分離は resolver の filter ではなく DO の分離で持つ。
+- **DO の前に存在を確かめる**: `Query.conversations` / `/ws` / file API は、D1 の project を見てから Session / Workspace DO をアドレスする。未知の id は GraphQL の `invalid_argument`、`/ws` は 404、file API は 404 で、DO を作らない。共有の lookup は `edge/store.ts` の `projectFor` の1箇所。
+- **失敗型を分ける**: 開けない・読めない DB は `StoreUnavailableError` → unavailable / 503。壊れた project row（`ValiError`）は defect として rethrow し、edge が 500 にする（503 に丸めない）。
+- **legacy default DO の混在**: 既定 project の id `"default"` の DO は、per-project 化の前に他 project の会話も持ち得る。**既定 project の読みに限り** project_id の filter を残す。他の project の DO は filter しない（他所の行が出たら隠さず defect として扱う）。
+- **egress（U-06）**: `Project.egress`（`inherit` / `deny` / `allowlist`）を追加。保存列は migration 0004、既定 `inherit`、GraphQL は `ProjectEgress` enum。作成時に固定し、`deny` の選択と執行は 0147 / 0194。
 - **0106（editor）は待ち**。Shell は選択 project の root を WorkspaceView と右パネル（slot）に渡すところまで。0148（machine registry）は待ちで、cwd は現在の単一 HNS_AGENT_URL の範囲。
+- **follow-up（latent）**: Session DO は自分の project を束縛・検証しない（DO 名と projectId の一致を DO 側では見ていない）。公開口（会話作成 API）を作るときに、DO 名と projectId の一致と既存会話の backfill を固定する。
 
 ## テスト条件
 
@@ -200,6 +206,10 @@ UI のプロジェクト切替が、実際に別のファイル空間を開く�
 | C12 | `npm run check` exit 0 | 高 | 受入6 |
 | C13 | machine の `containInRoot` / `applyVersionedWrite` が `..` / 中間 symlink / ROOT 外を拒否（ROOT を dirfd で解決） | 高 | 受入2・D080 R3 |
 | C14 | project a の sandbox / egress / hide の執行（`--tmpfs <ROOT>`、固定 hide、deny） | 高 | U-06 |
+| C15 | `Query.conversations` に存在しない projectId → `QueryFailure(INVALID_ARGUMENT)`。fake SESSION の `ids` / `requests` は空のまま（DO を作らない） | 高 | 受入5・D080 |
+| C16 | 既定 project の読みは、legacy default DO に混在する他 project の会話を出さない | 中 | 受入5（互換） |
+| C17 | corrupt な project row → file API / `/ws` は 503 ではなく defect（edge が 500）。open / lookup の失敗型が分かれる | 中 | 受入2 |
+| C18 | `Project.egress` は既定 `inherit` で保存され、GraphQL は `ProjectEgress` enum を返す。未知の保存値は parse で throw | 中 | U-06 |
 
 C13 は 0157 / 0147 の既存テストで証明済み（`packages/machine/src/containment.test.ts`、`packages/machine/test/integration/remote-write.test.ts`）。この issue はその契約を変えず、Worker が lexical 検証済みの root だけを渡すことを固定する。
 C14 は 0157 / 0194 の執行側の受入で、0127 は model / API / DO / fixture まで（U-04）。実マシンの fs は 0157 が持つ。
@@ -208,7 +218,7 @@ C14 は 0157 / 0194 の執行側の受入で、0127 は model / API / DO / fixtu
 
 | ID | 条件 | 技法 | 層 | テスト |
 | --- | --- | --- | --- | --- |
-| T1 | C1・C3・C7 | 契約テスト / 同値分割 | server unit | `packages/server/src/graphql/mutations/create-project.test.ts` |
+| T1 | C1・C3・C7 | 契約テスト / 同値分割 | server unit | `packages/server/src/graphql/mutations/create-project.test.ts`（session / name の拒否）と `packages/server/src/graphql/handler.test.ts`（HTTP の union / 400 / budget）、`views.test.ts`（payload の写像）。1ファイルに詰めず、resolver の直接実行と HTTP 契約を分けている |
 | T2 | C2・C3 | 境界値 + 同値分割 | core unit | `packages/core/src/workspace-root.test.ts` |
 | T3 | C6 | 状態遷移（migration） | store integration | `packages/store/test/integration/store/migrate.test.ts` / `projects.test.ts` |
 | T4 | C6 | 故障注入（不正行） | store unit | `packages/store/src/schemas.test.ts` |
@@ -219,6 +229,9 @@ C14 は 0157 / 0194 の執行側の受入で、0127 は model / API / DO / fixtu
 | T9 | C10 | シナリオ（component） | web component | `packages/web/src/app/Shell.test.tsx` |
 | T10 | C12 | — | gate | `npm run check` |
 | T11 | C13・C14 | —（0157 / 0147 の既存テストを証拠に使う） | machine integration | 既存 |
+| T12 | C15・C16 | 契約テスト + 故障注入 | server unit | `packages/server/src/graphql/handler.test.ts` |
+| T13 | C17 | 故障注入（corrupt row） | server unit | `packages/server/src/edge/store.test.ts` / `files/content.test.ts` / `edge/worker.test.ts` |
+| T14 | C18 | 契約テスト | store integration + server unit | `packages/store/test/integration/store/projects.test.ts` / `packages/server/src/graphql/views.test.ts` / `handler.test.ts` |
 
 層は store の integration（D1 の migration）と unit（lexical / schema）、server の unit（DO 名 / resolver / createProject / file API / env fixture）、web の component（切替）。同じシナリオを複数の層で回さない。
 
@@ -230,18 +243,24 @@ C14 は 0157 / 0194 の執行側の受入で、0127 は model / API / DO / fixtu
 - 2026-11-17: sandbox レポート（work/research/agent-sandbox-designs.md）を受けて R1〜R7 を決定案に反映: per-project、マシン側の結合・実体検査、兄弟 project を tmpfs で隠す、hide の固定リスト、egress は U-06。
 - 2026-11-17: lead と解釈を確定（checkpoint）。agentCwd は workspaceRoot と同じ値で保存列は1つ / migration は既存を `''`、NULL・不正は parse で throw / 1 project = 1 Session DO を実装（既定 id "default" は既存 DO のまま）/ touches 拡張を承認 / file API の projectRoot は client から消す。Design に「実装スコープと検証の分担」、テスト条件 C1–C14、テスト設計 T1–T11 を追加。
 - 2026-11-17: model / validator / store migration / createProject / DO 名 / file API / agent env / web 切替を実装。テストは core（lexical）、store（migration・parse の fail closed・別 project の分離）、server（mutation union・400・budget、file API の root 解決、/ws の DO 選択）、agent（env に渡る cwd）、web（切替で root と editor slot が変わる）に置いた。
+- 2026-11-17: レビューで BLOCKED（blocking 1）。`Query.conversations` が D1 を見ずに `idFromName` し、未知の projectId で空の Session DO を作っていた（C15）。修正: `edge/store.ts` の `projectFor` を `/ws`・file API・GraphQL の共有 lookup にし、conversations は存在確認してから DO をアドレスする。未知は `invalid_argument`。fake SESSION の ids / requests が空のままであることをテストで固定。
+- 2026-11-17: 低・中も修正。legacy `"default"` DO の読みに project_id filter を残す（C16）。壊れた project row を 503 に丸めず defect（500）にし、`StoreUnavailableError` と分ける（C17）。file face の本番 D1 lookup を fake D1 + 実 store でテスト（C8 の本体）。Shell の切替テストで会話一覧が変わることを断言（C10）。`docs/workspace.md` に root の分担を追記。D080 U-06 の `Project.egress` を model / migration 0004 / GraphQL に追加（C18、執行は 0147 / 0194）。Session DO の project 束縛の latent は follow-up として記録。
+- 2026-11-17: ゲートで cf dev の inspector port（9229 固定）競合を踏んだため、`session-do.test.ts` と `workspace-do.test.ts` の起動に cost / gateway と同じ 1 回 retry を入れた（server/test の scaffold。製品コードは変えない）。machine の `remote-write.test.ts` は touches 外なのでそのまま。
 ## Result
 
-**実装完了・レビュー待ち（done にしない）。** reviewer はこの変更を書いていない別エージェントが [docs/review.md](../../docs/review.md) で行い、verdict / HEAD / blocking をここに書く。
+**レビュー BLOCKED（blocking 1）→ 修正済み、再レビュー待ち（done にしない）。** reviewer はこの変更を書いていない別エージェントが [docs/review.md](../../docs/review.md) で行い、verdict / HEAD / blocking をここに書く。
+
+- review round 1: BLOCKED。blocking 1 = `Query.conversations` が未知の projectId で Session DO を作る。修正内容は Log（2026-11-17 の BLOCKED / 低・中）を参照。blocking の再現テストは C15 / T12（`packages/server/src/graphql/handler.test.ts` の "conversations for an unknown project never address a Session object"）。修正前はこのテストで fake SESSION の `ids` に id が載り、`requests` が 1 件になる（現コードでは両方空）。修正後は `projectFor` の存在確認が `invalid_argument` を返し、DO に触れない。
 
 - 受入の証拠（テスト条件 → テスト）
   - 受入1（root / cwd を持つ）: C1 → `packages/server/src/graphql/mutations/create-project.test.ts`、`packages/server/src/graphql/views.test.ts`、`packages/store/test/integration/store/projects.test.ts`
   - 受入2（正規化 / 拒否）: C2・C3 → `packages/core/src/workspace-root.test.ts`、C8 → `packages/server/src/files/content.test.ts`、C13 → 0157 / 0147 の既存 machine テスト
   - 受入3（migration / fail closed）: C6 → `packages/store/test/integration/store/migrate.test.ts`、`packages/store/src/schemas.test.ts`
   - 受入4（会話・agent・file API が root を使う）: C4 → `packages/server/src/session-name.test.ts`、C9 → `packages/server/src/do/session-rpc.test.ts` と `packages/agent/src/session.test.ts`、C8 → file face
-  - 受入5（切替）: C5・C11 → `packages/server/src/edge/worker.test.ts`、C10 → `packages/web/src/app/Shell.test.tsx`
+  - 受入5（切替）: C5・C11 → `packages/server/src/edge/worker.test.ts`、C15 → `packages/server/src/graphql/handler.test.ts`、C16 → 同（legacy default filter）、C10 → `packages/web/src/app/Shell.test.tsx`
   - 受入6（ゲート）: C12 → 下記
-- ゲート: コミット後の HEAD で `npm run check` exit 0（123 test files / 797 tests passed、39.1s。lint / fmt / codegen / typecheck / test（integration と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。
+  - U-06（egress）: C18 → `packages/store/test/integration/store/projects.test.ts`、`packages/store/src/parse.test.ts`、`packages/server/src/graphql/views.test.ts`、`packages/server/src/graphql/handler.test.ts`
+- ゲート: レビュー修正後の HEAD で `npm run check` exit 0（124 test files / 806 tests passed、51.6s。lint / fmt / codegen / typecheck / test（integration と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。
 - commits: `fab743a`（model / store / API）→ `595a2a0`（file API）→ `4369b35`（agent の cwd）→ `5501e57`（cf dev scaffold）→ `6686dda`（web 切替）→ 本 issue 記録。branch `issue/0127-model-project-workspace`、base main `2049a3c`。
-- 未実行: 独立レビュー（次）、commit の分割（下記の順で行う）、main への rebase / merge（lead の統合レーン）。
-- follow-up: 0106（editor 本体）は Shell が渡す `ProjectWorkspace` context を読む。0148（machine registry）は cwd の選択を registry に替える。既存会話で root が無い場合の backfill は、公開口（会話作成 API）ができた時点で Worker が D1 から渡す。
+- 済み: commit 分割（既存 6 本 + レビュー修正の commit。hash は `git log` と Log を参照）。未実行: 再レビュー、main への rebase / merge（lead の統合レーン）。
+- follow-up: 0106（editor 本体）は Shell が渡す `ProjectWorkspace` context を読む。0148（machine registry）は cwd の選択を registry に替える。既存会話で root が無い場合の backfill は、公開口（会話作成 API）ができた時点で Worker が D1 から渡す。**Session DO は自分の project を束縛・検証しない**（DO 名と projectId の一致を DO 側で見ていない latent）ので、公開口で固定する。egress の執行（`deny` / `allowlist`）は 0147 / 0194。
