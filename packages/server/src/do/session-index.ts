@@ -29,7 +29,7 @@ const INDEX_WRITE_FAILED = "d1_write_failed";
 export type IndexLog = (line: string) => void;
 
 /** The one-line text of one index observation, built as {@link indexEntry}. */
-export function indexLine(entry: ObsLogEntry): string {
+function indexLine(entry: ObsLogEntry): string {
   return JSON.stringify(entry);
 }
 

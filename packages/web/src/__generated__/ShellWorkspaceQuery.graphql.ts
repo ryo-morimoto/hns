@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<b323fd193642c400661f2019152837e7>>
+ * @generated SignedSource<<7c1b3d5274925c07a22895892520d4f0>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -10,7 +10,7 @@
 
 import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
-export type QueryErrorCode = "INVALID_ARGUMENT" | "LIMIT_EXCEEDED" | "UNAVAILABLE" | "%future added value";
+export type QueryFailureCode = "INVALID_REQUEST" | "LIMIT_EXCEEDED" | "UNAVAILABLE" | "%future added value";
 export type ShellWorkspaceQuery$variables = {
   hasProject: boolean;
   projectId: string;
@@ -21,7 +21,7 @@ export type ShellWorkspaceQuery$data = {
     readonly " $fragmentSpreads": FragmentRefs<"SidebarConversations">;
   } | {
     readonly __typename: "QueryFailure";
-    readonly code: QueryErrorCode;
+    readonly code: QueryFailureCode;
     readonly message: string;
   } | {
     // This will never be '%other', but we need some
@@ -30,7 +30,7 @@ export type ShellWorkspaceQuery$data = {
   };
   readonly tasks?: {
     readonly __typename: "QueryFailure";
-    readonly code: QueryErrorCode;
+    readonly code: QueryFailureCode;
     readonly message: string;
   } | {
     readonly __typename: "TaskList";

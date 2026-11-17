@@ -18,6 +18,11 @@
 同時に流す変更は [parallel-change.md](parallel-change.md) の「変更レーン」に従う。同時に流すのは最大3本で、
 増やす条件は人が判定する。agent は自分でレーンを増やさない。
 
+**worktree では `npm run codegen` が隣の checkout のサーバを読む。** `node_modules` はメイン checkout を指すので、
+`@hns/server/graphql` はメインの `packages/server` に解決される。worktree のサーバが変わったときは、worktree の
+`buildSchemaSdl()` を直接呼んで SDL を書き、絶対パスの relay 設定で `relay-compiler` を回す（メインの cwd で
+`node packages/server/src/graphql/schema.ts` 由来の SDL と一致することを、enum 名で確かめる）。
+
 ## 完了・記録・成果
 
 完了は Result の追記ではなく、1 issue 1 レコードで表す（[D067](decisions.md)）。置き場とスキーマは [0195](../work/issues/0195-work-record-contract.md) で決める（YAML は D067）。done level はレコードから導出する。

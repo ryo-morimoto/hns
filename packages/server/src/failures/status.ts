@@ -162,14 +162,20 @@ export type FailureCodeOf<S extends FailureSurface> = {
 }[FailureCode];
 
 /**
- * The row a code answers with on one face, or null when the row has no HTTP status.
+ * The rows a GraphQL code declares, without an HTTP status.
  *
- * @param surface - The face asking; the code must be one the face declares.
+ * @param surface - The face asking; `graphql` is the only caller that can get null back.
  * @param code - The closed failure code of that face.
- * @returns The row's status, or null when the row's transport is a GraphQL union member.
+ * @returns The row's status, or null when the row is a GraphQL union member (no HTTP answer).
  *
  * @throws Error when the row does not declare the face, which is a table defect rather than a
  * branch a caller can recover from.
+ *
+ * @remarks
+ * For the GraphQL face only: its failures travel inside the result unions of a 200 response, so
+ * the row's status is absent and `failureStatus` would throw. A REST face reads
+ * {@link failureStatus} instead. The function is also the table's own consistency check: the
+ * GraphQL builder walks its codes through it so a published enum value always has a row.
  * @internal
  */
 export function failureStatusOrNull<S extends FailureSurface>(
