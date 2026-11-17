@@ -109,6 +109,7 @@ export const EVENT_NAMES = [
   "index.rebuilt",
   "index.drain.failed",
   "index.state.failed",
+  "index.legacy_rows",
   "automation.created",
   "automation.fired",
   "automation.skipped",
