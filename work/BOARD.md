@@ -33,10 +33,10 @@
 | --- | --- | --- | --- |
 | [0220](issues/0220-capability-contract.md) | capability 契約（canonical call・grant・policy 型） | 依存なし | L0（capability） |
 | [0227](issues/0227-sandbox-hardening-spike.md) | sandbox 追加硬化の実測（Landlock / netns+proxy / seccomp） | 依存なし | L4（sandbox） |
-| [0198](issues/0198-graphql-mutation.md) | GraphQL の Mutation 面（書き込みの骨格） | 0176 done | L10（GraphQL） |
+| [0127](issues/0127-model-project-workspace.md) | Project と Workspace root の関連 | 0198 / 0159 done | L2（会話）/ L10（GraphQL） |
 
-第2波は 0059 / 0153 / 0169 / 0163 / 0154 / 0157 / 0162 が done（c55fc2d / 37f5f1d / 1ab43ea / 176310e / 13556fd / 21c65b2 / 8355d1f）。いまの `now` は **0220 / 0227 / 0198**。0048 / 0049 / 0103 / 0149 / 0152 / 0160 / 0165 / 0181 / 0182 / 0191 / 0194 / 0199 は順番待ち。
-0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を、0151 の後は 0152、0190 の後は 0191 を開ける。0169 / 0157 / 0154 / 0162 / 0163 は done。
+第2波は 0059 / 0153 / 0169 / 0163 / 0154 / 0157 / 0162 が done（c55fc2d / 37f5f1d / 1ab43ea / 176310e / 13556fd / 21c65b2 / 8355d1f）、0198 も done（bd33178）。いまの `now` は **0220 / 0227 / 0127**。0048 / 0049 / 0103 / 0149 / 0152 / 0160 / 0165 / 0181 / 0182 / 0191 / 0194 / 0199 は順番待ち。
+0147 は 0194 / 0148 / 0165 を、0159 は 0160 / 0105 を、0151 の後は 0152、0190 の後は 0191 を開ける。0169 / 0157 / 0154 / 0162 / 0163 / 0198 は done。
 
 ### 次の昇格
 
@@ -49,19 +49,19 @@
 
 
 
-### next（65）
+### next（64）
 
 `now` の条件は `design: agreed` かつ `depends-on` 充足。`next` は `now` ではない理由で分ける（設計待ち / 順番待ち / 依存待ち）。
 
 - **設計待ち（design: pending・依存充足、0）**: なし
 - **順番待ち（design: agreed・依存充足、13）**: 0043, 0048, 0049, 0103, 0149, 0152, 0160, 0165, 0181, 0182, 0191, 0194, 0199
-- **依存待ち（52、* は design: agreed）**:
+- **依存待ち（51、* は design: agreed）**:
   - **L4 耐久**: 0125*, 0155*, 0167*, 0168*
   - **L3 マシン**: 0148*
   - **L6 認証**: 0158
   - **L8 運用**: 0161, 0164, 0166*
   - **L9 ゲートウェイ**: 0122*
-  - **基盤・移植**: 0038*, 0040, 0069, 0070, 0071, 0127*
+  - **基盤・移植**: 0038*, 0040, 0069, 0070, 0071
   - **code mode（新規・設計待ち）**: 0200, 0201, 0202, 0203, 0214, 0215, 0216
   - **capability / policy（新規）**: 0221〜0226, 0228, 0229
   - **UI 画面**: 0104, 0105, 0106*, 0107, 0108, 0109, 0110, 0111, 0112, 0113, 0114
@@ -200,7 +200,7 @@
 | [0124](issues/0124-api-backup-settings.md) | Backup の状態・実行・スケジュール API | open | next | 0145, 0146, 0164 |
 | [0125](issues/0125-api-file-tree-search.md) | File tree と file search API | open | next | 0033, 0145, 0146 |
 | [0126](issues/0126-api-notifications.md) | Attention 通知（in-app / desktop / webhook） | open | next | 0102, 0115, 0145, 0146, 0159 |
-| [0127](issues/0127-model-project-workspace.md) | Project と Workspace root の関連 | open | next | 0033, 0047, 0145, 0146 |
+| [0127](issues/0127-model-project-workspace.md) | Project と Workspace root の関連 | open | now | 0033, 0047, 0145, 0146, 0159, 0198 |
 | [0128](issues/0128-provider-oauth.md) | Provider の OAuth / token refresh | open | next | 0069, 0107, 0122 |
 | [0129](issues/0129-api-run-cancel.md) | Workflow run のキャンセル | open | next | 0038, 0145, 0146 |
 | [0130](issues/0130-api-workflow-archive.md) | Workflow の archive / delete | open | next | 0038, 0145, 0146 |
@@ -263,7 +263,7 @@
 | [0195](issues/0195-work-record-contract.md) | 仕事の記録の契約（意図・方針・判断） | **done** | — | — |
 | [0196](issues/0196-record-package.md) | 構造化レコードの実装（@hns/record・YAML・CLI） | **done** | — | 0195 |
 | [0197](issues/0197-record-product-integration.md) | 記録の製品統合（WorkItem / Evidence への写像） | open | next | 0116, 0120, 0196 |
-| [0198](issues/0198-graphql-mutation.md) | GraphQL の Mutation 面（書き込みの骨格） | open | now | 0176 |
+| [0198](issues/0198-graphql-mutation.md) | GraphQL の Mutation 面（書き込みの骨格） | **done** | — | 0176 |
 | [0199](issues/0199-code-mode-contract.md) | code mode の実行契約（profile・event・budget・モジュール境界） | open | next | - |
 | [0200](issues/0200-code-mode.md) | code mode（codemode・sandbox・structured output） | open | next | 0199 |
 | [0201](issues/0201-subagent-budget.md) | subagent と実行予算（深さ・本数・usage） | open | next | 0199 |
