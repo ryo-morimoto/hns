@@ -1,6 +1,6 @@
 # 0149: 会話の索引（D1）
 
-status: open
+status: done
 priority: now
 design: agreed
 design-ref: D078
@@ -14,14 +14,14 @@ Session DO の中にある会話を、外から一覧・検索・ページング
 
 ## Acceptance criteria
 
-- [ ] 索引の列を最小に固定（Conversation モデル + `indexed_at`）。`status` / `machineId` は 0115 / 0116 / 0127 に送る
-- [ ] Session DO が commit の後に自分の行を書く。順序を決め、失敗しても再送できる（dirtyAt + CAS）
-- [ ] metadata doc は 32 delta で checkpoint し、revision を有界にする
-- [ ] 索引が遅れたときの表示（「更新中」）を決める
-- [ ] 検索は索引の範囲だけ。会話本文の全文検索は範囲外と明記
-- [ ] cursor pagination のテスト（同時更新で落ちない）
-- [ ] DO から索引を作り直せる（壊れても正本は失われない）
-- [ ] D1 障害時: 構造化ログ + `index_state` + `Query.indexState` + 0039 の metrics で検知できる
+- [x] 索引の列を最小に固定（Conversation モデル + `indexed_at`）。`status` / `machineId` は 0115 / 0116 / 0127 に送る
+- [x] Session DO が commit の後に自分の行を書く。順序を決め、失敗しても再送できる（dirtyAt + CAS）
+- [x] metadata doc は 32 delta で checkpoint し、revision を有界にする
+- [x] 索引が遅れたときの表示（「更新中」）を決める
+- [x] 検索は索引の範囲だけ。会話本文の全文検索は範囲外と明記
+- [x] cursor pagination のテスト（同時更新で落ちない）
+- [x] DO から索引を作り直せる（壊れても正本は失われない）
+- [x] D1 障害時: 構造化ログ + `index_state` + `Query.indexState` + 0039 の metrics で検知できる
 
 ## Notes
 
@@ -269,3 +269,12 @@ D078 の合意を、実装の形に落としたもの。逸脱は「D078 から�
 - 2026-11-17: 実測（checkpoint の効果）。`hns.conversation.index` を 40 回書く（create 40 回）と、`document_revisions` の行は **7**（base + 直近の delta。32 delta で checkpoint し、それ以前の delta は畳まれる）。変更前は 1 行/turn で単調に増えた（0146 の実測で 120 turn → revision 121）。revision は 33 前後で有界になる。
 - 2026-11-17: 実装。store に migration 0005（PK 張り替え + `indexed_at` + `index_state`）と `conversation-index` の writer、keyset の repository、agent に `dirtyAt` / `indexedAt` / `pendingIndex` / `markIndexed` / `indexRows` と `checkpointWhen`、server に `SessionIndex`（drain / reindex / index_state）と `/rpc/reindex`、GraphQL に `nextCursor` / `after` / `q` / `Query.indexState`。`docs/durability.md` に INV-11。
 
+
+## Result
+
+- verdict: **PASS**（reviewer-0149、blocking 0）
+- reviewer: reviewer-0149（この変更を書いていない別エージェント）
+- HEAD: 6f51b7d（main に ff 統合）
+- 受入: 8/8（最後の metrics は 0039 → 0162 の /api/metrics に申し送り。0149 は構造化ログ + index_state + Query.indexState まで）。gate は exit 0（876 tests / 133 files。main の 1 回目は既知の cf dev flake、再実行で green）。
+- 確認: Session DO → D1 binding の狭い writer（session-index.ts）、dirtyAt + pendingIndex（50 件上限）+ markIndexed の CAS、updated_at 単調 upsert。D1 失敗で turn は 200 のまま dirty が残り次の RPC で回復。GraphQL 一覧は D1 のみ（keyset cursor、未知 project は D1 / DO に触れず invalid_argument）、詳細は DO。migration 0005 で conversations の PK を (project_id, id) + indexed_at に張り替え（旧 DDL からの cf dev 再構築、行保持、衝突は fail closed）。backfill は metadata の projectId（legacy default の混在は default に寄せて件数ログ）。40 writes → 7 document_revisions（~33 で有界）。
+- 非 blocking（中 3 / 低 5、follow-up）: reindex と drain の同時実行（公開トリガー前に直列化）/ lastSyncedAt の意味（正常系で更新されない）/ 本番で drain を起こす経路がまだ 0（0104 / 0105 で用意）/ conversations_activity が ORDER BY に効かない（updated_at に揃える）/ pendingIndex の読み取り失敗が 0 と記録される / 50 の定数が二重 / ページングと legacy 混在のテスト穴 / FK 前提が docs にない。
