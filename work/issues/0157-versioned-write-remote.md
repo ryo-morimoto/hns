@@ -139,6 +139,14 @@ read / list / stat の形は変えない（後方互換）。**非対称の理�
 
 truncation 後に settled の別内容が applied を返す件（低6）は、outcome に intent の digest を持たせる 0169 の契約に関わるので、ここでは直さず issue の follow-up に残す（intent が残っている間は body hash で denied になる。truncation 後の再送は「忘れた settled」として新しい write になるのが現契約）。
 
+### 0202 再レビュー修正（2026-11-17）
+
+再レビューで blocking 1（新規）。B4 で束縛を settle に移したことで、**未束縛の並行初回呼び出し**に穴が開いていた。
+
+- **blocking: 束縛の直列化**。未束縛の間だけ、束縛を決め得る呼び出し（apply / read の gate → machine → settle 全体）を DO 内の promise chain で 1 本ずつ実行する（`#serializedByBinding`）。ロック内で meta を再読し、束縛済みなら通常経路。束縛後はロックを取らない。これで 2 本目は machine を呼ぶ前に 400 になり、pending intent が残らない（watermark も進む）。
+- 低・中: 面コメントのバッククォート復元 / machine 応答は 1MiB を超えた時点で stream を打ち切る（content-length が無い場合も）/ `createFilesFace` は edge の limits を受け取る / 署名ヘッダの test を literal の対応で固定 / write の too_large → 413 の回帰 test / settled 修復 event が常に changed である近似を TSDoc に / journal 移行の列集合を検査（知らない旧 schema は fail closed）/ watermark truncation 後の同 operationId 別内容は 0169 の follow-up。
+
+
 ## テスト条件
 
 | ID | 条件（Given → When → Then） | リスク | 出所 |
@@ -172,6 +180,10 @@ truncation 後に settled の別内容が applied を返す件（低6）は、ou
 | C27 | 同時再送で intent 1 / outcome 1 / event 1。outcome だけ残った状態の再送は版と event を 1 回だけ直す | 高 | 0202 B7 |
 | C28 | machine の応答 body が読めない / 1MiB 超 → unavailable（write は unknown）。too_large は 413 | 高 | 0202 B6 |
 | C29 | 旧 DDL の journal 表が cf dev（workerd）で 1 トランザクションで再構築され、denied を受ける | 高 | 0202 低 |
+| C30 | 未束縛の workspace に別 projectRoot の write 2 本を同時 → 片方 200・片方 400、machine の 2 本目は呼ばれず、pending intent 0 で watermark が通る。read + write の同時も同じ | 高 | 0202 再レビュー blocking |
+| C31 | write の too_large → 413（denied の outcome を記録し、再送も 413） | 中 | 0202 低 |
+| C32 | 知らない列を持つ旧 journal 表は upgrade を拒否する（黙って列を捨てない） | 中 | 0202 低 |
+| C33 | 面の body 上限は edge の limits と同じ値を使う | 中 | 0202 低 |
 
 テストしない条件:
 
@@ -211,6 +223,10 @@ truncation 後に settled の別内容が applied を返す件（低6）は、ou
 | T24 | C27 | 競合テスト + 状態遷移 | unit | 同 "simultaneous retries append one intent, one outcome, and one event" / "a settled applied outcome repairs the version and event once" |
 | T25 | C28 | 故障注入 | unit | server/src/do/machine.test.ts "an answer whose body cannot be read is unavailable" / "an oversized answer is unavailable" / "a too-large refusal keeps its own failure" |
 | T26 | C29 | 実経路（workerd の DDL-in-transaction） | integration（cf dev + probe DO） | server/test/integration/workspace-do.test.ts "the journal table is rebuilt from the previous DDL inside a transaction"（store の journalUpgradeStatements を実行） |
+| T27 | C30 | 競合テスト（未束縛の初回） | unit（実 SQLite + fake machine） | do/workspace.test.ts "concurrent first writes with different project roots bind once" / "a concurrent first read and write bind once"（machine 呼び出し 1 回・pending 0・watermark 可） |
+| T28 | C31 | 状態遷移 + 境界 | unit | 同 "a too-large write is a 413 denial" |
+| T29 | C32 | 故障注入（未知 schema） | unit（実 SQLite） | do/journal.test.ts "an unknown previous schema is refused instead of upgraded" |
+| T30 | C33 | 契約（limits の受け渡し） | unit | edge/handler.test.ts "the files face requires a session and only GET or POST"（limits を捕捉） |
 
 層の判断: DO の遷移・journal・版表は実 SQLite（node:sqlite、単一プロセス）の unit で、machine の dirfd 解決と temp/rename は実 fs の unit で証明する。machine の署名付き HTTP は既存の integration（実 HTTP）に write op を足した。実 workerd + 実 machine + 実 fs の経路は 1 ファイルにまとめ（cf dev の起動コスト）、p50 / p95 を記録する（決定的な閾値のテストにはしない）。
 
@@ -232,14 +248,17 @@ truncation 後に settled の別内容が applied を返す件（低6）は、ou
 - 2026-11-17: 実装中の発見。(a) journal の settled 再送が内容を比べておらず、同じ operationId の別内容が古い outcome を返していた（appendIntent で intent の body hash / path / expectedVersion を比較して denied に修正）。(b) workerd は fetch の redirect: "error" を実装していない（manual に変更）。(c) SQLite の CHECK は広げられないため、旧 DDL の journal 表を開時に作り直す。
 - 2026-11-17: 独立レビュー（0202）BLOCKED（blocking 7）。B1 body の上限・content-type、B2 read の status 丸め、B3 read の束縛順、B4 write の束縛のタイミング、B5 operation id 再利用の code、B6 machine の body 読み失敗、B7 outcome/版/event の 3 トランザクションを修正。低（rename 後の re-hash、write の fs ログ path、header/RPC path の定数化、DDL 移行の明示列と workerd の再構築 test）も同時に修正。
 - 2026-11-17: 修正後の npm run check exit 0（706 tests / 37.7s、全 stage）。保存 20 回の p50 18.1ms / p95 25.4ms（cf dev + 実 machine + 実 fs）。再レビュー待ち。
+- 2026-11-17: 再レビュー BLOCKED（新規 1）。未束縛の並行初回呼び出しが両方 machine に届き、敗者の `#bindProject` が outcome を rollback して pending intent を残す（watermark 恒久停止）。束縛を決め得る呼び出しを未束縛の間だけ DO 内で直列化（`#serializedByBinding`）。ロック無しでは 2 本の再現テストが落ちることを確認（machine 2 回・status [200,404]）。低・中も修正（面コメント、machine 応答の stream bound、edge limits の受け渡し、ヘッダ literal test、write too_large、settled 修復の TSDoc、移行の列検査）。
+- 2026-11-17: 修正後の npm run check exit 0（710 tests / 43.9s、全 stage）。保存 20 回の p50 18.0ms / p95 27.0ms。2 回目の再レビュー待ち。
 
 ## Result
 
-- verdict: 再レビュー待ち（0202 の blocking 7 は修正済み。この issue は done にしない）
+- verdict: 2 回目の再レビュー待ち（0202 の blocking 7 + 再レビューの blocking 1 は修正済み。この issue は done にしない）
 - reviewer: reviewer-0202（実装を書いていない agent。lead が割り当て）
-- HEAD: 8e4fec5（コード。issue の記録は別 commit）
+- HEAD: 9258a8c（コード。issue の記録は別 commit）
 - 受入: 7/7。証拠は「テスト設計」の各行に対応するテスト。
-- ゲート: 修正後 HEAD で `npm run check` exit 0（706 tests / 37.7s、lint 0 warnings / fmt / codegen / typecheck / test（統合と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。`npm run build -w @hns/server` も exit 0（dist に node: import なし）。
+- ゲート: 修正後 HEAD で `npm run check` exit 0（710 tests / 43.9s、lint 0 warnings / fmt / codegen / typecheck / test（統合と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。`npm run build -w @hns/server` も exit 0（dist に node: import なし）。
 - 計測: 保存 20 回の p50 14.5–20.0ms / p95 17.2–34.5ms（cf dev + 実 machine + 実 fs、127.0.0.1。複数回。目標は e2e p95 ≤ 1s、DO 側 ≤ 150ms）。tunnel 越しは未計測（0148 / 0167）。
+- follow-up（0169 の契約）: watermark で intent が切り詰められた後、同じ operationId の別内容は「忘れた settled」として新しい write になる（outcome が intent の digest を持たないため）。直すなら 0169 の outcome に digest を足す。ここでは直さない。
 - 実経路で確認したこと: workerd の WebCrypto で Ed25519 署名が動き、machine が control-plane 公開鍵で検証する（D100 の向き）。`x-request-id` は署名対象外のまま machine の `fs.op` ログに届く。machine 停止で read 503 / write unknown。
 - 非 blocking（follow-up）: tunnel 越しの p95 と実機の machine 喪失（0167）/ machine registry と鍵の配布・rotation（0148）/ UI の unknown・conflict・externalChange 表示（0106）/ machine の read は projectRoot を分離しない（DO の検証 + ROOT containment。理由は Design）/ knip の configuration hint（`.agents/**` と workspace の rooted-helper entry）は本変更の前後どちらでも出る設定メモ。/ 保存経路の `operationId` は REST の利用者（0106）が作る前提で、面は空文字を拒否するだけ。
