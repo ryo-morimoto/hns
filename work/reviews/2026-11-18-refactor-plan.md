@@ -38,3 +38,8 @@
 
 - #5 in-test build: 12 → 0、1 package 1 回、assertion / テスト名の差分 0、standalone が dist なしで green（server 359 / machine 60 / workspace 84）。孤児ロックは 1ms で乗っ取り（修正前は Atomics.wait で返らない）。910 tests。wall は 52.5s（変わらない。速くならなかったことを記録）。
 - review の低: commit message / measurements の「readLock がディレクトリを読んで EISDIR」という因果は、**fd2a896 には readLock が無く**、この修正の途中案の話。正しくは「ロックに owner 記録が無く、乗っ取りが何を置き換えたか判定できなかった」。measurements の文を直す（次回の L1 追記で）。25s の記録も「返らない」に訂正。
+
+## L2（core の語彙と契約）完了 — a3d024b
+
+- request-id / 署名対象 / AbsentVersion / EVENT_NAMES / DetailSchema 導出 / 定数（core は 50、agent は 500 を INDEX_LIST_LIMIT）/ levelOfStatus / JOURNAL_UNKNOWN_REASONS を core に一元化。利用側の手写が消え、重複 grep 0。918 tests、SDL / codegen 差分 0、署名バイト列は diff 0（reviewer が signatureMessage と署名器のハンク無しを確認）。
+- 非 blocking: (1) AbsentVersion は実質 string の別名（Version はもともとブランド無しの string。`"absent"` リテラル主体の設計は follow-up）、(2) SIGNED_FIELDS は写し（Object.values で導出可）、(3) SIGNED_HEADER_BY_FIELD の as は satisfies で塞げる、(4) wire の間接が増えた、(5) `index.legacy_rows` が EVENT_NAMES に無い（L3 で拾う）、(6) wire の新テストは header 名変更時のみ検出。
