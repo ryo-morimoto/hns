@@ -49,10 +49,10 @@ const PKCS8_PREFIX = Uint8Array.from([
  * unexpected status, or an authentication failure): for a write it is the `unknown` case, and
  * for a read it is "cannot read right now".
  */
-export const MACHINE_FAILURES = ["denied", "unavailable"] as const;
+const MACHINE_FAILURES = ["denied", "unavailable"] as const;
 
 /** One way the Worker has no usable answer. */
-export type MachineFailure = (typeof MACHINE_FAILURES)[number];
+type MachineFailure = (typeof MACHINE_FAILURES)[number];
 
 /** What one machine call answered: a result, or the failure and a short diagnostic code. */
 export type MachineFilesAnswer<T> =
@@ -162,7 +162,7 @@ function toBase64Url(bytes: ArrayBuffer): string {
  * random per request, and the timestamp is the Worker's clock, so the machine's window and
  * replay cache are what bound a retry.
  */
-export async function signedHeaders(
+async function signedHeaders(
   target: MachineTarget,
   machineId: string,
   body: Uint8Array,

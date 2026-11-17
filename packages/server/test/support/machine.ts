@@ -13,7 +13,7 @@ export function base64Of(text: string): string {
 }
 
 /** One write the fake was asked to apply. */
-export type FakeWrite = MachineWriteRequest;
+type FakeWrite = MachineWriteRequest;
 
 /**
  * A machine that keeps its files in memory.

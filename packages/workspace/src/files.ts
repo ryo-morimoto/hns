@@ -178,7 +178,7 @@ export async function expectRegular(file: FileHandle): Promise<number> {
  * @param file - An open regular file.
  * @returns The version string, `"sha256:<hex>"`, over the whole content.
  */
-export async function hashFile(file: FileHandle): Promise<string> {
+async function hashFile(file: FileHandle): Promise<string> {
   const hash = createHash("sha256");
   const buffer = Buffer.allocUnsafe(HASH_CHUNK);
   let offset = 0;
@@ -254,7 +254,7 @@ export function namesOf(path: readonly string[]): readonly string[] {
  * resolved, so the names cannot climb out of the directory they are joined to.
  * The walk below opens each name against a held fd, which is the other half.
  */
-export function componentNames(value: string): readonly string[] {
+function componentNames(value: string): readonly string[] {
   if (value.includes("\0")) fail("invalid", "invalid path");
   if (value.startsWith("/") || /^[a-zA-Z]:[\\/]/u.test(value)) fail("invalid", "absolute path");
   const parts = value.split(/[\\/]+/u);
@@ -276,7 +276,7 @@ export function componentNames(value: string): readonly string[] {
  * project and a `projectRoot` cannot leave ROOT, even when one is prefixed with
  * the other.
  */
-export function projectNames(projectRoot: string, path: string): readonly string[] {
+function projectNames(projectRoot: string, path: string): readonly string[] {
   const project = componentNames(projectRoot);
   const file = componentNames(path);
   if (file.length === 0) fail("invalid", "path is empty");

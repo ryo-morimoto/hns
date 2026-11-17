@@ -79,7 +79,7 @@ export interface IntentAppendInput {
  * settles an intent the machine refused before writing, so the intent is no longer pending and
  * a checkpoint may pass it. `reason` is the machine's refusal code.
  */
-export type JournalOutcomeInput =
+type JournalOutcomeInput =
   | MutationResult
   | {
       readonly status: "denied";

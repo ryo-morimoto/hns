@@ -13,7 +13,7 @@ import { problem } from "../edge/problem.ts";
  * `denied` is a refusal the machine decided before writing. None of these is ever rounded into
  * `applied`.
  */
-export const FILES_FAILURES = [
+const FILES_FAILURES = [
   "invalid_request",
   "unsupported_media_type",
   "not_found",
@@ -26,7 +26,7 @@ export const FILES_FAILURES = [
 ] as const;
 
 /** One failure code of the files face. */
-export type FilesFailure = (typeof FILES_FAILURES)[number];
+type FilesFailure = (typeof FILES_FAILURES)[number];
 
 /** The body of a versioned write. */
 const WriteInput = v.object({
