@@ -53,7 +53,7 @@ export function encodeCursor(cursor: ConversationCursor | null): string | null {
  *
  * @remarks
  * Never throws: the argument is untrusted, and the resolver answers an invalid one with
- * `invalid_argument` rather than a 500.
+ * `invalid_request` rather than a 500.
  */
 export function decodeCursor(value: string): ConversationCursor | undefined {
   const text = decode(value);

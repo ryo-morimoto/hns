@@ -47,6 +47,6 @@ test("a blank name is invalid and writes nothing", async () => {
   const { result, write } = await run("owner", { name: "   ", workspaceRoot: "projects/a" });
   expect(write).not.toHaveBeenCalled();
   expect(result.data).toMatchObject({
-    createProject: { __typename: "MutationFailure", code: "INVALID_ARGUMENT" },
+    createProject: { __typename: "MutationFailure", code: "INVALID_REQUEST" },
   });
 });

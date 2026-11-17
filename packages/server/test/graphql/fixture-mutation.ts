@@ -52,7 +52,7 @@ export function noteMutation(owner: string): MutationModule {
             return mutationFailure("forbidden", "The caller does not own this note.");
           }
           if (args.text.trim().length === 0) {
-            return mutationFailure("invalid_argument", "text must not be blank.");
+            return mutationFailure("invalid_request", "text must not be blank.");
           }
           if (!context.budget.spend(1)) {
             return mutationFailure("limit_exceeded", "This request writes more rows than it may.");

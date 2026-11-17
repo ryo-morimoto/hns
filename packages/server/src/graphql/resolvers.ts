@@ -89,13 +89,13 @@ async function guarded<T>(read: () => Promise<T>): Promise<Guarded<T>> {
  * Parse `first`, defaulting to the page cap.
  *
  * @internal
- * @throws QueryReadError with `invalid_argument` when `first` is not an integer in 1..maximum.
+ * @throws QueryReadError with `invalid_request` when `first` is not an integer in 1..maximum.
  */
 function pageSize(first: number | null | undefined, maximum: number): number {
   if (first === null || first === undefined) return maximum;
   if (!Number.isInteger(first) || first < 1 || first > maximum) {
     throw new QueryReadError(
-      "invalid_argument",
+      "invalid_request",
       "first must be an integer between 1 and " + String(maximum) + ".",
     );
   }
@@ -106,7 +106,7 @@ function pageSize(first: number | null | undefined, maximum: number): number {
  * Decode the required `projectId` argument.
  *
  * @internal
- * @throws QueryReadError with `invalid_argument` when the argument is missing, is not a global
+ * @throws QueryReadError with `invalid_request` when the argument is missing, is not a global
  * id, or names a type other than `Project`.
  *
  * @remarks
@@ -115,17 +115,17 @@ function pageSize(first: number | null | undefined, maximum: number): number {
  */
 function requiredProjectId(value: string | null | undefined): ProjectId {
   if (value === null || value === undefined || value.length === 0) {
-    throw new QueryReadError("invalid_argument", "projectId is required.");
+    throw new QueryReadError("invalid_request", "projectId is required.");
   }
   const decoded: GlobalIdResult = fromGlobalId(value);
   if (!decoded.ok) {
-    throw new QueryReadError("invalid_argument", "projectId must be a global id.");
+    throw new QueryReadError("invalid_request", "projectId must be a global id.");
   }
   if (decoded.value.type !== "Project") {
-    throw new QueryReadError("invalid_argument", "projectId must name a Project.");
+    throw new QueryReadError("invalid_request", "projectId must name a Project.");
   }
   if (decoded.value.id.length === 0) {
-    throw new QueryReadError("invalid_argument", "projectId must name a Project.");
+    throw new QueryReadError("invalid_request", "projectId must name a Project.");
   }
   return v.parse(ProjectIdSchema, decoded.value.id);
 }
@@ -151,14 +151,14 @@ function readOf(
  * Decode the `after` argument.
  *
  * @internal
- * @throws QueryReadError with `invalid_argument` when the value is present but is not a cursor.
+ * @throws QueryReadError with `invalid_request` when the value is present but is not a cursor.
  * @returns The position, or undefined when the argument is absent.
  */
 function cursorOf(after: string | null | undefined): ConversationCursor | undefined {
   if (after === null || after === undefined) return undefined;
   const cursor = decodeCursor(after);
   if (cursor === undefined) {
-    throw new QueryReadError("invalid_argument", "after must be a conversation cursor.");
+    throw new QueryReadError("invalid_request", "after must be a conversation cursor.");
   }
   return cursor;
 }
@@ -249,7 +249,7 @@ export async function resolveTasks(
  *
  * @remarks
  * The project is checked in D1 before the index is read, so an unknown id is a typed
- * `invalid_argument` and never reaches a Durable Object (D080). The read is the index only: a
+ * `invalid_request` and never reaches a Durable Object (D080). The read is the index only: a
  * conversation the Session has not written yet is missing here, and its detail still comes from
  * the object. A cursor that is not one this server issued is refused, not guessed.
  */
@@ -263,7 +263,7 @@ export async function resolveConversations(
     const first = pageSize(args.first, context.maxRowsPerList);
     const project = await context.reads.project(projectId);
     if (project === undefined) {
-      throw new QueryReadError("invalid_argument", "No project has this id.");
+      throw new QueryReadError("invalid_request", "No project has this id.");
     }
     const after = cursorOf(args.after);
     const q = searchOf(args.q);
@@ -304,7 +304,7 @@ export async function resolveIndexState(
     const projectId = requiredProjectId(args.projectId);
     const project = await context.reads.project(projectId);
     if (project === undefined) {
-      throw new QueryReadError("invalid_argument", "No project has this id.");
+      throw new QueryReadError("invalid_request", "No project has this id.");
     }
     return context.reads.indexState(projectId);
   });

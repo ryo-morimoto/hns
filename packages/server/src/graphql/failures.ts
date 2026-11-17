@@ -1,8 +1,14 @@
-/** The closed set of expected GraphQL failures. */
-export const QUERY_FAILURE_CODES = ["invalid_argument", "limit_exceeded", "unavailable"] as const;
+import type { FailureCodeOf } from "../failures/status.ts";
 
-/** One expected failure; the client branches on it instead of reading a message. */
-export type QueryFailureCode = (typeof QUERY_FAILURE_CODES)[number];
+/**
+ * The closed set of expected GraphQL failures.
+ *
+ * @remarks
+ * The codes are the server-wide spellings (`failures/status.ts`): `invalid_request` is the same
+ * word REST and the machine use, and `docs/observability.md` says once what each face emits. A
+ * GraphQL failure travels inside a result union of a 200 response, so no status is involved.
+ */
+export type QueryFailureCode = FailureCodeOf<"graphql">;
 
 /** The type name every union member carries; the union resolves on it. */
 const QUERY_FAILURE_TYPE = "QueryFailure";

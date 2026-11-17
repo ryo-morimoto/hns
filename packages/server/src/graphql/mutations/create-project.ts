@@ -74,7 +74,7 @@ export function createProjectModule(): MutationModule {
             const name = args.name.trim();
             if (name.length === 0 || name.length > MAX_NAME_LENGTH) {
               return mutationFailure(
-                "invalid_argument",
+                "invalid_request",
                 "name must be 1-" + String(MAX_NAME_LENGTH) + " characters.",
               );
             }
@@ -84,7 +84,7 @@ export function createProjectModule(): MutationModule {
             } catch (error) {
               if (!(error instanceof v.ValiError)) throw error;
               return mutationFailure(
-                "invalid_argument",
+                "invalid_request",
                 "workspaceRoot must name a directory below the machine root.",
               );
             }

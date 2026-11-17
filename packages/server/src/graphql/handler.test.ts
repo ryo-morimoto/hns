@@ -195,7 +195,7 @@ test("an invalid conversation cursor is a typed failure", async () => {
   });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
-    data: { conversations: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+    data: { conversations: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
   expect(reads).toBe(0);
 });
@@ -266,7 +266,7 @@ test("conversations for an unknown project never address a Session object", asyn
   );
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
-    data: { conversations: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+    data: { conversations: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
   expect(reads).toBe(0);
   expect(session.ids).toStrictEqual([]);
@@ -328,7 +328,7 @@ test("an unknown project has no index state", async () => {
   });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
-    data: { indexState: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+    data: { indexState: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
 });
 
@@ -362,7 +362,7 @@ test("an invalid first is a typed failure at HTTP 200", async () => {
   });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
-    data: { projects: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+    data: { projects: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
 });
 
@@ -374,7 +374,7 @@ test("a project id that is not a Project global id is a typed failure", async ()
   });
   expect(raw.status).toBe(200);
   expect(await raw.json()).toMatchObject({
-    data: { tasks: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+    data: { tasks: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
   const wrongType = await send({
     query:
@@ -383,13 +383,13 @@ test("a project id that is not a Project global id is a typed failure", async ()
       '") { __typename ... on QueryFailure { code } } }',
   });
   expect(await wrongType.json()).toMatchObject({
-    data: { tasks: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+    data: { tasks: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
   const malformed = await send({
     query: '{ tasks(projectId: "not-a-global-id") { __typename ... on QueryFailure { code } } }',
   });
   expect(await malformed.json()).toMatchObject({
-    data: { tasks: { __typename: "QueryFailure", code: "INVALID_ARGUMENT" } },
+    data: { tasks: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
 });
 
@@ -558,7 +558,7 @@ test.each(["/abs", "../x", "a//b", "a\\b", ".hns/x", ""])(
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      data: { createProject: { __typename: "MutationFailure", code: "INVALID_ARGUMENT" } },
+      data: { createProject: { __typename: "MutationFailure", code: "INVALID_REQUEST" } },
     });
     expect(write).not.toHaveBeenCalled();
   },
@@ -643,7 +643,7 @@ test("invalid mutation input is a typed failure at HTTP 200", async () => {
   const response = await send({ query: CREATE_NOTE, variables: { text: "   " } });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
-    data: { createNote: { __typename: "MutationFailure", code: "INVALID_ARGUMENT" } },
+    data: { createNote: { __typename: "MutationFailure", code: "INVALID_REQUEST" } },
   });
 });
 
