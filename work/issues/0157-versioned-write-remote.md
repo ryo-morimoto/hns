@@ -5,7 +5,7 @@ priority: now
 design: agreed
 design-ref: docs/durability.md §3.1・§3.4
 depends-on: 0033, 0147, 0156
-touches: packages/core/src/machine.ts, packages/core/src/machine.test.ts, packages/core/src/index.ts, packages/workspace/src/files.ts, packages/workspace/src/files.test.ts, packages/workspace/src/index.ts, packages/machine/src/wire.ts, packages/machine/src/operations.ts, packages/machine/src/signature.ts, packages/machine/src/agent.ts, packages/machine/src/wire.test.ts, packages/machine/test/integration/agent.test.ts, packages/machine/test/integration/remote-write.test.ts, packages/store/src/journal/schema.ts, packages/store/src/journal/model.ts, packages/store/src/journal/parse.ts, packages/server/src/do/machine.ts, packages/server/src/do/workspace.ts, packages/server/src/do/workspace.test.ts, packages/server/src/do/journal.ts, packages/server/src/do/journal.test.ts, packages/server/src/edge/handler.ts, packages/server/src/edge/handler.test.ts, packages/server/src/edge/worker.ts, packages/server/src/edge/env.ts, packages/server/src/files/content.ts, packages/server/src/files/content.test.ts, packages/server/test/support/machine.ts, packages/server/test/integration/workspace-do.test.ts, tools/deploy/cloudflare.config.ts, tools/deploy/config.test.ts, work/issues/0157-versioned-write-remote.md
+touches: packages/core/src/machine.ts, packages/core/src/machine.test.ts, packages/core/src/index.ts, packages/workspace/src/files.ts, packages/workspace/src/files.test.ts, packages/workspace/src/index.ts, packages/machine/src/wire.ts, packages/machine/src/operations.ts, packages/machine/src/signature.ts, packages/machine/src/agent.ts, packages/machine/src/wire.test.ts, packages/machine/test/integration/agent.test.ts, packages/machine/test/integration/remote-write.test.ts, packages/store/src/journal/schema.ts, packages/store/src/journal/model.ts, packages/store/src/journal/parse.ts, packages/server/src/do/machine.ts, packages/server/src/do/workspace.ts, packages/server/src/do/workspace.test.ts, packages/server/src/do/journal.ts, packages/server/src/do/journal.test.ts, packages/server/src/edge/handler.ts, packages/server/src/edge/handler.test.ts, packages/server/src/edge/worker.ts, packages/server/src/edge/env.ts, packages/server/src/files/content.ts, packages/server/src/files/content.test.ts, packages/server/test/support/machine.ts, packages/server/test/integration/workspace-do.test.ts, packages/server/src/do/machine.test.ts, packages/workspace/src/rooted-helper.ts, packages/server/README.md, packages/machine/README.md, packages/workspace/README.md, tools/deploy/cloudflare.config.ts, tools/deploy/config.test.ts, work/issues/0157-versioned-write-remote.md
 
 ## Goal
 
@@ -124,6 +124,21 @@ read / list / stat の形は変えない（後方互換）。**非対称の理�
 - 実測（2026-11-17、cf dev + 実 machine agent + 実 fs、127.0.0.1、n=20、warmup なしの連続保存。2 回）: **p50 19.1–20.0ms / p95 29.2–34.5ms**。cloudflared / tunnel 越しは 0148 の registry と実機が要るので取っていない（0167 の故障注入で扱う）。
 - 観測は 0162 の x-request-id と ObsLogEntry（hop worker / do / fs）をそのまま使う。保存 1 回の相関 ID で edge → DO → machine を辿れることをテストで固定した。
 
+### 0202 レビュー修正（2026-11-17）
+
+独立レビュー（0202）の blocking 7 と低・中を直した。番号はレビューの指摘。
+
+- **B1 面の body**: `POST` は edge の `readBody(maxBodyBytes)` で読む（GraphQL と同じ）。content-type が JSON でなければ 415、上限超過は 413、JSON でない body は 400。`request.text()` を直接読まない。
+- **B2 状態の写像**: read は Workspace の失敗 envelope を parse し、code から 400 / 404 / 409 / 413 / 503 / 500 を決める（status を推測しない）。machine の `too_large` は read で 413、write では denied の outcome（reason `too_large`）にして 413。404 に丸めない。
+- **B3 read の束縛**: `#read` は machine を呼ぶ前に束縛を**読んで照合**し、違えば 400 で machine を呼ばない。束縛は成功した read の後、版表の更新と同じトランザクションで書く。失敗した read は束縛しない。
+- **B4 write の束縛**: gate は束縛を**読んで照合**するだけ。書き込みは applied の outcome と版・event と同じトランザクション。lease 拒否・denied・unknown・conflict では束縛しない（path_denied の後に別 projectRoot で通ることをテスト）。
+- **B5 operation id の再利用**: `operation_id_reused` は `denied`（400）で返す。conflict は版の不一致だけ。
+- **B6 machine の応答**: `response.text()` も try/catch し、content-length / 実長が 1MiB を超えたら `unavailable`。body の読み取り失敗は 500 ではなく unavailable（write は unknown / 504）。
+- **B7 ack のトランザクション**: `Journal.settle(input, after)` を足し、outcome の insert と `after`（版表・event・束縛）を 1 つの `storage.transaction` で行う。`after` は appended のときだけ走るので、同時再送でも event は 1 行。settled の applied を見た再送は、版表か束縛が欠けていれば 1 トランザクションで直し（event は版が変わるときだけ）、二重 event を出さない。
+- **低**: rename 後の再 hash が throw したら denied ではなく unknown（`applyVersionedWrite`）。machine の `fs.op` ログは write でも `projectRoot/path` を出す。署名ヘッダ名は core の `SIGNED_HEADER_BY_FIELD` から作り、`MACHINE_RPC_PATH` も core の定数を使う（リテラルを消す）。journal の移行 INSERT は明示列にし、cf dev の probe DO で旧 DDL からの再構築（workerd の DDL-in-transaction）を 1 本足した。面の失敗はすべて面の union（problem+json と混ぜない）。
+
+truncation 後に settled の別内容が applied を返す件（低6）は、outcome に intent の digest を持たせる 0169 の契約に関わるので、ここでは直さず issue の follow-up に残す（intent が残っている間は body hash で denied になる。truncation 後の再送は「忘れた settled」として新しい write になるのが現契約）。
+
 ## テスト条件
 
 | ID | 条件（Given → When → Then） | リスク | 出所 |
@@ -149,6 +164,14 @@ read / list / stat の形は変えない（後方互換）。**非対称の理�
 | C19 | REST: 保存 1 回の相関 ID が edge → DO → machine の fs.op まで同じ。本文・content・token はログに出ない | 高 | 受入5、0162 |
 | C20 | 実経路（cf dev + 実 machine agent + 実 fs）: acquire → write 200 → 実ファイル一致 → 再送 applied → 同時 2 本で片方 conflict → 外部書き換え後の read が externalChange → stale 409 → machine 停止で read 503・write unknown。保存 20 回の p50 / p95 を記録 | 高 | 受入1–5 |
 | C21 | 全変更 → npm run check → exit 0 | 高 | Result |
+| C22 | write の body が JSON でない / content-type が JSON でない / 上限超過 → 400 / 415 / 413 で、machine を呼ばない | 高 | 0202 B1 |
+| C23 | read の Workspace の失敗（400 / 413 / 503 / 内部エラー）がそれぞれ 400 / 413 / 503 / 500 に写り、404 に丸めない | 高 | 0202 B2 |
+| C24 | 束縛済み workspace の別 projectRoot の read → 400 で machine.reads が増えない。失敗した read は束縛しない | 高 | 0202 B3 |
+| C25 | lease 拒否 / denied / unknown の write は束縛せず、その後に別 projectRoot の write が applied になる | 高 | 0202 B4 |
+| C26 | 同じ operationId の別内容 → 400 denied（conflict にしない） | 高 | 0202 B5 |
+| C27 | 同時再送で intent 1 / outcome 1 / event 1。outcome だけ残った状態の再送は版と event を 1 回だけ直す | 高 | 0202 B7 |
+| C28 | machine の応答 body が読めない / 1MiB 超 → unavailable（write は unknown）。too_large は 413 | 高 | 0202 B6 |
+| C29 | 旧 DDL の journal 表が cf dev（workerd）で 1 トランザクションで再構築され、denied を受ける | 高 | 0202 低 |
 
 テストしない条件:
 
@@ -180,6 +203,14 @@ read / list / stat の形は変えない（後方互換）。**非対称の理�
 | T16 | C19 | 契約（相関 ID） | integration（実経路） | machine/test/integration/remote-write.test.ts の corr-read / corr-save |
 | T17 | C20 | ユースケース（実経路） | integration（cf dev + 実 machine + 実 fs） | 同（1 ファイル 2 テスト: 実経路と machine 停止） |
 | T18 | C21 | ゲート | static / build | npm run check |
+| T19 | C22 | 境界値 + 同値分割 | unit（実 DO + fake machine + face） | server/src/files/content.test.ts "a non-JSON, wrongly typed, or oversized body is refused at the face" |
+| T20 | C23 | デシジョンテーブル | unit | 同 "a read the workspace refuses keeps its status" / "a read beyond the bound is a 413" / "an answer that is not the workspace envelope is an internal error" + do/workspace.test.ts "a read beyond the bound is a 413, not a 404" |
+| T21 | C24 | 故障注入（束縛） | unit | do/workspace.test.ts "a read for another project root is refused before the machine" / "a failed read does not bind the project" |
+| T22 | C25 | 状態遷移（束縛） | unit | 同 "a refused write does not claim the project" / "an unknown write and a lease refusal do not claim the project" |
+| T23 | C26 | 同値分割 | unit | 同 "the same operation id with different content is denied before the machine" + content.test.ts "a reused operation id is a denial, not a conflict" |
+| T24 | C27 | 競合テスト + 状態遷移 | unit | 同 "simultaneous retries append one intent, one outcome, and one event" / "a settled applied outcome repairs the version and event once" |
+| T25 | C28 | 故障注入 | unit | server/src/do/machine.test.ts "an answer whose body cannot be read is unavailable" / "an oversized answer is unavailable" / "a too-large refusal keeps its own failure" |
+| T26 | C29 | 実経路（workerd の DDL-in-transaction） | integration（cf dev + probe DO） | server/test/integration/workspace-do.test.ts "the journal table is rebuilt from the previous DDL inside a transaction"（store の journalUpgradeStatements を実行） |
 
 層の判断: DO の遷移・journal・版表は実 SQLite（node:sqlite、単一プロセス）の unit で、machine の dirfd 解決と temp/rename は実 fs の unit で証明する。machine の署名付き HTTP は既存の integration（実 HTTP）に write op を足した。実 workerd + 実 machine + 実 fs の経路は 1 ファイルにまとめ（cf dev の起動コスト）、p50 / p95 を記録する（決定的な閾値のテストにはしない）。
 
@@ -199,15 +230,16 @@ read / list / stat の形は変えない（後方互換）。**非対称の理�
 - 2026-11-17: 設計 checkpoint を lead に送り、承認。Q1 touches（tools/deploy は 0157 単独、lock は触らない）、Q2=A（denied を outcome 語彙に足す）、Q3 p95 目標、Q4 status/priority。
 - 2026-11-17: 実装。(1) files.ts 抽出（挙動不変の単独 commit。workspace の unit + integration 77 tests green）、(2) core の machine RPC 契約 + machine の write op（実 fs の unit 7 + machine の実 HTTP integration 1）、(3) store の denied + DO の apply / read / machine client / face / deploy、(4) 実経路 integration（cf dev + 実 machine agent + 実 fs、p50 19.1ms / p95 34.5ms）。
 - 2026-11-17: 実装中の発見。(a) journal の settled 再送が内容を比べておらず、同じ operationId の別内容が古い outcome を返していた（appendIntent で intent の body hash / path / expectedVersion を比較して denied に修正）。(b) workerd は fetch の redirect: "error" を実装していない（manual に変更）。(c) SQLite の CHECK は広げられないため、旧 DDL の journal 表を開時に作り直す。
-- 2026-11-17: 独立レビュー待ち（この issue は done にしない）。
+- 2026-11-17: 独立レビュー（0202）BLOCKED（blocking 7）。B1 body の上限・content-type、B2 read の status 丸め、B3 read の束縛順、B4 write の束縛のタイミング、B5 operation id 再利用の code、B6 machine の body 読み失敗、B7 outcome/版/event の 3 トランザクションを修正。低（rename 後の re-hash、write の fs ログ path、header/RPC path の定数化、DDL 移行の明示列と workerd の再構築 test）も同時に修正。
+- 2026-11-17: 修正後の npm run check exit 0（706 tests / 37.7s、全 stage）。保存 20 回の p50 18.1ms / p95 25.4ms（cf dev + 実 machine + 実 fs）。再レビュー待ち。
 
 ## Result
 
-- verdict: 未実施（独立レビュー待ち。この issue は done にしない）
-- reviewer: —（実装を書いていない agent を lead が割り当てる）
-- HEAD: db9e895
+- verdict: 再レビュー待ち（0202 の blocking 7 は修正済み。この issue は done にしない）
+- reviewer: reviewer-0202（実装を書いていない agent。lead が割り当て）
+- HEAD: 8e4fec5（コード。issue の記録は別 commit）
 - 受入: 7/7。証拠は「テスト設計」の各行に対応するテスト。
-- ゲート: 最終 HEAD で `npm run check` exit 0（688 tests / 35.8s、lint 0 warnings / fmt / codegen / typecheck / test（統合と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。
-- 計測: 保存 20 回の p50 19.1–20.0ms / p95 29.2–34.5ms（cf dev + 実 machine + 実 fs、127.0.0.1。3 回の実行。目標は e2e p95 ≤ 1s、DO 側 ≤ 150ms）。tunnel 越しは未計測（0148 / 0167）。
+- ゲート: 修正後 HEAD で `npm run check` exit 0（706 tests / 37.7s、lint 0 warnings / fmt / codegen / typecheck / test（統合と cf dev を含む）/ build / deploy dry-run / knip すべて ok）。`npm run build -w @hns/server` も exit 0（dist に node: import なし）。
+- 計測: 保存 20 回の p50 14.5–20.0ms / p95 17.2–34.5ms（cf dev + 実 machine + 実 fs、127.0.0.1。複数回。目標は e2e p95 ≤ 1s、DO 側 ≤ 150ms）。tunnel 越しは未計測（0148 / 0167）。
 - 実経路で確認したこと: workerd の WebCrypto で Ed25519 署名が動き、machine が control-plane 公開鍵で検証する（D100 の向き）。`x-request-id` は署名対象外のまま machine の `fs.op` ログに届く。machine 停止で read 503 / write unknown。
 - 非 blocking（follow-up）: tunnel 越しの p95 と実機の machine 喪失（0167）/ machine registry と鍵の配布・rotation（0148）/ UI の unknown・conflict・externalChange 表示（0106）/ machine の read は projectRoot を分離しない（DO の検証 + ROOT containment。理由は Design）/ knip の configuration hint（`.agents/**` と workspace の rooted-helper entry）は本変更の前後どちらでも出る設定メモ。/ 保存経路の `operationId` は REST の利用者（0106）が作る前提で、面は空文字を拒否するだけ。
