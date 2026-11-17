@@ -99,7 +99,7 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
 | C2 | 任意の HTTP 要求（401 / 404 / 200 を含む）→ Worker が `http` を 1 件記録。path はクエリ無し、status と duration を持ち、body / header / token を持たない | 高 | 受入1・4 |
 | C3 | DO に 3 件 append → list は新しい順。level / since / requestId で絞れる。limit は 1..500 に clamp | 高 | 受入2 |
 | C4 | Session RPC の `x-request-id` 付き send → agent の `agent.response` が同じ requestId を持ち、text を持たない | 高 | 受入1・5 |
-| C5 | 署名付き machine 要求に `x-request-id` → `fs.op` が同じ id・pathname・status を持ち、content / body / token を持たない | 高 | 受入1・4・5 |
+| C5 | 署名付き machine 要求に `x-request-id` → `fs.op` が同じ id・pathname・status を持ち、content / body / token を持たない。path は `a.txt` / `/a.txt` / `\a.txt` のどれでも `/a.txt` | 高 | 受入1・4・5 |
 | C6 | `/api/events` / `/api/metrics` → cookie 無し 401、GET 以外 405、`SESSION` 無し 503、不正 query 400 | 高 | 受入2、D059 |
 | C7 | 未知の hop / event / level を持つ行 → parse が `ValiError`。語彙は core の const array と一致 | 中 | 受入3 |
 | C8 | `body` / `headers` / `token` を余分に持つ entry、allowlist 外の detail → format 後の行に現れない | 高 | 受入4 |
@@ -123,7 +123,7 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
 | T2 | C2 | ユースケース | unit | `server/src/edge/handler.test.ts` "the edge records one http event with a path and a status" |
 | T3 | C3 | 状態遷移 + 境界値 | unit（実 SQLite） | `server/src/obs/store.test.ts` "events are listed newest first and filtered" / "a limit is clamped" |
 | T4 | C4 | 契約 | unit | `server/src/do/session-rpc.test.ts` "the request id reaches the agent event" + `agent/src/session.test.ts` "a send reports the request id without the text" |
-| T5 | C5 | 契約 + 故障注入 | integration | `machine/test/integration/agent.test.ts` "the request id and the path are logged without the content" |
+| T5 | C5 | 契約 + 故障注入 + 同値分割（先頭区切り） | integration | `machine/test/integration/agent.test.ts` "the request id and the path are logged without the content"（`a.txt` / `/a.txt` / `\a.txt`） |
 | T6 | C6 | デシジョンテーブル | unit | `server/src/edge/handler.test.ts` "the observability API requires a session and only GET" + `server/src/obs/api.test.ts` |
 | T7 | C7 | 同値分割 | unit | `core/src/observability.test.ts` "an unknown hop, event, or level is refused" |
 | T8 | C8 | 故障注入（禁止キー） | unit | `core/src/observability.test.ts` "body, headers, tokens, and unknown detail keys never reach the line" |
@@ -174,4 +174,14 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
   （0148 / 0157）、実 workerd の obs 表の長期動作（SQL は実 SQLite の unit と cf dev の既存 integration）、
   runId を持つ hop（0162 のどのホップも runId をまだ持たない。trace は detail にあれば出す）。
 - review は未実施。issue は done にしない。
+- 2026-11-17: reviewer-0162 が BLOCKED（blocking 1 / 低 8）。blocking は machine の fs ログで、先頭 `/` 付きの
+  有効な path（`/a.txt`）に `"/"` を足して `//a.txt` にし、URL がホストとして解釈して pathname が
+  `/` になっていた。`normalizeRelative` を第一候補にし、拒否される path は先頭区切りを落とす
+  best-effort に変更（ログの失敗でリクエストは落とさない）。C5/T5 に `/a.txt` と `\a.txt` を追加。
+- 低も修正: trace は自分の `x-request-id` を送らない（自己ログ防止）、失敗したターン（400/429/503）は
+  `do.rpc` を残す（成功して agent イベントを書いた時だけ skip）、SESSION 不在の `/api/metrics` 503 テスト、
+  docs の ID 発番の記述を「edge が HTTP ID、内部 runtime は自分の turn ID を生成し得る」に弱め、
+  fire-and-forget の消失と metrics が下限であることを docs / RESULTS に明記。
+- follow-up（低 4 / 5 / 7）: 語彙・allowlist・request-id regex の二重管理、CLI テストの fake API、
+  tool イベントの requestId。いずれも 0162 の受入には影響しないが、次の観測変更で寄せる。
 
