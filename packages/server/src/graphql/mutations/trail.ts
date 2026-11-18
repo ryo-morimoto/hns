@@ -6,7 +6,7 @@ import {
   type ProjectId,
   type Trail,
 } from "@hns/core";
-import { fromGlobalId, publicEnumName } from "@hns/core/graphql";
+import { fromGlobalId } from "@hns/core/graphql";
 import {
   GraphQLEnumType,
   GraphQLID,
@@ -22,6 +22,7 @@ import type { GraphQLContext } from "../context.ts";
 import { QueryReadError } from "../failures.ts";
 import { trailView, type TrailView } from "../views.ts";
 import { MutationFailureType, mutationFailure, type MutationFailureView } from "./failure.ts";
+import { enumValues } from "./enums.ts";
 import type { MutationModule } from "./index.ts";
 
 /** The successful member of `createTrail`: the Trail the store created. */
@@ -46,22 +47,6 @@ type UpdateTrailResult = UpdateTrailPayloadView | MutationFailureView;
 const MAX_TITLE_LENGTH = 200;
 /** The free-text bound: a description is prose, but not an unbounded request body. */
 const MAX_TEXT_LENGTH = 10_000;
-
-/**
- * Turn a model vocabulary into GraphQL enum values.
- *
- * @internal
- * @param values - The closed list, in declaration order.
- * @returns One value per member; the value is the model string, unchanged.
- *
- * @remarks
- * The names follow the published output enums (`publicEnumName`: `feature` -> `FEATURE`,
- * `in_review` -> `IN_REVIEW`), so a client sends the value name it read from a Trail without a
- * translation table, and the two spellings cannot drift.
- */
-function enumValues(values: readonly string[]): Record<string, { value: string }> {
-  return Object.fromEntries(values.map((value) => [publicEnumName(value), { value }]));
-}
 
 /** The `TrailKind` input: the model's closed vocabulary, so a client cannot send another. */
 const TrailKindInput = new GraphQLEnumType({
@@ -216,8 +201,10 @@ function trailIdOf(value: string): string {
  * @internal
  * @remarks
  * `not_found` and `corrupt_row` are answers the caller can tell apart from their own mistake.
- * `invalid_transition` and `invalid_change` cannot come from these two fields (neither writes a
- * state or a Change), so they are defects here and are thrown as such.
+ * `invalid_transition`, `invalid_change`, and `invalid_head` cannot come from the field writes
+ * (none of them writes a state, a Change, or a Decision), so they are defects here and are thrown
+ * as such. `decideTrail` maps its own store answer, because a head the Trail does not have is
+ * its caller's mistake.
  */
 function refusalOf(refusal: TrailWriteRefusal): MutationFailureView {
   switch (refusal.kind) {
@@ -227,6 +214,7 @@ function refusalOf(refusal: TrailWriteRefusal): MutationFailureView {
       return mutationFailure("unavailable", "The stored trail could not be read.");
     case "invalid_transition":
     case "invalid_change":
+    case "invalid_head":
       throw new Error("a trail field write cannot refuse as " + refusal.kind);
     default:
       return assertNever(refusal);
@@ -330,7 +318,7 @@ function patchOf(input: UpdateTrailArguments["input"]): UpdateTrailPatch {
  */
 export function trailModule(): MutationModule {
   return {
-    name: "trails",
+    name: "review",
     fields: (
       objects: ReadonlyMap<string, GraphQLObjectType>,
       overrides: ReadonlyMap<string, GraphQLObjectType>,

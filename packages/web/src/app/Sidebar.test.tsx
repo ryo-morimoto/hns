@@ -42,9 +42,12 @@ test("the sidebar shows lists, not a board of columns", async () => {
   expect(names).toStrictEqual(TRAIL_GROUPS.map((groupName) => TRAIL_GROUP_LABELS[groupName]));
   // No board and no columns: neither the elements nor the classes a board would need exist.
   expect(document.querySelector('[role="listbox"], [role="grid"], [data-column]')).toBe(null);
-  // Each Trail is a row with its state beside it, not a card in a column.
+  // Each Trail is a row with its state beside it, not a card in a column. The title links to the
+  // Trail's review face (0232), and the state stays a sibling the row carries.
   for (const trail of ["レビューを待つ", "Web の土台", "観測中の変更", "終わった作業"]) {
-    const row = screen.getByText(trail, { selector: "li span" }).closest("li");
+    // A conversation may share a Trail's title; a Trail's link is the one the Sidebar's list
+    // makes, `#/p/<project>/t/<trail>`.
+    const row = screen.getByText(trail, { selector: "li a[href*='/t/']" }).closest("li");
     expect(row?.className).toBe("hns-sidebar__row");
     expect(row?.querySelector(".hns-sidebar__state")?.textContent ?? "").not.toBe("");
   }

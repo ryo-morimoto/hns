@@ -4,6 +4,7 @@ import { createProjectModule } from "./create-project.ts";
 import { requestGrantModule } from "./grants.ts";
 import { machinesModule } from "./machines.ts";
 import { trailModule } from "./trail.ts";
+import { reviewModule } from "./review.ts";
 import { sendMessageModule } from "./send-message.ts";
 import { policyModule } from "../policy/schema.ts";
 
@@ -50,9 +51,11 @@ export const MUTATION_MODULES: readonly MutationModule[] = [
   // The chat's send face (0270n): the turn that admits a policy snapshot and opens 0226's
   // granted path.
   sendMessageModule(),
-  // The Trail write face (0231, D104): createTrail and updateTrail. Its module is last so the
-  // published SDL's Mutation grows at the end.
+  // The Trail write face (0231, D104): createTrail and updateTrail.
   trailModule(),
+  // The review face (0232, D104): the decision, the finding, and the hunk actions. Its module is
+  // last so the published SDL's Mutation grows at the end.
+  reviewModule(),
 ];
 
 /**

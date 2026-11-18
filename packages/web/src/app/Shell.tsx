@@ -20,6 +20,7 @@ import type { SidebarProjects$key } from "../__generated__/SidebarProjects.graph
 import type { SidebarTrails$key } from "../__generated__/SidebarTrails.graphql";
 import { Button } from "../components/Button.tsx";
 import { PolicyScreen, PolicyScreenFallback } from "../routes/policy/PolicyScreen.tsx";
+import { TrailDetailScreen } from "../routes/trail/TrailDetailScreen.tsx";
 import { ConversationScreen } from "../screens/conversation/ConversationScreen.tsx";
 import { projectIdFrom } from "../routes/ids.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
@@ -218,18 +219,24 @@ function ShellFrame({
     route.kind === "conversation"
       ? conversations.find((item) => item.id === route.conversationId)?.title
       : undefined;
+  const trailTitle =
+    route.kind === "trail" ? trails.find((trail) => trail.id === route.trailId)?.title : undefined;
   const location =
     route.kind === "conversation"
       ? (conversationTitle ?? "会話")
       : route.kind === "policy"
         ? "ポリシー"
-        : "Workspace";
+        : route.kind === "trail"
+          ? "Trail"
+          : "Workspace";
   const title =
     route.kind === "conversation"
       ? (conversationTitle ?? "会話")
       : route.kind === "policy"
         ? "ポリシー"
-        : (project?.name ?? "Workspace");
+        : route.kind === "trail"
+          ? (trailTitle ?? "Trail")
+          : (project?.name ?? "Workspace");
 
   const totals = totalsOf(summaries.data ?? []);
   const connection = projectsFailed ? "offline" : "online";
@@ -308,6 +315,8 @@ function ShellFrame({
             />
           ) : route.kind === "policy" ? (
             <PolicyView project={project} />
+          ) : route.kind === "trail" ? (
+            <TrailDetailScreen trailId={route.trailId} />
           ) : (
             <WorkspaceView project={project} conversations={conversations} trails={trails} />
           )}

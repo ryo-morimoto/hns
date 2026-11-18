@@ -15,10 +15,21 @@ import type {
   Store,
   TrailChangeValue,
   TrailCreateInput,
+  TrailDecisionCreateInput,
+  TrailDecisionValue,
+  TrailFindingCreateInput,
+  TrailFindingValue,
+  TrailGateValue,
   TrailRowValue,
+  TrailSessionValue,
   TrailUpdate,
   TrailWriteRefusal,
 } from "@hns/store";
+import { reviewDiff } from "../review/service.ts";
+import type { ReviewDiff } from "../review/service.ts";
+import { R2ReviewSource } from "../review/r2.ts";
+import { writeHunk } from "../review/write.ts";
+import type { ReviewDiffWriteResult } from "../review/write.ts";
 import type { WorkerEnv } from "../edge/env.ts";
 import { createRowBudget, type RowBudget } from "../edge/limits.ts";
 import type { Session } from "../edge/session.ts";
@@ -107,6 +118,63 @@ export interface GraphQLReads {
   readonly trailChanges: (
     trailId: string,
   ) => Promise<readonly (TrailChangeValue | TrailWriteRefusal)[]>;
+  /**
+   * The sessions a Trail is linked to, oldest first (0232).
+   *
+   * @remarks
+   * Same shape as `trailChanges`: the store answers a row it cannot parse as a `corrupt_row`
+   * refusal in the list, and the resolver turns that into a typed failure.
+   */
+  readonly trailSessions: (
+    trailId: string,
+  ) => Promise<readonly (TrailSessionValue | TrailWriteRefusal)[]>;
+  /** The findings on a Trail, newest first; the same `corrupt_row` rule as {@link trailChanges}. */
+  readonly trailFindings: (
+    trailId: string,
+  ) => Promise<readonly (TrailFindingValue | TrailWriteRefusal)[]>;
+  /** The decisions on a Trail, newest first; the same `corrupt_row` rule as {@link trailChanges}. */
+  readonly trailDecisions: (
+    trailId: string,
+  ) => Promise<readonly (TrailDecisionValue | TrailWriteRefusal)[]>;
+  /**
+   * The gate evaluations recorded on a Trail, newest first.
+   *
+   * @remarks
+   * The **evidence** a gate left, not the gate's state now: `Trail.gates` computes that from the
+   * head, the findings, and the decisions, and this list is what it was before.
+   */
+  readonly trailGates: (
+    trailId: string,
+  ) => Promise<readonly (TrailGateValue | TrailWriteRefusal)[]>;
+  /**
+   * The latest Change of a Trail, or undefined when it has none: the head its review is about.
+   *
+   * @remarks
+   * The gates and an approval both address this Change (C2 / C3). A trailing `corrupt_row` in
+   * `trailChanges` already fails the read of the list, so this port answers the row or nothing; a
+   * corrupt row is reported by the list.
+   */
+  readonly trailHead: (trailId: string) => Promise<TrailChangeValue | undefined>;
+  /**
+   * The base commit a Trail's review is compared against, or undefined when it has no Change.
+   *
+   * @remarks
+   * The first commit the Trail was taken from. The freshness gate compares the Change's
+   * `baseCommit` with it: equal is "the base did not move".
+   */
+  readonly trailBase: (trailId: string) => Promise<string | undefined>;
+  /**
+   * The diff between two commits, as the checkpoint diff reads it (C1).
+   *
+   * @returns The diff, or a typed failure the review face shows.
+   *
+   * @remarks
+   * The diff engine (`review/service.ts`) is the one the editor has (0009 / 0011), and it reads a
+   * `ReviewSource`: production is the R2 checkpoint packs (D106), a test is the fake source. A
+   * `source` of undefined is a deployment without the `OBJECTS` binding, which fails closed as
+   * `unavailable` — never as an empty diff.
+   */
+  readonly reviewDiff: (base: string, head: string) => Promise<ReviewDiffReadResult>;
   /**
    * One page of the D1 conversation index, scoped to the project.
    *
@@ -210,6 +278,97 @@ export interface GraphQLWrites {
     id: string,
     patch: UpdateTrailWrite,
   ) => Promise<TrailRowValue | TrailWriteRefusal | undefined>;
+  /**
+   * Record a Decision on a Trail (0232): an approval, a change request, or a rejection.
+   *
+   * @remarks
+   * The actor is the resolver's to pass (it takes the session's subject); the store refuses an
+   * approval whose head the Trail does not have, so the C2 rule is checked in the layer that
+   * persists it as well as in the resolver that reads it.
+   */
+  readonly addTrailDecision: (
+    trailId: string,
+    input: TrailDecisionCreateInput,
+  ) => Promise<TrailDecisionValue | TrailWriteRefusal>;
+  /** Raise a Finding on a Trail; the resolver checks the vocabularies before this port runs. */
+  readonly addTrailFinding: (
+    trailId: string,
+    input: TrailFindingCreateInput,
+  ) => Promise<TrailFindingValue | TrailWriteRefusal>;
+}
+
+/**
+ * The answer of one diff read on the GraphQL face.
+ *
+ * @remarks
+ * A failure is a value, not an exception (the diff engine's own contract): the review face shows
+ * `review_not_ready` for a commit whose checkpoint pack has not been stored yet, which a person
+ * reads as "wait", and `unavailable` for the rest.
+ */
+export type ReviewDiffReadResult =
+  | { readonly ok: true; readonly diff: ReviewDiff }
+  | {
+      readonly ok: false;
+      readonly code: "invalid_request" | "not_found" | "too_large" | "unauthorized" | "unavailable";
+      readonly message: string;
+    };
+
+/**
+ * What one hunk action (`keepHunk` / `undoHunk` / `applyHunk`) needs: the diff pair it acts on.
+ *
+ * @remarks
+ * A hunk action is a **versioned write** (C1, D104: the UI is not the authority), so the server
+ * needs the bytes on both sides and the version the caller saw. This port is the server's side of
+ * the Workspace's versioned write: production reads the pair out of the checkpoint packs and
+ * refuses to guess a version; a test replaces it with a real file and the real
+ * `applyVersionedWrite`.
+ */
+export interface ReviewFilePair {
+  /** The bytes on the head side, or undefined when the path is not there (a deleted file). */
+  readonly head: Uint8Array | undefined;
+  /** The bytes on the base side, or undefined when the path is not there (an added file). */
+  readonly base: Uint8Array | undefined;
+}
+
+/** What a hunk action asks for. */
+export interface ReviewHunkWrite {
+  /** The Change the hunk belongs to (base..head), decoded from its global id. */
+  readonly changeId: string;
+  /** The base and head the caller read; a Change that moved is refused. */
+  readonly base: string;
+  readonly head: string;
+  /** The path the hunk is in; must be inside the workspace and not binary. */
+  readonly path: string;
+  /** The line the hunk starts at on the head side (0 for a deletion-only hunk at the top). */
+  readonly headStart: number;
+  /** The version of the file the caller saw, or `absent`. */
+  readonly expectedVersion: string;
+  /** The actor the file write is recorded under. */
+  readonly actor: string;
+}
+
+/** The ports the review face writes through. */
+export interface GraphQLReviewWrites {
+  /**
+   * Write the bytes `action` produces from one hunk, if the file is still at `expectedVersion`.
+   *
+   * @returns The outcome, and the diff re-read afterwards when the write was applied.
+   *
+   * @remarks
+   * The three actions differ only in which bytes they produce:
+   *
+   * - **keep** writes the head bytes (the hunk stays as it is);
+   * - **undo** writes the base bytes (the hunk is reverted to the base);
+   * - **apply** writes the head bytes for a hunk the base does not have, and the base bytes for a
+   *   hunk the head does not have (a resolution taken on the screen).
+   *
+   * Every one of them goes through `applyVersionedWrite`, so a file that moved since the caller
+   * read it is `conflict` and nothing is written.
+   */
+  readonly hunk: (
+    action: "keep" | "undo" | "apply",
+    input: ReviewHunkWrite,
+  ) => Promise<ReviewDiffWriteResult>;
 }
 
 /** What one request carries into its resolvers. */
@@ -226,6 +385,15 @@ export interface GraphQLContext {
   readonly session: Session;
   readonly reads: GraphQLReads;
   readonly writes: GraphQLWrites;
+  /**
+   * The review face's writes (0232): a hunk's keep / undo / apply, each a versioned write.
+   *
+   * @remarks
+   * A port of its own rather than a {@link GraphQLWrites} member because it writes **files**, not
+   * rows: it is the Workspace's `applyVersionedWrite` behind a seam, and a test replaces it with
+   * one over a temporary directory.
+   */
+  readonly review: GraphQLReviewWrites;
   /**
    * The grant port: `requestGrant` asks a session object for one capability grant (0224).
    *
@@ -267,6 +435,8 @@ export interface GraphQLContextOptions {
   readonly session: Session;
   readonly reads?: Partial<GraphQLReads> | undefined;
   readonly writes?: Partial<GraphQLWrites> | undefined;
+  /** Replace the review face's file writes; production builds it over the checkpoint packs. */
+  readonly review?: Partial<GraphQLReviewWrites> | undefined;
   /**
    * Replace the policy face; production builds it over the control database.
    *
@@ -436,6 +606,19 @@ function defaultReads(
     trail: (id) => storeCall(env, requestId, "read", (store) => store.trails.get(id)),
     trailChanges: (trailId) =>
       storeCall(env, requestId, "read", (store) => store.trails.listChanges(trailId)),
+    trailSessions: (trailId) =>
+      storeCall(env, requestId, "read", (store) => store.trails.listSessions(trailId)),
+    trailFindings: (trailId) =>
+      storeCall(env, requestId, "read", (store) => store.trails.listFindings(trailId)),
+    trailDecisions: (trailId) =>
+      storeCall(env, requestId, "read", (store) => store.trails.listDecisions(trailId)),
+    trailGates: (trailId) =>
+      storeCall(env, requestId, "read", (store) => store.trails.listGates(trailId)),
+    trailHead: (trailId) =>
+      storeCall(env, requestId, "read", (store) => store.trails.headChange(trailId)),
+    trailBase: (trailId) =>
+      storeCall(env, requestId, "read", (store) => store.trails.baseCommit(trailId)),
+    reviewDiff: (base, head) => diffRead(env, requestId, base, head),
     conversations: (projectId, query) =>
       storeCall(env, requestId, "read", (store) =>
         store.conversations.page(pageQuery(projectId, query)),
@@ -494,6 +677,73 @@ function defaultWrites(env: WorkerEnv, requestId: string): GraphQLWrites {
       storeCall(env, requestId, "write", (store) => store.trails.create(input)),
     updateTrail: (id, patch) =>
       storeCall(env, requestId, "write", (store) => store.trails.update(id, patch)),
+    addTrailDecision: (trailId, input) =>
+      storeCall(env, requestId, "write", (store) => store.trails.addDecision(trailId, input)),
+    addTrailFinding: (trailId, input) =>
+      storeCall(env, requestId, "write", (store) => store.trails.addFinding(trailId, input)),
+  };
+}
+
+/**
+ * The production diff read: the R2 checkpoint packs, through the review engine (C1).
+ *
+ * @internal
+ * @param env - The Worker environment; `OBJECTS` is where the packs live (D106).
+ * @returns The diff, or a typed failure.
+ *
+ * @remarks
+ * A deployment without the `OBJECTS` binding fails closed with `unavailable`: the review source
+ * is the packs, and there is no second place a commit could be read from that the face may reach.
+ * The engine's failure codes are the core `ReviewFailure` vocabulary; `not_found` is surfaced as
+ * it is, because for a checkpoint that means "the pack for this commit has not been stored yet".
+ */
+async function diffRead(
+  env: WorkerEnv,
+  requestId: string,
+  base: string,
+  head: string,
+): Promise<ReviewDiffReadResult> {
+  const bucket = env.OBJECTS;
+  if (bucket === undefined) {
+    console.error("graphql: no OBJECTS binding for a review diff", requestId);
+    return {
+      ok: false,
+      code: "unavailable",
+      message: "This deployment has no checkpoint store to read a diff from.",
+    };
+  }
+  const result = await reviewDiff(new R2ReviewSource(bucket), base, head);
+  if (result.ok) return { ok: true, diff: result.diff };
+  console.error("graphql: a review diff could not be read", requestId, result.failure);
+  return { ok: false, code: result.failure, message: result.message };
+}
+
+/**
+ * The production hunk writes: the Workspace's versioned write over the checkpoint packs (C1).
+ *
+ * @internal
+ * @remarks
+ * **The UI is not the authority.** Keep / undo / apply read both sides of the file out of the
+ * packs and write through `applyVersionedWrite`'s rules (`review/write.ts`), so the hunk the
+ * caller saw and the bytes on disk are compared before anything is written: a file that moved is
+ * `conflict`. The worker has no writable directory, so this build's port answers
+ * `unavailable` when it is asked to write; the seam and its rules are the part 0232 proves,
+ * and a writable Workspace reach is what turns it on.
+ */
+function defaultReview(env: WorkerEnv, requestId: string): GraphQLReviewWrites {
+  return {
+    hunk: async (action, input) => {
+      const bucket = env.OBJECTS;
+      // Without the packs there is no head side to keep, and one is not invented: fail closed.
+      if (bucket === undefined) {
+        return {
+          ok: false,
+          code: "unavailable",
+          message: "This deployment has no checkpoint store to read the change from.",
+        };
+      }
+      return writeHunk(new R2ReviewSource(bucket), action, input, requestId);
+    },
   };
 }
 
@@ -529,6 +779,8 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       store: () => storeWith(options.env, options.requestId),
       signal: options.signal ?? new AbortController().signal,
     });
+  const reviewOverrides = options.review ?? {};
+  const review = defaultReview(options.env, options.requestId);
   const readOverrides = options.reads ?? {};
   const writeOverrides = options.writes ?? {};
   return {
@@ -545,6 +797,13 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       trails: readOverrides.trails ?? reads.trails,
       trail: readOverrides.trail ?? reads.trail,
       trailChanges: readOverrides.trailChanges ?? reads.trailChanges,
+      trailSessions: readOverrides.trailSessions ?? reads.trailSessions,
+      trailFindings: readOverrides.trailFindings ?? reads.trailFindings,
+      trailDecisions: readOverrides.trailDecisions ?? reads.trailDecisions,
+      trailGates: readOverrides.trailGates ?? reads.trailGates,
+      trailHead: readOverrides.trailHead ?? reads.trailHead,
+      trailBase: readOverrides.trailBase ?? reads.trailBase,
+      reviewDiff: readOverrides.reviewDiff ?? reads.reviewDiff,
       conversations: readOverrides.conversations ?? reads.conversations,
       indexState: readOverrides.indexState ?? reads.indexState,
       machines: readOverrides.machines ?? reads.machines,
@@ -555,6 +814,11 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       revokeMachine: writeOverrides.revokeMachine ?? writes.revokeMachine,
       createTrail: writeOverrides.createTrail ?? writes.createTrail,
       updateTrail: writeOverrides.updateTrail ?? writes.updateTrail,
+      addTrailDecision: writeOverrides.addTrailDecision ?? writes.addTrailDecision,
+      addTrailFinding: writeOverrides.addTrailFinding ?? writes.addTrailFinding,
+    },
+    review: {
+      hunk: reviewOverrides.hunk ?? review.hunk,
     },
   };
 }

@@ -49,6 +49,25 @@ import {
 import type { PolicyActive, StoredPolicyProposal } from "./repositories/policy.ts";
 
 /**
+ * Whether a value a Trail repository answered is a stored row rather than a refusal.
+ *
+ * @param value - A row, or a `TrailWriteRefusal`.
+ * @returns `true` for a row.
+ *
+ * @remarks
+ * The discriminator is `refused`: every row carries `refused: false` and every refusal carries
+ * `refused: true`, so one boolean separates them and a caller narrows without a cast. It is a
+ * function rather than an `in` test per call site because a row's id is a string and a
+ * refusal's `kind` is also a string: "has a kind" does not narrow, and this is the one property
+ * that does.
+ */
+export function isStored<TValue extends object>(
+  value: TValue | { readonly refused: true },
+): value is TValue {
+  return !("refused" in value && value.refused);
+}
+
+/**
  * Parse a raw `projects` row into the public {@link Project}.
  *
  * @remarks

@@ -6,12 +6,24 @@ import {
   type ProjectId,
   type Trail,
   type TrailChange,
+  type TrailDecision,
+  type TrailDecisionAction,
+  type TrailFinding,
+  type TrailGate,
   type TrailPriority,
+  type TrailSession,
   type TrailState,
 } from "@hns/core";
 import type { StoreContext } from "../db.ts";
-import { parseTrail, parseTrailChange } from "../parse.ts";
-import { TrailChangeRowSchema, TrailRowSchema } from "../schemas.ts";
+import { parseTrail, parseTrailChange, parseTrailDecision, parseTrailFinding } from "../parse.ts";
+import {
+  TrailChangeRowSchema,
+  TrailDecisionRowSchema,
+  TrailFindingRowSchema,
+  TrailGateRowSchema,
+  TrailRowSchema,
+  TrailSessionRowSchema,
+} from "../schemas.ts";
 
 /**
  * A write the Trail repository refuses.
@@ -28,6 +40,9 @@ import { TrailChangeRowSchema, TrailRowSchema } from "../schemas.ts";
  * - `corrupt_row`: the row the caller asked about does not parse — a stored value this build does
  *   not know, in a column the table's CHECK could not refuse. The read fails closed and says so;
  *   it is not a defect of the caller's request, and it is not a default either.
+ * - `invalid_head`: an approval named no head, or a head this Trail's Changes do not name. An
+ *   approval that names nothing could never be told apart from a later head (C2), so it is not
+ *   recorded.
  *
  * Every refusal carries `refused: true` and every stored row carries `refused: false`, so a caller
  * branches on one boolean and the two outcomes are a discriminated union for a TypeScript reader.
@@ -48,7 +63,8 @@ export type TrailWriteRefusal =
       readonly head_commit: string;
       readonly refused: true;
     }
-  | { readonly kind: "corrupt_row"; readonly refused: true };
+  | { readonly kind: "corrupt_row"; readonly refused: true }
+  | { readonly kind: "invalid_head"; readonly refused: true };
 
 /**
  * What a caller supplies to create a Trail.
@@ -80,6 +96,44 @@ export interface TrailChangeCreateInput {
   readonly headCommit: string;
   readonly repoId?: string | undefined;
   readonly runId?: string | undefined;
+}
+
+/**
+ * What a caller supplies to record a Decision.
+ *
+ * @remarks
+ * A Decision is append-only: this is the whole of it, and nothing edits one afterwards. `note` is
+ * the point a person typed, and is stored even when empty. `resolveFindingIds` is the revise path:
+ * the findings the review said were addressed become `resolved` in the same D1 batch, so a
+ * requested change and the points it answers are written together or not at all.
+ */
+export interface TrailDecisionCreateInput {
+  readonly action: TrailDecisionAction;
+  /** The session subject or agent that decided. */
+  readonly actor: string;
+  readonly note: string;
+  /** The Change the decision is about. */
+  readonly changeId?: string | undefined;
+  /** The commit the decision was made against; an approval must name it (D104). */
+  readonly headCommit?: string | undefined;
+  /** Findings a revise answers; they become `resolved` when the decision is stored. */
+  readonly resolveFindingIds?: readonly string[] | undefined;
+}
+
+/**
+ * What a caller supplies to raise a Finding.
+ *
+ * @remarks
+ * A Finding is recorded, never derived: an agent, a test, or a person raises it. `none` is "a note
+ * without weight", so it can be stored and shown without blocking anything.
+ */
+export interface TrailFindingCreateInput {
+  readonly changeId?: string | undefined;
+  readonly severity: TrailFinding["severity"];
+  readonly source: TrailFinding["source"];
+  readonly summary: string;
+  readonly file?: string | undefined;
+  readonly hunk?: string | undefined;
 }
 
 /**
@@ -117,6 +171,23 @@ export type TrailRowValue = Trail & { readonly refused: false };
  * absence is what makes {@link TrailWriteRefusal} the other half of the union.
  */
 export type TrailChangeValue = TrailChange & { readonly refused: false };
+
+/**
+ * A Trail's session link a method returned as stored.
+ *
+ * @remarks
+ * The same discriminated shape as {@link TrailRowValue}.
+ */
+export type TrailSessionValue = TrailSession & { readonly refused: false };
+
+/** A Finding a method returned as stored. */
+export type TrailFindingValue = TrailFinding & { readonly refused: false };
+
+/** A Decision a method returned as stored. */
+export type TrailDecisionValue = TrailDecision & { readonly refused: false };
+
+/** A gate evaluation a method returned as stored. */
+export type TrailGateValue = TrailGate & { readonly refused: false };
 
 /**
  * Trails: the unit of work (D104), the rows a Task used to be.
@@ -223,6 +294,95 @@ export interface TrailRepository {
     trailId: string,
     input: TrailChangeCreateInput,
   ): Promise<(TrailChange & { readonly refused: false }) | TrailWriteRefusal>;
+  /**
+   * The sessions a Trail is linked to, oldest link first.
+   *
+   * @returns The links, or a one-entry array holding the `corrupt_row` refusal when a stored link
+   * does not parse — the same shape every list of this repository answers with. An empty array is
+   * a Trail with no session.
+   */
+  listSessions(trailId: string): Promise<readonly (TrailSessionValue | TrailWriteRefusal)[]>;
+  /**
+   * The findings raised on a Trail, newest first.
+   *
+   * @returns The findings, or a one-entry array holding the `corrupt_row` refusal. Newest first is
+   * the order a reader wants: the point just raised is the one being discussed.
+   */
+  listFindings(trailId: string): Promise<readonly (TrailFindingValue | TrailWriteRefusal)[]>;
+  /**
+   * The decisions recorded on a Trail, newest first.
+   *
+   * @returns The decisions, or a one-entry array holding the `corrupt_row` refusal.
+   *
+   * @remarks
+   * Newest first is what an approval rule needs (`core`'s `trailCurrentApproval` reads the list
+   * in this order) and what a reviewer reads: the last thing decided is the first line.
+   */
+  listDecisions(trailId: string): Promise<readonly (TrailDecisionValue | TrailWriteRefusal)[]>;
+  /**
+   * The gate evaluations recorded on a Trail, newest first.
+   *
+   * @returns The gate rows, or a one-entry array holding the `corrupt_row` refusal.
+   *
+   * @remarks
+   * These are the **evidence** a gate left at a moment. The state a screen shows now is computed
+   * from the Trail's head, findings, and decisions (`core`'s `trailGates`), because a stored
+   * answer would go stale the moment the head moved.
+   */
+  listGates(trailId: string): Promise<readonly (TrailGateValue | TrailWriteRefusal)[]>;
+  /**
+   * Record a Decision, and the findings it answers, as one batch.
+   *
+   * @returns The stored Decision; `not_found` when the Trail (or the Change it names) is missing.
+   * @throws ValiError when the row this repository would write fails its schema.
+   *
+   * @remarks
+   * **An approval names a head commit, and the Trail has to have it.** An `approve` without
+   * `headCommit`, or naming a head the Trail's Changes do not name, is `invalid_request`: the
+   * whole point of the head on an approval is that a later head can be told apart from it
+   * (C2), and an approval that names nothing could never go stale.
+   *
+   * A `request_changes` with `resolveFindingIds` resolves those findings in the same D1 batch, so
+   * a revise and the points it answers are stored together or not at all. A finding that is not
+   * this Trail's is `not_found`, and nothing is written.
+   */
+  addDecision(
+    trailId: string,
+    input: TrailDecisionCreateInput,
+  ): Promise<TrailDecisionValue | TrailWriteRefusal>;
+  /**
+   * Raise a Finding on a Trail.
+   *
+   * @returns The stored Finding, which starts `open`. `not_found` when the Trail (or the Change
+   * it names) is missing.
+   * @throws ValiError when the row this repository would write fails its schema.
+   */
+  addFinding(
+    trailId: string,
+    input: TrailFindingCreateInput,
+  ): Promise<TrailFindingValue | TrailWriteRefusal>;
+  /**
+   * The base commit a Trail's review is compared against: the oldest Change's `base_commit`.
+   *
+   * @returns The base commit, or undefined when the Trail has no Change.
+   *
+   * @remarks
+   * C4 (the next Run starts from the previous Run's head) and the freshness gate need "the base
+   * the review is against": the first commit the Trail was taken from. Reading it from the
+   * Changes rather than asking a machine keeps the store the only source a gate reads.
+   */
+  baseCommit(trailId: string): Promise<string | undefined>;
+  /**
+   * The latest Change of a Trail: the head its review is about.
+   *
+   * @returns The newest Change, or undefined when the Trail has none.
+   *
+   * @remarks
+   * "Newest" is by `created_at`, the order `listChanges` reads. A review, an approval, and the
+   * gates all address this Change's head (C2); a Trail with several Changes is approved for the
+   * last one.
+   */
+  headChange(trailId: string): Promise<TrailChangeValue | undefined>;
   /** Whether `value` is a Trail state this build knows (useful to a surface before a write). */
   isState(value: string): value is TrailState;
 }
@@ -287,6 +447,45 @@ export function trailRepository(context: StoreContext): TrailRepository {
     return row === undefined
       ? { kind: "not_found", refused: true }
       : readReturned(TrailRowSchema, row, "trail was not read");
+  };
+
+  /**
+   * Whether a Change the caller named belongs to this Trail.
+   *
+   * @returns The Change's row, or undefined when the id is not this Trail's.
+   */
+  const changeOf = async (
+    trailId: string,
+    changeId: string,
+  ): Promise<TrailChangeValue | undefined> => {
+    const row = await sql.get("SELECT * FROM trail_changes WHERE id = ? AND trail_id = ? LIMIT 1", [
+      changeId,
+      trailId,
+    ]);
+    if (row === undefined) return undefined;
+    const parsed = readReturned(TrailChangeRowSchema, row, "trail change was not read");
+    return parsed.refused ? undefined : parsed;
+  };
+
+  /**
+   * Read one list of a Trail's rows, validating every row before it is typed.
+   *
+   * @returns The rows, or a one-entry array holding the `corrupt_row` refusal — the shape every
+   * list of this repository answers with, so a caller has one rule for all five.
+   */
+  const listOf = async <TValue>(
+    schema: v.GenericSchema<unknown, TValue>,
+    statement: string,
+    trailId: string,
+  ): Promise<readonly (TValue & { readonly refused: false })[] | readonly TrailWriteRefusal[]> => {
+    const rows = await sql.all(statement, [trailId]);
+    const values: (TValue & { readonly refused: false })[] = [];
+    for (const row of rows) {
+      const parsed = v.safeParse(schema, row);
+      if (!parsed.success) return [{ kind: "corrupt_row", refused: true }];
+      values.push(stored(parsed.output));
+    }
+    return values;
   };
 
   return {
@@ -443,6 +642,159 @@ export function trailRepository(context: StoreContext): TrailRepository {
       const row = results[0]?.[0];
       if (row === undefined) throw new Error("trail change was not created");
       return stored(parseTrailChange(row));
+    },
+    listSessions(trailId) {
+      return listOf(
+        TrailSessionRowSchema,
+        "SELECT * FROM trail_sessions WHERE trail_id = ? ORDER BY linked_at",
+        trailId,
+      );
+    },
+    listFindings(trailId) {
+      return listOf(
+        TrailFindingRowSchema,
+        "SELECT * FROM trail_findings WHERE trail_id = ? ORDER BY created_at DESC, id DESC",
+        trailId,
+      );
+    },
+    listDecisions(trailId) {
+      return listOf(
+        TrailDecisionRowSchema,
+        "SELECT * FROM trail_decisions WHERE trail_id = ? ORDER BY at DESC, id DESC",
+        trailId,
+      );
+    },
+    listGates(trailId) {
+      return listOf(
+        TrailGateRowSchema,
+        "SELECT * FROM trail_gates WHERE trail_id = ? ORDER BY evaluated_at DESC, id DESC",
+        trailId,
+      );
+    },
+    async headChange(trailId) {
+      // The same order the Change list is read in, so "the latest Change" is the last one it shows.
+      const row = await sql.get(
+        "SELECT * FROM trail_changes WHERE trail_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+        [trailId],
+      );
+      if (row === undefined) return undefined;
+      const parsed = readReturned(TrailChangeRowSchema, row, "trail change was not read");
+      return parsed.refused ? undefined : parsed;
+    },
+    async baseCommit(trailId) {
+      const row = await sql.get(
+        "SELECT base_commit FROM trail_changes WHERE trail_id = ? ORDER BY created_at, id LIMIT 1",
+        [trailId],
+      );
+      if (row === undefined) return undefined;
+      return v.parse(v.object({ base_commit: v.string() }), row).base_commit;
+    },
+    async addFinding(trailId, input) {
+      const trail = await readState(trailId);
+      if (trail.kind !== "state") return { ...trail, refused: true };
+      if (input.changeId !== undefined && !(await changeOf(trailId, input.changeId)))
+        return { kind: "not_found", refused: true };
+      const stamp = now();
+      const finding = parseTrailFinding({
+        id: newId(),
+        trail_id: trailId,
+        change_id: input.changeId ?? null,
+        severity: input.severity,
+        source: input.source,
+        status: "open",
+        file: input.file ?? null,
+        hunk: input.hunk ?? null,
+        summary: input.summary,
+        created_at: stamp,
+        resolved_at: null,
+        resolved_by: null,
+      });
+      const row = await sql.get(
+        "INSERT INTO trail_findings (id, trail_id, change_id, severity, source, status, file, hunk, " +
+          "summary, created_at, resolved_at, resolved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+          "RETURNING *",
+        [
+          finding.id,
+          finding.trail_id,
+          finding.change_id,
+          finding.severity,
+          finding.source,
+          finding.status,
+          finding.file,
+          finding.hunk,
+          finding.summary,
+          finding.created_at,
+          finding.resolved_at,
+          finding.resolved_by,
+        ],
+      );
+      return readReturned(TrailFindingRowSchema, row, "trail finding was not created");
+    },
+    async addDecision(trailId, input) {
+      const trail = await readState(trailId);
+      if (trail.kind !== "state") return { ...trail, refused: true };
+      // An approval names the head it decides: one the Trail's Changes do not name could never be
+      // told apart from the head it is about later (C2), so it is refused before anything is written.
+      if (input.action === "approve") {
+        const heads = await sql.all("SELECT head_commit FROM trail_changes WHERE trail_id = ?", [
+          trailId,
+        ]);
+        const known = heads.some(
+          (row) =>
+            v.parse(v.object({ head_commit: v.string() }), row).head_commit === input.headCommit,
+        );
+        if (input.headCommit === undefined || !known)
+          return { kind: "invalid_head", refused: true };
+      }
+      if (input.changeId !== undefined && !(await changeOf(trailId, input.changeId)))
+        return { kind: "not_found", refused: true };
+      const resolveIds = input.resolveFindingIds ?? [];
+      for (const findingId of resolveIds) {
+        const row = await sql.get("SELECT id FROM trail_findings WHERE id = ? AND trail_id = ?", [
+          findingId,
+          trailId,
+        ]);
+        if (row === undefined) return { kind: "not_found", refused: true };
+      }
+      const stamp = now();
+      const decision = parseTrailDecision({
+        id: newId(),
+        trail_id: trailId,
+        change_id: input.changeId ?? null,
+        actor: input.actor,
+        action: input.action,
+        head_commit: input.headCommit ?? null,
+        note: input.note,
+        at: stamp,
+      });
+      // The decision and the findings a revise answers are one batch: a revise that resolved
+      // nothing because it was half written would say two things about the same review.
+      const results = await sql.batch([
+        {
+          sql:
+            "INSERT INTO trail_decisions (id, trail_id, change_id, actor, action, head_commit, note, at) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+          params: [
+            decision.id,
+            decision.trail_id,
+            decision.change_id,
+            decision.actor,
+            decision.action,
+            decision.head_commit,
+            decision.note,
+            decision.at,
+          ],
+        },
+        ...resolveIds.map((findingId) => ({
+          sql:
+            "UPDATE trail_findings SET status = 'resolved', resolved_at = ?, resolved_by = ? " +
+            "WHERE id = ? AND trail_id = ?",
+          params: [stamp, input.actor, findingId, trailId],
+        })),
+      ]);
+      const row = results[0]?.[0];
+      if (row === undefined) throw new Error("trail decision was not created");
+      return readReturned(TrailDecisionRowSchema, row, "trail decision was not read");
     },
     isState(value): value is TrailState {
       // SAFETY: TRAIL_STATES is the union's own list, so a member of it is a TrailState; the

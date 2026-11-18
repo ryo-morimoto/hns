@@ -1,7 +1,15 @@
 import * as v from "valibot";
-import { ProjectIdSchema, type ProjectId, type Trail } from "@hns/core";
+import {
+  ProjectIdSchema,
+  trailGateLine,
+  trailGates,
+  type ProjectId,
+  type Trail,
+  type TrailGateLine,
+} from "@hns/core";
 import { fromGlobalId, type GlobalIdResult } from "@hns/core/graphql";
 import type { ConversationCursor, TrailRowValue, TrailWriteRefusal } from "@hns/store";
+import { isStored } from "@hns/store";
 import type { ConversationReadQuery, GraphQLContext } from "./context.ts";
 import { decodeCursor, encodeCursor } from "./cursor.ts";
 import { queryFailure, QueryReadError, type QueryFailureView } from "./failures.ts";
@@ -10,7 +18,10 @@ import {
   indexStateView,
   machineView,
   projectView,
+  reviewDiffView,
   trailView,
+  type ReviewDiffView,
+  type TrailChangeView,
   type ConversationView,
   type IndexStateView,
   type MachineView,
@@ -431,4 +442,145 @@ export async function resolveIndexState(
   });
   if (!result.ok) return result.failure;
   return { __typename: "IndexState", ...indexStateView(result.value) };
+}
+
+/**
+ * The `TrailChange.diff` field (C1): the files between the Change's base and head.
+ *
+ * @param parent - The `TrailChangeView` whose diff is asked for.
+ * @param _args - No arguments: the pair is the Change's own.
+ * @param context - The request's diff read and budget.
+ * @returns `ReviewDiff`, or the typed failure the read answered with.
+ *
+ * @remarks
+ * **The pair is the Change's** (`base_commit` / `head_commit`), not a client's: a hunk a screen
+ * takes is about the commits the store recorded. The diff engine is the editor's (0009 / 0011);
+ * what changes between deployments is where the commits are read from, which is the port's
+ * concern (`context.reads.reviewDiff`). A commit whose checkpoint pack is not stored yet answers
+ * `not_found` from the engine, and the screen says "not previewable yet" rather than showing an
+ * empty change.
+ */
+export async function resolveChangeDiff(
+  parent: TrailChangeView,
+  _args: Record<string, never>,
+  context: GraphQLContext,
+): Promise<ReviewDiffView | QueryFailureView> {
+  if (!context.budget.spend(1)) {
+    throw new QueryReadError("limit_exceeded", "This request reads more rows than it may.");
+  }
+  const result = await context.reads.reviewDiff(parent.baseCommit, parent.headCommit);
+  if (!result.ok) return queryFailure(diffFailureCode(result.code), result.message);
+  return reviewDiffView(result.diff);
+}
+
+/**
+ * The `Trail.gates` field (C3): the four gates evaluated now, and the one line that says whether
+ * a merge may go ahead.
+ *
+ * @param parent - The `TrailView` whose gates are asked for.
+ * @param _args - No arguments.
+ * @param context - The request's reads and budget.
+ * @returns The gate lines (in `TRAIL_GATE_KINDS` order) and `trailGateLine` over them.
+ *
+ * @remarks
+ * **Computed, not read from `trail_gates`.** The head decides the human gate, a resolved finding
+ * decides the findings gate, and a moved base decides freshness; a stored row would be the answer
+ * from the moment it was written, shown beside a Trail that moved after it. Four reads are what it
+ * takes — the head Change, the base, the findings, the decisions — and the field is charged as one
+ * row against the request's budget, like every other list.
+ *
+ * Freshness is the store's own statement: the latest Change's `base_commit` is "still the base"
+ * when it is the base the oldest Change names. This build records one base ref per Trail (what a
+ * merge moves is U-01), so a Change taken from a later base reads as stale, which is the one
+ * answer available without inventing a second ref. A row this build cannot parse is
+ * `unavailable`, never a default gate.
+ */
+export async function resolveTrailGates(
+  parent: TrailView,
+  _args: Record<string, never>,
+  context: GraphQLContext,
+): Promise<{ readonly lines: readonly TrailGateLine[]; readonly line: string }> {
+  const trailId = rawTrailIdOf(parent);
+  if (!context.budget.spend(1)) {
+    throw new QueryReadError("limit_exceeded", "This request reads more rows than it may.");
+  }
+  const head = await context.reads.trailHead(trailId);
+  const base = await context.reads.trailBase(trailId);
+  const findings = await rowsOf(await context.reads.trailFindings(trailId), "findings", context);
+  const decisions = await rowsOf(await context.reads.trailDecisions(trailId), "decisions", context);
+  const lines = trailGates({
+    head: head?.head_commit,
+    fresh: head === undefined || base === undefined || head.base_commit === base,
+    findings,
+    decisions,
+  });
+  return { lines: [...lines], line: trailGateLine(lines) };
+}
+
+/**
+ * The Query failure code a diff read's code becomes.
+ *
+ * @internal
+ * @param code - The review engine's code (`not_found`, `unavailable`, `too_large`,
+ * `invalid_request`, `unauthorized`).
+ * @returns The Query union's code. `not_found` stays as it is (the checkpoint pack is not stored
+ * yet, which a person reads as "not ready"); a size or authorization refusal is the request's own
+ * shape (`invalid_request`), and everything else is `unavailable`. A client has one branch for
+ * each of three codes instead of five that only the server understands.
+ */
+function diffFailureCode(
+  code: "invalid_request" | "not_found" | "too_large" | "unauthorized" | "unavailable",
+): "invalid_request" | "not_found" | "unavailable" {
+  switch (code) {
+    case "not_found":
+      return "not_found";
+    case "too_large":
+    case "unauthorized":
+    case "invalid_request":
+      return "invalid_request";
+    case "unavailable":
+      return "unavailable";
+  }
+}
+
+/**
+ * The rows of a Trail list read, or `unavailable` when the store refused one.
+ *
+ * @internal
+ * @param values - What a list port answered.
+ * @param name - The list's name, for the log line and the message.
+ * @param context - The request, for its id.
+ * @returns The rows, narrowed to values.
+ */
+function rowsOf<TValue extends object>(
+  values: readonly (TValue | TrailWriteRefusal)[],
+  name: string,
+  context: GraphQLContext,
+): readonly TValue[] {
+  const rows = values.filter((value): value is TValue => isStored(value));
+  if (rows.length !== values.length) {
+    console.error("graphql: a stored trail " + name + " could not be read", context.requestId);
+    throw new QueryReadError("unavailable", "The stored trail " + name + " could not be read.");
+  }
+  return rows;
+}
+
+/**
+ * The stored id behind a `TrailView`'s global id.
+ *
+ * @internal
+ * @param view - The Trail the field's parent field resolved.
+ * @returns The id the store holds.
+ * @throws QueryReadError with `invalid_request` when the view's id is not a Trail global id.
+ *
+ * @remarks
+ * The parent is built by the server, so a value that does not decode is a defect; it is still
+ * refused as a typed failure, because the answer is a 200 union either way.
+ */
+function rawTrailIdOf(view: TrailView): string {
+  const decoded = fromGlobalId(view.id);
+  if (!decoded.ok || decoded.value.type !== "Trail") {
+    throw new QueryReadError("invalid_request", "The parent is not a Trail.");
+  }
+  return decoded.value.id;
 }

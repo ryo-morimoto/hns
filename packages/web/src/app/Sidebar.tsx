@@ -335,7 +335,16 @@ export function Sidebar({
                         <ul className="hns-sidebar__list">
                           {group.trails.map((trail) => (
                             <li className="hns-sidebar__row" key={trail.id}>
-                              <span>{trail.title}</span>
+                              <a
+                                className="hns-sidebar__link"
+                                href={formatHash({
+                                  kind: "trail",
+                                  projectId: project.id,
+                                  trailId: trail.id,
+                                })}
+                              >
+                                {trail.title}
+                              </a>
                               <span className="hns-sidebar__state">{trail.state}</span>
                             </li>
                           ))}

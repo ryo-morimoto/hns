@@ -447,6 +447,248 @@ export function isTrailOpen(state: TrailState): boolean {
 }
 
 /**
+ * The commit a Change's review is about: its head, or undefined when it has no Change.
+ *
+ * @param change - The Change being reviewed, or undefined for a Trail with none.
+ * @returns The head commit, or undefined.
+ *
+ * @remarks
+ * A review, an approval, and a gate are all about one commit (`trail-model-v1` §3, C2): the head
+ * the Change names. A Trail with no Change has no commit to approve, which is why the answer is
+ * not a separate state.
+ */
+export function trailHeadOf(
+  change: { readonly head_commit: string } | undefined,
+): string | undefined {
+  return change?.head_commit;
+}
+
+/**
+ * Whether an approval still holds for the head being reviewed (C2).
+ *
+ * @param decision - The approval, which names the head it decided on.
+ * @param head - The commit under review now, or undefined when the Trail has no Change.
+ * @returns `true` only for an approval recorded against exactly this head.
+ *
+ * @remarks
+ * An approval is a statement about **one commit** (D104: `approve` names the head commit it
+ * approves, so a later head invalidates it). A new head — a revise, a rebase, another Change —
+ * therefore makes every earlier approval stale without anything being deleted: the record stays,
+ * and the answer changes because the head changed. An approval with no `head_commit`, or a Trail
+ * with no Change, is not valid for any head: a decision that does not name what it approved cannot
+ * be checked, so it fails closed.
+ */
+export function trailApprovalHolds(
+  decision: Pick<TrailDecision, "action" | "head_commit">,
+  head: string | undefined,
+): boolean {
+  if (decision.action !== "approve") return false;
+  if (decision.head_commit === null || head === undefined) return false;
+  return decision.head_commit === head;
+}
+
+/**
+ * The approval in force for a Trail's current head: the latest one that still holds (C2).
+ *
+ * @param decisions - The Trail's decisions, newest first.
+ * @param head - The commit under review now, or undefined.
+ * @returns The latest approval naming `head`, or undefined when none does.
+ *
+ * @remarks
+ * "Newest first" is the order the Trail's `decisions` list is read in (the append-only record is
+ * newest first, `core`'s Trail entity). Only `approve` counts here; a `request_changes` or a
+ * `reject` is read by the caller that asks for the gate, because a refusal means something a
+ * later approval has to be newer than.
+ */
+export function trailCurrentApproval(
+  decisions: readonly Pick<TrailDecision, "action" | "head_commit">[],
+  head: string | undefined,
+): Pick<TrailDecision, "action" | "head_commit"> | undefined {
+  return decisions.find((decision) => trailApprovalHolds(decision, head));
+}
+
+/** The finding severities that block a merge while the finding is open (C3). */
+export const TRAIL_BLOCKING_SEVERITIES: readonly TrailFindingSeverity[] = ["high"];
+
+/**
+ * Whether a Finding stops a merge: `high` and still open (C3).
+ *
+ * @param finding - The finding as the gate reads it.
+ * @returns `true` for a `high` finding whose status is `open`.
+ *
+ * @remarks
+ * Only `high` blocks. `medium`, `low`, and `none` are recorded and shown, and a `high` one that
+ * was resolved or dismissed stops blocking — dismissing is how a person says "I read this and it
+ * does not stop the merge", which is a decision the record keeps.
+ */
+export function trailFindingBlocks(finding: Pick<TrailFinding, "severity" | "status">): boolean {
+  return finding.status === "open" && TRAIL_BLOCKING_SEVERITIES.includes(finding.severity);
+}
+
+/**
+ * One gate's answer, as a reviewer sees it: the gate, its status, and why.
+ *
+ * @remarks
+ * `detail` is the reason in a few words ("2 findings open at high"), never a sentence a screen
+ * has to parse; the screen shows it beside the gate's name. The four gates are the ones
+ * `trail-model-v1` §5 names and the `trail_gates` table stores.
+ */
+export interface TrailGateLine {
+  readonly gate: TrailGateKind;
+  readonly status: TrailGateStatus;
+  readonly detail: string;
+}
+
+/** What a gate evaluation is made from: the Trail's head and what the record says about it. */
+export interface TrailGateInput {
+  /** The commit under review, or undefined for a Trail with no Change. */
+  readonly head: string | undefined;
+  /** Whether the Change's `base_commit` is what the workspace's base ref holds now. */
+  readonly fresh: boolean;
+  /** The Trail's findings, in any order. */
+  readonly findings: readonly Pick<TrailFinding, "severity" | "status">[];
+  /** The Trail's decisions, newest first. */
+  readonly decisions: readonly Pick<TrailDecision, "action" | "head_commit">[];
+}
+
+/**
+ * Evaluate the four gates (C3): human, tests, findings, freshness.
+ *
+ * @param input - The head, freshness, findings, and decisions the evaluation reads.
+ * @returns One line per gate in `TRAIL_GATE_KINDS` order, each with the reason it holds.
+ *
+ * @remarks
+ * **The gates are computed, not stored.** A change of head moves the human gate by itself, a
+ * resolved finding moves the findings gate by itself, and a moved base ref moves freshness by
+ * itself; a stored row would be an answer from a moment, shown beside a Trail that moved after
+ * it. The `trail_gates` table records what a gate said (append-only evidence); this function is
+ * what a screen asks now.
+ *
+ * - **human_review**: `pass` when the latest approval names the current head; otherwise `fail`
+ *   naming what is missing (no Change, no approval at this head).
+ * - **tests**: `ask`. This build stores evaluations (`trail_evals`) but nothing records one yet,
+ *   so "no evidence" and "failed evidence" would read the same. It says "ask" rather than "pass"
+ *   because a gate that passes by default is not a gate.
+ * - **findings**: `pass` when nothing open is `high`; `fail` naming the count when something is.
+ * - **freshness**: `pass` when the base the Change was taken from is still the base, `fail` when it
+ *   moved (a rebase is needed), and `ask` for a Trail with no Change.
+ */
+export function trailGates(input: TrailGateInput): readonly TrailGateLine[] {
+  const approval = trailCurrentApproval(input.decisions, input.head);
+  const blocking = input.findings.filter(trailFindingBlocks).length;
+  return [
+    {
+      gate: "human_review",
+      status: approval === undefined ? "fail" : "pass",
+      detail: humanDetailOf(input.head, approval),
+    },
+    {
+      gate: "tests",
+      status: "ask",
+      detail: "no test evidence is recorded on this Trail",
+    },
+    {
+      gate: "findings",
+      status: blocking > 0 ? "fail" : "pass",
+      detail: blocking > 0 ? String(blocking) + " high finding(s) open" : "no high finding is open",
+    },
+    {
+      gate: "freshness",
+      status: input.head === undefined ? "ask" : input.fresh ? "pass" : "fail",
+      detail:
+        input.head === undefined
+          ? "no Change to compare with the base"
+          : input.fresh
+            ? "the base the Change names is still the base"
+            : "the base moved: the Change was taken from an earlier commit",
+    },
+  ];
+}
+
+/** The human gate's reason, for the head and the approval that holds for it. */
+function humanDetailOf(
+  head: string | undefined,
+  approval: Pick<TrailDecision, "action" | "head_commit"> | undefined,
+): string {
+  if (head === undefined) return "no Change to approve";
+  if (approval !== undefined) return "approved at " + head;
+  return "not approved at " + head;
+}
+
+/**
+ * The line a reviewer reads first: whether a merge may go ahead, and what stops it (C3).
+ *
+ * @param gates - {@link trailGates}'s answer.
+ * @returns `merge: ready` when every gate passes, and otherwise `merge: blocked — <each gate that
+ * does not pass, with why>`.
+ *
+ * @remarks
+ * This is the "one line" the issue asks for (C3): a person opening a Trail reads it before the
+ * diff and decides whether anything needs doing. `ask` blocks like `fail` does: a gate nobody has
+ * answered has not passed. The reasons are the gates' own `detail`, so the line and the gate list
+ * cannot say different things.
+ */
+export function trailGateLine(gates: readonly TrailGateLine[]): string {
+  const blocked = gates.filter((gate) => gate.status !== "pass");
+  if (blocked.length === 0) return "merge: ready";
+  return (
+    "merge: blocked — " + blocked.map((gate) => gate.gate + " (" + gate.detail + ")").join("; ")
+  );
+}
+
+/**
+ * The findings a revise hands to the next Run as its input (C4).
+ *
+ * @param findings - The Trail's findings, in any order.
+ * @param head - The commit under review now, or undefined.
+ * @returns The open findings, `high` first, as the lines the next Run's prompt carries.
+ *
+ * @remarks
+ * **Revise means the points go to the next Run as input** (D104 / run review sheet §4.4), so this
+ * is the text that travels: one line per open finding, naming where it is when the record says.
+ * Only `open` ones travel — a resolved or dismissed point is not a task. The order is severity
+ * then place, so two Runs given the same record are given the same input.
+ *
+ * An empty list answers `""`: nothing is open, so a next Run has nothing to fix.
+ */
+export function trailReviseInput(
+  findings: readonly Pick<TrailFinding, "severity" | "status" | "file" | "hunk" | "summary">[],
+  head: string | undefined,
+): string {
+  const open = findings.filter((finding) => finding.status === "open");
+  if (open.length === 0) return "";
+  const ordered = [...open].sort((left, right) => {
+    const severity =
+      TRAIL_FINDING_SEVERITIES.indexOf(left.severity) -
+      TRAIL_FINDING_SEVERITIES.indexOf(right.severity);
+    if (severity !== 0) return severity;
+    const leftAt = left.file ?? "";
+    const rightAt = right.file ?? "";
+    if (leftAt !== rightAt) return leftAt < rightAt ? -1 : 1;
+    const leftHunk = left.hunk ?? "";
+    const rightHunk = right.hunk ?? "";
+    if (leftHunk === rightHunk) return 0;
+    return leftHunk < rightHunk ? -1 : 1;
+  });
+  const heading =
+    head === undefined
+      ? "Review findings to address:"
+      : "Review findings to address (head " + head + "):";
+  return [
+    heading,
+    ...ordered.map((finding) => {
+      const where =
+        finding.file === null
+          ? ""
+          : finding.hunk === null
+            ? finding.file + ": "
+            : finding.file + " " + finding.hunk + ": ";
+      return "- [" + finding.severity + "] " + where + finding.summary;
+    }),
+  ].join("\n");
+}
+
+/**
  * Fail on an unhandled union member.
  *
  * @internal

@@ -40,6 +40,12 @@ Task と TaskStatus は SDL から消え、代わりに Trail 系の型と閉じ
 - **`createTrail(input: CreateTrailInput!)`**（Mutation）: `projectId`（`Project` の global id、存在しない project は `invalid_request`）、`title`、任意の `description` / `acceptance` / `kind` / `priority`（`feature` / `normal` が既定）。**state は入力にしない**（`draft` で始まり、遷移は表に従う）。作成者は session の subject。成功は `CreateTrailPayload { trail }`、失敗は `MutationFailure`。
 - **`updateTrail(id: ID!, input: UpdateTrailInput!)`**（Mutation）: 与えた欄だけを置き換える。**state は変えない**（状態遷移は 0232 のレビュー面の mutation が表に問い合わせる）。無い Trail は `NOT_FOUND`、読めない行は `UNAVAILABLE`。成功は `UpdateTrailPayload { trail }`、失敗は `MutationFailure`。
 - **`Trail.changes: [TrailChange!]!`**: Trail の id から読む（列ではない）。`baseCommit` / `headCommit` は保存値そのまま。読めない Change は `UNAVAILABLE`。
+- **`Trail.sessions` / `findings` / `decisions`**（0232）: 同じく id から読む。sessions は古い順、findings と decisions は新しい順。読めない行は `UNAVAILABLE`（空の一覧に潰さない）。
+- **`Trail.gates`（計算）/ `Trail.gatesRecorded`（記録）**（0232）: `gates` は `TrailGates { line, lines { gate, status, detail } }` で、head・finding・decision・freshness から**その都度**計算する（`trail_gates` を読まない — 保存値は時点の答え）。`line` が C3 の一行（`merge: ready` / `merge: blocked — …`）で、`ask` も block 扱い。`gatesRecorded` は `trail_gates` の証拠を新しい順で返す。
+- **`TrailChange.diff: TrailChangeDiffResult!`**（0232）: その Change の `base..head` を 0009 / 0011 の diff 実装で読む。成功は `ReviewDiff { baseCommit, headCommit, added, removed, files { path, change, added, removed, previewable, hunks { baseStart, headStart, lines { kind, text } } } }`、失敗は `QueryFailure`（**空の diff にしない** — 空は「変更なし」に見える）。checkpoint の pack がまだ無い commit は `NOT_FOUND`。
+- **`decideTrail(input: DecideTrailInput!)`**（0232・Mutation）: `trailId`・`action`（`APPROVE` / `REQUEST_CHANGES` / `REJECT`）・任意の `note`・`changeId`・`headCommit`・`resolveFindingIds`。**approve は head を必ず名乗り、Trail の Change に無い head は `INVALID_REQUEST`**（C2）。`resolveFindingIds` の指摘は同じ batch で `resolved` になる。成功は `DecideTrailPayload { decision, nextRunInput }` で、`nextRunInput` は**開いている指摘を次の Run の入力にした文**（C4）。
+- **`raiseFinding(input: RaiseFindingInput!)`**（0232・Mutation）: `trailId`・`severity`（`HIGH`/`MEDIUM`/`LOW`/`NONE`）・`source`（`AGENT`/`TEST`/`HUMAN`）・`summary`・任意の `file`/`hunk`/`changeId`。成功は `RaiseFindingPayload { finding }`。
+- **`keepHunk` / `undoHunk` / `applyHunk(input: ReviewHunkInput!)`**（0232・Mutation）: `changeId`・`path`・`headStart`・`expectedVersion`。**Workspace の版付き書き込み**（`applyVersionedWrite`）を通す。成功は `ReviewHunkPayload { diff }`（書き込み後に読み直した diff）、版が違えば `CONFLICT`、書ける workspace が無い deployment は `UNAVAILABLE`（worker に書き込み先が無い。実装と起動は別 — 0232 の Result 参照）。
 
 ## 上限
 

@@ -58,6 +58,22 @@ type Trail {
   title: String!
   updatedAt: String!
   changes: [TrailChange!]!
+  sessions: [TrailSession!]!
+  findings: [TrailFinding!]!
+  decisions: [TrailDecision!]!
+  gatesRecorded: [TrailGate!]!
+  gates: TrailGates!
+}
+
+type TrailGates {
+  lines: [TrailGateLine!]!
+  line: String!
+}
+
+type TrailGateLine {
+  gate: TrailGateKind!
+  status: TrailGateStatus!
+  detail: String!
 }
 
 type TrailChange {
@@ -71,6 +87,61 @@ type TrailChange {
   trailId: ID!
   updatedAt: String!
   workspaceId: ID!
+  diff: TrailChangeDiffResult!
+}
+
+union TrailChangeDiffResult = ReviewDiff | QueryFailure
+
+type ReviewDiff {
+  baseCommit: String!
+  headCommit: String!
+  added: Int!
+  removed: Int!
+  files: [ReviewFile!]!
+}
+
+type ReviewFile {
+  path: String!
+  change: ReviewChangeKind!
+  added: Int!
+  removed: Int!
+  previewable: Boolean!
+  hunks: [ReviewHunk!]!
+}
+
+enum ReviewChangeKind {
+  ADDED
+  DELETED
+  MODIFIED
+}
+
+type ReviewHunk {
+  baseStart: Int!
+  headStart: Int!
+  lines: [ReviewLine!]!
+}
+
+type ReviewLine {
+  kind: ReviewLineKind!
+  text: String!
+}
+
+enum ReviewLineKind {
+  CONTEXT
+  ADD
+  DEL
+}
+
+type QueryFailure {
+  code: QueryFailureCode!
+  message: String!
+}
+
+enum QueryFailureCode {
+  INVALID_REQUEST
+  LIMIT_EXCEEDED
+  NOT_FOUND
+  UNAVAILABLE
 }
 
 enum TrailChangeState {
@@ -205,18 +276,6 @@ type ProjectList {
   projects: [Project!]!
 }
 
-type QueryFailure {
-  code: QueryFailureCode!
-  message: String!
-}
-
-enum QueryFailureCode {
-  INVALID_REQUEST
-  LIMIT_EXCEEDED
-  NOT_FOUND
-  UNAVAILABLE
-}
-
 union ConversationListResult = ConversationList | QueryFailure
 
 type ConversationList {
@@ -344,6 +403,11 @@ type Mutation {
   sendMessage(input: SendMessageInput!): SendMessageResult!
   createTrail(input: CreateTrailInput!): CreateTrailResult!
   updateTrail(id: ID!, input: UpdateTrailInput!): UpdateTrailResult!
+  decideTrail(input: DecideTrailInput!): DecideTrailResult!
+  raiseFinding(input: RaiseFindingInput!): RaiseFindingResult!
+  keepHunk(input: ReviewHunkInput!): ReviewHunkResult!
+  undoHunk(input: ReviewHunkInput!): ReviewHunkResult!
+  applyHunk(input: ReviewHunkInput!): ReviewHunkResult!
 }
 
 union CreateProjectResult = CreateProjectPayload | MutationFailure
@@ -526,4 +590,68 @@ input UpdateTrailInput {
   acceptance: String
   kind: TrailKindInput
   priority: TrailPriorityInput
+}
+
+union DecideTrailResult = DecideTrailPayload | MutationFailure
+
+type DecideTrailPayload {
+  decision: TrailDecision!
+  nextRunInput: String!
+}
+
+input DecideTrailInput {
+  trailId: ID!
+  action: TrailDecisionActionInput!
+  note: String
+  changeId: ID
+  headCommit: String
+  resolveFindingIds: [ID]
+}
+
+enum TrailDecisionActionInput {
+  APPROVE
+  REQUEST_CHANGES
+  REJECT
+}
+
+union RaiseFindingResult = RaiseFindingPayload | MutationFailure
+
+type RaiseFindingPayload {
+  finding: TrailFinding!
+}
+
+input RaiseFindingInput {
+  trailId: ID!
+  severity: TrailFindingSeverityInput!
+  source: TrailFindingSourceInput!
+  summary: String!
+  file: String
+  hunk: String
+  changeId: ID
+}
+
+enum TrailFindingSeverityInput {
+  HIGH
+  MEDIUM
+  LOW
+  NONE
+}
+
+enum TrailFindingSourceInput {
+  AGENT
+  TEST
+  HUMAN
+}
+
+union ReviewHunkResult = ReviewHunkPayload | MutationFailure
+
+type ReviewHunkPayload {
+  diff: ReviewDiff!
+}
+
+input ReviewHunkInput {
+  changeId: ID!
+  path: String!
+  headStart: Int!
+  expectedVersion: String!
 }
