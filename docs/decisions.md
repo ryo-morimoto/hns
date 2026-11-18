@@ -1342,7 +1342,7 @@ date: 2026-11-17 · by: user · issue: 0191
 - **計測**: write p95 < 10ms、integration < 3s。ゲートは `gate: test <pkg> ok (Nms)` の run 単位を足す。before / after を issue に残す。
 
 前提が変わる条件: worker thread の隔離が十分になり seam を保てる、native helper（openat2 / renameat2）を配る、または helper の RSS が問題になるとき。
-## D094: UI は Workers Assets + 手動 SPA fallback で配り、typed client は Relay の codegen にする
+## D107: UI は Workers Assets + 手動 SPA fallback で配り、typed client は Relay の codegen にする
 
 date: 2026-11-17 · by: user · issue: 0160
 

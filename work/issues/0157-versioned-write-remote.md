@@ -16,7 +16,7 @@ TOCTOU の閉じ方（dirfd・同一ディレクトリ temp + rename）はマシ
 
 ## Acceptance criteria
 
-- [x] 「POST /workspaces/:id/files」が DO で intent を書き、マシンで適用し、outcome を書いてから 200 を返す（面は D059 / D094 に合わせて POST /api/workspaces/:workspaceId/files に確定）
+- [x] 「POST /workspaces/:id/files」が DO で intent を書き、マシンで適用し、outcome を書いてから 200 を返す（面は D059 / D107 に合わせて POST /api/workspaces/:workspaceId/files に確定）
 - [x] expectedVersion はマシンで再計算して比較（DO の値を信じない）
 - [x] 応答が返らないときは unknown。再送で照合（INV-04）
 - [x] concurrent な保存で片方が conflict になるテスト
@@ -62,7 +62,7 @@ browser → edge（session 認証・method・動的 route）
 | read | GET /api/workspaces/:workspaceId/files?projectRoot=&path= | session | machine から bytes + version。切断中・未設定は 503（古い内容を返さない） |
 | write | POST /api/workspaces/:workspaceId/files | session | 版付き保存。200 / 400 / 404 / 409 / 415 / 503 / 504 |
 
-- 0182 の棚卸しの server/src/files/content.ts。AC の POST /workspaces/:id/files は暫定で、/api/ 配下に置く（D094 の「/api/* の未知は 404」と揃える）。
+- 0182 の棚卸しの server/src/files/content.ts。AC の POST /workspaces/:id/files は暫定で、/api/ 配下に置く（D107 の「/api/* の未知は 404」と揃える）。
 - write の body は { projectRoot, path, expectedVersion, operationId, content }（content は UTF-8 テキスト。base64 は DO ↔ machine の内部 RPC だけ）。
 - 応答は閉じた union。applied は 200 { ok: true, status: "applied", operationId, path, version }、conflict は 409 { ok: false, code: "conflict", operationId, path, currentVersion }、unknown は 504 { ok: false, code: "unknown", operationId, path, reason }（成功扱いにしない。D092）、lease は 409 { ok: false, code: "lease", reason }（版 conflict と区別）、denied は 400、unavailable は 503、入力不正は 400、バイナリ読みは 415。problem+json と混ぜず、この面の code はこの union の語彙。
 - edge は session 認証・method・動的 route だけを持ち、HandlerDependencies.files（0162 の obs と同じ形）へ委譲する。Worker は Workspace DO へ /rpc/apply / /rpc/read を転送する。

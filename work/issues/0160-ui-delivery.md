@@ -3,7 +3,7 @@
 status: done
 priority: now
 design: agreed
-design-ref: D094
+design-ref: D107
 depends-on: 0159
 touches: packages/web/, packages/server/src/edge/, tools/deploy/, deploy/assets/, .gitignore, work/issues/0160-ui-delivery.md
 
@@ -26,9 +26,9 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 - PoC は run.mjs だけで UI を持たない。
 - 0103〜0114 の画面はこの配信形態の上で作る。
 
-## Design（D094 で合意）
+## Design（D107 で合意）
 
-2026-11-17 / ユーザーの設計レビューで合意（D094）。
+2026-11-17 / ユーザーの設計レビューで合意（D107）。
 
 ### 前提
 
@@ -80,7 +80,7 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 - 設計時点の `packages/web/vite.config.ts` は proxy を持たず、`tools/deploy/cloudflare.config.ts` にも `ASSETS` が無かった。0160 が両方を足した（上の「実装」）。
 - cookie / passkey は same-origin で動かす。CORS を足さない。
 
-### 決定（D094）
+### 決定（D107）
 
 | ID | 論点 | 決定 | 影響 | 決める時 |
 | --- | --- | --- | --- | --- |
@@ -101,7 +101,7 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
   残りを `ASSETS` へ流す。`ASSETS` が 404 かつ `Accept: text/html` かつ `/assets`・`/api`・
   `/graphql`・`/ws` 以外のときだけ `/index.html` を返す。`/assets/*` は
   `public, max-age=31536000, immutable`、HTML は `no-cache`。
-- **ヘッダ**: HTML に CSP（D094 の directive）・`X-Content-Type-Options: nosniff`・
+- **ヘッダ**: HTML に CSP（D107 の directive）・`X-Content-Type-Options: nosniff`・
   `Referrer-Policy: same-origin`・`Permissions-Policy`。production の source map は生成も配布もしない。
 - **domain**: staging / production は `HNS_DOMAIN` 必須で `domains: [host]` / `workersDev: false`。
   development は `workersDev: true` で domain なし。`previewUrls: false`。`deploy.sh` は web build を
@@ -167,7 +167,7 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
   200 に `public, max-age=31536000, immutable`、`/assets/missing.js` は 404（index でない）。
   `POST /graphql` は 401（`application/problem+json`）、`GET /graphql` は 405、`/api/unknown` は JSON 404。
 
-- 2026-11-17: D094 で合意。U-01〜U-06 を決定し、`design: agreed` にした。
+- 2026-11-17: D107 で合意。U-01〜U-06 を決定し、`design: agreed` にした。
 - 2026-11-17: reviewer-0160 PASS（blocking 0）。main へ ff 統合（da1484a）。main の gate は exit 0（829 tests / 39.7s）。
 
 ## Result
