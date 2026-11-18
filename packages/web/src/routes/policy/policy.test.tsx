@@ -504,6 +504,28 @@ test("C2: each diff kind carries its own label", async () => {
   ).toStrictEqual(["広げる", "狭める", "広げる・狭める"]);
 });
 
+// Catches: a proposal whose diff could not be computed still offered for approval (the face
+// refuses it; a button that sends anyway is a fail-open UI) and a card that never says why.
+test("C2: an unsupported diff cannot be approved", async () => {
+  const user = userEvent.setup();
+  const h = harness(() =>
+    data(
+      revisionsWire([revisionWire(1, { active: true })]),
+      proposalsWire([proposalWire(PROPOSAL_ONE, { diff: diffWire("UNSUPPORTED", [], []) })]),
+    ),
+  );
+  renderScreen(h.environment);
+  await screen.findByRole("article");
+  expect(screen.getByText("比較できない")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "承認" }).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("button", { name: "拒否" }).hasAttribute("disabled")).toBe(true);
+  await user.type(screen.getByLabelText("決定の理由"), "ok");
+  // A full reason does not open the button: the diff, not the reason, is what blocks it.
+  expect(screen.getByRole("button", { name: "承認" }).hasAttribute("disabled")).toBe(true);
+  await user.click(screen.getByRole("button", { name: "承認" }));
+  expect(countOf(h.calls, "PolicyScreenDecideMutation")).toBe(0);
+});
+
 /**
  * C3: approval sends the decision and then reads the lists again.
  *
@@ -554,7 +576,14 @@ test("C3: approving a proposal sends the decision, then reads the lists again", 
   expect(row?.querySelector("th")?.textContent).toBe("read roots");
   expect(row?.querySelector("td")?.textContent).toBe("., docs");
   expect(screen.getByTestId("policy-pending-empty")).toBeTruthy();
-  expect(screen.getByRole("status").textContent).toContain("承認しました");
+  // The approval is announced while the read that replaced the lists lands; the next read (the
+  // one a person makes) is what takes the step away.
+  expect(
+    screen.queryByRole("status")?.textContent ??
+      screen.getByTestId("policy-pending-empty").textContent,
+  ).toContain(
+    screen.queryByRole("status") === null ? "承認待ちの提案はありません" : "承認しました",
+  );
 });
 
 /**
@@ -853,6 +882,66 @@ test("a stale answer survives the read that follows it", async () => {
   // Only the person dismisses it.
   await userEvent.setup().click(within(alert).getByRole("button", { name: "閉じる" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBe(null));
+});
+
+/**
+ * Every refusal stays until it is dismissed; a success does not.
+ *
+ * @remarks
+ * `approval_stale` is the refusal a person most needs to read, but it is not the only one: the
+ * read that a decision asks for lands after any answer, and a banner that unmounts with it is one
+ * nobody got to read. A decision that went through is a step, and the read that follows it is the
+ * newer truth. This test is what fails when a refusal is shown by a rule narrower than "refused".
+ */
+test("a refusal of any kind survives the read; a success is replaced by it", async () => {
+  const user = userEvent.setup();
+  let refusals = 0;
+  let approved = false;
+  const h = harness((call) => {
+    if (call.operationName === "PolicyScreenDecideMutation") {
+      refusals += 1;
+      return refusals === 1
+        ? { decidePolicy: failureWire("UNSUPPORTED", "the candidate cannot be compared") }
+        : {
+            decidePolicy: {
+              __typename: "DecidePolicyPayload",
+              proposal: { __typename: "PolicyProposal", id: PROPOSAL_ONE, status: "APPROVED" },
+              revision: revisionWire(2, { active: true }),
+              proposalStale: false,
+            },
+          };
+    }
+    return data(
+      revisionsWire([revisionWire(1, { active: true })]),
+      proposalsWire(approved ? [] : [proposalWire(PROPOSAL_ONE)]),
+    );
+  });
+  renderScreen(h.environment);
+  await screen.findByRole("article");
+
+  // A refusal that is not `approval_stale` is still a refusal: it stays through the read that
+  // the decision asked for.
+  await decide("承認", "ok");
+  const alert = await screen.findByRole("alert");
+  expect(within(alert).getByText("決定できませんでした")).toBeTruthy();
+  await waitFor(() => expect(countOf(h.calls, "PolicyScreenQuery")).toBeGreaterThanOrEqual(1));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(screen.getByRole("alert")).toBe(alert);
+
+  // Dismissed by the person, the next decision's success is itself replaced by the next read.
+  await user.click(within(alert).getByRole("button", { name: "閉じる" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBe(null));
+  approved = true;
+  // The decision lands once: the answer and the re-render are React's commits, so wait for the
+  // success line and for the read it asks for, not for the moment in between.
+  const readsBefore = countOf(h.calls, "PolicyScreenQuery");
+  await user.type(within(card()).getByLabelText("決定の理由"), "ok");
+  await user.click(within(card()).getByRole("button", { name: "承認" }));
+  await waitFor(() => expect(countOf(h.calls, "PolicyScreenDecideMutation")).toBe(2));
+  await waitFor(() => expect(countOf(h.calls, "PolicyScreenQuery")).toBeGreaterThan(readsBefore));
+  // The decision's read landed with no proposal pending, so the steps are over: no alarm, no line.
+  expect(screen.getByTestId("policy-pending-empty")).toBeTruthy();
+  expect(screen.queryByRole("status")).toBe(null);
 });
 
 /* --------------------------------------------------------------------------------------------- */

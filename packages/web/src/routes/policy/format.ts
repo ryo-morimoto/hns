@@ -63,9 +63,10 @@ export type PolicyAtomRecord = PolicyProposalRecord["diff"]["added"][number];
  * @returns The revision flagged active, or null.
  *
  * @remarks
- * The face reads through the `ensure`, so a workspace that exists answers at least revision 1;
- * a list with no active flag is a server answer this screen does not describe, and it is said as
- * an error rather than as "no policy".
+ * The face reads through the `ensure`, so a workspace that exists answers at least revision 1.
+ * A list with no active flag is a server answer this reader does not describe — a defect, not a
+ * workspace without a policy — and the screen says so as an **empty state** (`role="status"`)
+ * with the read offered again, never as an alarm: an alarm is for a read that was refused.
  */
 export function activeRevisionOf(
   revisions: readonly PolicyRevisionRecord[],

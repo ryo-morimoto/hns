@@ -154,9 +154,21 @@ function PolicyReader({
 }: ReaderProps): ReactElement {
   const [report, setReport] = useState<DecisionOutcome | null>(null);
   // The read that follows a decision is a new request, so it may be answered after the report is
-  // set; a refusal (a stale approval above all) keeps its place on screen until a person dismisses
-  // it, because a banner that disappears with the next read is one nobody got to read.
+  // set. A refusal keeps its place on screen until a person dismisses it — `approval_stale` above
+  // all, but any refusal, because a banner that disappears with the next read is one nobody got to
+  // read. A decision that went through is a step, not an alarm: the first read after it replaces
+  // it (and an empty list has no row to act on, so the report is let go by the read's landing).
   const kept = report !== null && report.kind === "refused" ? report : null;
+  // What this read answered with; a new read is a new object, so the identity is the signal.
+  const list: readonly unknown[] =
+    proposals.__typename === "PolicyProposalList" ? proposals.proposals : [];
+  const [released, setReleased] = useState<{ readonly list: readonly unknown[] } | null>(null);
+  useEffect(() => {
+    if (report === null || report.kind === "refused") return;
+    setReleased({ list });
+  }, [report, list]);
+  const step =
+    report !== null && report.kind !== "refused" && released?.list !== list ? report : null;
   // Focus is put back once the panels below have settled: whether a decision leaves the
   // proposal card on screen depends on the read that follows it, which lands after this render.
   // The region that receives it is the shell's main one; a screen rendered without the shell
@@ -184,11 +196,14 @@ function PolicyReader({
   }
   const active = activeRevisionOf(revisions.revisions);
   if (active === null) {
+    // An empty state, not a failure: the read succeeded and named no active revision, which the
+    // face's `ensure` should have given. The screen says what it sees and offers the read again;
+    // it does not raise an alarm (`role="status"`), which is the reader's job for a refused read.
     return (
       <section className="hns-policy" aria-label="ポリシー">
         <h1>ポリシーがありません</h1>
-        <p className="hns-policy__note" role="alert">
-          サーバが active な revision を返しませんでした。
+        <p className="hns-policy__note" role="status">
+          サーバが active な revision を返しませんでした。読み直すと作り直されます。
         </p>
         <Button variant="ghost" onClick={() => window.location.reload()}>
           読み直す
@@ -202,16 +217,13 @@ function PolicyReader({
         <h1 id="policy-title">ポリシー</h1>
         {canDecide ? null : (
           <p className="hns-policy__note" data-testid="policy-no-permission">
-            agent の principal では承認・拒否できません。提案だけできます。
+            この画面では承認・拒否を送れません。承認できるのは人だけです（agent の principal
+            はサーバが拒否します）。提案はできます。
           </p>
         )}
       </header>
-      {kept === null ? null : (
-        <DecisionReport outcome={kept} stale onDismiss={() => setReport(null)} />
-      )}
-      {report === null || kept !== null ? null : (
-        <DecisionReport outcome={report} stale={false} onDismiss={() => setReport(null)} />
-      )}
+      {kept === null ? null : <DecisionReport outcome={kept} onDismiss={() => setReport(null)} />}
+      {step === null ? null : <DecisionReport outcome={step} onDismiss={() => setReport(null)} />}
       <ActivePanel revisions={revisions.revisions} active={active} />
       <ProposalForm workspaceId={workspaceId} active={active.document} onProposed={onReread} />
       <PendingPanel
@@ -229,17 +241,20 @@ function PolicyReader({
  * The decision's outcome, announced once and kept out of the panel it came from.
  *
  * @param props.outcome - What the face answered.
- * @param props.stale - Whether this is a refusal: it stays until a person dismisses it, because
- * the read that follows a decision may land after it and must not take it away.
  * @param props.onDismiss - Dismiss the banner.
+ *
+ * @remarks
+ * **A refusal stays and a success does not.** A refused decision is drawn by the reader for as long
+ * as the report is a refusal (the read that a decision asks for may land after it, and a banner
+ * that unmounts with that read is one nobody got to read); it goes only when a person dismisses it.
+ * A decision that went through is a step of the work: the read that follows replaces it. Whether
+ * the refusal is `approval_stale` decides the words, never whether it stays.
  */
 function DecisionReport({
   outcome,
-  stale,
   onDismiss,
 }: {
   readonly outcome: DecisionOutcome;
-  readonly stale: boolean;
   readonly onDismiss: () => void;
 }): ReactElement {
   if (outcome.kind === "refused") {
@@ -555,7 +570,10 @@ function ProposalCard({
   const [refusal, setRefusal] = useState<string | null>(null);
   const reasonOk = reasonState(reason).ok;
   const diff = diffKindLabel(proposal.diff.kind);
-  const canSubmit = canDecide && reasonOk && !inFlight;
+  // A diff the algebra could not compute (`unsupported`) is not a change anyone can approve: the
+  // face refuses it too, and the button says so before the refusal round trip.
+  const comparable = proposal.diff.kind !== "UNSUPPORTED";
+  const canSubmit = canDecide && reasonOk && comparable && !inFlight;
 
   const decide = useCallback(
     (approve: boolean): void => {
@@ -612,7 +630,13 @@ function ProposalCard({
         </label>
         {canDecide ? null : (
           <p className="hns-policy__note">
-            agent の principal では承認・拒否できません。人が決めます。
+            この画面では承認・拒否を送れません。人が決めます（agent の principal
+            はサーバが拒否します）。
+          </p>
+        )}
+        {comparable ? null : (
+          <p className="hns-policy__note">
+            この差分は比較できないため、承認・拒否はできません。提案を出し直してください。
           </p>
         )}
         {refusal === null ? null : (

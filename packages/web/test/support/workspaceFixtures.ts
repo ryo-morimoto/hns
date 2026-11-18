@@ -3,6 +3,7 @@ import {
   ProjectIdSchema,
   type Conversation,
   type Project,
+  type JsonValue,
   type Task,
 } from "@hns/core";
 import { fromGlobalId, toGlobalId } from "@hns/core/graphql";
@@ -110,6 +111,44 @@ export function conversationFixture(id: string): Conversation | undefined {
   return conversations.find((conversation) => conversation.id === id);
 }
 
+/**
+ * The policy answer every shell test's fixture gives.
+ *
+ * @remarks
+ * The policy screen mounts under the shell, and the shell's fixtures answer its read with an empty
+ * policy: one active revision and no proposal. The documents are the screen's own wire shapes
+ * (the four axes the contract publishes), so a shell test proves the route, not the policy.
+ *
+ * @param workspaceId - The `Project` global id the read named.
+ * @returns The `policyRevisions` and `policyProposals` members.
+ */
+function policyFixture(workspaceId: string) {
+  return {
+    policyRevisions: {
+      __typename: "PolicyRevisionList",
+      revisions: [
+        {
+          __typename: "PolicyRevision",
+          id: toGlobalId("PolicyRevision", workspaceId + "/1"),
+          revision: 1,
+          hash: "a".repeat(64),
+          active: true,
+          createdAt: "2026-11-01T00:00:00.000Z",
+          createdBy: "system",
+          document: {
+            __typename: "PolicyDocument",
+            readRoots: ["."],
+            writeRoots: ["."],
+            bash: false,
+            network: false,
+          },
+        },
+      ],
+    },
+    policyProposals: { __typename: "PolicyProposalList", proposals: [] },
+  } satisfies JsonValue;
+}
+
 /** The fixture responder the shell tests use; it answers the two compiled operations. */
 export const workspaceFixture: Responder = (call) => {
   if (call.operation === "ShellProjectsQuery") {
@@ -139,6 +178,11 @@ export const workspaceFixture: Responder = (call) => {
         tasks: tasks.flatMap((task) => (task.project_id === projectId ? [taskPayload(task)] : [])),
       },
     };
+  }
+  if (call.operation === "PolicyScreenQuery") {
+    const workspaceId = v.safeParse(v.string(), call.variables["workspaceId"]);
+    if (!workspaceId.success) return undefined;
+    return policyFixture(workspaceId.output);
   }
   return undefined;
 };

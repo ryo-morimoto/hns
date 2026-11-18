@@ -37,6 +37,35 @@ test("a conversation route renders the conversation", async () => {
   expect(await screen.findByRole("textbox", { name: "メッセージ" })).toBeTruthy();
 });
 
+/**
+ * The policy route: the workspace's policy screen under the shell, and the way back.
+ *
+ * @remarks
+ * The shell fixtures answer the policy read (an empty policy, in the screen's own wire shapes), so
+ * what this test proves is the **route**: the policy hash mounts the policy screen and not the
+ * workspace view, and the workspace route comes back. (The back control's own navigation is the
+ * conversation route's test below; the desktop bar keeps this route's back behind the project
+ * menu's place, which a mouse user reaches the same way.)
+ */
+test("a policy route renders the policy screen, and back returns to the workspace", async () => {
+  window.location.hash = "#/p/project-hns/policy";
+  renderShell();
+
+  expect(await screen.findByRole("heading", { name: "ポリシー", level: 1 })).toBeTruthy();
+  expect(await screen.findByTestId("policy-pending-empty")).toBeTruthy();
+  // The workspace view and a conversation's composer are not under it.
+  expect(screen.queryByRole("heading", { name: "Workspace" })).toBe(null);
+  expect(screen.queryByRole("textbox", { name: "メッセージ" })).toBe(null);
+
+  // The chrome names the place the route is (not the workspace it belongs to).
+  expect(screen.getAllByText("ポリシー").length).toBeGreaterThan(0);
+  window.location.hash = "#/p/project-hns";
+  await waitFor(() => {
+    expect(window.location.hash).toBe("#/p/project-hns");
+  });
+  expect(await screen.findByRole("heading", { name: "Workspace" })).toBeTruthy();
+});
+
 test("back returns to the previous route", async () => {
   renderShell();
   await screen.findByRole("heading", { name: "Workspace" });
