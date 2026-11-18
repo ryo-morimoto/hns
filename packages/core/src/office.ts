@@ -651,6 +651,20 @@ export const OFFICE_CELL_REF_PATTERN = /^[A-Z]{1,3}[1-9][0-9]{0,6}$/u;
 export const OFFICE_ARTIFACT_FILE_PATTERN = /^(?:pdf|png)$/u;
 
 /**
+ * The operations that produce a file, and the only ones a cache key may name (§4).
+ *
+ * @remarks
+ * `inspect` / `edit` / `recalc` produce no artifact, so they have no key and no path. The type
+ * says so, not only the schema: a caller that built a key from an `inspect` would not compile,
+ * where a run-time check in one function could be forgotten by the next. The list is the one
+ * place the pair is written; `OFFICE_OPERATIONS` still carries all six for a job.
+ */
+export const OFFICE_ARTIFACT_FILE_OPERATIONS = ["preview", "render"] as const;
+
+/** One operation that produces a file. */
+export type OfficeArtifactFileOperation = (typeof OFFICE_ARTIFACT_FILE_OPERATIONS)[number];
+
+/**
  * The whole key one artifact lives under, as the 5-tuple (§4).
  *
  * @remarks
@@ -667,14 +681,17 @@ export interface OfficeCacheKey {
   readonly pathHash: string;
   /** The input's version: its content hash, `sha256:<hex>`. */
   readonly version: string;
-  /** The operation that produced it. */
-  readonly operation: OfficeOperation;
+  /** The operation that produced it: one of the two that make a file. */
+  readonly operation: OfficeArtifactFileOperation;
   /** The hash of `{ operation, ...the operation's options }`, 16 hex ({@link officeParamsHash}). */
   readonly paramsHash: string;
 }
 
 /** The directory inside one cache entry: `<operation>-<paramsHash>` (§4). */
-export function officeArtifactDirectory(operation: OfficeOperation, paramsHash: string): string {
+export function officeArtifactDirectory(
+  operation: OfficeArtifactFileOperation,
+  paramsHash: string,
+): string {
   if (!OFFICE_PARAMS_HASH_PATTERN.test(paramsHash)) {
     throw new Error("an office params hash is 16 lowercase hex characters");
   }
@@ -693,17 +710,12 @@ export function officeArtifactDirectory(operation: OfficeOperation, paramsHash: 
  * The extension is derived from the operation, never given: a preview is a PDF and a render is a
  * PNG, so the name cannot disagree with what the file is.
  */
-export function officeArtifactFile(operation: OfficeOperation): string {
+export function officeArtifactFile(operation: OfficeArtifactFileOperation): string {
   switch (operation) {
     case "preview":
       return "pdf";
     case "render":
       return "png";
-    case "inspect":
-    case "edit":
-    case "convert":
-    case "recalc":
-      throw new Error("an office operation that produces no artifact has no file");
     default:
       return assertNever(operation);
   }
@@ -746,17 +758,12 @@ export function officeCachePath(key: OfficeCacheKey): string {
 }
 
 /** The directory's operation part: `preview` or `render`, and no other (§4). */
-function artifactFileName(operation: OfficeOperation): string {
+function artifactFileName(operation: OfficeArtifactFileOperation): string {
   switch (operation) {
     case "preview":
       return "preview";
     case "render":
       return "render";
-    case "inspect":
-    case "edit":
-    case "convert":
-    case "recalc":
-      throw new Error("an office operation that produces no artifact has no directory");
     default:
       return assertNever(operation);
   }
@@ -874,17 +881,12 @@ export async function officeParamsHash(
  *
  * @throws Error when the operation makes no artifact.
  */
-export function officeArtifactContentType(operation: OfficeOperation): string {
+export function officeArtifactContentType(operation: OfficeArtifactFileOperation): string {
   switch (operation) {
     case "preview":
       return "application/pdf";
     case "render":
       return "image/png";
-    case "inspect":
-    case "edit":
-    case "convert":
-    case "recalc":
-      throw new Error("an office operation that produces no artifact has no content type");
     default:
       return assertNever(operation);
   }
@@ -1193,7 +1195,7 @@ export const OfficeCacheKeySchema: v.GenericSchema<unknown, OfficeCacheKey> = v.
   workspaceId: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
   pathHash: v.pipe(v.string(), v.regex(OFFICE_PATH_HASH_PATTERN, "a path hash is 16 hex")),
   version: v.pipe(v.string(), v.regex(OFFICE_SHA256_PATTERN, "a version is sha256:<64 hex>")),
-  operation: v.picklist(["preview", "render"]),
+  operation: v.picklist(OFFICE_ARTIFACT_FILE_OPERATIONS),
   paramsHash: v.pipe(v.string(), v.regex(OFFICE_PARAMS_HASH_PATTERN, "a params hash is 16 hex")),
 });
 

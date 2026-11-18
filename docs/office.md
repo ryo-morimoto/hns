@@ -19,15 +19,25 @@
 ## 2. 語彙
 
 ```ts
-OFFICE_FORMATS     = ["docx", "xlsx", "pptx", "pdf"]
-OFFICE_OPERATIONS  = ["preview", "render", "inspect", "edit", "convert", "recalc"]
-PREVIEW_STATUSES   = ["unsupported", "disabled", "queued", "generating", "ready", "failed", "stale"]
+OFFICE_FORMATS = ["docx", "xlsx", "pptx", "pdf"];
+OFFICE_OPERATIONS = ["preview", "render", "inspect", "edit", "convert", "recalc"];
+PREVIEW_STATUSES = ["unsupported", "disabled", "queued", "generating", "ready", "failed", "stale"];
 
 OFFICE_ERROR_CODES = [
-  "unsupported_format", "unsupported_command", "input_too_large", "too_many_cells", "too_many_pixels",
-  "engine_unavailable", "engine_timeout", "engine_failed", "engine_busy", "output_too_large",
-  "source_changed", "not_authorized", "cancelled",
-]
+  "unsupported_format",
+  "unsupported_command",
+  "input_too_large",
+  "too_many_cells",
+  "too_many_pixels",
+  "engine_unavailable",
+  "engine_timeout",
+  "engine_failed",
+  "engine_busy",
+  "output_too_large",
+  "source_changed",
+  "not_authorized",
+  "cancelled",
+];
 ```
 
 `OfficeJob` は `operation` を判別子にした閉じた union。`limits` は server がポリシーから解決して載せる。
@@ -39,34 +49,46 @@ OFFICE_ERROR_CODES = [
 export type OfficeCommand =
   | { readonly op: "setText"; readonly paragraphId: number; readonly text: string }
   | { readonly op: "setCells"; readonly sheet: string; readonly cells: readonly CellEdit[] }
-  | { readonly op: "setShapeText"; readonly slide: number; readonly shape: number; readonly text: string };
+  | {
+      readonly op: "setShapeText";
+      readonly slide: number;
+      readonly shape: number;
+      readonly text: string;
+    };
 
 export interface CellEdit {
-  readonly ref: string;                       // "B12"
+  readonly ref: string; // "B12"
   readonly value:
     | { readonly kind: "text"; readonly text: string }
     | { readonly kind: "number"; readonly value: number }
-    | { readonly kind: "formula"; readonly formula: string };  // "=SUM(B2:B9)"
+    | { readonly kind: "formula"; readonly formula: string }; // "=SUM(B2:B9)"
 }
 ```
 
 ```ts
 interface OfficeInput {
-  readonly workspaceId: string;   // workspace の同一性（machine の ROOT と 1:1）
-  readonly path: string;          // workspace 相対
-  readonly version: string;       // workspace の版。実体は "sha256:<hex>"（内容ハッシュ）
+  readonly workspaceId: string; // workspace の同一性（machine の ROOT と 1:1）
+  readonly path: string; // workspace 相対
+  readonly version: string; // workspace の版。実体は "sha256:<hex>"（内容ハッシュ）
   readonly format: OfficeFormat;
 }
 
 // operation が判別子。op の違う option を混ぜた job（preview + commands）は schema が拒否する。
 type OfficeJob = {
-  readonly v: 1;             // 契約の版。破壊は v2
+  readonly v: 1; // 契約の版。破壊は v2
   readonly id: OperationId; // [A-Za-z0-9_-]{1,64}。監査（§7）と冪等な再試行が同じ id を名乗る
   readonly input: OfficeInput;
-  readonly limits: OfficeLimits;  // server がポリシーから解決して載せる（§10）
+  readonly limits: OfficeLimits; // server がポリシーから解決して載せる（§10）
 } & (
-  | { readonly operation: "preview"; readonly pages?: readonly (number | { from: number; to: number })[] }
-  | { readonly operation: "render";  readonly pages?: readonly (number | { from: number; to: number })[]; readonly width?: number }
+  | {
+      readonly operation: "preview";
+      readonly pages?: readonly (number | { from: number; to: number })[];
+    }
+  | {
+      readonly operation: "render";
+      readonly pages?: readonly (number | { from: number; to: number })[];
+      readonly width?: number;
+    }
   | { readonly operation: "inspect" }
   | { readonly operation: "edit"; readonly commands: readonly OfficeCommand[] }
   | { readonly operation: "convert"; readonly to: "pdf" }
@@ -79,17 +101,21 @@ type OfficeResult =
 
 interface OfficeArtifact {
   readonly workspaceId: string;
-  readonly pathHash: string;   // §4 の 16 hex
-  readonly version: string;    // "sha256:<hex>"
-  readonly file: string;       // "<operation>-<paramsHash>.<pdf|png>"（拡張子は operation から導く）
-  readonly sha256: string;     // バイト列の "sha256:<hex>"。write の rename 前に照合する（§5）
+  readonly pathHash: string; // §4 の 16 hex
+  readonly version: string; // "sha256:<hex>"
+  readonly file: string; // "<operation>-<paramsHash>.<pdf|png>"（拡張子は operation から導く）
+  readonly sha256: string; // バイト列の "sha256:<hex>"。write の rename 前に照合する（§5）
   readonly bytes: number;
-  readonly pages?: number;     // PNG には無い
-  readonly missingFonts: readonly string[];   // 空 = 全部見つかった
+  readonly pages?: number; // PNG には無い
+  readonly missingFonts: readonly string[]; // 空 = 全部見つかった
   readonly engine: { readonly id: string; readonly version: string };
 }
 
-interface OfficeStats { readonly ms: number; readonly peakRssMb: number; readonly cached: boolean }
+interface OfficeStats {
+  readonly ms: number;
+  readonly peakRssMb: number;
+  readonly cached: boolean;
+}
 ```
 
 **schema は型に整合する**（`v.GenericSchema<unknown, T>`）。型の正本は `types.ts` ではなく
@@ -129,8 +155,10 @@ queued ─▶ generating ─▶ ready
 
 **キーは 5 つ組**（`OfficeCacheKey`）：`(workspaceId, pathHash, version, operation, paramsHash)`。どれも省略できない。
 
-- `version` は workspace の版で、実体は内容ハッシュ（`sha256:<hex>`）。したがって**同一内容は自然に同じキー**になる。
-  「内容ハッシュをキーにしない」という以前の記述は誤り（レビュー B3）。版は内容である。
+- `version` は workspace の版で、実体は内容ハッシュ（`sha256:<hex>`）。
+  **同じ pathHash なら、同一内容は同じキー**になる（版は内容である。以前の「内容ハッシュをキーにしない」は
+  誤り。レビュー B3）。**パスが違えば内容が同じでも別のキー**である（同じ内容の 2 つのコピーは、
+  2 つの成果物として別に持つ）。
 - `pathHash` = SHA-256(workspace 相対パス) 先頭 16 hex。
 - `paramsHash` = **core の `officeParamsHash(operation, options)`** が返す 16 hex（JCS + SHA-256）。
   server も machine もこの 1 関数だけを使う（既定値の変更で静かに cache miss しないため。レビュー Q7）。
@@ -149,10 +177,10 @@ queued ─▶ generating ─▶ ready
 ```ts
 export interface OfficeCacheKey {
   readonly workspaceId: string;
-  readonly pathHash: string;    // SHA-256(パス) 先頭 16 hex
-  readonly version: string;      // "sha256:<hex>"
-  readonly operation: OfficeOperation;   // preview | render（成果物を作る 2 つだけ）
-  readonly paramsHash: string;            // officeParamsHash(operation, options)
+  readonly pathHash: string; // SHA-256(パス) 先頭 16 hex
+  readonly version: string; // "sha256:<hex>"
+  readonly operation: OfficeOperation; // preview | render（成果物を作る 2 つだけ）
+  readonly paramsHash: string; // officeParamsHash(operation, options)
 }
 ```
 
@@ -168,13 +196,18 @@ export interface OfficeCacheKey {
 **JSON の型（封筒）は 1 つも増やさない**。
 
 ```ts
-{ op: "office"; job: OfficeJob }    // → OfficeResult（convert も cache に作るところまで）
+{
+  op: "office";
+  job: OfficeJob;
+} // → OfficeResult（convert も cache に作るところまで）
 ```
 
 エンジンの能力照会は独立した op（pack の manifest を読む面が他に無い。レビュー P2）:
 
 ```ts
-{ op: "officeEngine" }  // → { available: true, id, version, formats, operations } | { available: false, reason }
+{
+  op: "officeEngine";
+} // → { available: true, id, version, formats, operations } | { available: false, reason }
 ```
 
 キャッシュの読み出しは JSON の op ではなく、`GET /artifact`（バイナリ）で行う。
@@ -183,7 +216,7 @@ export interface OfficeCacheKey {
   成果物として残すのは**別の 1 手**: 既存の `write` op の変種（`content` の代わりに構造化 `source`）で
   ROOT に資産化する。journal・版・`file.write` 監査は既存の write 経路がそのまま記録する。
   結果は `applied` / `conflict` / `unknown`（`operationId` で冪等、応答断は `unknown`、照合は stat）。
-  - `source` は **構造化**する: `{ kind: "office-cache", ...OfficeCacheKey }`  =
+  - `source` は **構造化**する: `{ kind: "office-cache", ...OfficeCacheKey }` =
     `{ kind, workspaceId, pathHash, version, operation, paramsHash }`（文字列 key は持たない。
     名前は machine が cache の内側で `officeCachePath` から導く）。サーバーは `office` の結果の
     `artifact.key` をそのまま載せる。
@@ -213,6 +246,7 @@ export interface OfficeCacheKey {
   - 既存の署名ヘッダと同じ鍵・時刻窓・nonce。
   - **cache のキーだけで解決**し、ROOT を読まない。`length` は最大 8 MiB、超えたら `invalid_request`。
   - server はバッファせず `ReadableStream` に流す。
+
 - `artifact` は構造化する:
   `{ key, workspaceId, pathHash, version, file, sha256, bytes, pages, missingFonts, engine }`。
   `key` は §4 の 5 つ組そのもの（`OfficeCacheKey`）。`workspaceId` / `pathHash` /
@@ -235,24 +269,65 @@ export interface OfficeCacheKey {
 既存の失敗表現（閉じた enum + union）に合わせる。**文字列の error field を足さない。**
 
 ```graphql
-union DocumentPreviewResult = DocumentPreview | OfficeFailure   # not_authorized はここ
+union DocumentPreviewResult = DocumentPreview | OfficeFailure # not_authorized はここ
 ```
 
 ```graphql
-enum OfficeErrorCode { UNSUPPORTED_FORMAT UNSUPPORTED_COMMAND INPUT_TOO_LARGE TOO_MANY_CELLS TOO_MANY_PIXELS
-  ENGINE_UNAVAILABLE ENGINE_TIMEOUT ENGINE_FAILED ENGINE_BUSY OUTPUT_TOO_LARGE SOURCE_CHANGED NOT_AUTHORIZED CANCELLED }
-enum PreviewStatus { UNSUPPORTED DISABLED QUEUED GENERATING READY FAILED STALE }
-type DocumentPreview {
-  path: String!  version: String!  status: PreviewStatus!
-  url: String  pages: Int  bytes: Int  missingFonts: [String!]!
-  engine: String  generatedAt: DateTime  error: OfficeFailure
+enum OfficeErrorCode {
+  UNSUPPORTED_FORMAT
+  UNSUPPORTED_COMMAND
+  INPUT_TOO_LARGE
+  TOO_MANY_CELLS
+  TOO_MANY_PIXELS
+  ENGINE_UNAVAILABLE
+  ENGINE_TIMEOUT
+  ENGINE_FAILED
+  ENGINE_BUSY
+  OUTPUT_TOO_LARGE
+  SOURCE_CHANGED
+  NOT_AUTHORIZED
+  CANCELLED
 }
-type OfficeFailure { code: OfficeErrorCode!  message: String! }
-type OfficeEngineAvailable { id: String!  version: String! }
-type OfficeEngineUnavailable { reason: String! }
+enum PreviewStatus {
+  UNSUPPORTED
+  DISABLED
+  QUEUED
+  GENERATING
+  READY
+  FAILED
+  STALE
+}
+type DocumentPreview {
+  path: String!
+  version: String!
+  status: PreviewStatus!
+  url: String
+  pages: Int
+  bytes: Int
+  missingFonts: [String!]!
+  engine: String
+  generatedAt: DateTime
+  error: OfficeFailure
+}
+type OfficeFailure {
+  code: OfficeErrorCode!
+  message: String!
+}
+type OfficeEngineAvailable {
+  id: String!
+  version: String!
+}
+type OfficeEngineUnavailable {
+  reason: String!
+}
 union OfficeEngine = OfficeEngineAvailable | OfficeEngineUnavailable
-type Query { documentPreview(path: String!): DocumentPreviewResult!  officeEngine: OfficeEngine! }
-type Mutation { requestDocumentPreview(path: String!): DocumentPreviewResult! }
+type Query {
+  documentPreview(path: String!): DocumentPreviewResult!
+  officeEngine: OfficeEngine!
+}
+type Mutation {
+  requestDocumentPreview(path: String!): DocumentPreviewResult!
+}
 ```
 
 - `documentPreview` は状態を返すだけ。生成は `requestDocumentPreview` mutation（冪等）。
@@ -280,21 +355,21 @@ type Mutation { requestDocumentPreview(path: String!): DocumentPreviewResult! }
 
 ## 9. エラーと UI 文言
 
-| code | 意味 | UI |
-| --- | --- | --- |
-| unsupported_format | 形式が対象外（odt 等） | 「この形式はプレビューできません」 |
-| unsupported_command | 編集・再計算の語彙に無い | 「この操作には対応していません」 |
-| input_too_large | 入力が上限超え | 「ファイルが大きすぎます（上限 50 MB）」 |
-| too_many_cells | セル数が上限超え | 「ブックが大きすぎます（推定 X GB / 上限 2 GB）」 |
-| too_many_pixels | 画像が上限超え | 「画像が大きすぎます」 |
-| engine_unavailable | pack が無い/壊れている | 「Office プレビューは未設定です」＋導線 |
-| engine_timeout | 時間切れ | 「時間内に変換できませんでした」＋再試行 |
-| engine_failed | エンジンが失敗 | 「変換に失敗しました」＋原本は無傷 |
-| engine_busy | 他の変換が実行中 | 「他の変換が終わるのを待っています」＋少し待って再試行 |
-| output_too_large | 出力が上限超え | 「出力が大きすぎます」 |
-| source_changed | 版が変わった | 「ファイルが更新されました」＋再読み込み |
-| not_authorized | 権限が無い | 既存の拒否表示 |
-| cancelled | 利用者が中止 | 静かに戻す |
+| code                | 意味                     | UI                                                     |
+| ------------------- | ------------------------ | ------------------------------------------------------ |
+| unsupported_format  | 形式が対象外（odt 等）   | 「この形式はプレビューできません」                     |
+| unsupported_command | 編集・再計算の語彙に無い | 「この操作には対応していません」                       |
+| input_too_large     | 入力が上限超え           | 「ファイルが大きすぎます（上限 50 MB）」               |
+| too_many_cells      | セル数が上限超え         | 「ブックが大きすぎます（推定 X GB / 上限 2 GB）」      |
+| too_many_pixels     | 画像が上限超え           | 「画像が大きすぎます」                                 |
+| engine_unavailable  | pack が無い/壊れている   | 「Office プレビューは未設定です」＋導線                |
+| engine_timeout      | 時間切れ                 | 「時間内に変換できませんでした」＋再試行               |
+| engine_failed       | エンジンが失敗           | 「変換に失敗しました」＋原本は無傷                     |
+| engine_busy         | 他の変換が実行中         | 「他の変換が終わるのを待っています」＋少し待って再試行 |
+| output_too_large    | 出力が上限超え           | 「出力が大きすぎます」                                 |
+| source_changed      | 版が変わった             | 「ファイルが更新されました」＋再読み込み               |
+| not_authorized      | 権限が無い               | 既存の拒否表示                                         |
+| cancelled           | 利用者が中止             | 静かに戻す                                             |
 
 **machine の拒否コード → OfficeErrorCode の写像**: `busy` → `engine_busy`、`too_large` → `input_too_large`、
 `deadline_exceeded` → `engine_timeout`、`path_denied`/`forbidden` → `not_authorized`、`invalid_request` → `unsupported_command`（形式不正）、
@@ -314,23 +389,23 @@ type Mutation { requestDocumentPreview(path: String!): DocumentPreviewResult! }
 
 ## 10. 上限（既定）
 
-| 項目 | 値 | 根拠 |
-| --- | --- | --- |
-| 入力 | 50 MiB | スパイク最重量 13.7 MB の 3.6 倍 |
-| セル数 | 300,000 | RSS ≈ 60 MB + 5 KB × セル（約 1.5 GB） |
-| 画素 | 24,000,000 | RSS ≈ 4 × 画素（約 96 MB） |
-| job timeout | 60 s（machine 設定 90 s 前提、clamp あり） | 最重量 PDF 化 17 s の 3.5 倍 |
-| 出力 | 100 MiB（machine が ROOT に書く経路） | 31 MB PDF の 3 倍 |
-| プレビュー PDF | 50 MiB / 300 ページ | ブラウザに渡す上限 |
-| PNG | 10 ページ / 幅 1600 px | 目視 QA の用途 |
+| 項目           | 値                                         | 根拠                                   |
+| -------------- | ------------------------------------------ | -------------------------------------- |
+| 入力           | 50 MiB                                     | スパイク最重量 13.7 MB の 3.6 倍       |
+| セル数         | 300,000                                    | RSS ≈ 60 MB + 5 KB × セル（約 1.5 GB） |
+| 画素           | 24,000,000                                 | RSS ≈ 4 × 画素（約 96 MB）             |
+| job timeout    | 60 s（machine 設定 90 s 前提、clamp あり） | 最重量 PDF 化 17 s の 3.5 倍           |
+| 出力           | 100 MiB（machine が ROOT に書く経路）      | 31 MB PDF の 3 倍                      |
+| プレビュー PDF | 50 MiB / 300 ページ                        | ブラウザに渡す上限                     |
+| PNG            | 10 ページ / 幅 1600 px                     | 目視 QA の用途                         |
 
 ```ts
 export const DEFAULT_OFFICE_LIMITS = {
-  maxInputBytes: 50 * 1024 * 1024,     // 52_428_800
+  maxInputBytes: 50 * 1024 * 1024, // 52_428_800
   maxCells: 300_000,
   maxPixels: 24_000_000,
   timeoutMs: 60_000,
-  maxOutputBytes: 100 * 1024 * 1024,   // 104_857_600
+  maxOutputBytes: 100 * 1024 * 1024, // 104_857_600
 } as const satisfies OfficeLimits;
 ```
 
@@ -347,10 +422,16 @@ manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capa
 `preview` / `render` / `convert` のみ。`inspect` / `edit` / `recalc` は sidecar（0242）が入ってから宣言する。
 
 ```json
-{ "id": "ibisoffice", "version": "0.8.7",
-  "capabilities": { "formats": ["docx","xlsx","pptx"], "operations": ["preview","render","convert"] },
+{
+  "id": "ibisoffice",
+  "version": "0.8.7",
+  "capabilities": {
+    "formats": ["docx", "xlsx", "pptx"],
+    "operations": ["preview", "render", "convert"]
+  },
   "license": { "spdx": "AGPL-3.0-only", "notice": "NOTICE", "source": "SOURCE.md" },
-  "files": { "bin/ibisOffice": "<sha256>" } }
+  "files": { "bin/ibisOffice": "<sha256>" }
+}
 ```
 
 ## 12. golden fixture と契約の検査
@@ -358,19 +439,29 @@ manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capa
 `packages/core/test/fixtures/office/` に**手で書いた JSON** を 25 個置く（型から起こすと、契約と
 実装のずれを検出できない）。内訳:
 
-| 群 | ファイル数 | 中身 |
-| --- | --- | --- |
-| job | 3 | preview / render / convert |
-| result | 4 | 同 3 つ + `officeEngine` の報告 |
-| error | 3 | `unsupported_format` / `engine_timeout` / `source_changed` |
-| 拒否 | 6 | 未知 operation・preview+commands・version 不正・limits 0・未知 error.code・workspaceId 無し |
-| command / cell | 4 | `OfficeCommand` 3 語彙 + `CellEdit` |
-| write | 3 | `source` / `content` / 両方（拒否） |
-| key | 2 | 同じ job・同じ version で `pathHash` 違い／`paramsHash` 違い |
+| 群             | ファイル数 | 中身                                                                                        |
+| -------------- | ---------- | ------------------------------------------------------------------------------------------- |
+| job            | 3          | preview / render / convert                                                                  |
+| result         | 4          | 同 3 つ + `officeEngine` の報告                                                             |
+| error          | 3          | `unsupported_format` / `engine_timeout` / `source_changed`                                  |
+| 拒否           | 6          | 未知 operation・preview+commands・version 不正・limits 0・未知 error.code・workspaceId 無し |
+| command / cell | 4          | `OfficeCommand` 3 語彙 + `CellEdit`                                                         |
+| write          | 3          | `source` / `content` / 両方（拒否）                                                         |
+| key            | 2          | 同じ job・同じ version で `pathHash` 違い／`paramsHash` 違い                                |
 
-**合計 25 ファイル。** 受入の「fixture 12 件（成功 6・拒否 6）」とは数え方が違う: 成功として
-schema を通すのが job 3・result 3・error 3・command 4・write 2 の **15 本**、拒否が **6 本**、
-残る 4 本（`officeEngine` の報告と key の 2 つ）は key 単体の検査に使う。数え方は lead が Result に書く。
+**実ディレクトリの数: 25**（job 3 + result 4 + error 3 + 拒否 6 + command/cell 4 + write 3 + key 2）。
+受け入れ条件の「fixture 12 件」は **この数え方とは別物**で、次のように分かれる:
+
+- **成功例: 16**（job 3・result 3（`result-office-engine` を含む）・error 3・command/cell 4・write 2）。
+  受入の「成功 6」は、このうち job と result の 6 本を指していた。error の 3 本は
+  `ok: false` の `OfficeResult` で、成功ではないが schema は通す（失敗は成功の反対側の正常値）。
+- **拒否例: 7**。`reject-*` の 6 本（未知 operation・preview+commands・version 不正・limits 0・
+  未知 error.code・workspaceId 無し）と、`write` 群の「content と source の両載せ」1 本。
+  受入の「拒否 6」は `reject-*` の 6 本を指していた（両載せは write の変種として足した分）。
+
+上とは別に、key の 2 本（`key-convert-other-path` / `key-convert-other-params`）は
+`OfficeCacheKeySchema` と `officeCachePath` に当てる（成功でも拒否でもなく、キーの差分の検査）。
+16 + 7 + 2 = 25 で、ディレクトリの数と一致する。
 
 型と schema の一致は `v.GenericSchema<unknown, T>`（コンパイルで固定）と `expectTypeOf` で、
 閉じた union の `switch` は `assertNever` で網羅を固定する。

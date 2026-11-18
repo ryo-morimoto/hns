@@ -4,6 +4,7 @@ import * as v from "valibot";
 import {
   CHECKPOINT_PACK_CONTENT_TYPE,
   MAX_CHECKPOINT_PACK_BYTES,
+  OfficeEngineReportSchema,
   SIGNED_HEADER_BY_FIELD,
   fitsCheckpointPack,
 } from "@hns/core";
@@ -158,6 +159,37 @@ test("a response body is parsed at the boundary", () => {
     parseResponseBody(JSON.stringify({ ok: false, code: "made-up", message: "x" })),
   ).toThrow();
   expect(() => parseStatResult({ exists: true, kind: "socket", size: 1, mtimeMs: 0 })).toThrow();
+});
+
+// Catches: the office ops answering under a name the answer envelope does not carry, so a probe
+// or a job's answer would be a parse failure at the client instead of a result. The two ops are
+// in the closed operation vocabulary, and both answers come back under it.
+test("an office answer is parsed under the office ops' names", () => {
+  for (const op of ["office", "officeEngine"] as const) {
+    const body = parseResponseBody(JSON.stringify({ ok: true, op, result: { ok: true } }));
+    expect(body.ok).toBe(true);
+    if (!body.ok) throw new Error("expected a success");
+    expect(body.op).toBe(op);
+    expect(body.result).toStrictEqual({ ok: true });
+  }
+  // The report a probe answers is the contract's, and its refusal-free failure is the other union.
+  const report = parseResponseBody(
+    JSON.stringify({
+      ok: true,
+      op: "officeEngine",
+      result: { available: false, reason: "no pack" },
+    }),
+  );
+  expect(report.ok).toBe(true);
+  if (!report.ok) throw new Error("expected a success");
+  expect(v.parse(OfficeEngineReportSchema, report.result)).toStrictEqual({
+    available: false,
+    reason: "no pack",
+  });
+  // An op outside the vocabulary is still refused: the envelope did not widen into free text.
+  expect(() =>
+    parseResponseBody(JSON.stringify({ ok: true, op: "transcode", result: {} })),
+  ).toThrow();
 });
 
 /** A checkpoint prepare answer, as the machine sends it. */

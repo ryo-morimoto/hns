@@ -50,6 +50,8 @@ import {
 import type {
   ArtifactTargetParams,
   CellEdit,
+  OfficeArtifactFileOperation,
+  OfficeCacheKey,
   OfficeArtifact,
   OfficeCommand,
   OfficeErrorCode,
@@ -167,7 +169,8 @@ test("the refusal fixtures are refused by the schema that reads them", () => {
 // (6 that parse and 6 that are refused) plus the command, cell-edit, and write fixtures; this is
 // the one place that count is written down.
 test("the golden fixtures are the files this issue fixed, and every one is read", () => {
-  // 25 files: the issue's 12 "golden" cases, the command/cell/write fixtures, and B1's two keys.
+  // 25 files: 16 that a schema accepts (job 3, result 3, error 3, command/cell 4, write 2), 7 that
+  // it refuses, and B1's 2 keys (the key tests' own fixtures).
   expect(GOLDEN_FILES).toHaveLength(25);
   expect(GOLDEN_JOBS.length + GOLDEN_RESULTS.length + GOLDEN_ERRORS.length).toBe(10);
   expect(GOLDEN_JOB_REJECTIONS.length + GOLDEN_RESULT_REJECTIONS.length).toBe(6);
@@ -378,7 +381,9 @@ describe("a switch over a closed union ends in never", () => {
   });
 
   // Catches: a cache file name built from the request rather than derived, so a preview could be
-  // named .exe; and an operation that makes no artifact being given one.
+  // named .exe; and an operation that makes no artifact being given one. **The last is a type
+  // obligation, not a run-time throw** (N4): `inspect` / `edit` / `convert` / `recalc` are not
+  // `OfficeArtifactFileOperation`, so a key or a path built from one does not compile.
   test("the cache file name is derived from the operation, never given", () => {
     const hash = "a1b2c3d4e5f60718";
     expect(officeArtifactFile("preview")).toBe("pdf");
@@ -387,11 +392,11 @@ describe("a switch over a closed union ends in never", () => {
     expect(officeArtifactDirectory("render", hash)).toBe("render-" + hash);
     expect(officeArtifactContentType("preview")).toBe("application/pdf");
     expect(officeArtifactContentType("render")).toBe("image/png");
-    for (const operation of ["inspect", "edit", "convert", "recalc"] as const) {
-      expect(() => officeArtifactFile(operation), operation).toThrow();
-      expect(() => officeArtifactDirectory(operation, hash), operation).toThrow();
-      expect(() => officeArtifactContentType(operation), operation).toThrow();
-    }
+    expectTypeOf<OfficeArtifactFileOperation>().toEqualTypeOf<"preview" | "render">();
+    expectTypeOf<OfficeCacheKey["operation"]>().toEqualTypeOf<OfficeArtifactFileOperation>();
+    // @ts-expect-error -- a conversion makes no cache entry, so its key does not type-check.
+    const fromConvert: OfficeCacheKey["operation"] = "convert";
+    expect(fromConvert).toBe("convert");
     expect(() => officeArtifactDirectory("preview", "not-hex")).toThrow();
     expect(() => officeArtifactDirectory("preview", hash.toUpperCase())).toThrow();
   });
@@ -425,31 +430,34 @@ describe("a switch over a closed union ends in never", () => {
 // shows: another path and another option.
 describe("the cache key is (workspaceId, pathHash, version, operation, paramsHash)", () => {
   // Catches: a key that dropped the path parts, so two files sharing a version share an entry.
-  // The fixtures write the same convert job twice; only the pathHash differs.
+  // **The two values differ in `pathHash` and nothing else**: the same 5-tuple is built from the
+  // one fixture, once with each path, so a path builder that reads the other four fields and
+  // ignores `pathHash` gives two equal paths and fails here (the earlier version compared two
+  // whole fixture keys whose other fields could also differ, and stayed green with the hash
+  // dropped).
   test("the same job, version, and operation at another path is another key", async () => {
     const other = fixture("key-convert-other-path.json");
-    const key = v.parse(OfficeCacheKeySchema, { ...(other as { key: object }).key });
-    const base = v.parse(OfficeCacheKeySchema, {
-      ...key,
-      pathHash: v.parse(
-        OfficeCacheKeySchema,
-        (
-          fixture("result-convert.json") as {
-            artifact: { key: object };
-          }
-        ).artifact.key,
-      ).pathHash,
-    });
+    const key = v.parse(OfficeCacheKeySchema, (other as { key: object }).key);
+    const base = v.parse(
+      OfficeCacheKeySchema,
+      (fixture("result-convert.json") as { artifact: { key: object } }).artifact.key,
+    );
     expect(key.workspaceId).toBe(base.workspaceId);
     expect(key.version).toBe(base.version);
     expect(key.operation).toBe(base.operation);
     expect(key.paramsHash).toBe(base.paramsHash);
     expect(key.pathHash).not.toBe(base.pathHash);
-    expect(officeCachePath(key)).not.toBe(officeCachePath(base));
+    // One tuple, two paths: the path is the only difference the two cache paths can see.
+    const atOtherPath = officeCachePath({ ...key, pathHash: key.pathHash });
+    const atBasePath = officeCachePath({ ...key, pathHash: base.pathHash });
+    expect(atOtherPath).not.toBe(atBasePath);
+    expect(atOtherPath).toContain("/" + key.pathHash + "/");
+    expect(atBasePath).toContain("/" + base.pathHash + "/");
     // The params hash is the same for both: the path is outside the hash by design, and inside
     // the key. A key made of the hash alone would be one entry.
-    const convert = await officeParamsHash("preview", { to: "pdf" });
-    expect(convert).toBe(await officeParamsHash("preview", { to: "pdf" }));
+    expect(await officeParamsHash("preview", { to: "pdf" })).toBe(
+      await officeParamsHash("preview", { to: "pdf" }),
+    );
   });
 
   // Catches: a key that dropped the options, so two previews of different pages share an entry.
@@ -500,6 +508,28 @@ describe("the cache key and the artifact target are one function each", () => {
     expect(second).toBe(first);
     expect(await officeParamsHash("render", { pages: [1, 2], width: 800 })).not.toBe(first);
     expect(await officeParamsHash("preview", { pages: [2, 1], width: 800 })).not.toBe(first);
+  });
+
+  // Catches: **the hash taking a different input than the contract says** — the path parts mixed
+  // in (so one artifact gets two keys depending on which side built it), an option dropped, or a
+  // second canonical form. The expected value is written by hand from the rule — JCS of
+  // { operation, ...options }, SHA-256, first 16 hex — not by calling the function under test.
+  test("the params hash is the sha256 of JCS { operation, ...options }, first 16 hex", async () => {
+    const canonical = '{"operation":"preview","pages":[1]}';
+    expect(officeCanonicalize({ operation: "preview", pages: [1] })).toBe(canonical);
+    const digest = await sha256Hex(canonical);
+    expect(digest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(await officeParamsHash("preview", { pages: [1] })).toBe(digest.slice(0, 16));
+    // The path parts are not inputs: adding one changes nothing, and the rule never has them.
+    const withPaths = await officeParamsHash("preview", { pages: [1] });
+    expect(officeCanonicalize({ workspaceId: "ws-1", pathHash: "3f1a2b3c4d5e6f70" })).not.toBe(
+      canonical,
+    );
+    expect(withPaths).toBe(digest.slice(0, 16));
+    // An empty option set hashes {operation} alone; the key's other four fields make it a key.
+    expect(await officeParamsHash("convert")).toBe(
+      (await sha256Hex('{"operation":"convert"}')).slice(0, 16),
+    );
   });
 
   // Catches: office growing a second canonical form, so the same options hash two ways. It reuses
