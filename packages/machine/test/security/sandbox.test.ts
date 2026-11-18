@@ -17,7 +17,7 @@ import { machineHideList } from "../../src/sandbox.ts";
 import type { MachineExec } from "../../src/exec.ts";
 import { MachineRefusal } from "../../src/refusal.ts";
 import { parseOperation } from "../../src/wire.ts";
-import { capturedArgv, hostEnv, runArgv, sandboxPaths, sandboxReport } from "../support/sandbox.ts";
+import { capturedArgv, hostEnv, sandboxPaths, sandboxReport } from "../support/sandbox.ts";
 import type { SandboxPaths } from "../support/sandbox.ts";
 
 const report = await sandboxReport();

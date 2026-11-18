@@ -701,6 +701,62 @@ describe.skipIf(skipReason !== undefined)("the office engine over the real pack"
     });
   });
 
+  // NB4 — a file the pack does not handle is `unsupported_format` before anything runs. The pack
+  // declares docx / xlsx / pptx and not pdf, so a .pdf is refused at the format check, and the
+  // prescan's own `not a PDF` branch is stated in its unit test (prescan.test.ts).
+  test("NB4: a file that is not a PDF is unsupported_format", async () => {
+    await withAgent(
+      async ({ root }) => {
+        await writeFile(join(root, "notapdf.pdf"), new TextEncoder().encode("hello, not a pdf"));
+      },
+      async (fixture) => {
+        const version = await hashOf(join(fixture.root, "notapdf.pdf"));
+        const job: OfficeJob = {
+          ...previewJob("notapdf.pdf"),
+          input: { workspaceId: WORKSPACE, path: "notapdf.pdf", version, format: "pdf" },
+        };
+        const result = officeResultOf(await fixture.call(officeCall(job)));
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+        // The pack declares docx / xlsx / pptx and not pdf, so the job is refused before the
+        // prescan: a format the engine does not handle is `unsupported_format` (the `unsupported`
+        // state), not `unsupported_command` (an operation outside the vocabulary).
+        expect(result.error).toBe("unsupported_format");
+      },
+      { office: officeSetup() },
+    );
+  });
+  // C2: a render whose image is over the pixel bound is refused, measured on the image the engine
+  // drew. A PNG's height is the engine's (the width is the job's), so the count is only known after
+  // the render — which is why the bound is checked there, and why the artifact never reaches the
+  // cache.
+  test("C2: a render over the pixel bound is too_many_pixels", async () => {
+    await withOffice(async (fixture) => {
+      const cacheRoot = cacheRootOf(fixture);
+      const before = await treeOf(cacheRoot);
+      const job: OfficeJob = {
+        v: 1,
+        id: jobId("office-1752"),
+        input: {
+          workspaceId: WORKSPACE,
+          path: "proposal.docx",
+          version: fixtureVersion,
+          format: "docx",
+        },
+        // One pixel: the narrowest bound the contract allows, so the smallest rendered page is
+        // already over it whatever the engine's layout turns out to be.
+        limits: { ...DEFAULT_OFFICE_LIMITS, maxPixels: 1 },
+        operation: "render",
+      };
+      const answer = officeResultOf(await fixture.call(officeCall(job)));
+      expect(answer.ok).toBe(false);
+      if (answer.ok) return;
+      expect(answer.error).toBe("too_many_pixels");
+      expect(answer.message).toContain("pixel limit");
+      // Nothing was kept: a refused render leaves the cache as it was.
+      expect(await treeOf(cacheRoot)).toStrictEqual(before);
+    });
+  });
   // C3: a job that cannot finish inside its budget is cut off, and the answer says so. The engine
   // is given ten milliseconds, which is less than it needs to start.
   test("C3: a one-millisecond job budget is engine_timeout", async () => {
@@ -743,6 +799,7 @@ describe.skipIf(skipReason !== undefined)("the office engine over the real pack"
         timeoutMs: 1_000,
         maxRssMb: 256,
         maxOutputBytes: 1024,
+        maxPixels: 24_000_000,
       },
       {
         binary: join(pack, "bin/ibisOffice"),

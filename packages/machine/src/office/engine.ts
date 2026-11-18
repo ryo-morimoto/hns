@@ -29,7 +29,8 @@ export type EngineOutcome =
   | { readonly ok: false; readonly kind: "unavailable"; readonly reason: string }
   | { readonly ok: false; readonly kind: "timeout" }
   | { readonly ok: false; readonly kind: "failed"; readonly reason: string }
-  | { readonly ok: false; readonly kind: "too_large"; readonly reason: string };
+  | { readonly ok: false; readonly kind: "too_large"; readonly reason: string }
+  | { readonly ok: false; readonly kind: "too_many_pixels"; readonly reason: string };
 
 /** What one run needs: the pack, the paths it may see, and the bounds it runs under. */
 export interface EngineRun {
@@ -58,6 +59,8 @@ export interface EngineRun {
   readonly maxRssMb: number;
   /** The largest artifact this machine will keep; a bigger file is refused, not truncated. */
   readonly maxOutputBytes: number;
+  /** The most pixels a rendered image may hold (the job's `maxPixels`; a preview makes no image). */
+  readonly maxPixels: number;
   /** The bwrap executable; defaults to `$BWRAP`, then `bwrap` on PATH. */
   readonly bwrap?: string | undefined;
 }
@@ -67,13 +70,6 @@ const EXPORT_OF = {
   preview: "pdf",
   render: "png",
   convert: "pdf",
-} as const satisfies Record<"preview" | "render" | "convert", string>;
-
-/** The content types the artifacts carry, in the order a reader expects them. */
-const CONTENT_TYPE_OF_OPERATION = {
-  preview: "application/pdf",
-  render: "image/png",
-  convert: "application/pdf",
 } as const satisfies Record<"preview" | "render" | "convert", string>;
 
 /**
@@ -494,6 +490,27 @@ async function collectArtifact(
       reason: "the office engine wrote a file that is not a " + kind,
     };
   }
+  if (run.operation === "render") {
+    // The job's pixel bound, measured on the image the engine drew: the width is the job's and the
+    // height is the engine's, so this is the only place the product can know the count before the
+    // artifact is cached. A PNG whose size cannot be read is refused rather than counted at zero.
+    const pixels = await pngPixels(path);
+    if (pixels === undefined) {
+      return { ok: false, kind: "failed", reason: "the rendered image's size cannot be read" };
+    }
+    if (pixels > run.maxPixels) {
+      return {
+        ok: false,
+        kind: "too_many_pixels",
+        reason:
+          "the rendered image is " +
+          String(pixels) +
+          " pixels, over the " +
+          String(run.maxPixels) +
+          " pixel limit",
+      };
+    }
+  }
   for (const name of produced.slice(1)) {
     await rm(join(output, name), { force: true }).catch(() => undefined);
   }
@@ -512,6 +529,34 @@ async function hasMagic(path: string, kind: keyof typeof MAGIC): Promise<boolean
       if (magic.every((byte, index) => bytes[at + index] === byte)) return true;
     }
     return false;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * The pixel count a PNG declares.
+ *
+ * @param path - A file the magic check accepted as a PNG.
+ * @returns Width times height from the IHDR chunk, or undefined when the header is short.
+ *
+ * @remarks
+ * A PNG's first chunk is its header: 8 bytes of signature, 4 of length, 4 of type, then the width
+ * and height as big-endian 32-bit integers. The render width is the job's and the height is the
+ * engine's, so the product can only compare the count against `maxPixels` after the engine wrote
+ * the file.
+ */
+async function pngPixels(path: string): Promise<number | undefined> {
+  const handle = await open(path, "r");
+  try {
+    const header = new Uint8Array(24);
+    const { bytesRead } = await handle.read(header, 0, header.byteLength, 0);
+    if (bytesRead < 24) return undefined;
+    const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+    const width = view.getUint32(16, false);
+    const height = view.getUint32(20, false);
+    if (width === 0 || height === 0) return undefined;
+    return width * height;
   } finally {
     await handle.close();
   }

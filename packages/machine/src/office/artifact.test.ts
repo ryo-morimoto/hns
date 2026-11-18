@@ -59,9 +59,8 @@ test("C14: a reordered query is refused", async () => {
 // for a key it already had.
 test("C14: an extra or repeated parameter is refused", async () => {
   const canonical = await target();
-  // A range is written in its own place, right after the key's five parts: the canonical spelling
-  // of `length=10` is the key followed by `&length=10`, which is one of the accepted spellings,
-  // so this is asserted as accepted below. What is refused is a range *before* another key part.
+  // A range is written in its own place, right after the key's five parts, so an appended
+  // `&length=10` is exactly the canonical spelling of that range and is accepted.
   expect(refusalOf(canonical + "&length=10")).toBeUndefined();
   const parts = canonical.split("&");
   expect(refusalOf([parts[0], "length=10", ...parts.slice(1)].join("&"))?.code).toBe(
@@ -102,4 +101,51 @@ test("C11: a key part outside its spelling, or an operation with no artifact, is
 test("a target with no query, or a different route, is refused", async () => {
   expect(refusalOf("/artifact")?.code).toBe("invalid_request");
   expect(refusalOf("")?.code).toBe("invalid_request");
+});
+
+// B1 — the byte-exact comparison. docs §5 says the machine verifies the request target it received
+// against the canonical one, and the *encoding* is part of the target: two escapes that decode to
+// the same character are two different sets of bytes, and the signature covers one of them. A check
+// that compares only the decoded values (which is what "the names are right and it parses" amounts
+// to) lets a rewritten target through, which is what this test refuses.
+test("B1: the same key in another encoding of the same character is refused", async () => {
+  const canonical = await target();
+  // The path is 提案書.docx: %E6%8F%90 starts with an upper-case escape, and %e6%8f%90 decodes to the
+  // same character. Both are valid percent-encoding; only one is the target the server signed.
+  expect(canonical).toContain("%E6%8F%90");
+  const lowerCase = canonical.replace("%E6%8F%90", "%e6%8f%90");
+  expect(lowerCase).not.toBe(canonical);
+  expect(decodeURIComponent(lowerCase)).toBe(decodeURIComponent(canonical));
+  expect(refusalOf(lowerCase)?.code).toBe("invalid_request");
+  // The same for the version, whose ":" is written %3A: %3a is the same value in other bytes.
+  const lowerColon = canonical.replace("sha256%3A", "sha256%3a");
+  expect(decodeURIComponent(lowerColon)).toBe(decodeURIComponent(canonical));
+  expect(refusalOf(lowerColon)?.code).toBe("invalid_request");
+  // A space is written %20 by the canonical spelling; `+` is the other form a query reader
+  // accepts for it, and it decodes to the same path under URLSearchParams, so only the byte
+  // comparison can refuse it.
+  const spaced = await target({ path: "a b.docx" });
+  expect(spaced).toContain("a%20b.docx");
+  const plus = spaced.replace("a%20b.docx", "a+b.docx");
+  expect([...new URLSearchParams(plus.slice(plus.indexOf("?") + 1)).entries()]).toStrictEqual([
+    ...new URLSearchParams(spaced.slice(spaced.indexOf("?") + 1)).entries(),
+  ]);
+  expect(plus).not.toBe(spaced);
+  expect(refusalOf(plus)?.code).toBe("invalid_request");
+});
+
+// B1 — the positive half: the canonical target of every range shape is accepted, so the byte
+// comparison is not so strict that a legitimate read is refused.
+test("B1: every canonical range shape round-trips", async () => {
+  for (const range of [{}, { offset: 0 }, { length: 1024 }, { offset: 4096, length: 1024 }]) {
+    const canonical = await target(range);
+    expect(refusalOf(canonical), JSON.stringify(range)).toBeUndefined();
+    const parsed = verifyArtifactTarget(canonical);
+    expect(parsed.workspaceId).toBe("ws-1");
+    expect(parsed.path).toBe("提案書.docx");
+    expect(parsed.operation).toBe("preview");
+    // An absent range is absent, not 0: a zero-length read is not "the whole".
+    expect(parsed.offset).toBe("offset" in range ? range.offset : undefined);
+    expect(parsed.length).toBe("length" in range ? range.length : undefined);
+  }
 });

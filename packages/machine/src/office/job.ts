@@ -130,7 +130,7 @@ async function runJob(
   const host = await checkPackHost(pack);
   if (!host.ok) return failure("engine_unavailable", problemMessage(host.problem));
   const unsupported = unsupportedReason(job, pack);
-  if (unsupported !== undefined) return failure("unsupported_command", unsupported);
+  if (unsupported !== undefined) return unsupported;
 
   const input = await resolveInput(root, workspaceId, job);
   if (!input.ok) return input.result;
@@ -241,31 +241,40 @@ function failure(error: OfficeErrorCode, message: string): OfficeFailure {
  *
  * @param job - The job the server resolved.
  * @param pack - The installed pack.
- * @returns The reason, phrased for a person; the answer above it is `unsupported_command`.
+ * @returns The office code the job is refused with, and the reason for a person.
  *
  * @remarks
  * The engine's CLI is what limits the vocabulary: v0.8.7 exports every page (there is no
  * `--pages`), so a preview or a render that names pages is refused rather than answered with the
  * whole document, and `inspect` / `edit` / `recalc` wait for the sidecar (0242).
+ *
+ * **A format the pack does not handle is `unsupported_format`, not `unsupported_command`**: §9 puts
+ * the two in different states, and the first is what a person reads as "not this kind of file".
  */
-function unsupportedReason(job: OfficeJob, pack: OfficePack): string | undefined {
+function unsupportedReason(job: OfficeJob, pack: OfficePack): OfficeFailure | undefined {
   if (!pack.manifest.capabilities.operations.some((operation) => operation === job.operation)) {
-    return "the office pack does not declare " + job.operation;
+    return failure("unsupported_command", "the office pack does not declare " + job.operation);
   }
   if (!pack.manifest.capabilities.formats.some((format) => format === job.input.format)) {
-    return "the office pack does not handle " + job.input.format;
+    return failure("unsupported_format", "the office pack does not handle " + job.input.format);
   }
   switch (job.operation) {
     case "preview":
     case "render":
       if (job.pages === undefined) return undefined;
-      return "this build's office engine exports every page; a page selection is not supported yet";
+      return failure(
+        "unsupported_command",
+        "this build's office engine exports every page; a page selection is not supported yet",
+      );
     case "convert":
       return undefined;
     case "inspect":
     case "edit":
     case "recalc":
-      return "this build does not run " + job.operation + " yet; the sidecar is 0242";
+      return failure(
+        "unsupported_command",
+        "this build does not run " + job.operation + " yet; the sidecar is 0242",
+      );
   }
   const unreachable: never = job;
   return unreachable;
@@ -448,6 +457,7 @@ async function runInSandbox(
         timeoutMs,
         maxRssMb: envelope.maxRssMb,
         maxOutputBytes: job.limits.maxOutputBytes,
+        maxPixels: job.limits.maxPixels,
         bwrap: engine.bwrap,
       },
       signal,
@@ -478,6 +488,8 @@ function engineFailure(outcome: Extract<EngineOutcome, { ok: false }>): OfficeFa
       return failure("engine_timeout", "the office engine did not finish inside the job's budget");
     case "too_large":
       return failure("output_too_large", outcome.reason);
+    case "too_many_pixels":
+      return failure("too_many_pixels", outcome.reason);
     case "failed":
       return failure("engine_failed", outcome.reason);
   }

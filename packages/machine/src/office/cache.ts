@@ -1,6 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import * as v from "valibot";
 import { OFFICE_SHA256_PATTERN, officeArtifactFile, officeCachePath } from "@hns/core/office";

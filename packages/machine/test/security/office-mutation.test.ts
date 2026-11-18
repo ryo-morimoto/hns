@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, expect, test } from "vitest";
 import { zipOf } from "../support/zip.ts";
+import { verifyArtifactTarget } from "../../src/office/artifact.ts";
 
 // Mutation probes for the office executor: each one breaks a single property of the product
 // and runs the assertion a reviewer relies on, so a test that passes against a broken machine
@@ -134,16 +135,20 @@ test("M2: a lookup that never hits leaves the cache useless", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
-// M3 — stop checking that the query is the one that was signed. The integration suite's C14 is
-// what catches it (a reordered query answered 200); the probe proves the mutant accepts the
-// reordered target the product refuses.
-test("M3: with the target check removed, a reordered query is accepted", async () => {
+// M3 — stop checking that the target is the one that was signed. docs §5 says the machine compares
+// the request target it received with the canonical one byte for byte, and that comparison is what
+// makes the signature mean what it says. The probe removes it and shows the same rewritten target
+// the product refuses is then accepted.
+test("M3: with the target comparison removed, another encoding of the same key is accepted", async () => {
   const url = await mutated("artifact.ts", (text) =>
-    text.replace("  if (!isCanonicalPairs(pairs)) {", "  if (false as boolean) {"),
+    text.replace(
+      "  if (target !== artifactTarget(parsed)) {",
+      "  if (target === undefined as unknown as string) {",
+    ),
   );
   const { artifactTarget, officeParamsHash } = await import("@hns/core/office");
   const { verifyArtifactTarget } = await import("../../src/office/artifact.ts");
-  // SAFETY: the mutant is the product's own artifact module with one check removed; the probe
+  // SAFETY: the mutant is the product's own artifact module with one branch changed; the probe
   // only asks whether it throws, which is what both functions' signatures allow.
   const mutant = (await import(/* @vite-ignore */ url)) as {
     verifyArtifactTarget(target: string): ReturnType<typeof verifyArtifactTarget>;
@@ -155,17 +160,30 @@ test("M3: with the target check removed, a reordered query is accepted", async (
     operation: "preview",
     paramsHash: await officeParamsHash("preview", {}),
   });
-  const question = canonical.indexOf("?");
-  const reordered =
-    canonical.slice(0, question) +
-    "?" +
-    canonical
-      .slice(question + 1)
-      .split("&")
-      .reverse()
-      .join("&");
-  expect(reordered).not.toBe(canonical);
-  // The product refuses the reordered target; the mutant parses it and hands the key back.
-  expect(() => verifyArtifactTarget(reordered)).toThrow(/not the signed one/u);
-  expect(() => mutant.verifyArtifactTarget(reordered)).not.toThrow();
+  // The same key in the other encoding of the same characters: the names and the decoded values
+  // are unchanged, so only the byte comparison can refuse it.
+  const rewritten = canonical.replace("%E6%8F%90", "%e6%8f%90");
+  expect(rewritten).not.toBe(canonical);
+  expect(refusalOfProduct(rewritten)).toBe(true);
+  expect(throwsOf(() => mutant.verifyArtifactTarget(rewritten))).toBe(false);
 });
+
+/** Whether the product refuses one target. */
+function refusalOfProduct(target: string): boolean {
+  try {
+    verifyArtifactTarget(target);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** Whether calling one function throws. */
+function throwsOf(call: () => void): boolean {
+  try {
+    call();
+    return false;
+  } catch {
+    return true;
+  }
+}

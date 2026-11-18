@@ -426,19 +426,35 @@ async function run(
  *
  * @remarks
  * `HNS_OFFICE_PACK` is the pack's directory and is what turns Office on at all; the other two name
- * the cache and the runs' directory, and neither has to be given. A pack path that is set but
+ * the cache and the runs' directory, and neither has to be given. **Both are read together**: a
+ * first draft returned after the first one it found, so naming `HNS_OFFICE_CACHE` silently dropped
+ * `HNS_OFFICE_WORK`. An empty value means the same as an absent one. A pack path that is set but
  * wrong is not refused here: the agent answers `officeEngine` with the reason, which is what an
  * operator reads without restarting anything.
  */
-function officeOptionsOf(env: NodeJS.ProcessEnv): MachineOfficeOptions | undefined {
+export function officeOptionsOf(env: NodeJS.ProcessEnv): MachineOfficeOptions | undefined {
   const packRoot = env["HNS_OFFICE_PACK"];
   if (packRoot === undefined || packRoot === "") return undefined;
-  const options: MachineOfficeOptions = { packRoot };
-  const cacheRoot = env["HNS_OFFICE_CACHE"];
-  if (cacheRoot !== undefined && cacheRoot !== "") return { ...options, cacheRoot };
-  const workRoot = env["HNS_OFFICE_WORK"];
-  if (workRoot !== undefined && workRoot !== "") return { ...options, workRoot };
-  return options;
+  const cacheRoot = namedDirectory(env["HNS_OFFICE_CACHE"]);
+  const workRoot = namedDirectory(env["HNS_OFFICE_WORK"]);
+  if (cacheRoot === undefined) {
+    return workRoot === undefined ? { packRoot } : { packRoot, workRoot };
+  }
+  return workRoot === undefined ? { packRoot, cacheRoot } : { packRoot, cacheRoot, workRoot };
+}
+
+/**
+ * One directory-name variable, or undefined when it is absent or empty.
+ *
+ * @param value - The variable's value.
+ * @returns The value when it names a directory.
+ *
+ * @remarks
+ * An empty value is what a shell writes for `HNS_OFFICE_CACHE=`, and it is not a directory: the
+ * agent would then try to make `""`. Treating it as absent keeps the default.
+ */
+function namedDirectory(value: string | undefined): string | undefined {
+  return value === undefined || value === "" ? undefined : value;
 }
 
 /** The config directory an invocation uses: `--config-dir`, else `$HNS_CONFIG_DIR`, else the default. */

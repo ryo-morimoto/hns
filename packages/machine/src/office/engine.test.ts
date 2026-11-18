@@ -42,6 +42,7 @@ function run(overrides: Partial<EngineRun> = {}): EngineRun {
     timeoutMs: 60_000,
     maxRssMb: 2048,
     maxOutputBytes: 100 * 1024 * 1024,
+    maxPixels: 24_000_000,
     ...overrides,
   };
 }

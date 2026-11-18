@@ -1,7 +1,7 @@
 import { open, stat } from "node:fs/promises";
 import {
   MACHINE_ARTIFACT_PATH,
-  MAX_ARTIFACT_BYTES,
+  artifactTarget,
   officeArtifactContentType,
   officePathHash,
   parseArtifactQuery,
@@ -29,22 +29,22 @@ export interface ArtifactResponse {
  *
  * @param target - The request target as it arrived: `/artifact?…`, query included.
  * @returns The parsed key and the range the target names.
- * @throws {MachineRefusal} `invalid_request` for a target that is not `{@link MACHINE_ARTIFACT_PATH}`
+ * @throws {MachineRefusal} `invalid_request` for a target that is not {@link MACHINE_ARTIFACT_PATH}
  * with a query, a query with an unknown, repeated or malformed pair, a `length` over
- * {@link MAX_ARTIFACT_BYTES}, or a query that is valid but not the one spelling of itself.
+ * {@link MAX_ARTIFACT_BYTES}, or a target that is not the one canonical spelling of itself.
  *
  * @remarks
- * **The signature covers the whole request target** (`docs/office.md` §5): the verifier hashes the
- * path and query the client sent, so the machine only has to check that what it received is the
- * canonical target for what it parsed. A query whose pairs were reordered or whose `version` was
- * swapped for another still parses, and is refused here — before the signature is even attempted —
- * because it is not the target anybody signed.
+ * **The signature covers the whole request target** (`docs/office.md` §5), and the machine checks
+ * that what it received is the canonical target for what it parsed — the contract's own
+ * {@link artifactTarget}, byte for byte. That one comparison is what makes the signature mean what
+ * it says: the same key in another spelling (`%e6%8f%90` for `%E6%8F%90`, `:` for `%3A`, a
+ * reordered pair, an appended one) is different bytes, and the bytes on the wire are what the
+ * verifier hashed.
  *
- * **The query's shape is checked on the raw text, before anything is decoded**: the pairs must be
- * exactly the five key parts, in that order, followed by `offset` then `length` when the target
- * names them. That is the one order the server writes, so a reordered query, a repeated key, or a
- * range put before a key part is refused even though it parses. The values are proved after it, by
- * `parseArtifactQuery`, which is also what refuses a key part outside its spelling.
+ * **The pair shape is checked first, on the raw text**, before anything is decoded: the pairs must
+ * be exactly the five key parts, in that order, followed by `offset` then `length` when the target
+ * names them. It is a reading aid for the reason, not the guarantee — the guarantee is the
+ * byte comparison after the parse, which also covers the values and their encoding.
  *
  * The `operation` is not trusted for what it says: the cache path is built for an operation that
  * makes a file, so a `convert` (which makes no cache entry) is not a key this route serves.
@@ -58,11 +58,9 @@ export function verifyArtifactTarget(target: string): ArtifactQuery {
     throw new MachineRefusal("invalid_request", "an artifact read is not the artifact route");
   }
   const query = target.slice(question + 1);
-  const pairs = rawPairs(query);
-  // The pairs are checked first, on their raw text: the target must be the key's five parts and
-  // then, if they are named, `offset` and `length`. A query that parses to the same values in
-  // another order (or with a pair added somewhere else) is not the target anybody signed.
-  if (!isCanonicalPairs(pairs)) {
+  // The shape is read first so a reordered or extra pair is refused for that reason; the byte
+  // comparison below is the check that decides.
+  if (!isCanonicalPairs(rawPairs(query))) {
     throw new MachineRefusal("invalid_request", "the artifact target is not the signed one");
   }
   let entries: [string, string][];
@@ -86,6 +84,12 @@ export function verifyArtifactTarget(target: string): ArtifactQuery {
       "the artifact query names no artifact the cache holds",
     );
   }
+  // docs §5: the machine verifies the request target it received against the contract's one
+  // canonical spelling, byte for byte. Every other spelling of the same key — another encoding
+  // of the same character, another order, a pair added — is refused here.
+  if (target !== artifactTarget(parsed)) {
+    throw new MachineRefusal("invalid_request", "the artifact target is not the signed one");
+  }
   return parsed;
 }
 
@@ -93,7 +97,7 @@ export function verifyArtifactTarget(target: string): ArtifactQuery {
 const ARTIFACT_QUERY_KEYS = ["workspaceId", "path", "version", "operation", "paramsHash"] as const;
 
 /**
- * The query's pairs exactly as they were written.
+ * The query's pair names exactly as they were written.
  *
  * @param query - The target's query, after the `?`.
  * @returns Each pair's name, in order, without decoding it.
@@ -106,17 +110,17 @@ function rawPairs(query: string): readonly string[] {
 }
 
 /**
- * Whether the pairs are the canonical query's, in its order.
+ * Whether the pairs have the canonical query's names, in its order.
  *
  * @param names - The pair names, as they were written.
  * @returns True for the five key parts and then, if named, `offset` and `length`; false for any
  * other name, a repeat, an absent one, or the canonical names in another order.
  *
  * @remarks
- * The check is of the names alone: the values are `parseArtifactQuery`'s to prove, and what this
- * function adds is that the *shape* of the query is the one the server signs. An appended
- * `&length=10` fails here because a sixth key part is not where the range goes; a repeated
- * `workspaceId` fails because the fifth position must be `paramsHash`.
+ * **This is a reading aid, not the guarantee.** The guarantee is the byte comparison against
+ * {@link artifactTarget} in {@link verifyArtifactTarget}: the names are the same for every
+ * spelling of the values, so a query that passes here can still be rejected there (`%e6` for
+ * `%E6`), and the tests state both.
  */
 function isCanonicalPairs(names: readonly string[]): boolean {
   const expected: string[] = [...ARTIFACT_QUERY_KEYS];

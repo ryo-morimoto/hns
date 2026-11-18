@@ -1,6 +1,5 @@
 // Building a machine's sandbox in a test: a temporary project, a temporary home with secrets in
 // it, and the exact argv the product wrapper would run.
-import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -241,38 +240,4 @@ class CommandRecorder implements ExecutionEnv {
   cleanup(...args: Parameters<ExecutionEnv["cleanup"]>) {
     return this.#inner.cleanup(...args);
   }
-}
-
-/** What one command inside bwrap printed and how it exited. */
-export interface RunOutcome {
-  readonly status: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-/**
- * Run one argv to completion, inheriting nothing from the test's environment but PATH.
- *
- * @param argv - The program and its arguments.
- * @param options - Extra environment variables for the program itself.
- * @returns Status, stdout, and stderr; a non-zero status is the caller's to read.
- *
- * @remarks
- * GIT_* is stripped, per the repository's rule for fixtures that spawn git: a developer's
- * GIT_DIR would otherwise point the command at another repository.
- */
-export function runArgv(
-  argv: readonly string[],
-  options: { readonly env?: Readonly<Record<string, string>> | undefined } = {},
-): RunOutcome {
-  const passed: Record<string, string> = {};
-  for (const name of ["PATH", "LANG", "TERM"]) {
-    const value = process.env[name];
-    if (value !== undefined) passed[name] = value;
-  }
-  const env = { ...passed, ...options.env };
-  const [program, ...args] = argv;
-  if (program === undefined) throw new Error("an argv needs a program");
-  const result = spawnSync(program, args, { encoding: "utf8", timeout: 60_000, env });
-  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }

@@ -3,12 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import * as v from "valibot";
 import { EngineManifestSchema, OFFICE_SHA256_PATTERN } from "@hns/core/office";
-import type {
-  EngineManifest,
-  OfficeEngineReport,
-  OfficeFormat,
-  OfficeOperation,
-} from "@hns/core/office";
+import type { EngineManifest, OfficeEngineReport, OfficeOperation } from "@hns/core/office";
 
 /**
  * One path the pack names as "outside the pack, bind it read-only when the engine runs" (§11).
