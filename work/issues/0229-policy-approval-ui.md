@@ -1,6 +1,6 @@
 # 0229: ポリシー承認の UI（提案・差分・承認）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §10
@@ -17,14 +17,14 @@ touches: packages/web/src/routes/policy/, packages/web/src/routes/route.ts, pack
 
 ## Acceptance criteria
 
-- [ ] active revision と pending proposals を Relay で読み、`document` の readRoots / writeRoots / bash / network を表示する
-- [ ] 提案フォームが read/write roots、bash、network、reason を入力でき、`proposePolicy` を呼ぶ
-- [ ] 差分を `added` / `removed` の atom で表示し、expansion / narrowing / mixed をラベルする
-- [ ] 承認・拒否が `decidePolicy` を呼び、成功後に一覧と active を再取得する
-- [ ] `approval_stale` は「提案が古い」と表示し、再取得を促す。黙って再送しない
-- [ ] loading / empty / error / 権限なし の 4 状態を持つ
-- [ ] キーボードで提案・承認・拒否に到達でき、フォーカスが戻る
-- [ ] `npm test -w @hns/web` と typecheck が通る
+- [x] active revision と pending proposals を Relay で読み、`document` の readRoots / writeRoots / bash / network を表示する
+- [x] 提案フォームが read/write roots、bash、network、reason を入力でき、`proposePolicy` を呼ぶ
+- [x] 差分を `added` / `removed` の atom で表示し、expansion / narrowing / mixed をラベルする
+- [x] 承認・拒否が `decidePolicy` を呼び、成功後に一覧と active を再取得する
+- [x] `approval_stale` は「提案が古い」と表示し、再取得を促す。黙って再送しない
+- [x] loading / empty / error / 権限なし の 4 状態を持つ
+- [x] キーボードで提案・承認・拒否に到達でき、フォーカスが戻る
+- [x] `npm test -w @hns/web` と typecheck が通る
 
 ## テスト条件
 
@@ -67,3 +67,14 @@ touches: packages/web/src/routes/policy/, packages/web/src/routes/route.ts, pack
 ## Log
 
 - 2026-11-17: 作成（D091）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0229。blocking 0。lead が検出不能の mutation 2 件を塞がせた）
+- HEAD: 2acd5f7（main に ff 統合）。gate は exit 0（1631 tests / 1632、main で 68.9s）。
+- **画面**: `#/p/:projectId/policy`（Shell の route と Sidebar のリンク）。active revision と全 proposal を 1 クエリで読み、`document` を readRoots / writeRoots / bash / network の表で表示。**提案フォーム**は `[]` を「変更なし」として送る（**サーバの `documentOf` と同じ解釈**を server の単体テストで固定）。**差分は added / removed の atom**（`exec` は「ファイルの書き込み」等に翻訳）で、**広げる（warn）/ 狭める / 両方 / 変更なし / 比較できない（danger）**をラベル。**`equal` は「承認しても権限は変わりません」**、**`unsupported` は承認・拒否できない**（0223 / 0228 の fail closed に UI も揃えた）。
+- **stale**: `approval_stale` は「提案が古い」と表示し、**決定は 1 回だけ**（50ms 後にも回数を確認）。**拒否は読み直しを越えて残り、人が「閉じる」まで消えない**（狭い実装を mutation で検出）。成功は次の read が置き換える。
+- **本物の resolver まで**: `packages/server/test/integration/graphql-web-operations.test.ts` が **web のコンパイル済み operation** を **本番の `createGraphQLFace` + 実 D1（workerd）** に投げ、`PolicyScreenQuery` / propose / decide の入力と応答を固定（**web → server の依存は増やしていない**）。
+- **4 状態**（loading / empty / error / 権限なし）、**キーボードで提案 → 決定理由 → 承認 → フォーカス復帰**。
+- **レビューで見つかって直したもの**: ①`UNSUPPORTED` でも承認できた（fail open）②`stale` 以外の拒否が次の読み直しで消えていた（TSDoc と実装のずれ）③`kept` を null にする mutation が**検出されなかった**（テストを足した）④Shell の policy route のテストが無かった ⑤active が null の分岐が `role="alert"` で「空」と「障害」を混同していた。
+- **残件**: (1) **`canDecide` は route が常に true** で、**session の subject を読む配線（0108）待ち**。サーバの `policy_denied` が authoritative で、UI はその状態を描ける（断定しない文言にした）。(2) 再読込でフォーカスが 0ms の setTimeout 依存。(3) 決定後に提案フォームが unmount して入力が消える。(4) 狭い幅のレイアウト。(5) 実ブラウザでの視覚証拠（1280 / 320 / 200%）は未取得。
