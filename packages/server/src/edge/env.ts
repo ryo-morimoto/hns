@@ -1,5 +1,4 @@
 import type { D1Binding } from "@hns/store";
-import type { ArtifactsBinding } from "../artifacts/repos.ts";
 import type { ArtifactsReviewBinding } from "../review/artifacts.ts";
 
 /**
@@ -134,11 +133,15 @@ export interface WorkerEnv {
    * The Artifacts namespace that holds the workspace mirrors.
    *
    * @remarks
-   * The Workspace object reads it to get-or-create one repository per workspace and to issue the
-   * short-lived push token a checkpoint's prepare answer carries (0246). Optional, like every
-   * binding: absent means no mirror target is issued, and the checkpoint path is unaffected.
+   * **One binding, two readers, and the type says both.** The Workspace object reads it to
+   * get-or-create one repository per workspace and to issue the short-lived push token a
+   * checkpoint's prepare answer carries (0246); the review reads it to fetch a commit's bytes
+   * (0248). The real binding satisfies both — mirror and review are two views of one namespace —
+   * so both are named here rather than one cast being hidden in a test. Optional, like every
+   * binding: absent means no mirror target is issued and the review falls back to the checkpoint
+   * store, and the checkpoint path is unaffected.
    */
-  readonly ARTIFACTS?: (ArtifactsBinding & ArtifactsReviewBinding) | undefined;
+  readonly ARTIFACTS?: ArtifactsReviewBinding | undefined;
   /**
    * The Artifacts mirror's kill switch: `"on"` mirrors, anything else does not.
    *

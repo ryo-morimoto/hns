@@ -1,13 +1,7 @@
 import * as v from "valibot";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { isoTimestamp } from "@hns/core";
-import type {
-  CheckpointRecord,
-  JsonValue,
-  ReviewCommit,
-  ReviewFile,
-  ReviewTreeEntry,
-} from "@hns/core";
+import type { CheckpointRecord, JsonValue } from "@hns/core";
 import { toGlobalId } from "@hns/core/graphql";
 import type { Store } from "@hns/store";
 import { checkpointPackKey, gitObjectId } from "@hns/workspace/objects";
@@ -16,10 +10,11 @@ import { createD1Harness, type D1Harness } from "../../../store/test/integration
 import { createGraphQLFace, type GraphQLFaceDependencies } from "../../src/graphql/handler.ts";
 import { policyFaceOver } from "../../src/graphql/policy/face.ts";
 import { Workspace } from "../../src/do/workspace.ts";
-import { FakeReviewSource } from "../../src/review/source.ts";
+import { artifactsRepoName } from "../../src/artifacts/repos.ts";
 import type { WorkerEnv } from "../../src/edge/env.ts";
 import { envWith } from "../support/edge.ts";
 import { openSqliteState, type OpenSqliteState } from "../support/sqlite.ts";
+import { fakeArtifactsReview } from "../support/artifacts-review.ts";
 /**
  * Which store a review's diff was read from (0248), over the production parts (C1-C3).
  *
@@ -42,21 +37,6 @@ let HEAD = "";
 const HUMAN = "owner";
 const WORKSPACE = "workspace-review";
 
-const blob = (path: string, object: string, size: number): ReviewTreeEntry => ({
-  path,
-  kind: "blob",
-  mode: "100644",
-  object,
-  size,
-});
-
-const file = (path: string, object: string, text: string): ReviewFile => ({
-  path,
-  object,
-  contentType: "text/plain",
-  bytes: new TextEncoder().encode(text),
-});
-
 /** The two sides of the Change: a one-line file and the same file with a second line. */
 const SIDES = [
   { path: "app.ts", text: "const a = 1;\n", message: "hns checkpoint base" },
@@ -65,7 +45,7 @@ const SIDES = [
 
 /** One commit's objects, made by the builder both fixtures share. */
 interface FixtureCommit {
-  readonly id: string;
+  readonly commit: string;
   readonly tree: string;
   readonly blob: string;
   readonly path: string;
@@ -99,7 +79,7 @@ async function commits(): Promise<readonly FixtureCommit[]> {
       ),
     };
     made.push({
-      id: await gitObjectId(commit),
+      commit: await gitObjectId(commit),
       tree: treeId,
       blob: blobId,
       path: side.path,
@@ -110,37 +90,13 @@ async function commits(): Promise<readonly FixtureCommit[]> {
   return made;
 }
 
-/** The Artifacts fake over the commits: the same tree and file bytes as the packs. */
-function artifactsSource(made: readonly FixtureCommit[]): FakeReviewSource {
-  const trees = new Map<string, readonly ReviewTreeEntry[]>();
-  const files = new Map<string, ReviewFile>();
-  for (const entry of made) {
-    // The same one-directory tree the pack carries: the root lists one file, and both stores
-    // must answer that file's bytes for that commit id.
-    trees.set(entry.id + ":" + "", [blob(entry.path, entry.blob, entry.text.length)]);
-    files.set(entry.id + ":" + entry.path, file(entry.path, entry.blob, entry.text));
-  }
-  return new FakeReviewSource(
-    new Map(
-      made.map((entry) => [
-        entry.id,
-        {
-          commit: entry.id,
-          tree: entry.tree,
-          message: "hns checkpoint",
-          committedAt: isoTimestamp("2026-11-18T00:00:00.000Z"),
-        },
-      ]),
-    ),
-    trees,
-    files,
-  );
-}
+/** The workspace whose Artifacts repository the review reads. */
+const REPO = artifactsRepoName(WORKSPACE);
 
 /** The R2 packs over the same commits: one pack per commit, as a checkpoint uploads. */
 async function r2Packs(made: readonly FixtureCommit[]): Promise<Map<string, Uint8Array>> {
   const packs = new Map<string, Uint8Array>();
-  for (const entry of made) packs.set(checkpointPackKey(entry.id), await packOf(entry.objects));
+  for (const entry of made) packs.set(checkpointPackKey(entry.commit), await packOf(entry.objects));
   return packs;
 }
 /** One object as the pack builder takes it. */
@@ -233,39 +189,44 @@ class PackBucket {
   }
 }
 
-/** The Artifacts namespace over a review source: every commit id it holds answers as a repository. */
-function artifactsOver(source: FakeReviewSource): NonNullable<WorkerEnv["ARTIFACTS"]> {
-  const handle: ArtifactsHandle = {
-    log: (commitId) => source.log(commitId),
-    readTree: async (input) => await source.readTree(input.commit, input.path),
-    readFile: async (input) => await source.readFile(input.commit, input.path),
-  };
-  const namespace = {
-    create: () => Promise.reject(new Error("a review never creates a repository")),
-    get: () => Promise.resolve(handle),
-  };
-  // SAFETY: the test's handle answers the three read calls a review makes; the mirror's own calls
-  // (`create`, `createToken`, `info`) are unreachable from a review, so the narrower shape is
-  // the wider binding's for every path this suite takes.
-  // oxlint-disable-next-line anti-slop/no-known-value-widening -- the fake namespace is not the
-  // whole Artifacts binding; the test declares only the calls a review can reach.
-  const binding: NonNullable<WorkerEnv["ARTIFACTS"]> = namespace as never;
+/**
+ * The Artifacts namespace over the fixture commits, in the real binding's shape.
+ *
+ * @remarks
+ * `get` throws `NOT_FOUND` for a workspace whose repository does not exist (a namespace that never
+ * pushed), and the handle reads by object id and answers a `Blob` — the same surface the Worker's
+ * `env.ARTIFACTS` has, so the production selector and adapter run unmodified against it. The
+ * fake satisfies the adapter's binding interface by type, and the environment's binding is that
+ * adapter interface, so no assertion stands between them.
+ */
+function artifactsOver(made: readonly FixtureCommit[], pushed: boolean) {
+  const binding = fakeArtifactsReview();
+  if (!pushed) return binding;
+  for (const entry of made) {
+    binding.put(REPO, entry.commit, {
+      kind: "commit",
+      metadata: {
+        hash: entry.commit,
+        treeHash: entry.tree,
+        message: "hns checkpoint",
+        committedAt: 1_760_000_000,
+      },
+    });
+    binding.put(REPO, entry.tree, {
+      kind: "tree",
+      entries: [{ name: entry.path, mode: "100644", hash: entry.blob, type: "blob" }],
+    });
+    binding.put(REPO, "blob:" + entry.commit + ":" + entry.path, {
+      kind: "blob",
+      bytes: new TextEncoder().encode(entry.text),
+      type: "text/plain;charset=utf-8",
+    });
+  }
   return binding;
 }
-
 /** A JSON string field as text, or the empty string when it is not one (the assertion then says so). */
 function textOfValue(value: JsonValue | undefined): string {
   return v.safeParse(v.string(), value).success ? String(value) : "";
-}
-
-/** The handle the Artifacts binding answers for one workspace's repository. */
-interface ArtifactsHandle {
-  log(commit: string): Promise<ReviewCommit>;
-  readTree(input: {
-    readonly commit: string;
-    readonly path: string;
-  }): Promise<readonly ReviewTreeEntry[]>;
-  readFile(input: { readonly commit: string; readonly path: string }): Promise<ReviewFile>;
 }
 
 /** A Workspace object as the GraphQL context reaches it: one namespace, named by workspace. */
@@ -286,8 +247,8 @@ beforeAll(async () => {
   const base = made[0];
   const head = made[1];
   if (base === undefined || head === undefined) throw new Error("the fixture has two commits");
-  BASE = base.id;
-  HEAD = head.id;
+  BASE = base.commit;
+  HEAD = head.commit;
 });
 
 afterAll(async () => {
@@ -387,7 +348,8 @@ async function trailWithChange(store: Store, base: string, head: string): Promis
 interface FaceOptions {
   readonly store: Store;
   readonly packs: ReadonlyMap<string, Uint8Array>;
-  readonly artifacts: FakeReviewSource | undefined;
+  /** Whether the workspace's Artifacts repository holds the commits; false is a namespace that never pushed. */
+  readonly artifacts: boolean;
   readonly workspace: Workspace | undefined;
 }
 
@@ -415,14 +377,13 @@ async function readDetail(
       : envWith({ db: harness.db, workspace: workspaceNamespace(options.workspace) });
   // A separate statement, not a conditional spread: a binding is added only when it exists
   // (`exactOptionalPropertyTypes` makes a present `undefined` a different thing from absent).
-  const env: WorkerEnv =
-    options.artifacts === undefined
-      ? { ...base, OBJECTS: new PackBucket(options.packs) }
-      : {
-          ...base,
-          OBJECTS: new PackBucket(options.packs),
-          ARTIFACTS: artifactsOver(options.artifacts),
-        };
+  const env: WorkerEnv = options.artifacts
+    ? {
+        ...base,
+        OBJECTS: new PackBucket(options.packs),
+        ARTIFACTS: artifactsOver(made, true),
+      }
+    : { ...base, OBJECTS: new PackBucket(options.packs) };
   const response = await face({
     request: new Request("https://hns.test/graphql", { method: "POST" }),
     env,
@@ -496,7 +457,7 @@ test("C1: a mirrored commit is read from Artifacts with no checkpoint pack in th
     await harness.withStore(async (store) => {
       const trail = await trailWithChange(store, BASE, HEAD);
       const changes = await readDetail(
-        { store, packs: new Map(), artifacts: artifactsSource(made), workspace: held.workspace },
+        { store, packs: new Map(), artifacts: true, workspace: held.workspace },
         trail,
       );
       const diff = diffOf(changes);
@@ -530,7 +491,7 @@ test("C2: a failed mirror is read from the checkpoint store and says so", async 
         {
           store,
           packs,
-          artifacts: new FakeReviewSource(new Map(), new Map(), new Map()),
+          artifacts: false,
           workspace: failed.workspace,
         },
         trail,
@@ -562,17 +523,14 @@ test("C3: both stores read the same tree and file bytes for a commit id", async 
   await harness.withStore(async (store) => {
     const trail = await trailWithChange(store, BASE, HEAD);
     const fromArtifacts = diffOf(
-      await readDetail(
-        { store, packs: new Map(), artifacts: artifactsSource(made), workspace: undefined },
-        trail,
-      ),
+      await readDetail({ store, packs: new Map(), artifacts: true, workspace: undefined }, trail),
     );
     const fromR2 = diffOf(
       await readDetail(
         {
           store,
           packs,
-          artifacts: new FakeReviewSource(new Map(), new Map(), new Map()),
+          artifacts: false,
           workspace: undefined,
         },
         trail,

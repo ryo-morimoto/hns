@@ -1332,12 +1332,20 @@ export class Workspace {
     }
     const rows = this.#all("SELECT record FROM checkpoint_run WHERE record IS NOT NULL");
     for (const row of rows) {
-      const parsed = v.safeParse(v.object({ record: v.string() }), row);
-      if (!parsed.success) continue;
-      const record = v.safeParse(CheckpointRecordSchema, JSON.parse(parsed.output.record));
-      if (record.success && record.output.commit === commit) {
-        return json({ ok: true, checkpoint: record.output });
+      const stored = v.safeParse(v.object({ record: v.string() }), row);
+      if (!stored.success) continue;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(stored.output.record);
+      } catch {
+        // A row this build cannot parse is not this commit's record; it is skipped rather than
+        // failing the read, exactly as a row whose shape does not parse is. A review asking for
+        // a commit must not answer 500 because another Run's row is corrupt.
+        continue;
       }
+      const record = v.safeParse(CheckpointRecordSchema, raw);
+      if (!record.success) continue;
+      if (record.output.commit === commit) return json({ ok: true, checkpoint: record.output });
     }
     return failure("not_found", "No completed checkpoint of this workspace names that commit.");
   }

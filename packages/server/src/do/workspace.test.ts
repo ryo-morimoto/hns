@@ -1783,3 +1783,33 @@ test("the checkpoint record route answers the stored record of a commit, and onl
     h.close();
   }
 });
+
+// 0248 NB7: Catches a record read that answers 500 because another Run's row does not parse: the
+// review asks for one commit and a corrupt row elsewhere must not fail it.
+test("the checkpoint record route skips a row it cannot parse instead of failing", async () => {
+  const h = await harnessWithMirror();
+  try {
+    const record = await checkpointOnce(h);
+    h.sql(
+      "INSERT INTO checkpoint_run (run_id, prepare, record) VALUES (?, ?, ?)",
+      "run-corrupt",
+      "{}",
+      "{not json",
+    );
+    h.sql(
+      "INSERT INTO checkpoint_run (run_id, prepare, record) VALUES (?, ?, ?)",
+      "run-shape",
+      "{}",
+      JSON.stringify({ runId: "run-shape" }),
+    );
+    const found = await h.workspace.fetch(get("/rpc/checkpoint/record?commit=" + record.commit));
+    expect(found.status, await found.clone().text()).toBe(200);
+    const answer = v.parse(
+      v.object({ ok: v.literal(true), checkpoint: CheckpointRecordSchema }),
+      await found.json(),
+    );
+    expect(answer.checkpoint).toStrictEqual(record);
+  } finally {
+    h.close();
+  }
+});

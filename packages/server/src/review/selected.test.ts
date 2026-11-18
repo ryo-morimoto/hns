@@ -1,10 +1,10 @@
 import { expect, test } from "vitest";
 import { isoTimestamp } from "@hns/core";
-import type { CheckpointRecord, ReviewCommit, ReviewFile, ReviewTreeEntry } from "@hns/core";
+import type { CheckpointRecord } from "@hns/core";
 import { checkpointPackKey, gitObjectId } from "@hns/workspace/objects";
-import type { ArtifactsReviewBinding, ArtifactsReviewHandle } from "./artifacts.ts";
 import { fallbackLine, selectedReviewDiff, type ReviewSelectionDeps } from "./selected.ts";
-import { FakeReviewSource } from "./source.ts";
+import { fakeArtifactsReview } from "../../test/support/artifacts-review.ts";
+import { artifactsRepoName } from "../artifacts/repos.ts";
 
 /**
  * Which source a review's diff is read from, and what the answer says when it is not Artifacts
@@ -21,60 +21,40 @@ import { FakeReviewSource } from "./source.ts";
 const FIXTURE = await fixtureCommits();
 const BASE = FIXTURE[0]?.commit ?? "";
 const HEAD = FIXTURE[1]?.commit ?? "";
-const TREE = FIXTURE[0]?.tree ?? "";
-const BLOB = FIXTURE[0]?.blob ?? "";
+/** The workspace's repository name, which the selector derives from the Change's workspace id. */
+const REPO = artifactsRepoName("workspace-1");
 
-const commit = (id: string): ReviewCommit => ({
-  commit: id,
-  tree: TREE,
-  message: "hns checkpoint",
-  committedAt: isoTimestamp("2026-11-18T00:00:00.000Z"),
-});
-
-const blob = (path: string, object: string, size: number): ReviewTreeEntry => ({
-  path,
-  kind: "blob",
-  mode: "100644",
-  object,
-  size,
-});
-
-const file = (path: string, object: string, text: string): ReviewFile => ({
-  path,
-  object,
-  contentType: "text/plain",
-  bytes: new TextEncoder().encode(text),
-});
-
-/** A source with one file that gains a line from the base to the head. */
-function source(options: { readonly empty?: boolean } = {}): FakeReviewSource {
-  if (options.empty === true) return new FakeReviewSource(new Map(), new Map(), new Map());
-  return new FakeReviewSource(
-    new Map([
-      [BASE, commit(BASE)],
-      [HEAD, commit(HEAD)],
-    ]),
-    new Map([
-      [BASE + ":", [blob("a.txt", BLOB, 2)]],
-      [HEAD + ":", [blob("a.txt", FIXTURE[1]?.blob ?? "", 5)]],
-    ]),
-    new Map([
-      [BASE + ":a.txt", file("a.txt", BLOB, FIXTURE[0]?.text ?? "")],
-      [HEAD + ":a.txt", file("a.txt", FIXTURE[1]?.blob ?? "", FIXTURE[1]?.text ?? "")],
-    ]),
-  );
+/**
+ * The Artifacts namespace over the fixture commits, in the real binding's shape.
+ *
+ * @returns The namespace; `empty` holds no repository at all, as a workspace that never pushed.
+ */
+function artifactsNamespace(options: { readonly empty?: boolean } = {}) {
+  const binding = fakeArtifactsReview();
+  if (options.empty === true) return binding;
+  for (const entry of FIXTURE) {
+    binding.put(REPO, entry.commit, {
+      kind: "commit",
+      metadata: {
+        hash: entry.commit,
+        // The fixture's own tree id: the two commits hold different trees, or the diff is empty.
+        treeHash: entry.tree,
+        message: "hns checkpoint",
+        committedAt: 1_760_000_000,
+      },
+    });
+    binding.put(REPO, entry.tree, {
+      kind: "tree",
+      entries: [{ name: "a.txt", mode: "100644", hash: entry.blob, type: "blob" }],
+    });
+    binding.put(REPO, "blob:" + entry.commit + ":a.txt", {
+      kind: "blob",
+      bytes: new TextEncoder().encode(entry.text),
+      type: "text/plain;charset=utf-8",
+    });
+  }
+  return binding;
 }
-
-/** The Artifacts namespace over a review source. */
-function namespace(held: FakeReviewSource): ArtifactsReviewBinding {
-  const handle: ArtifactsReviewHandle = {
-    log: (id) => held.log(id),
-    readTree: (input) => held.readTree(input.commit, input.path),
-    readFile: (input) => held.readFile(input.commit, input.path),
-  };
-  return { get: () => Promise.resolve(handle) };
-}
-
 /**
  * A bucket holding the packs it is given.
  *
@@ -225,13 +205,13 @@ async function packOf(
 
 /** The selector's inputs, with the Artifacts namespace and the bucket the test gives it. */
 function depsOf(options: {
-  readonly artifacts?: FakeReviewSource | undefined;
+  readonly artifacts?: ReturnType<typeof fakeArtifactsReview> | undefined;
   readonly packs?: ReadonlyMap<string, Uint8Array> | undefined;
   readonly workspace?: CheckpointRecord | undefined;
 }): ReviewSelectionDeps {
   return {
     objects: options.packs === undefined ? undefined : bucketOf(options.packs),
-    artifacts: options.artifacts === undefined ? undefined : namespace(options.artifacts),
+    artifacts: options.artifacts,
     workspaceId: "workspace-1",
     workspace: workspaceOf(options.workspace),
     requestId: "selected-test",
@@ -243,7 +223,7 @@ function depsOf(options: {
 test("C1: a diff both stores hold is read from Artifacts", async () => {
   const stored = await packs();
   const result = await selectedReviewDiff(
-    depsOf({ artifacts: source(), packs: stored, workspace: recordOf("skipped") }),
+    depsOf({ artifacts: artifactsNamespace(), packs: stored, workspace: recordOf("skipped") }),
     BASE,
     HEAD,
   );
@@ -265,7 +245,11 @@ test("C2: when Artifacts lacks the commit the diff comes from R2 and says why", 
     ["pending", "まだ完了していない"],
   ] as const) {
     const result = await selectedReviewDiff(
-      depsOf({ artifacts: source({ empty: true }), packs: stored, workspace: recordOf(status) }),
+      depsOf({
+        artifacts: artifactsNamespace({ empty: true }),
+        packs: stored,
+        workspace: recordOf(status),
+      }),
       BASE,
       HEAD,
     );
@@ -285,7 +269,7 @@ test("C2: when Artifacts lacks the commit the diff comes from R2 and says why", 
 test("C2: no record is pending, and a failed record keeps its reason", async () => {
   const stored = await packs();
   const unknown = await selectedReviewDiff(
-    depsOf({ artifacts: source({ empty: true }), packs: stored, workspace: undefined }),
+    depsOf({ artifacts: artifactsNamespace({ empty: true }), packs: stored, workspace: undefined }),
     BASE,
     HEAD,
   );
@@ -301,7 +285,7 @@ test("C2: no record is pending, and a failed record keeps its reason", async () 
     },
   };
   const withReason = await selectedReviewDiff(
-    depsOf({ artifacts: source({ empty: true }), packs: stored, workspace: failed }),
+    depsOf({ artifacts: artifactsNamespace({ empty: true }), packs: stored, workspace: failed }),
     BASE,
     HEAD,
   );
@@ -318,7 +302,7 @@ test("C2: no record is pending, and a failed record keeps its reason", async () 
 test("the machine fallback is refused with a typed failure, not answered", async () => {
   const result = await selectedReviewDiff(
     depsOf({
-      artifacts: source({ empty: true }),
+      artifacts: artifactsNamespace({ empty: true }),
       packs: new Map(),
       workspace: recordOf("skipped"),
     }),
@@ -338,7 +322,11 @@ test("no source at all is unavailable, and a value that is not a commit id is re
   expect(none.ok).toBe(false);
   if (none.ok) return;
   expect(none.failure).toBe("unavailable");
-  const refs = await selectedReviewDiff(depsOf({ artifacts: source() }), "refs/heads/main", HEAD);
+  const refs = await selectedReviewDiff(
+    depsOf({ artifacts: artifactsNamespace() }),
+    "refs/heads/main",
+    HEAD,
+  );
   expect(refs.ok).toBe(false);
   if (refs.ok) return;
   expect(refs.failure).toBe("invalid_request");

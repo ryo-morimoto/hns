@@ -17,18 +17,25 @@ import type { ReviewSource } from "./source.ts";
  * @remarks
  * Artifacts is a **mirror** of the authoritative checkpoint in R2 (D106). A Run's checkpoint is
  * pushed under `refs/heads/hns/run/<runId>` (`@hns/workspace/mirror`), but nothing here reads a ref:
- * every read names a **commit id**, and the binding resolves that id in the repository's own
- * object store, so a ref that moved or was deleted cannot change what a review shows. That is the
- * same rule the R2 source follows, and the reason the mirror's ref name is not this module's
+ * every read names a **commit or tree id**, and the binding resolves that id in the repository's
+ * own object store, so a ref that moved or was deleted cannot change what a review shows. That is
+ * the same rule the R2 source follows, and the reason the mirror's ref name is not this module's
  * business.
  *
- * The three calls a review makes — `log`, `readTree`, `readFile` — are the binding's own, narrowed
- * structurally like {@link ArtifactsRepoHandle} narrows the repository's lifecycle. Each answer
- * is parsed the moment it arrives (the binding is not typed by this package), and its failure is
- * mapped onto the closed {@link ReviewFailure} vocabulary: a binding that cannot answer is
- * `unavailable`, an id the repository does not hold is `not_found`, a refused token is
- * `unauthorized`, and a commit, tree, or file over the limits is `too_large`. A binding that
- * throws something outside its own error shape is a defect and propagates.
+ * **The binding's surface is the real one, not a shape invented here.** Artifacts' repository
+ * capability (`ArtifactsRepo` in workerd's generated types) answers `get(name)` with a handle
+ * (throwing `NOT_FOUND` when the repository is absent), and the handle reads by object id:
+ * `readCommit(hash)` for a commit, `readTree(hash)` for one tree's immediate children, and
+ * `readFile({ ref, path })` for a file resolved at a branch, tag, or commit. This module maps that
+ * surface onto {@link ReviewSource} — a commit id in, `ReviewCommit` / `ReviewTreeEntry[]` /
+ * `ReviewFile` out — and does the **tree walk** itself, because the binding reads one tree by its
+ * id while a review asks for a path.
+ *
+ * Every answer is parsed the moment it arrives (the binding is typed by workerd, but a Worker
+ * bundle does not carry that type), and its failure is mapped onto the closed {@link ReviewFailure}
+ * vocabulary: a binding that cannot answer is `unavailable`, an id the repository does not hold is
+ * `not_found`, a refused token is `unauthorized`, and a file over the limit is `too_large`. A
+ * throw that is not the binding's own error is a defect and propagates.
  */
 
 /** The largest file `readFile` answers; a larger blob is `too_large`. */
@@ -43,57 +50,71 @@ const SYMLINK_MODE = "120000";
 const GITLINK_MODE = "160000";
 
 /**
- * The part of Artifacts' repository handle a review reads.
+ * A commit as the binding's `readCommit` answers it.
  *
  * @remarks
- * The answers stay `unknown` on purpose: they are the binding's, and the schemas below are the
- * one place they become values. `readFile` takes the commit as well as the path because a mirror
- * holds many commits of one repository, and the review must show the bytes the commit names.
+ * `committedAt` is Unix seconds and `treeHash` is the root tree's id — workerd's
+ * `ArtifactsCommitMetadata`, narrowed to the fields a review reads.
  */
-export interface ArtifactsReviewHandle {
-  /** The commit `commit` as the repository holds it. */
-  // oxlint-disable-next-line anti-slop/no-unknown-returns -- the binding's boundary: the value is untrusted until CommitAnswerSchema parses it.
-  log(commit: string): Promise<unknown>;
-  /** One directory of one commit's tree. */
-  // oxlint-disable-next-line anti-slop/no-unknown-returns -- the binding's boundary: the value is untrusted until TreeAnswerSchema parses it.
-  readTree(input: { readonly commit: string; readonly path: string }): Promise<unknown>;
-  /** One file's bytes in one commit. */
-  // oxlint-disable-next-line anti-slop/no-unknown-returns -- the binding's boundary: the value is untrusted until FileAnswerSchema parses it.
-  readFile(input: { readonly commit: string; readonly path: string }): Promise<unknown>;
+export interface ArtifactsCommitMetadata {
+  readonly hash: string;
+  readonly treeHash: string;
+  readonly message: string;
+  readonly committedAt: number;
 }
 
 /**
- * The repository a review reads, as the binding's namespace answers for it.
+ * One immediate child of a tree, as the binding's `readTree` answers it.
  *
  * @remarks
- * **`get` is the namespace's, and the handle a review needs is the wider one.** The namespace
- * already exists and answers {@link ArtifactsRepoHandle} (the mirror's own view: `info`,
- * `createToken`, `log`) plus the two read calls a review makes. The two are merged here rather
- * than restated, so a binding that satisfies the mirror's interface and this module's is the
- * Worker's real one, not a shape invented for a test.
+ * workerd's `ArtifactsTreeEntry`: the entry's `name` relative to the tree, its git `mode`, its
+ * object `hash`, and the binding's own `type` classification. A review reads `mode` for the
+ * contract's entry kind rather than trusting `type`, and `hash` for the blob's id.
  */
-export interface ArtifactsReviewBinding {
-  /** A repository's handle, or null when the namespace has no repository of that name. */
-  get(name: string): Promise<ArtifactsReviewHandle | null>;
+export interface ArtifactsTreeEntry {
+  readonly name: string;
+  readonly mode: string;
+  readonly hash: string;
+  readonly type: "tree" | "blob" | "symlink" | "gitlink" | "exec";
 }
 
-/** The 40 lowercase hex characters a git object id is. */
-const ObjectId = v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/u));
+/**
+ * The part of Artifacts' repository capability a review reads.
+ *
+ * @remarks
+ * The method names, parameters, and answers are workerd's `ArtifactsRepo`'s. `readFile` resolves
+ * by `ref` and `path` (so the review can hand it a **commit id** as the ref) and answers a Blob
+ * whose `type` is the service's content type; `readCommit` and `readTree` answer `null` for an
+ * object the repository does not hold. Every method may throw `ArtifactsError`, which is how a
+ * missing repository or an unavailable service is reported.
+ */
+export interface ArtifactsReviewHandle {
+  /** The commit, or null when the repository does not hold that object. */
+  readCommit(hash: string): Promise<ArtifactsCommitMetadata | null>;
+  /** One tree's immediate children, or null when the repository does not hold that tree. */
+  readTree(hash: string): Promise<readonly ArtifactsTreeEntry[] | null>;
+  /** A file's bytes at `ref`, or null when the path does not resolve to a file. */
+  readFile(args: { readonly ref: string; readonly path: string }): Promise<Blob | null>;
+}
 
-/** The commit as the binding answers it. */
-const CommitAnswerSchema: v.GenericSchema<
-  unknown,
-  {
-    readonly commit: string;
-    readonly tree: string;
-    readonly message: string;
-    readonly committedAt: string;
-  }
-> = v.object({
-  commit: ObjectId,
-  tree: ObjectId,
+/**
+ * The namespace call a review makes: the repository capability for one name.
+ *
+ * @remarks
+ * workerd's `Artifacts.get` **throws** `NOT_FOUND` when the namespace has no repository of that
+ * name; it never answers null. A workspace that never pushed therefore fails the lookup, which the
+ * adapter maps to `not_found`.
+ */
+export interface ArtifactsReviewBinding {
+  get(name: string): Promise<ArtifactsReviewHandle>;
+}
+
+/** The commit as the binding answers it, parsed at the boundary. */
+const CommitAnswerSchema: v.GenericSchema<unknown, ArtifactsCommitMetadata> = v.object({
+  hash: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/u)),
+  treeHash: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/u)),
   message: v.string(),
-  committedAt: v.string(),
+  committedAt: v.pipe(v.number(), v.integer()),
 });
 
 /** The tree entry mode as the binding answers it: git's own spelling of the contract's. */
@@ -106,42 +127,15 @@ const ModeSchema = v.union([
   v.literal("160000"),
 ]);
 
-/** One directory's entries as the binding answers them. */
-const TreeAnswerSchema: v.GenericSchema<
-  unknown,
-  readonly {
-    readonly path: string;
-    readonly mode: string;
-    readonly object: string;
-    readonly size: number;
-  }[]
-> = v.array(
+/** One tree's entries as the binding answers them. */
+const TreeAnswerSchema: v.GenericSchema<unknown, readonly ArtifactsTreeEntry[]> = v.array(
   v.object({
-    path: v.pipe(v.string(), v.minLength(1)),
+    name: v.pipe(v.string(), v.minLength(1)),
     mode: ModeSchema,
-    object: ObjectId,
-    size: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    hash: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/u)),
+    type: v.picklist(["tree", "blob", "symlink", "gitlink", "exec"]),
   }),
 );
-
-/** One file as the binding answers it: bytes, and the commit they belong to. */
-const FileAnswerSchema: v.GenericSchema<
-  unknown,
-  { readonly path: string; readonly object: string; readonly bytes: Uint8Array }
-> = v.object({
-  path: v.pipe(v.string(), v.minLength(1)),
-  object: ObjectId,
-  bytes: v.instance(Uint8Array),
-});
-
-/** A binding error is an `Error`; anything else is a defect. */
-// oxlint-disable-next-line anti-slop/no-unknown-parameters -- this function is the catch boundary: a binding may throw any value, and this is where it becomes the Error the mapper reads.
-function errorOf(thrown: unknown): Error {
-  return thrown instanceof Error
-    ? thrown
-    : new Error("the binding threw a value that is not an Error");
-}
-
 /** The binding's own error code, when the error carries one. */
 function errorCodeOf(error: Error): string | undefined {
   // SAFETY: an Error value with an own `code` property is what the binding throws; reading it as a
@@ -155,27 +149,45 @@ function errorCodeOf(error: Error): string | undefined {
  * Map a binding failure to the review failure it stands for.
  *
  * @param error - What the binding threw.
- * @returns The closed review failure code.
+ * @returns The closed review failure code, or undefined when the throw is not the binding's own.
  *
  * @remarks
- * `NOT_FOUND` is a commit or path the repository does not hold; `UPSTREAM_UNAVAILABLE` and
- * `INTERNAL_ERROR` are a binding that could not answer at all; an authentication or
- * authorization refusal is `unauthorized`; anything else is a source that could not be read, so
- * `unavailable` rather than a failure invented as "nothing there". A message is never read: it may
- * quote the request or a token.
+ * **One rule for every throw.** A code the binding sets is mapped: `NOT_FOUND` is a repository,
+ * commit, tree, or path the repository does not hold; `UPSTREAM_UNAVAILABLE` and `INTERNAL_ERROR`
+ * are a binding that could not answer at all; `MEMORY_LIMIT` is an object too large to buffer, and
+ * `REMOTE_AUTH_REQUIRED` an authorization refusal (plus the two credential spellings a service
+ * may use). Undefined means the throw carried no code, so it is not the binding's expected
+ * failure: a defect, which keeps travelling instead of becoming `not_found`.
+ *
+ * A message is never read: it may quote the request or a token.
  *
  * @internal
  */
-export function reviewFailureOfBinding(error: Error): "not_found" | "unavailable" | "unauthorized" {
+export function reviewFailureOfBinding(
+  error: Error,
+): "not_found" | "unavailable" | "unauthorized" | "too_large" | undefined {
   switch (errorCodeOf(error)) {
     case "NOT_FOUND":
       return "not_found";
+    case "MEMORY_LIMIT":
+      return "too_large";
     case "UNAUTHENTICATED":
     case "UNAUTHORIZED":
     case "REMOTE_AUTH_REQUIRED":
       return "unauthorized";
-    default:
+    case "ALREADY_EXISTS":
+    case "CREATE_IN_PROGRESS":
+    case "IMPORT_IN_PROGRESS":
+    case "FORK_IN_PROGRESS":
+    case "INVALID_INPUT":
+    case "INVALID_REPO_NAME":
+    case "INVALID_TTL":
+    case "INVALID_URL":
+    case "UPSTREAM_UNAVAILABLE":
+    case "INTERNAL_ERROR":
       return "unavailable";
+    default:
+      return undefined;
   }
 }
 
@@ -216,15 +228,33 @@ const normaliseMode = (mode: string): ReviewTreeEntryMode => {
   return normalised as ReviewTreeEntryMode;
 };
 
+/** One tree entry as the review's contract names it, from the binding's `(name, mode, hash)`. */
+function treeEntryOf(entry: ArtifactsTreeEntry): ReviewTreeEntry {
+  const mode = entry.mode;
+  const isTree = TREE_MODES.has(mode);
+  if (!isTree && !BLOB_MODES.has(mode) && mode !== SYMLINK_MODE && mode !== GITLINK_MODE) {
+    throw new ReviewSourceError("unavailable", "a tree entry has a mode a review cannot read");
+  }
+  // A symlink is a blob in the contract's kind vocabulary (its bytes are the link target); the
+  // mode is what tells it apart. A submodule is a commit in another repository.
+  return {
+    path: entry.name,
+    kind: isTree ? "tree" : mode === GITLINK_MODE ? "commit" : "blob",
+    mode: normaliseMode(mode),
+    object: entry.hash,
+    // The binding does not answer a blob's size for a tree listing, so a file's size is 0 and a
+    // reader that shows one asks `readFile` for its bytes; the size is not a review decision.
+    size: 0,
+  };
+}
 /**
  * The review source over one workspace's Artifacts repository.
  *
  * @remarks
  * The source holds a **repository name** and the binding's namespace, and resolves the repository
- * on the first read: a workspace that never pushed has none, and looking it up lazily means a
- * deployment with no Artifacts binding fails closed without a lookup. Every read is by commit id
- * (the port's contract), and every answer is parsed before it leaves this module, so a binding
- * that changes shape is `unavailable` and a commit it does not hold is `not_found`.
+ * on each read through `get`: a workspace that never pushed has none, and the binding answers
+ * `NOT_FOUND`, which is the review's `not_found`. Every read is by commit id (the port's contract);
+ * a directory is walked here, one tree id at a time, because the binding reads a tree by its id.
  */
 export class ArtifactsReviewSource implements ReviewSource {
   readonly #binding: ArtifactsReviewBinding;
@@ -269,108 +299,133 @@ export class ArtifactsReviewSource implements ReviewSource {
     }
   }
 
-  /** The repository's handle, or `not_found` when the namespace has no repository of that name. */
-  async #repository(): Promise<ArtifactsReviewHandle> {
-    let handle: ArtifactsReviewHandle | null;
-    try {
-      handle = await this.#binding.get(this.#repo);
-    } catch (error) {
-      throw new ReviewSourceError(
-        reviewFailureOfBinding(errorOf(error)),
-        "the repository could not be read",
-      );
-    }
-    if (handle === null) {
-      throw new ReviewSourceError("not_found", "no Artifacts repository for this workspace");
-    }
-    return handle;
-  }
-
   /**
    * Run one binding call, mapping its failure to a review failure.
    *
    * @internal
    * @remarks
-   * A defect is not swallowed: a binding that throws something outside its own error shape is a
-   * bug in the binding, and it is rethrown so the request answers 500 instead of "not found".
+   * **One rule for every throw**, the namespace lookup included (which is why the lookup goes
+   * through here rather than catching on its own): a {@link ReviewSourceError} is the port's own
+   * vocabulary and travels unchanged; an `Error` the binding threw with one of its codes becomes
+   * the review failure that code stands for; **anything else** — a binding error with no code, or
+   * a value that is not an `Error` at all — is a defect and is rethrown, so the request answers
+   * 500 instead of "not found". There is no second place in this module that decides this.
    */
   async #call<T>(what: string, work: () => Promise<T>): Promise<T> {
     try {
       return await work();
-    } catch (error) {
-      // A review failure is the port's own vocabulary already (the fake's and any adapter's
-      // answer): it is the code a source answers with, so it travels unchanged instead of being
-      // re-read as a binding error with no code.
-      if (error instanceof ReviewSourceError) throw error;
-      if (!(error instanceof Error)) throw error;
-      const code = errorCodeOf(error);
-      if (code === undefined) throw error;
+    } catch (thrown) {
+      if (thrown instanceof ReviewSourceError) throw thrown;
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- this is the throw boundary: the
+      // binding may throw any value, and only an Error may name one of its codes.
+      if (!(thrown instanceof Error)) throw thrown;
+      const failure = reviewFailureOfBinding(thrown);
+      if (failure === undefined) throw thrown;
       throw new ReviewSourceError(
-        reviewFailureOfBinding(error),
-        "the Artifacts binding could not read " + what + " (" + code + ")",
+        failure,
+        "the Artifacts binding could not read " + what + " (" + (errorCodeOf(thrown) ?? "") + ")",
       );
     }
   }
 
-  async log(commit: string): Promise<ReviewCommit> {
-    const id = ArtifactsReviewSource.#commitId(commit);
-    const handle = await this.#repository();
-    const answer = await this.#call("commit " + id, () => handle.log(id));
+  /** The repository's capability, or `not_found` when the namespace has no repository of that name. */
+  async #repository(): Promise<ArtifactsReviewHandle> {
+    return await this.#call("the repository", () => this.#binding.get(this.#repo));
+  }
+
+  /** The commit, or `not_found` when the repository does not hold it. */
+  async #commit(handle: ArtifactsReviewHandle, id: string): Promise<ReviewCommit> {
+    const answer = await this.#call("commit " + id, () => handle.readCommit(id));
+    if (answer === null) {
+      throw new ReviewSourceError("not_found", "no commit " + id + " in the Artifacts repository");
+    }
     const parsed = v.safeParse(CommitAnswerSchema, answer);
     if (!parsed.success) {
       throw new ReviewSourceError("unavailable", "the Artifacts commit answer is not a commit");
     }
-    const committedAt = new Date(parsed.output.committedAt);
+    if (parsed.output.hash !== id) {
+      // The answer must be the commit asked for: a binding that answers another id would have the
+      // review read bytes the Change did not name.
+      throw new ReviewSourceError(
+        "unavailable",
+        "the Artifacts commit answer names another commit",
+      );
+    }
+    const committedAt = new Date(parsed.output.committedAt * 1000);
     if (Number.isNaN(committedAt.getTime())) {
       throw new ReviewSourceError("unavailable", "the Artifacts commit has no valid time");
     }
     const at: IsoTimestamp = isoTimestamp(committedAt.toISOString());
     return {
-      // The id the caller asked for, which the answer must name: a binding that answers another
-      // commit would otherwise have the review read bytes the Change did not name.
       commit: id,
-      tree: parsed.output.tree,
+      tree: parsed.output.treeHash,
       message: parsed.output.message,
       committedAt: at,
     };
+  }
+
+  /** One tree's entries, or `not_found` when the repository does not hold it. */
+  async #tree(
+    handle: ArtifactsReviewHandle,
+    hash: string,
+    path: string,
+  ): Promise<readonly ArtifactsTreeEntry[]> {
+    const answer = await this.#call("tree " + JSON.stringify(path), () => handle.readTree(hash));
+    if (answer === null) {
+      throw new ReviewSourceError("not_found", "no tree " + hash + " in the Artifacts repository");
+    }
+    const parsed = v.safeParse(TreeAnswerSchema, answer);
+    if (!parsed.success) {
+      throw new ReviewSourceError("unavailable", "the Artifacts tree answer is not a tree");
+    }
+    return parsed.output;
+  }
+
+  /**
+   * Walk `path` from the commit's root tree, one directory at a time.
+   *
+   * @returns The entry the path names, and the entries of its directory when the path is a
+   * directory.
+   *
+   * @remarks
+   * The binding reads a tree by its id, so a path is resolved here: each segment is looked up in
+   * the directory above it, and every earlier segment must be a tree. A missing segment is
+   * `not_found`; a file read of a directory is `not_found` as well (a directory is not a file).
+   */
+  async #walk(
+    handle: ArtifactsReviewHandle,
+    root: string,
+    path: string,
+  ): Promise<{ readonly entries: readonly ArtifactsTreeEntry[]; readonly directory: string }> {
+    const segments = path === "" ? [] : path.split("/");
+    let treeId = root;
+    let entries = await this.#tree(handle, treeId, "");
+    for (const segment of segments) {
+      const found = entries.find((entry) => entry.name === segment);
+      if (found === undefined) {
+        throw new ReviewSourceError("not_found", "no " + JSON.stringify(path) + " in the tree");
+      }
+      if (!TREE_MODES.has(found.mode)) {
+        throw new ReviewSourceError("not_found", JSON.stringify(path) + " is not a directory");
+      }
+      treeId = found.hash;
+      entries = await this.#tree(handle, treeId, path);
+    }
+    return { entries, directory: treeId };
+  }
+
+  async log(commit: string): Promise<ReviewCommit> {
+    const id = ArtifactsReviewSource.#commitId(commit);
+    return await this.#commit(await this.#repository(), id);
   }
 
   async readTree(commit: string, path: string): Promise<readonly ReviewTreeEntry[]> {
     const id = ArtifactsReviewSource.#commitId(commit);
     ArtifactsReviewSource.#checkPath(path);
     const handle = await this.#repository();
-    const answer = await this.#call("tree " + JSON.stringify(path), () =>
-      handle.readTree({ commit: id, path }),
-    );
-    const parsed = v.safeParse(TreeAnswerSchema, answer);
-    if (!parsed.success) {
-      throw new ReviewSourceError("unavailable", "the Artifacts tree answer is not a tree");
-    }
-    return parsed.output.map((entry) => {
-      const mode = entry.mode;
-      const kind: ReviewTreeEntry["kind"] = TREE_MODES.has(mode)
-        ? "tree"
-        : GITLINK_MODE === mode
-          ? "commit"
-          : "blob";
-      // A symlink is a blob in the contract's kind vocabulary (its bytes are the link target);
-      // the mode is what tells it apart. Any other mode is refused rather than guessed at.
-      if (
-        !TREE_MODES.has(mode) &&
-        !BLOB_MODES.has(mode) &&
-        mode !== SYMLINK_MODE &&
-        mode !== GITLINK_MODE
-      ) {
-        throw new ReviewSourceError("unavailable", "a tree entry has a mode a review cannot read");
-      }
-      return {
-        path: entry.path,
-        kind,
-        mode: normaliseMode(mode),
-        object: entry.object,
-        size: entry.size,
-      };
-    });
+    const root = (await this.#commit(handle, id)).tree;
+    const { entries } = await this.#walk(handle, root, path);
+    return entries.map(treeEntryOf);
   }
 
   async readFile(commit: string, path: string): Promise<ReviewFile> {
@@ -380,27 +435,34 @@ export class ArtifactsReviewSource implements ReviewSource {
       throw new ReviewSourceError("invalid_request", "a file read needs a path");
     }
     const handle = await this.#repository();
-    const answer = await this.#call("file " + JSON.stringify(path), () =>
-      handle.readFile({ commit: id, path }),
+    // The commit first, so a commit the repository does not hold is `not_found` for the commit and
+    // not for the path; then the path walk, so a directory is refused as a file.
+    await this.#commit(handle, id);
+    const directory = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    const { entries } = await this.#walk(handle, (await this.#commit(handle, id)).tree, directory);
+    const entry = entries.find(
+      (candidate) => candidate.name === path.slice(path.lastIndexOf("/") + 1),
     );
-    const parsed = v.safeParse(FileAnswerSchema, answer);
-    if (!parsed.success) {
-      throw new ReviewSourceError("unavailable", "the Artifacts file answer is not a file");
+    if (entry === undefined || TREE_MODES.has(entry.mode) || entry.mode === GITLINK_MODE) {
+      throw new ReviewSourceError("not_found", JSON.stringify(path) + " is not a file");
     }
-    if (parsed.output.path !== path) {
-      throw new ReviewSourceError("unavailable", "the Artifacts file answer names another path");
+    const answer = await this.#call("file " + JSON.stringify(path), () =>
+      handle.readFile({ ref: id, path }),
+    );
+    if (answer === null) {
+      throw new ReviewSourceError("not_found", "no " + JSON.stringify(path) + " at " + id);
     }
-    if (parsed.output.bytes.length > this.#maxFileBytes) {
+    if (answer.size > this.#maxFileBytes) {
       throw new ReviewSourceError("too_large", JSON.stringify(path) + " is too large to show");
     }
     return {
       path,
-      object: parsed.output.object,
+      object: entry.hash,
       contentType: contentTypeOf(path),
-      bytes: parsed.output.bytes,
+      bytes: new Uint8Array(await answer.arrayBuffer()),
     };
   }
 }
 
-/** Render a commit's stored Artifacts repository name from a workspace id, for the selector. */
+/** Render a workspace's stored Artifacts repository name, for the selector. */
 export { artifactsRepoName } from "../artifacts/repos.ts";
