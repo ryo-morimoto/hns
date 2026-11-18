@@ -75,7 +75,7 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
 
 | 面                                                                                 | 今この面は起動するか  | 誰が呼ぶか                                                                          |
 | ---------------------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------- |
-| Worker の send 面（`Mutation.sendMessage`）                                        | ✓                     | 画面 / client の `/graphql`（**画面の composer はまだ無い**：issue 0159 の送信 UI） |
+| Worker の send 面（`Mutation.sendMessage`）                                        | ✓                     | 画面 / client の `/graphql`（**画面の composer はまだ無い**：issue 0105 の送信 UI） |
 | policy snapshot を載せた send → granted path（0226）                               | ✓                     | 上の `sendMessage` の resolver → `conversationPortOver` → Session DO                |
 | deploy の env 3 つ（`HNS_AGENT_URL` / `HNS_MACHINE_ID` / `HNS_CONTROL_PLANE_KEY`） | ✓                     | `tools/deploy/cloudflare.config.ts` の binding（dry-run の一覧に出る）              |
 | env が一部だけの起動                                                               | ✓（起動時に失敗する） | edge の `toolPathMode` と Session の `#initialize`                                  |

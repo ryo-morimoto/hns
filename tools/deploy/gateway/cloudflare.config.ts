@@ -63,6 +63,15 @@ export const gatewayWorkerFor = (
 };
 
 export default defineConfig(({ mode }) => {
-  const deployment = deploymentFor(mode, process.env.HNS_AGENT_URL, process.env.HNS_MODEL);
+  // The gateway names no machine — it holds provider keys and nothing else — but the deployment
+  // record is shared with the harness Worker, and its machine id is required in every mode (0270n),
+  // so the same environment supplies it. A gateway deploy and the harness deploy of one mode read
+  // one `HNS_MACHINE_ID`.
+  const deployment = deploymentFor(
+    mode,
+    process.env.HNS_AGENT_URL,
+    process.env.HNS_MODEL,
+    process.env.HNS_MACHINE_ID,
+  );
   return { worker: gatewayWorkerFor(deployment, process.env) };
 });

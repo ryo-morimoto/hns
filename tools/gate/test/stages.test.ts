@@ -50,6 +50,8 @@ test("the deploy stage builds the development config", () => {
   const env = {
     XDG_CONFIG_HOME: "/repo/.work/cf/config",
     XDG_CACHE_HOME: "/repo/.cache",
+    // The config requires the machine id in every mode (0270n); the dry run names a placeholder.
+    HNS_MACHINE_ID: "machine-dry-run",
   };
   expect(runs).toStrictEqual([
     {
@@ -72,7 +74,9 @@ test("codegen runs only when the artifacts can change", () => {
   assert.ok(stage !== undefined);
   // record has no path to server, so the closure cannot pull codegen in.
   const record: PackageInfo = { dir: "record", name: "@hns/record", dependsOn: [] };
-  expect(stage.run({ root: "/repo", packages: [record], all: false, tier: "unit" })).toStrictEqual([]);
+  expect(stage.run({ root: "/repo", packages: [record], all: false, tier: "unit" })).toStrictEqual(
+    [],
+  );
   const web: PackageInfo = { dir: "web", name: "@hns/web", dependsOn: [] };
   const runs = stage.run({ root: "/repo", packages: [web], all: false, tier: "unit" });
   expect(runs.map((run) => run.argv.join(" "))).toStrictEqual([

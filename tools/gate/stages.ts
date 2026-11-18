@@ -142,11 +142,14 @@ export const stages: readonly Stage[] = [
     name: "deploy",
     hooks: ["pre-push"],
     // Both Workers are checked: the gateway's config is its own cf project because one
-    // cloudflare.config.ts describes one Worker.
+    // cloudflare.config.ts describes one Worker. The machine id is the dry run's placeholder: the
+    // config requires it in every mode (0270n; a default would let a development Worker address a
+    // machine the operator did not name), and this stage builds no Worker that would dial it.
     run: ({ root }) => {
       const env = {
         XDG_CONFIG_HOME: join(root, ".work/cf/config"),
         XDG_CACHE_HOME: join(root, ".cache"),
+        HNS_MACHINE_ID: "machine-dry-run",
       };
       return ["tools/deploy", "tools/deploy/gateway"].map((dir) => ({
         cwd: join(root, dir),

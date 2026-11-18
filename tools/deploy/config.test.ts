@@ -6,7 +6,7 @@ import { buildSettings } from "./wrangler.config.ts";
 // Catches: a mode mapping that sends staging to the production Worker, or lets a missing URL/model through.
 
 test("development uses the local defaults", () => {
-  expect(deploymentFor("development", undefined, undefined)).toStrictEqual({
+  expect(deploymentFor("development", undefined, undefined, "machine-dev")).toStrictEqual({
     mode: "development",
     env: "dev",
     workerName: "hns-dev",
@@ -53,6 +53,16 @@ test("production requires an https agent URL, a machine id, and a model", () => 
   );
 });
 
+// Catches: development defaulting the machine id, so a local Worker that meant to grant tools
+// addresses a machine the operator did not name (0270n NB5). Every mode states it.
+test("development requires the machine id too", () => {
+  expect(() => deploymentFor("development", undefined, undefined)).toThrow(/HNS_MACHINE_ID/);
+  expect(() => deploymentFor("development", undefined, undefined, "")).toThrow(/HNS_MACHINE_ID/);
+  expect(deploymentFor("development", undefined, undefined, "machine-1").machineId).toBe(
+    "machine-1",
+  );
+});
+
 test("a missing mode is rejected", () => {
   expect(() => deploymentFor(undefined, undefined, undefined)).toThrow(/--mode/);
 });
@@ -63,20 +73,20 @@ test("an unknown mode is rejected", () => {
 
 // Catches: a face reading env.DB without a declared D1 binding.
 test("the worker declares one D1 binding named for the worker", () => {
-  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  const worker = workerFor(deploymentFor("development", undefined, undefined, "machine-dev"));
   expect(worker.env.DB).toStrictEqual({ type: "d1", name: "hns-dev" });
 });
 
 // Catches: the edge reading HNS_SESSION_SECRET without a declared binding.
 test("the worker declares the session secret binding", () => {
-  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  const worker = workerFor(deploymentFor("development", undefined, undefined, "machine-dev"));
   expect(worker.env).toHaveProperty("HNS_SESSION_SECRET");
   expect(worker.env).toHaveProperty("SESSION");
 });
 
 // Catches: a Workspace export the WORKSPACE binding cannot address, or vice versa.
 test("the worker exports and binds the Workspace Durable Object", () => {
-  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  const worker = workerFor(deploymentFor("development", undefined, undefined, "machine-dev"));
   expect(worker.exports.Workspace).toStrictEqual({
     type: "durable-object",
     storage: "sqlite",
@@ -97,7 +107,7 @@ test("the worker binds the object store bucket", () => {
 
 // Catches: a provider key added to the harness Worker's env, which would undo the isolation.
 test("the harness worker declares no provider credential", () => {
-  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  const worker = workerFor(deploymentFor("development", undefined, undefined, "machine-dev"));
   const names = Object.keys(worker.env);
   // The control-plane key authenticates Worker -> machine (D100), not a model provider; the
   // provider keys stay in the gateway Worker.
@@ -109,7 +119,7 @@ test("the harness worker declares no provider credential", () => {
 
 // Catches: the Workspace object signing machine requests from an undeclared secret.
 test("the worker declares the machine URL, machine id, and control-plane key", () => {
-  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  const worker = workerFor(deploymentFor("development", undefined, undefined, "machine-dev"));
   expect(worker.env.HNS_AGENT_URL).toStrictEqual({ type: "text", value: "http://127.0.0.1:8788" });
   expect(worker.env.HNS_MACHINE_ID).toStrictEqual({ type: "text", value: "machine-dev" });
   expect(worker.env.HNS_CONTROL_PLANE_KEY).toStrictEqual({ type: "secret" });
@@ -147,7 +157,7 @@ test("the harness worker binds the gateway service by name", () => {
 
 // Catches: the edge having no asset binding, or the asset layer serving before the API faces.
 test("the worker binds the assets and routes every request through the edge", () => {
-  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  const worker = workerFor(deploymentFor("development", undefined, undefined, "machine-dev"));
   expect(worker.env.ASSETS).toStrictEqual({ type: "assets" });
   expect(worker.assets).toStrictEqual({ notFoundHandling: "none", runWorkerFirst: true });
 });
@@ -165,7 +175,7 @@ test("production publishes on its custom domain and turns workers.dev off", () =
 
 // Catches: a development deploy accidentally claiming the production hostname.
 test("development keeps workers.dev and declares no custom domain", () => {
-  const worker = workerFor(deploymentFor("development", undefined, undefined));
+  const worker = workerFor(deploymentFor("development", undefined, undefined, "machine-dev"));
   expect(worker).not.toHaveProperty("domains");
   expect(worker.workersDev).toBe(true);
   expect(worker.previewUrls).toBe(false);

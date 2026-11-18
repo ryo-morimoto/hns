@@ -6,6 +6,8 @@ import { execute, parse, type ExecutionResult } from "graphql";
 import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import type { AgentSession } from "@hns/agent/session";
 import { toGlobalId } from "@hns/core/graphql";
+import { WORKSPACE_TOOLS, manifestFor } from "@hns/agent";
+import { ToolCallSchema } from "@hns/core/capability";
 import * as v from "valibot";
 import { openStore } from "../../../store/src/index.ts";
 import { openConversationIndex } from "../../../store/src/conversation-index/index.ts";
@@ -16,6 +18,9 @@ import { GrantCounter } from "../../../machine/src/capability/counter.ts";
 import { controlPlanePublicKey } from "../../src/capability/signing.ts";
 import { createPolicyService } from "../../src/policy/service.ts";
 import { Session } from "../../src/do/session.ts";
+import type { GrantedCallRequest } from "../../src/do/session-tools.ts";
+import type { GrantedAnswer } from "@hns/workspace/protocol";
+import type { RunGrantPathFactory } from "../../src/do/session.ts";
 import type { SessionState } from "../../src/do/state.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { createContext } from "../../src/graphql/context.ts";
@@ -80,6 +85,21 @@ function fakeTurn(): Awaited<ReturnType<AgentSession["send"]>> {
 /** The one member of the machine's log detail this test reads: the operation name. */
 const LogDetailSchema = v.object({ op: v.optional(v.string()) });
 
+/**
+ * What the run's real-route relay answered.
+ *
+ * @remarks
+ * The transport parses the object's answer and returns the decision, so this is either that
+ * decision (an allow with its grant id and result, or a denial the object or the machine made) or
+ * the typed failure the path reports when it could not relay.
+ */
+type RelayAnswer =
+  | { readonly ok: true; readonly answer: GrantedAnswer }
+  | {
+      readonly ok: false;
+      readonly code: "unavailable" | "grant_invalid" | "invalid_request" | string;
+    };
+
 /** One line the machine logged, as this test reads it. */
 interface MachineLogLine {
   readonly op: string | undefined;
@@ -87,9 +107,20 @@ interface MachineLogLine {
   readonly status: number;
 }
 
-/** What one chain gives a test: the mutation, the machine, and the object. */
+/**
+ * What one chain gives a test: the mutation, the machine, and the object.
+ *
+ * @remarks
+ * `relay` reaches the object the way the agent does: it asks the object for the run's granted path
+ * (which mints the run's token), relays the call through that path's own transport, and so posts the
+ * object's real `/rpc/conversations/<id>/tool` route with the token. Nothing here calls the object's
+ * internal test seam: the route's token check, the body parse, the relay and the audit are all the
+ * product's, which is the lesson 0226 wrote down ("本番の部品同士を突き合わせる").
+ */
 interface Chain {
   readonly send: (text: string, conversationId?: string) => Promise<ExecutionResult>;
+  /** Relay one granted call through the run's own transport to the object's real route. */
+  readonly relay: (request: GrantedCallRequest) => Promise<RelayAnswer>;
   /** What the machine's log recorded: the operations it served, and the status of each. */
   readonly machineLog: () => readonly MachineLogLine[];
   readonly agent: MachineAgent;
@@ -180,6 +211,10 @@ async function chain(): Promise<Chain> {
     url.port = local.port;
     return await fetch(url, init);
   };
+  // The object hands the runtime the runs' granted-path factory (its fifth argument). This test
+  // keeps it, so a relay can go through the run's own path and its transport — the same object the
+  // agent's tool hooks would hold — rather than through the object's internal test seam.
+  let grantPathOf: RunGrantPathFactory | undefined;
   const object = new Session(
     state,
     {
@@ -190,7 +225,8 @@ async function chain(): Promise<Chain> {
       HNS_CONTROL_PLANE_KEY: SEED,
       HNS_SESSION_SECRET: "test-secret-0123456789abcdef0123456789",
     },
-    async () => {
+    async (_state, _env, _hooks, _audit, of) => {
+      grantPathOf = of;
       const fake: AgentSession = {
         closed: new Promise(() => undefined),
         createConversation: async () => {
@@ -240,6 +276,37 @@ async function chain(): Promise<Chain> {
         },
       });
     },
+    async relay(input) {
+      // The run's granted path exists only once a turn was admitted under a snapshot: asking for it
+      // is what a tool call does in production, and it mints the run's route token.
+      const path = grantPathOf?.(CONVERSATION_ID);
+      if (path === undefined) {
+        // The object's granted path is closed (no admitted snapshot): the route answers
+        // `unavailable` to any call, so this test reports the same answer rather than a guess.
+        return { ok: false, code: "unavailable" };
+      }
+      // The source is the object's issuer; the transport is the object's route with the run's token.
+      const contract = await contractOf();
+      const issued = await path.source.issue({
+        toolId: "read_file",
+        toolVersion: contract.manifest.version,
+        manifestHash: contract.manifestHash,
+        maxBytes: input.bytes,
+      });
+      if (!issued.ok) {
+        return {
+          ok: false,
+          code: issued.decision.outcome === "deny" ? issued.decision.code : "invalid_request",
+        };
+      }
+      const answer = await path.transport.call({
+        call: v.parse(ToolCallSchema, input.call),
+        contract,
+        bytes: input.bytes,
+        grant: issued.grant,
+      });
+      return { ok: true, answer };
+    },
     machineLog: () => machineLog,
     agent,
     object,
@@ -251,17 +318,20 @@ async function chain(): Promise<Chain> {
   };
 }
 
+/** The read_file tool's contract, as the agent builds it (the source's manifest check uses it). */
+async function contractOf(): Promise<Awaited<ReturnType<typeof manifestFor>>> {
+  const tool = WORKSPACE_TOOLS.find((candidate) => candidate.toolId === "read_file");
+  if (tool === undefined) throw new Error("no read_file tool");
+  return await manifestFor(tool);
+}
+
 /** The one read_file call this test relays, as the agent builds it. */
 async function readCall(): Promise<{
   readonly call: unknown;
   readonly manifest: unknown;
   readonly bytes: number;
 }> {
-  const tool = (await import("@hns/agent")).WORKSPACE_TOOLS.find(
-    (candidate) => candidate.toolId === "read_file",
-  );
-  if (tool === undefined) throw new Error("no read_file tool");
-  const contract = await (await import("@hns/agent")).manifestFor(tool);
+  const contract = await contractOf();
   return {
     call: {
       v: 1,
@@ -288,9 +358,10 @@ test("sendMessage opens 0226's granted path and the machine runs the call", asyn
       },
     });
     // The object admitted a policy: this is what a send without a snapshot would never do. The only
-    // way to observe it from outside is the grant it enables, which the next lines ask for.
-    const relayed = await fixture.object.relayForTest(CONVERSATION_ID, await readCall());
-    if (!relayed.ok) throw new Error("the relay failed: " + relayed.code + " " + relayed.message);
+    // way to observe it from outside is the grant it enables, so the run's granted path asks for one
+    // and relays the call **through the object's own route** (with the run's token).
+    const relayed = await fixture.relay(await readCall());
+    if (!relayed.ok) throw new Error("the relay failed: " + relayed.code);
     expect(relayed.answer.decision.outcome).toBe("allow");
     // The machine served the call: one line per request, the tool one on /rpc.
     // The log's path is the RPC path when the granted call is answered before a file path is
@@ -307,6 +378,35 @@ test("sendMessage opens 0226's granted path and the machine runs the call", asyn
     // The grant the machine spent is the same id: the object's ledger and the machine agree.
     const ledger = fixture.opened.rows("SELECT grant_id FROM session_grants");
     expect(ledger.map((row) => String(row["grant_id"]))).toContain(String(audit[0]?.["grant_id"]));
+  } finally {
+    await fixture.close();
+  }
+});
+
+// Catches: the object's route relaying a call that does not hold the run's token. The send face is
+// what opens the granted path; the token it mints is what proves the caller is the run. A call
+// without it must be refused before anything is issued or relayed (0226's NB2, from the send side).
+test("the object's route refuses a granted call without the run's token", async () => {
+  const fixture = await chain();
+  try {
+    expect((await fixture.send("read a.txt")).data).toMatchObject({
+      sendMessage: { __typename: "SendMessagePayload" },
+    });
+    // Reach the real route directly, with no token: the send above opened the run's path, so the
+    // refusal is the token check and not a closed path.
+    const call = await readCall();
+    const response = await fixture.object.fetch(
+      new Request("https://session/rpc/conversations/" + CONVERSATION_ID + "/tool", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(call),
+      }),
+    );
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ ok: false, code: "forbidden_internal" });
+    // Nothing was issued and nothing reached the machine.
+    expect(fixture.opened.rows("SELECT grant_id FROM session_grants")).toHaveLength(0);
+    expect(fixture.machineLog()).toHaveLength(0);
   } finally {
     await fixture.close();
   }

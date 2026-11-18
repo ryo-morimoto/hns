@@ -68,6 +68,15 @@ export interface ConversationPort {
    *
    * @param input - The conversation and the text.
    * @param subject - The verified session's subject.
+   *
+   * @remarks
+   * **The subject is not used for authorization today.** The model has no per-conversation owner
+   * (a conversation names its project, and a project has no `created_by`), so the check this port
+   * performs is that a live conversation row exists and its project exists; any session may send to
+   * any indexed conversation of this deployment (`docs/contracts/auth.md`, the same open
+   * authorization 0224's `requestGrant` has). The parameter is here, and typed, because it **is**
+   * the fact an authorization will be made from: when a project gains an owner, the owner check
+   * belongs at the top of `send`, before an object is addressed, and the signature does not change.
    * @returns The turn, or the typed refusal.
    *
    * @remarks
@@ -142,7 +151,7 @@ function refusalOf(code: string | undefined, message: string | undefined): SendM
  */
 export function conversationPortOver(options: ConversationPortOptions): ConversationPort {
   return {
-    async send(input, _subject) {
+    async send(input, subject) {
       const conversationId = v.safeParse(ConversationIdSchema, input.conversationId);
       if (!conversationId.success) {
         return {
@@ -158,10 +167,21 @@ export function conversationPortOver(options: ConversationPortOptions): Conversa
       if (conversation === undefined) {
         return { ok: false, code: "not_found", message: "No conversation has this id." };
       }
+      const requester = subject;
       const project = await options.project(conversation.projectId);
       if (project === undefined) {
         return { ok: false, code: "not_found", message: "No project has this id." };
       }
+      // The requester is named at the place the owner check will go: today there is no owner to
+      // compare it with, and the object's audit row records the turn's workspace and session but not
+      // who asked, so this face logs it (an id, never a secret) beside the conversation it names.
+      console.log(
+        "graphql: sendMessage",
+        options.requestId,
+        String(requester),
+        String(conversation.id),
+        String(project.id),
+      );
       const document = await options.policy.activeDocument(project.id);
       if (!document.ok) {
         return {

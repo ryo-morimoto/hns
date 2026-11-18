@@ -28,7 +28,8 @@ granted tool path は **`HNS_AGENT_URL` / `HNS_MACHINE_ID` / `HNS_CONTROL_PLANE_
 `src/do/tool-path-mode.ts` の `toolPathMode` が唯一の判定で、**全部ある = granted / 全部無い = Phase 0 / 一部だけ = 起動時に fail**
 （edge は全経路 503、Session は `#initialize` で throw して 503）。**黙って Phase 0 に落ちない**。
 エラーの文言は**どの binding が足りないか**を名指しし、**値を出さない**。deploy は `HNS_MACHINE_ID` の binding を
-dry-run の一覧に出す（staging / production では必須、development は既定値）。
+dry-run の一覧に出す（**development でも必須**。既定値を置くと、ツールを渡すつもりの開発 deployment が
+名指ししていない machine に繋ぐ）。`npm run deploy:check` は `HNS_MACHINE_ID=<id>` を要る。
 
 ## 上限
 

@@ -55,19 +55,16 @@ const httpsUrl = (value: string, mode: string): string => {
   return value;
 };
 
-/** The machine id development addresses: the one a local agent enrolls with. */
-const DEV_MACHINE_ID = "machine-dev";
-
 /**
  * Resolve the deployment for a Cloudflare CLI mode.
  *
  * @remarks
- * development is local and has defaults; staging and production require an https agent URL, a
- * machine id, and a model. An unknown mode throws instead of falling back to production.
+ * development is local and has a default agent URL and model; staging and production require an
+ * https agent URL and a model. An unknown mode throws instead of falling back to production.
  *
- * `machineId` is required where `HNS_AGENT_URL` is: the three bindings of the granted tool path are
- * a set (0270n), and a deploy that declared the URL and the key but no id would build a Worker that
- * refuses every request at start.
+ * `machineId` is required in **every** mode, including development: the three bindings of the
+ * granted tool path are a set (0270n), and a default here would let a development Worker that meant
+ * to grant tools address a machine it did not name (wrong grants, or none). An operator states it.
  */
 export const deploymentFor = (
   mode: string | undefined,
@@ -89,7 +86,7 @@ export const deploymentFor = (
       env,
       workerName,
       agentUrl: agentUrl ?? "http://127.0.0.1:8788",
-      machineId: machineId ?? DEV_MACHINE_ID,
+      machineId: required(machineId, "HNS_MACHINE_ID", selected),
       model: model ?? "faux/echo",
     };
   }

@@ -3,7 +3,7 @@ import { GATEWAY_ROUTES } from "../../../packages/server/src/gateway/providers.t
 import { deploymentFor } from "../modes.ts";
 import { gatewayWorkerFor } from "./cloudflare.config.ts";
 
-const development = () => deploymentFor("development", undefined, undefined);
+const development = () => deploymentFor("development", undefined, undefined, "machine-dev");
 
 test("the gateway is its own worker on the mode's database", () => {
   const worker = gatewayWorkerFor(

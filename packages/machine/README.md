@@ -105,7 +105,7 @@ maxBlobBytes / created）を返す。pack は `POST /rpc/checkpoint/<runId>/pack
 ```ts
 import { GrantCounter, authorizeGrantedCall, fetchControlPlaneKeys } from "@hns/machine";
 
-const keys = await fetchControlPlaneKeys({ url, fetch, session }); // enrollment で 1 回
+const keys = await fetchControlPlaneKeys({ url, fetch, session }); // 0148 の鍵面から 1 回
 const counter = new GrantCounter(join(homedir(), ".config", "hns", "grants"));
 const { decision } = await authorizeGrantedCall({
   grant,
@@ -123,7 +123,10 @@ const { decision } = await authorizeGrantedCall({
 - **検証**（`verifyGrant`）: このマシン宛か → 契約の `authorizeCall`（署名 → alg → 失効 → 期限 → epoch →
   manifest / tool / version → scope → exact）→ 提示された `activePolicy` と `epoch` / `policyHash` の一致。
   結果は `PolicyDecision`（例外を投げない）。`activePolicy` を渡されなければ `policy_denied`（fail closed）。
-- **鍵**: `GET /api/machines/keys`（0148）が配る control-plane の公開鍵を enrollment 時に取得し、
+- **鍵**: `GET /api/machines/keys`（0148）が配る control-plane の公開鍵を、**ホストのプログラムが**
+  `fetchControlPlaneKeys` で取得して `startMachineAgent` の `controlPlane` に渡す（**`hns-machine run` は
+  まだこの関数を使わない**：CLI は `--control-plane-key` の seed から公開 half を導出するか
+  `<configDir>/control-plane.json` を読む。鍵面から取る口は follow-up）。machine はその鍵で
   grant の `keyId`（`sha256Hex(JCS(base64url(公開鍵)))` の先頭 32 hex）で選ぶ。**grant 応答の鍵は使わない**
   （TOFU にしない）。無い・読めない・不一致は `grant_invalid`。
 - **カウンタ**: `<configDir>/grants/<grantId>.json`（0600、ディレクトリ 0700）に `calls` / `bytes` を置き、
@@ -151,16 +154,17 @@ hns-machine run [--enrollment <file|->] [--config-dir <dir>] [--control-plane-ke
 
 ## 起動した / していない（0270n）
 
-| 面                                                              | 今この面は起動するか | 誰が呼ぶか                                                                         |
-| --------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------- |
-| machine の agent（`startMachineAgent`）                         | ✓                    | `hns-machine run`（人が 1 コマンド）                                               |
-| machine の enrollment（device 鍵と公開鍵）                      | ✓                    | `hns-machine enroll` → 人が `registerMachine` に貼る                               |
-| 署名付き health / probe（`/api/machines/keys` / 0148 の probe） | ✓                    | `Query.machines` の読み（throttle）                                                |
-| signed wire（`/rpc` の read / write / checkpoint / exec）       | ✓                    | `Workspace` DO と `Session` DO の relay                                            |
-| capability grant の検証（0225）                                 | ✓                    | agent の `op: "tool"`（0226 の relay から）                                        |
-| artifact mirror の push（0246）                                 | ✗                    | **Worker → machine の push 配線が無い**（0246 の Result が 0249 の受入にしている） |
-| exec の seccomp（0194）                                         | ✗                    | 製品の exec に fd を渡す口が無い（0194 の Result の follow-up）                    |
-| enrollment token（machine が自分で enroll）                     | ✗                    | 設計が未着手（0148 の follow-up）                                                  |
+| 面                                                                        | 今この面は起動するか | 誰が呼ぶか                                                                         |
+| ------------------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------- |
+| machine の agent（`startMachineAgent`）                                   | ✓                    | `hns-machine run`（人が 1 コマンド）                                               |
+| machine の enrollment（device 鍵と公開鍵）                                | ✓                    | `hns-machine enroll` → 人が `registerMachine` に貼る                               |
+| 署名付き health / probe（`/api/machines/keys` / 0148 の probe）           | ✓                    | `Query.machines` の読み（throttle）                                                |
+| signed wire（`/rpc` の read / write / checkpoint / exec）                 | ✓                    | `Workspace` DO と `Session` DO の relay                                            |
+| capability grant の検証（0225）                                           | ✓                    | agent の `op: "tool"`（0226 の relay から）                                        |
+| artifact mirror の push（0246）                                           | ✗                    | **Worker → machine の push 配線が無い**（0246 の Result が 0249 の受入にしている） |
+| exec の seccomp（0194）                                                   | ✗                    | 製品の exec に fd を渡す口が無い（0194 の Result の follow-up）                    |
+| enrollment token（machine が自分で enroll）                               | ✗                    | 設計が未着手（0148 の follow-up）                                                  |
+| `run` が `GET /api/machines/keys` から鍵を取る（`fetchControlPlaneKeys`） | ✗                    | CLI は seed か `control-plane.json` を読む。鍵面から取る口は follow-up             |
 
 ## 開発
 
