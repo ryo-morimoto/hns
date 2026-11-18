@@ -1,6 +1,6 @@
 # 0237: GraphQL に文書プレビューとエンジン状態を足す
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D059, D103, docs/office.md
@@ -26,21 +26,21 @@ DO の行に乗せる。edge の 1 リクエストは 10 秒なので、**生成
 
 ## Acceptance criteria
 
-- [ ] `documentPreview(path)` は `DocumentPreviewResult = DocumentPreview | OfficeFailure` を返す
+- [x] `documentPreview(path)` は `DocumentPreviewResult = DocumentPreview | OfficeFailure` を返す
       （`not_authorized` は union の失敗側。7 状態に無理に詰めない）
-- [ ] `requestDocumentPreview(path)` は、`officeEngine` の能力で**形式が対象外なら `unsupported` 行**、**manifest が無ければ `disabled` 行**を作り、
+- [x] `requestDocumentPreview(path)` は、`officeEngine` の能力で**形式が対象外なら `unsupported` 行**、**manifest が無ければ `disabled` 行**を作り、
       それ以外（machine 不達を含む）は `queued` 行 + alarm を arm して**即座に返る**（edge の 10 秒に収まる。engine 照会は短い timeout）
-- [ ] alarm が行を `generating` にし、machine を呼び、`ready` / `failed` を書く。結果は行に残る
-- [ ] 同じ `(path, version)` の request は冪等（queued / generating / ready の行を再利用）。
+- [x] alarm が行を `generating` にし、machine を呼び、`ready` / `failed` を書く。結果は行に残る
+- [x] 同じ `(path, version)` の request は冪等（queued / generating / ready の行を再利用）。
       **終端行（`disabled` / `unsupported` / `failed`）は request 時に置換する**（pack 導入後に再 request できる）
-- [ ] machine に届かないときは `stale`。alarm が再試行し、上限で `failed`（engine_unavailable）に倒す
-- [ ] alarm は既存の wake と office の TTL を**合成**する（`min`。idle で消えない）
-- [ ] `officeEngine` は union（`OfficeEngineAvailable | OfficeEngineUnavailable`）
-- [ ] 失敗は `OfficeErrorCode` enum + `OfficeFailure`
-- [ ] `GET /api/office/preview?workspaceId=…&path=…&v=…` が Session 認可で、machine の `GET /artifact` を range で引いて
+- [x] machine に届かないときは `stale`。alarm が再試行し、上限で `failed`（engine_unavailable）に倒す
+- [x] alarm は既存の wake と office の TTL を**合成**する（`min`。idle で消えない）
+- [x] `officeEngine` は union（`OfficeEngineAvailable | OfficeEngineUnavailable`）
+- [x] 失敗は `OfficeErrorCode` enum + `OfficeFailure`
+- [x] `GET /api/office/preview?workspaceId=…&path=…&v=…` が Session 認可で、machine の `GET /artifact` を range で引いて
       ストリームする（バッファしない・署名 URL を作らない）
-- [ ] `office.job` を `EVENT_NAMES` に追加し、監査イベントを 1 本出す（本文なし）
-- [ ] 同じ path の古い版の行は、request 時に削除する
+- [x] `office.job` を `EVENT_NAMES` に追加し、監査イベントを 1 本出す（本文なし）
+- [x] 同じ path の古い版の行は、request 時に削除する
 
 ## テスト条件
 
@@ -167,3 +167,16 @@ flag で隠す。0238 が使い始めたら既定で有効。
 - 設計レビュー: issue-reviewer / **PASS with comments**（2026-11-17、5 ラウンド。blocking 0）
 - blocking: なし（R1〜R10 の整合修正を反映済み）
 - 次アクション: 0234 → 0235 → 0236 の順で実装レーンへ（0240 / 0242 は設計レビューで agreed に）
+
+## Result
+
+- verdict: **PASS**（reviewer-0237。FAIL 2 回 —— **GraphQL → object の request が実経路で 0 本**（port がヘッダを付けず、object がフォールバックで通していた）、**route と GraphQL で object の解決関数が違う**（`default` の project で別 object）—— を直して PASS）
+- HEAD: 30447a5（main に ff 統合）。gate は **`HNS_REQUIRE_OFFICE_PACK=1` で** exit 0（**1957 tests / 1958**、main で 206.1s）。
+- **面**: `documentPreview(path)` は `DocumentPreviewResult = DocumentPreview | OfficeFailure`（**`not_authorized` は失敗側**、7 状態に詰めない）。`requestDocumentPreview(path)` は **engine 照会 3 秒**で `disabled` / `unsupported` / `queued + alarm` を即返す（**edge の 10 秒に収まる**）。`officeEngine` は union。
+- **alarm**: `generating` → machine `op:"office"` → `ready` / `failed`。**machine 不達は `stale` → 30 秒 × 3 → `failed(engine_unavailable)`**（**`disabled` にしない**）、**行は残り再 request で置換できる**。**`stale` の再試行は `createdAt + TTL` の締め切りで有界**（**締め切り超過は `failed(engine_timeout)`、alarm がそれ以上立たない**——**alarm は D049 の課金対象**なので、これは design の不足を直したもの）。
+- **冪等**: `(path, version)` で queued / generating / stale は reuse、**終端行は request 時に置換**、**新版 request で旧版行は同一 transaction で DELETE**。
+- **`GET /api/office/preview`**: **edge の Session 認可 → D1 で Session object 名に解決 → object の `/rpc/office/preview` に body を流したまま forwarding**。**object 名を決めるのは `office/route.ts` の 1 関数だけ**（port / edge route / `previewUrl` が同じ関数を読む）。**object は query と `x-hns-session-name` の両方が自分の名前でなければ 404**（**フォールバックなし**）。**machine の 8 MiB range で引き、バッファしない**、**署名 URL を作らない**、**range 失敗で `controller.error`**（200 で切らない）。
+- **実経路 2 本**: ①`edge → GraphQL → port → object → alarm → 実 machine / 実 pack → %PDF-`（**request が GraphQL から流れる**、`HNS_REQUIRE_OFFICE_PACK=1`）②C9 の締め切り / 再試行 / 二重認可の 4 通り / 行なし disabled。
+- **レビューで直したもの**: ①GraphQL → object の request の実経路が無かった ②route と GraphQL で object 名の解決が違った ③**二重認可のヘッダ側が一度も実行されていなかった** ④probe の結果を reuse 経路で捨てていた ⑤**C9 の TTL が live 経路で効かず、alarm が 30 秒ごとに起き続けていた** ⑥NUL チェックが `"\u0000"` の 6 文字を見ていて**実 NUL を通していた** ⑦`SEAMS_EXEMPT` という**存在しない名前**をコメントが指していた。
+- **`audit-probe.test.ts` の flake は本 issue のせいではない**（lead が測った: base で 10 回 + server 全体 2 回で**再現せず**、落とす値の **12 文字のランダム接尾辞が `v1` を含む確率は約 0.84%**）。**assertion の書き方の欠陥**として別 issue で直す。
+- **未接続 / 残件**: ①**「未要求」を code で区別できない**（行が無い read も `engine_unavailable` + 固定文言。契約の穴）②**8 MiB range の実経路は未踏**（実 pack の fixture が 8 MiB 未満。`office-artifact` の fake で 31 MB → 8+8+8+7 を固定）③**`workspaceId` は任意**（省略時 `not_authorized`、fail closed）④**`seams.test` は `office` を名前で除外するので、その名前の seam の production 混入を検出しない**（TSDoc と本 Result に明記）。
