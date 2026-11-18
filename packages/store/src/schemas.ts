@@ -507,8 +507,12 @@ const at = v.string();
  *
  * @remarks
  * `state`, `kind`, and `priority` must be one of the core vocabularies; an unknown value throws
- * rather than falling back. The store does not check a transition here — that is
- * `assertTrailTransition` in the repository, because a row does not know where it came from.
+ * rather than falling back. This schema checks a single row and knows nothing about where the row
+ * came from, so it cannot check a transition: that is `trails.transition` in the repository,
+ * which reads the stored state and asks `canTrailTransition` before it writes.
+ *
+ * `title` and `id` are non-empty. The table has no length CHECK beyond that: an empty title is
+ * the one malformation the schema can refuse on its way in, and it does.
  */
 export const TrailRowSchema: v.GenericSchema<unknown, Trail> = v.object({
   id: v.pipe(text, v.minLength(1)),

@@ -369,18 +369,6 @@ const TRAIL_TRANSITIONS: Record<TrailState, readonly TrailState[]> = {
 };
 
 /**
- * The transition table, for the store and for the test that pins it.
- *
- * @internal
- * @remarks
- * Exported because the store imports core at run time (the test alias maps `@hns/core` to source,
- * the build to dist) and because the test that pins the table needs the thing it pins. It is
- * deliberately not part of `@hns/core`'s own tests' input: the expected table is written out.
- */
-export const TRAIL_TRANSITIONS_FOR_TEST: Readonly<Record<TrailState, readonly TrailState[]>> =
-  TRAIL_TRANSITIONS;
-
-/**
  * Whether a Trail may move from one state to another.
  *
  * @param from - The Trail's current state.
@@ -469,4 +457,42 @@ export function isTrailOpen(state: TrailState): boolean {
  */
 function assertNever(value: never): never {
   throw new Error("unexpected trail state: " + String(value));
+}
+
+// The table is not exported: it is an implementation detail a caller reaches through
+// `canTrailTransition`, and a test-only export on the package's public surface would be shipped.
+// The in-source test below runs it instead, so the table it pins is the one this module uses.
+if (import.meta.vitest) {
+  const { expect, test } = import.meta.vitest;
+  // The expected table is written out, not read from the module: a test that compared the
+  // implementation's own table with itself would agree with any edit to it.
+  const EXPECTED: Readonly<Record<TrailState, readonly TrailState[]>> = {
+    draft: ["active", "abandoned"],
+    active: ["in_review", "abandoned"],
+    in_review: ["active", "merged", "abandoned"],
+    merged: ["observing"],
+    observing: ["active", "closed"],
+    closed: [],
+    abandoned: [],
+  };
+  test("the Trail transition table is the one the model names, and it has a row per state", () => {
+    expect(TRAIL_TRANSITIONS).toStrictEqual(EXPECTED);
+    expect(Object.keys(TRAIL_TRANSITIONS).sort()).toStrictEqual([...TRAIL_STATES].sort());
+  });
+  // Catches: a move the diagram draws being refused, or one it does not draw being allowed.
+  test("canTrailTransition answers the table, for every ordered pair of states", () => {
+    for (const from of TRAIL_STATES) {
+      for (const to of TRAIL_STATES) {
+        const legal = EXPECTED[from].includes(to);
+        expect(TRAIL_TRANSITIONS[from].includes(to), from + " -> " + to).toBe(legal);
+        expect(canTrailTransition(from, to), from + " -> " + to).toBe(legal);
+        // A state never transitions to itself: staying put is not a move the table records.
+        if (from === to) expect(legal, from).toBe(false);
+      }
+    }
+  });
+  // Catches: the refusal the issue names — a merged Trail must not be abandoned.
+  test("a merged Trail cannot be abandoned", () => {
+    expect(canTrailTransition("merged", "abandoned")).toBe(false);
+  });
 }

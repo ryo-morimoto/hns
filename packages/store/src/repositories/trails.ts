@@ -113,10 +113,24 @@ export type TrailRowValue = Trail & { readonly refused: false };
  * Trails: the unit of work (D104), the rows a Task used to be.
 
  * @remarks
- * **Every method parses what it returns** through `parseTrail`, so a hand-edited row throws at the
- * boundary instead of flowing on as a mistyped value. **No method throws for an expected
- * refusal**: a missing row, an illegal move, or a change without a difference is a
- * {@link TrailWriteRefusal} value.
+ * **Every answer is parsed into the model, and a Trail that does not parse is a value.** The
+ * reader is split two ways, and the split is deliberate:
+ *
+ * - `get`, `list`, `create`, `update`, and `transition` read a `trails` row through
+ *   {@link TrailRowSchema} with `v.safeParse`, and answer `corrupt_row` when it fails, because
+ *   their callers can act on "this row is unreadable". They do not call `parseTrail`, which
+ *   throws for the same input: the schema is the one check, and these methods turn its failure
+ *   into a value.
+ * - `listChanges` calls `parseTrailChange`, which throws a `ValiError`. It is the **only**
+ *   throwing read of this repository today; a caller that needs a refusal value for a Change
+ *   gets one when it arrives, not before (no surface reads a Change list yet).
+ *
+ * `create` also parses the row it is about to write with `parseTrail` first, so a malformed
+ * Trail is refused before it reaches SQLite. `addChange` parses the Change it is about to write
+ * with `parseTrailChange` the same way.
+ *
+ * **No method throws for an expected refusal**: a missing row, an illegal move, or a change
+ * without a difference is a {@link TrailWriteRefusal} value.
  *
  * **A state move is one conditional `UPDATE`**: `WHERE id = ? AND state = <the state read>`, so a
  * concurrent move loses rather than overwriting a state nobody read, and the caller gets
