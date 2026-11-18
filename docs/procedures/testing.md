@@ -170,6 +170,9 @@ e2e/                                      # Playwright。pages / fixtures / jour
 - push 時は `npm run gate pre-push` が全パッケージに全段階（integration・build・knip を含む）を回す。定義は [tools/gate/stages.ts](../../tools/gate/stages.ts)、選別は [tools/gate/select.ts](../../tools/gate/select.ts)。
 - CI も同じコマンド。テストのためだけの別ランナー・別設定を作らない。
 - E2E は `npm run check` に入れない。`npm run test:e2e` で 3 構成を回し、CI は 0041 の後に別ジョブ（PR はスモーク × 3 構成、nightly は全部 × 3 構成）にする（0043 / D101）。
+- **mutation probe（実装を壊してテストが落ちるか）はリポジトリのルートから `npx vitest run --project <name> <path>` で回す**。
+  パッケージのディレクトリで `npx vitest run <path>` を叩くと、ルートの `vitest.config.ts` の alias（`@hns/*` → `src`）が
+  効かず `dist` に解決されるため、**壊した実装が素通りして「検出」と誤判定する**（0271n のレビューで実際に起きた）。
 
 ## 移行（2026-11-10）
 
