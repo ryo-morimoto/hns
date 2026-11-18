@@ -77,6 +77,16 @@ export interface OfficePreviewRow {
   readonly engine: string | null;
   /** When the row last changed, epoch milliseconds. */
   readonly updatedAt: number;
+  /**
+   * When the row was created, epoch milliseconds (0237, C9).
+   *
+   * @remarks
+   * The row's **deadline** is this plus {@link OFFICE_ROW_TTL_MS}, and a retry does not move it:
+   * the TTL is the bound on how long one preview may keep the alarm, not a pause between two
+   * attempts. A row past it is answered `failed(engine_timeout)` by the next pass instead of
+   * being retried forever (the object's alarm costs a request each time it is set).
+   */
+  readonly createdAt: number;
   /** The artifact key's params hash: what the route reads a preview by. */
   readonly paramsHash: string;
   /** The artifact key's path hash. */
@@ -98,6 +108,8 @@ export interface OfficeRowWrite {
   readonly attempts?: number | undefined;
   readonly jobId?: string | null | undefined;
   readonly now: number;
+  /** When the row was created; defaults to `now` for a row this write creates. */
+  readonly createdAt?: number | undefined;
 }
 
 /** The identity of one row, which only the request that creates it writes. */
@@ -174,6 +186,7 @@ const RowSchema = v.object({
   bytes: v.nullable(v.number()),
   engine: v.nullable(v.string()),
   updatedAt: v.number(),
+  createdAt: v.number(),
   paramsHash: v.pipe(v.string(), v.regex(OFFICE_PARAMS_HASH_PATTERN, "a params hash is 16 hex")),
   pathHash: v.pipe(v.string(), v.regex(OFFICE_PATH_HASH_PATTERN, "a path hash is 16 hex")),
   attempts: v.number(),
@@ -235,6 +248,7 @@ function rowOf(raw: OfficeSqlRow): OfficePreviewRow {
     bytes: numberOf(raw, "bytes"),
     engine: textOf(raw, "engine"),
     updatedAt: numberOf(raw, "updated_at"),
+    createdAt: numberOf(raw, "created_at"),
     paramsHash: textOf(raw, "params_hash"),
     pathHash: textOf(raw, "path_hash"),
     attempts: numberOf(raw, "attempts"),
@@ -260,15 +274,16 @@ export function createOfficeRows(storage: OfficeRowStorage): OfficeRows {
       "workspace_id TEXT NOT NULL, path TEXT NOT NULL, version TEXT NOT NULL, " +
       "format TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, " +
       "code TEXT, message TEXT, pages INTEGER, bytes INTEGER, engine TEXT, " +
-      "updated_at INTEGER NOT NULL, params_hash TEXT NOT NULL, path_hash TEXT NOT NULL, " +
+      "updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
+      "params_hash TEXT NOT NULL, path_hash TEXT NOT NULL, " +
       "attempts INTEGER NOT NULL, job_id TEXT, " +
       "PRIMARY KEY (workspace_id, path, version))",
   );
 
   const INSERT =
     "INSERT OR REPLACE INTO office_preview (workspace_id, path, version, format, operation, " +
-    "status, code, message, pages, bytes, engine, updated_at, params_hash, path_hash, attempts, " +
-    "job_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    "status, code, message, pages, bytes, engine, updated_at, created_at, params_hash, " +
+    "path_hash, attempts, job_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
   return {
     async rowsFor(workspaceId, path) {
@@ -329,6 +344,9 @@ export function createOfficeRows(storage: OfficeRowStorage): OfficeRows {
           write.bytes ?? null,
           write.engine ?? null,
           write.now,
+          // The deadline is fixed when the row is created: a rewrite keeps the moment it was
+          // created, so a retry cannot extend it (0237, C9).
+          write.createdAt ?? write.now,
           key.paramsHash,
           key.pathHash,
           write.attempts ?? 0,

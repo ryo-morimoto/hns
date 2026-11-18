@@ -389,13 +389,45 @@ export function nextOfficeAlarm(
   remaining: readonly OfficePreviewRow[],
   at: number,
 ): number | undefined {
-  let earliest: number | undefined;
+  const row = earliestOfficeRow(remaining, at);
+  return row === undefined ? undefined : officeAlarmFor(row, at);
+}
+
+/**
+ * The moment one row needs the alarm (0237, C9).
+ *
+ * @param row - An unfinished row.
+ * @param at - The clock the pass runs at.
+ * @returns **`min(wake's moment, the row's deadline)`**: the earlier of the retry the row is due
+ * for and `createdAt + {@link OFFICE_ROW_TTL_MS}`, never before `at`.
+ *
+ * @remarks
+ * The row's **deadline** is fixed when it was created and a retry does not move it: the TTL is
+ * the bound on how long one preview may keep an alarm, not a pause between attempts. So **even
+ * if the retry pause is later than the deadline, the deadline is the answer**, and the next pass
+ * finds the row past it and answers `failed(engine_timeout)`. Every alarm the object sets is one
+ * request (D049), so this is what makes an unreachable machine cost a bounded number of them
+ * rather than one every retry, forever.
+ */
+export function officeAlarmFor(row: OfficePreviewRow, at: number): number {
+  const due = row.updatedAt + (row.status === "stale" ? OFFICE_RETRY_MS : 0);
+  const deadline = row.createdAt + OFFICE_ROW_TTL_MS;
+  // Never before now (an alarm in the past fires at once) and never past the deadline (the row is
+  // settled then). A deadline that has already passed is now, where the pass settles the row.
+  return Math.max(at, Math.min(due, deadline));
+}
+
+/** The unfinished row the pass must plan for first, or undefined. */
+function earliestOfficeRow(
+  remaining: readonly OfficePreviewRow[],
+  at: number,
+): OfficePreviewRow | undefined {
+  let earliest: { readonly row: OfficePreviewRow; readonly at: number } | undefined;
   for (const row of remaining) {
-    const candidate = row.updatedAt + (row.status === "stale" ? OFFICE_RETRY_MS : 0);
-    if (earliest === undefined || candidate < earliest) earliest = candidate;
+    const moment = officeAlarmFor(row, at);
+    if (earliest === undefined || moment < earliest.at) earliest = { row, at: moment };
   }
-  if (earliest === undefined) return undefined;
-  return Math.min(Math.max(earliest, at), at + OFFICE_ROW_TTL_MS);
+  return earliest?.row;
 }
 
 /**
@@ -431,10 +463,53 @@ export function createOfficePreview(options: OfficePreviewOptions): OfficePrevie
     }
   }
 
+  /**
+   * Settle a row whose deadline passed (0237, C9).
+   *
+   * @param row - The row, still unfinished.
+   * @param attempts - How many attempts it has had.
+   * @returns Nothing; the row is failed with engine_timeout and the audit says so.
+   *
+   * @remarks
+   * The row is not retried past its deadline. `engine_timeout` is the contract code for a job
+   * that did not finish inside its budget, which is exactly what a preview that kept the alarm
+   * for its whole TTL did.
+   */
+  async function settleExpired(row: OfficePreviewRow, attempts: number): Promise<void> {
+    const at = now();
+    const write = failureWrite(
+      "engine_timeout",
+      "The preview was not ready before its deadline.",
+      "failed",
+      at,
+      attempts,
+    );
+    await rows.update(row.workspaceId, row.path, row.version, {
+      ...write,
+      createdAt: row.createdAt,
+    });
+    await options.record?.({
+      jobId: row.jobId ?? "office-expired-" + row.pathHash,
+      path: row.path,
+      version: row.version,
+      inputHash: await sha256Hex(JSON.stringify({ path: row.path, version: row.version })),
+      engineVersion: undefined,
+      ms: Math.max(0, at - row.createdAt),
+      outcome: "failed",
+    });
+  }
+
   /** One attempt for one row: generating, ask, settle. */
   async function attempt(row: OfficePreviewRow): Promise<void> {
     const started = now();
     const attempts = row.attempts + 1;
+    // The deadline is the row's, from its creation: a row past createdAt + TTL is not
+    // retried again. It is answered failed(engine_timeout) and settled, so a machine that
+    // never answers costs a bounded number of alarms (C9: the TTL is the deadline).
+    if (started >= row.createdAt + OFFICE_ROW_TTL_MS) {
+      await settleExpired(row, attempts);
+      return;
+    }
     // The row says it is being worked on, so a poll during a sixty-second conversion reads
     // \`generating\` rather than the \`queued\` it was asked for (C3).
     await rows.update(row.workspaceId, row.path, row.version, {
@@ -447,6 +522,7 @@ export function createOfficePreview(options: OfficePreviewOptions): OfficePrevie
       attempts,
       jobId: row.jobId,
       now: started,
+      createdAt: row.createdAt,
     });
     const job = jobOf(row);
     const inputHash = await sha256Hex(JSON.stringify(job));
@@ -456,7 +532,12 @@ export function createOfficePreview(options: OfficePreviewOptions): OfficePrevie
         ? { kind: "unavailable", detail: "the session has no machine" }
         : await machine.job(job);
     const settle = async (write: OfficeRowWrite): Promise<void> => {
-      await rows.update(row.workspaceId, row.path, row.version, write);
+      // Every write an attempt makes keeps the row's creation moment: it is the deadline the
+      // alarm plans against, and a settle that reset it would extend the row past its TTL.
+      await rows.update(row.workspaceId, row.path, row.version, {
+        ...write,
+        createdAt: row.createdAt,
+      });
       await options.record?.({
         jobId: job.id,
         path: row.path,
@@ -598,6 +679,8 @@ export function createOfficePreview(options: OfficePreviewOptions): OfficePrevie
                 attempts: 0,
                 jobId: null,
                 now: at,
+                // A new job's deadline starts now, with the row.
+                createdAt: at,
               }
             : failureWrite(
                 refusal?.kind === "format" ? "unsupported_format" : "engine_unavailable",

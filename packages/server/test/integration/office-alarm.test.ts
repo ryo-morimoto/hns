@@ -3,7 +3,11 @@ import type { AgentSession } from "@hns/agent/session";
 import { Session } from "../../src/do/session.ts";
 import type { SessionEnv, SessionState } from "../../src/do/state.ts";
 import type { OfficePreviewFace } from "../../src/do/office-job.ts";
-import { OFFICE_MAX_ATTEMPTS, createOfficeRows } from "../../src/do/office-rows.ts";
+import {
+  OFFICE_MAX_ATTEMPTS,
+  OFFICE_RETRY_MS,
+  createOfficeRows,
+} from "../../src/do/office-rows.ts";
 import { createOfficePreview } from "../../src/do/office-job.ts";
 import { SESSION_NAME_HEADER } from "../../src/edge/env.ts";
 import { openSqliteState } from "../support/sqlite.ts";
@@ -245,7 +249,7 @@ test("the alarm gives up on an unreachable machine, and the failed row remains",
     await session.requestDocumentPreview("提案書.docx", VERSION);
     for (let attempt = 0; attempt < OFFICE_MAX_ATTEMPTS; attempt += 1) {
       await session.alarm();
-      clock += 60_000;
+      clock += OFFICE_RETRY_MS;
     }
     const row = await session.documentPreview("提案書.docx", VERSION);
     expect(row).toMatchObject({
@@ -313,6 +317,64 @@ test("an office RPC needs both the name header and the workspace, and both must 
     const accepted = await rpcWith(session, { query: WORKSPACE, header: WORKSPACE });
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toMatchObject({ __typename: "OfficeFailure" });
+  } finally {
+    opened.close();
+  }
+}, 30_000);
+// Catches: a stale row re-arming every retry forever (each alarm is a billed request, D049):
+// once the row is past its deadline the next pass answers failed(engine_timeout), and no alarm
+// is armed for it again. The TTL is the deadline from the row creation, not a retry pause.
+test("a machine that stays down ends at failed(engine_timeout) once the deadline passes", async () => {
+  const opened = openSqliteState();
+  let alarm: number | null = null;
+  const storage = {
+    ...opened.state.storage,
+    getAlarm: async () => alarm,
+    setAlarm: async (at: number) => {
+      alarm = at;
+    },
+    deleteAlarm: async () => {
+      alarm = null;
+    },
+  };
+  let clock = 1_700_000_000_000;
+  const face = createOfficePreview({
+    rows: createOfficeRows(storage),
+    now: () => clock,
+    machine: {
+      // The probe answers, so the row is queued; the job never answers, so it goes stale.
+      probe: async () => ({ kind: "unavailable" }),
+      job: async () => ({ kind: "unavailable", detail: "transport" }),
+    },
+  });
+  const state: SessionState = {
+    id: { name: WORKSPACE },
+    storage,
+    blockConcurrencyWhile: opened.state.blockConcurrencyWhile,
+    abort: () => undefined,
+  };
+  const session = new Session(state, { HNS_ENV: "dev" }, async () => inertSession(), {
+    office: face,
+  });
+  try {
+    await session.ready();
+    await session.requestDocumentPreview("提案書.docx", VERSION);
+    // Retries walk the row forward in its retry pause; none of them may pass the deadline.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      clock += 30_000;
+      await session.alarm();
+      const row = await session.documentPreview("提案書.docx", VERSION);
+      if (row.__typename === "DocumentPreview" && row.status === "failed") break;
+    }
+    // Past the deadline: the next pass must settle the row rather than retry it.
+    clock = 1_700_000_000_000 + 120_000;
+    await session.alarm();
+    const row = await session.documentPreview("提案書.docx", VERSION);
+    expect(row).toMatchObject({ __typename: "DocumentPreview", status: "failed" });
+    if (row.__typename !== "DocumentPreview") throw new Error("expected a row");
+    expect(row.error?.code).toBe("engine_timeout");
+    // And nothing is armed for it any more: the row is settled.
+    expect(alarm).toBeNull();
   } finally {
     opened.close();
   }

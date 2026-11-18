@@ -35,3 +35,13 @@ test("a path inside the workspace is accepted, and an empty workspace is not", (
   });
   expect(officePathOf("", "提案書.docx").ok).toBe(false);
 });
+// Catches: a NUL in a path passing the guard. The check must test the **character**, not the six
+// letters of an escape sequence, so a JSON body a caller sends can spell a real NUL.
+test("a path with a real NUL byte is refused", () => {
+  const withNul = "a" + String.fromCharCode(0) + "b.docx";
+  expect(withNul.length).toBe(8);
+  const checked = officePathOf("project-1", withNul);
+  expect(checked.ok).toBe(false);
+  if (checked.ok) return;
+  expect(checked.failure.code).toBe("not_authorized");
+});

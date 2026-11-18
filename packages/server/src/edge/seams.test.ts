@@ -31,21 +31,32 @@ const SEAMS: Record<keyof SessionDependencies, true> = {
   upgradeResponse: true,
   machineFetch: true,
   officeAgentUrl: true,
-  // The compiler requires this key (the type demands every seam), and the test below reads what
-  // it means: the production table's `office` is the **face's own forwarder** (`worker.ts`), so
-  // the name is present there while the seam this key names is not. The two live on different
-  // tables (`SessionDependencies` has the seam; `HandlerDependencies` has the dependency), and
-  // `SEAMS_EXEMPT` is where the test records that a name can mean both.
+  // Listed because the type demands every seam, and then **excluded from the check**: the
+  // production table's `office` is the face's own forwarder (`worker.ts`), which is the preview
+  // route's production wiring, not a substitution. The seam of that name is on the object's
+  // dependencies, and the dependency of that name is on the face's table.
   office: true,
   open: true,
   cost: true,
 };
 
+/**
+ * The names the check below skips, and why.
+ *
+ * @remarks
+ * `office` is one name for two things: the **seam** on `SessionDependencies` (a test supplies an
+ * office face) and the **production dependency** on `HandlerDependencies` (the edge's own
+ * forwarder for `GET /api/office/preview`, from `worker.ts`). The production table must carry the
+ * second, so the name is present there while the seam is not. The consequence: this test cannot
+ * tell the seam from the dependency by name, so a seam named `office` that reached
+ * `SessionDependencies` would not be caught here — the object's own open path is what keeps it
+ * from being substituted in production.
+ */
+const SEAMS_EXEMPT: ReadonlySet<string> = new Set(["office"]);
+
 test("the production Worker's dependency table carries no seam", () => {
   for (const seam of Object.keys(SEAMS)) {
-    // `office` is the face's own forwarder in the table, not the seam: it is the production
-    // wiring of the preview route, and the seam of that name lives on the object's dependencies.
-    if (seam === "office") continue;
+    if (SEAMS_EXEMPT.has(seam)) continue;
     expect(dependencies).not.toHaveProperty(seam);
   }
 });

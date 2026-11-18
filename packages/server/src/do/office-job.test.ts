@@ -6,6 +6,7 @@ import {
   OFFICE_PROBE_TIMEOUT_MS,
   createOfficePreview,
   nextOfficeAlarm,
+  officeAlarmFor,
   previewUrl,
 } from "./office-job.ts";
 import { OFFICE_MAX_ATTEMPTS, OFFICE_ROW_TTL_MS, createOfficeRows } from "./office-rows.ts";
@@ -438,10 +439,14 @@ test("a request whose probe now says there is no engine replaces its queued row"
 });
 
 // Catches: the alarm arming in the past for a row whose retry already fell due (an alarm that
-// fires at once, a spin) or later than the TTL the object promises (C9 / NB2).
-test("the next alarm is the due moment, clamped to now and to the row TTL", () => {
-  // The bound reads only the state and the moment; a row is that pair for this question.
-  const row = (status: "queued" | "generating" | "stale", updatedAt: number): OfficePreviewRow => ({
+// fires at once, a spin), or arming past the row deadline because a retry moved it (C9, as the
+// reviewer fixed it: the TTL is a deadline from the row creation, not a pause between attempts).
+test("the next alarm is the due moment, and the row deadline bounds it", () => {
+  const row = (
+    status: "queued" | "generating" | "stale",
+    updatedAt: number,
+    createdAt = 0,
+  ): OfficePreviewRow => ({
     workspaceId: WORKSPACE,
     path: PATH,
     version: VERSION,
@@ -454,26 +459,27 @@ test("the next alarm is the due moment, clamped to now and to the row TTL", () =
     bytes: null,
     engine: null,
     updatedAt,
+    createdAt,
     paramsHash: "",
     pathHash: "",
     attempts: 0,
     jobId: null,
   });
-  // A stale row is due after its retry pause; a queued one is due now.
-  expect(nextOfficeAlarm([row("stale", 1_000)], 1_000)).toBe(1_000 + 30_000);
-  expect(nextOfficeAlarm([row("queued", 1_000)], 1_000)).toBe(1_000);
-  expect(nextOfficeAlarm([row("generating", 1_000)], 5_000)).toBe(5_000);
+  const now = 1_000_000;
+  // A stale row is due after its retry pause; a queued or generating one is due now.
+  expect(nextOfficeAlarm([row("stale", now, now)], now)).toBe(now + 30_000);
+  expect(nextOfficeAlarm([row("queued", now, now)], now)).toBe(now);
+  expect(nextOfficeAlarm([row("generating", now, now)], now)).toBe(now);
   // A due moment already passed is clamped to now (never an alarm in the past).
-  expect(nextOfficeAlarm([row("stale", 0)], 10_000_000)).toBe(10_000_000);
-  // A row whose due moment is more than the TTL away is clamped to the TTL (the longest a row
-  // waits), and one inside it keeps its own moment.
-  expect(nextOfficeAlarm([row("stale", 200_000)], 0)).toBe(OFFICE_ROW_TTL_MS);
-  expect(nextOfficeAlarm([row("stale", 20_000)], 0)).toBe(50_000);
+  expect(nextOfficeAlarm([row("stale", 0, now)], now)).toBe(now);
+  // The deadline is created_at + TTL and a **retry does not move it**: a stale row whose retry
+  // falls after the deadline is armed at the deadline, not after it.
+  expect(officeAlarmFor(row("stale", now, now - OFFICE_ROW_TTL_MS + 1_000), now)).toBe(now + 1_000);
+  // A row already past its deadline is due now, where the pass settles it as failed.
+  expect(officeAlarmFor(row("stale", now, now - OFFICE_ROW_TTL_MS - 50_000), now)).toBe(now);
   // The earliest of several rows wins, and no unfinished row leaves nothing to arm.
-  expect(nextOfficeAlarm([row("stale", 0), row("queued", 0), row("generating", 0)], 1_000)).toBe(
-    1_000,
-  );
-  expect(nextOfficeAlarm([], 1_000)).toBeUndefined();
+  expect(nextOfficeAlarm([row("stale", now, now), row("queued", now, now)], now)).toBe(now);
+  expect(nextOfficeAlarm([], now)).toBeUndefined();
 });
 
 // Catches: a Session with no machine at all (no office bindings) answering `queued` for a job

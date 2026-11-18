@@ -46,7 +46,10 @@ export function officePathOf(workspaceId: string, path: string): OfficePathCheck
   if (path.length === 0 || path.length > MAX_PATH_LENGTH) {
     return refuse("invalid_request", "not_authorized", "A path is 1 to 4096 characters.");
   }
-  if (path.includes("\\u0000") || path.includes("\\")) {
+  // The NUL is checked as the character it is. A literal "\u0000" in this source would be the
+  // six characters of an escape sequence, not the byte a path can carry, so a path with a real
+  // NUL (a string a JSON body can hold) would have passed that check.
+  if (path.includes("\0") || path.includes("\\")) {
     return refuse("invalid_request", "not_authorized", "A path has no NUL and no backslash.");
   }
   // An absolute path is not a separate branch: its first segment is empty, and the empty-segment
