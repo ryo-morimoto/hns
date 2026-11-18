@@ -17,14 +17,14 @@ grant を発行しても、実行するマシンが検証しなければ意味�
 
 ## Acceptance criteria
 
-- [ ] `verifyGrant(input)` が署名・alg・期限・epoch・manifestHash・tool/version・scope・exact を検証する
-- [ ] `consume(grantId, calls, bytes)` がアトミックに残量を減らし、超えたら `counter_exhausted`
-- [ ] 状態は `~/.config/hns/grants/` に置き、agent からは見えない。読めない・書けないは拒否
-- [ ] 検証結果は `PolicyDecision` で返し、例外を投げない
-- [ ] `lastEpoch` を保持し、`payload.epoch < lastEpoch` を `epoch_stale` にする
-- [ ] control-plane の公開鍵を 0148 の `GET /api/machines/keys` から取得し、`keyId` で選ぶ。無い・読めない・不一致は拒否
-- [ ] fixture の Ed25519 grant でテストする（Phase 1 は Ed25519 固定）
-- [ ] `npm test -w @hns/machine` と typecheck が通る
+- [x] `verifyGrant(input)` が署名・alg・期限・epoch・manifestHash・tool/version・scope・exact を検証する
+- [x] `consume(grantId, calls, bytes)` がアトミックに残量を減らし、超えたら `counter_exhausted`
+- [x] 状態は `~/.config/hns/grants/` に置き、agent からは見えない。読めない・書けないは拒否
+- [x] 検証結果は `PolicyDecision` で返し、例外を投げない
+- [x] `lastEpoch` を保持し、`payload.epoch < lastEpoch` を `epoch_stale` にする
+- [x] control-plane の公開鍵を 0148 の `GET /api/machines/keys` から取得し、`keyId` で選ぶ。無い・読めない・不一致は拒否
+- [x] fixture の Ed25519 grant でテストする（Phase 1 は Ed25519 固定）
+- [x] `npm test -w @hns/machine` と typecheck が通る
 
 ## テスト条件
 
@@ -66,3 +66,22 @@ grant を発行しても、実行するマシンが検証しなければ意味�
 ## Log
 
 - 2026-11-17: 作成（D091）。
+- 2026-11-18: 実装（lane-0225、HEAD f950f1d、branch issue/0225-machine-verifier）。`packages/machine/src/capability/` に verify / counter / keys / decision。`GrantPayload` に `policyHash` を足し、`authorizeCall` が `epoch` / `policyHash` を activePolicy と照合（lead 承認済みの契約追加）。Result は下。
+## Result
+
+- verdict: **実装完了・レビュー待ち**（lane-0225。HEAD f950f1d、base main 5396e1d）。
+- **gate**: `npm run check` exit 0（**1440 passed / 1 skipped**、main は 1353。テストは減っていない）。commit は pre-commit gate（unit）通過済み。
+- **実装**（`packages/machine/src/capability/`）:
+  - `verify.ts`: `verifyGrant` — このマシン宛か（`machine_invalid`…ではなく `grant_invalid`）→ 契約の `authorizeCall`（署名 → alg → 失効 → 期限 → epoch → manifest / tool / version → scope → exact）→ 提示された `activePolicy` と `epoch` / `policyHash` の一致。`PolicyDecision` を返し、例外は投げない。`activePolicy` 未提示は `policy_denied`（fail closed）。
+  - `counter.ts`: `GrantCounter.consume` — `<configDir>/grants/<grantId>.json`（dir 0700 / file 0600、temp + fsync + rename、grant ごとの in-process lock）。`maxCalls` / `maxBytes` 超過は `counter_exhausted`、**書かずに拒否**。再起動をまたいで数える（テストで別インスタンス／別プロセス）。壊れた JSON・読めない・書けないは拒否（新しい予算にしない）。id がパスを逃げる形は `grant_invalid`。
+  - `keys.ts`: `grantKeyId` / `enrolledGrantKeys` / `fetchControlPlaneKeys`。`GET /api/machines/keys` の公開鍵を `keyId`（`sha256Hex(JCS(base64url(raw)))` の先頭 32 hex = 0224 の signer と一致）で選ぶ。grant 応答の鍵は使わない（TOFU にしない）。無い・読めない・alg 違いは拒否。
+  - `decision.ts`: `authorizeGrantedCall` — verify → consume の順。検証が拒否したら消費しない（0226 が呼ぶ入口）。
+- **契約の追加**（lead 承認）: `GrantPayload.policyHash` と `authorizeCall` の `activePolicy` 照合。epoch の再利用で古い scope が生き残らない。0224 の issuer、ledger、GraphQL `GrantView`、SDL（codegen）も追随。
+- **実経路**: `test/integration/machine-verifier.test.ts` が **実 D1 の policy revision + 実 0224 issuer（実 control-plane 鍵で署名）+ 実 WebCrypto** の grant を machine の verifier に通し、allow / 期限切れ `grant_expired` / 旧 revision `epoch_stale` / `maxCalls` 超過 `counter_exhausted` / scope 外 `unsupported` / 失効 `grant_revoked` / 別 deployment の鍵を拒否、を実測（7 tests）。
+- **mutation**（`test/security/verifier-mutation.test.ts`、5 tests）: 署名を検証しない（grant 自身の鍵を信じる）/ `expiresAt` を見ない / scope を見ない / `maxCalls` を見ない、の 4 種で **product の判定と変異体の判定が分かれる**ことを固定。counter は product の class に bound を注入して外す（実装の書き換えではなく product のパス）。
+- **agent から見えない**: `test/security/verifier-state.test.ts` が 0194 の sandbox で exec し、`~/.config/hns/grants` が list / cat できないことと、その裏で machine は読めることを実測。
+- **未確認 / 判断**:
+  - **実運用の起動点はまだ無い**。`authorizeGrantedCall` を呼ぶのは 0226 の RPC 配線（と制御チャネルの `activePolicy` snapshot）。それまでは machine は grant を検証しない。
+  - カウンタの**プロセス間**の窓: 書き込みは rename で原子的だが、2 プロセスが同時に読むと残量を二重に使える。machine は ROOT ごとに 1 プロセスなので実害は無いが、file lock は入れていない（`docs/capability.md` §5 に追記するかは 0226 で判断）。
+  - gate の `cf dev` 依存 suite（workspace-do / session-do / remote-write）は**並列実行で inspector lock 待ちの 60s timeout に当たる**ことがある（単独では 19s で通る）。私の変更とは無関係。CI の retry 方針は [testing.md](../../docs/procedures/testing.md) の flaky 規則どおり別途（retry で隠さない）。
+  - `grant_invalid`（別マシン宛）は `DENIAL_CODES` に専用 code が無いので流用した。専用 code を足すなら core の表と retry 表を同時に変える（0226 までに判断）。
