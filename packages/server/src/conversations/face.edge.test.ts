@@ -2,8 +2,6 @@ import type { AgentSession } from "@hns/agent/session";
 import type { JsonValue } from "@hns/core";
 import { openSession } from "@hns/agent/session";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
 import { openStore, type D1Binding } from "@hns/store";
 import { openConversationIndex } from "@hns/store/conversation-index";
@@ -15,6 +13,8 @@ import { forgetStore } from "../edge/store.ts";
 import worker from "../edge/worker.ts";
 import type { SessionEnv } from "../do/state.ts";
 import { Session } from "../do/session.ts";
+import { modelsFor } from "../do/models.ts";
+// PREK_DEBUG_MARK_2026
 import { openSqliteState } from "../../test/support/sqlite.ts";
 import { envWith, sessionCookie, sessionWith } from "../../test/support/edge.ts";
 import { createConversationsFace, lookupConversation } from "./index.ts";
@@ -47,16 +47,20 @@ function answer(): Awaited<ReturnType<AgentSession["send"]>> {
   return turn as unknown as Awaited<ReturnType<AgentSession["send"]>>;
 }
 
-/** A real agent runtime over memory, so the conversation's metadata is the product's. */
+/**
+ * A real agent runtime over memory, so the conversation's metadata and its turns are the product's.
+ *
+ * @remarks
+ * The model registry is the deployment's (`modelsFor` over the development bindings): the same
+ * faux provider a dev Worker opens with, answering each turn with a message, so a turn is a turn.
+ */
 async function runtime(): Promise<AgentSession> {
-  const faux = fauxProvider();
-  const models = createModels();
-  models.setProvider(faux.provider);
+  const { models, model } = modelsFor(DEV);
   return await openSession({
     storage: new MemoryStorage(),
     models,
     registry: createRegistry(),
-    model: { provider: "faux", modelId: "faux-1" },
+    model,
     context: BACKGROUND_CONTEXT,
   });
 }
@@ -65,7 +69,7 @@ async function runtime(): Promise<AgentSession> {
 const CreatedBody = v.object({ conversation: v.object({ id: v.string() }) });
 
 /** The bindings a Session opens with: development, so its model is the faux one. */
-const DEV: SessionEnv = { HNS_ENV: "dev" };
+const DEV: SessionEnv = { HNS_ENV: "dev", HNS_MODEL: "faux/echo" };
 
 /** A row the index holds for a conversation no object has: the "the two disagree" case. */
 const ORPHAN = "orphan-1";
@@ -123,10 +127,6 @@ async function openObject(): Promise<Opened> {
   const settle = async (): Promise<void> => {
     for (let tick = 0; tick < 5; tick += 1) await new Promise((done) => setTimeout(done, 1));
   };
-  const runtimeWithAnswer = {
-    ...agent,
-    send: async () => answer(),
-  };
   const session = new Session(
     {
       id: { name: LEGACY },
@@ -136,7 +136,7 @@ async function openObject(): Promise<Opened> {
     },
     { ...DEV, DB: d1.db },
     async () => agent,
-    { open: async () => runtimeWithAnswer },
+    { open: async () => agent },
   );
   // The list route is the wake-up: the object opens its runtime on the first RPC.
   const list = await session.fetch(
@@ -584,17 +584,17 @@ test("a person renames, archives, unarchives and deletes a conversation through 
 });
 
 /**
- * The asymmetry 0271n accepts, on the product's own rebuild.
+ * The rule the 0271n review made: an object write never takes back a person's edit.
  *
  * @remarks
- * The face writes D1 only. This test shows the other half of that contract: the object still
- * holds the title and the flag it was created with, and when its own metadata writes the row
- * back (`POST /rpc/reindex`, the full rebuild; a drain does the same for a row the object marks
- * dirty), the object wins and the human's title is gone. It is written down rather than hoped
- * for, because a caller that reads the contract has to know the edit is a write to the index,
- * not to the conversation.
+ * This is the reproduction of the blocking defect. The person renames, archives, or deletes
+ * through the face (D1); the object then runs a whole turn (and its drain), and finally the
+ * rebuild the object offers (`POST /rpc/reindex`, which speaks for every row of the project).
+ * After all of that the row still says what the person said — the new title, archived, and the
+ * tombstone (the delete does not resurrect) — and the object owns the rest of the row, so the
+ * drain still moves `updated_at`.
  */
-test("the object's own rebuild writes its metadata over a human's rename", async () => {
+test("a person's rename, archive and delete survive the object's turn, drain and rebuild", async () => {
   const object = await openObject();
   try {
     const edge = createEdge(edgeDeps());
@@ -602,22 +602,109 @@ test("the object's own rebuild writes its metadata over a human's rename", async
     const at = "/api/conversations/" + object.created;
     const renamed = await edge(await write("PATCH", at, { title: "a human's title" }), env);
     expect(renamed.status).toBe(200);
-    expect((await rowOf(object.db, object.created))?.title).toBe("a human's title");
-    // The object's state is untouched by the face.
+    const archived = await edge(await write("PATCH", at, { archived: true }), env);
+    expect(archived.status).toBe(200);
+    expect(await rowOf(object.db, object.created)).toStrictEqual({
+      title: "a human's title",
+      archived: 1,
+      deleted_at: null,
+    });
+
+    /** One real turn through the object's own route, and the drain the object runs after it. */
+    const turnAndDrain = async (requestId: string): Promise<void> => {
+      const turn = await object.session.fetch(
+        new Request("https://session.internal/rpc/conversations/" + object.created + "/messages", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-request-id": requestId },
+          body: JSON.stringify({ text: "hello please answer", requestId }),
+        }),
+      );
+      expect(turn.status).toBe(200);
+      expect(await turn.json()).toMatchObject({ ok: true, submissionId: expect.any(String) });
+      const drain = await object.session.fetch(
+        new Request("https://session.internal/rpc/conversations", {
+          headers: { "x-request-id": "drain-" + requestId },
+        }),
+      );
+      expect(drain.status).toBe(200);
+      // The drain runs after the object answers, so poll until its write lands (or give up and let
+      // the assertions say what is missing).
+      for (let tick = 0; tick < 100; tick += 1) {
+        const row = v.parse(
+          v.nullable(v.object({ indexed_at: v.nullable(v.string()) })),
+          await object.db
+            .prepare("SELECT indexed_at FROM conversations WHERE id = ?")
+            .bind(object.created)
+            .first(),
+        );
+        if (row?.indexed_at !== null && row?.indexed_at !== undefined) return;
+        await new Promise((done) => setTimeout(done, 5));
+      }
+      // A drain that did not write leaves the row as it was; the assertions decide whether that
+      // matters (a row whose version the object already wrote need not be written again).
+    };
+    /** The rebuild the object offers for a project: it speaks for every row, edited or not. */
+    const rebuild = async (requestId: string): Promise<void> => {
+      const rebuilt = await object.session.fetch(
+        new Request("https://session.internal/rpc/reindex", {
+          method: "POST",
+          headers: { "x-request-id": requestId },
+        }),
+      );
+      expect(rebuilt.status).toBe(200);
+    };
+
+    // Before any turn, the row still says what the object last wrote, and the drain after a real
+    // turn does write it: the activity columns are the object's, unconditionally.
+    const activity = async (): Promise<{ readonly updatedAt: string; readonly archived: number }> =>
+      v.parse(
+        v.object({ updatedAt: v.string(), archived: v.number() }),
+        await object.db
+          .prepare("SELECT updated_at AS updatedAt, archived FROM conversations WHERE id = ?")
+          .bind(object.created)
+          .first(),
+      );
+    const beforeTurn = await activity();
+    await turnAndDrain("r1");
+    const afterRealTurn = await activity();
+    expect(afterRealTurn.updatedAt > beforeTurn.updatedAt).toBe(true);
+    expect(afterRealTurn.archived).toBe(1);
+    // After a real turn: the person's title and archive flag, and the conversation is readable.
+    const afterTurn = await edge(await get(at), env);
+    expect(afterTurn.status).toBe(200);
+    expect(await afterTurn.json()).toMatchObject({
+      ok: true,
+      conversation: { title: "a human's title", archived: true },
+    });
+    expect(await rowOf(object.db, object.created)).toStrictEqual({
+      title: "a human's title",
+      archived: 1,
+      deleted_at: null,
+    });
+    // The object's metadata is still its own: the face never wrote it.
     const state = await object.session.fetch(
       new Request("https://session.internal/rpc/state?conversation=" + object.created),
     );
     expect(await state.json()).toMatchObject({ conversation: { title: "the conversation" } });
-    // A rebuild is how the object's metadata is written back: `POST /rpc/reindex` replaces the
-    // project's rows from the object, and the human's title is gone from D1.
-    const rebuilt = await object.session.fetch(
-      new Request("https://session.internal/rpc/reindex", {
-        method: "POST",
-        headers: { "x-request-id": "reindex" },
-      }),
-    );
-    expect(rebuilt.status).toBe(200);
-    expect((await rowOf(object.db, object.created))?.title).toBe("the conversation");
+    // The rebuild speaks for the whole project, and the person's columns still win.
+    await rebuild("reindex-1");
+    expect(await rowOf(object.db, object.created)).toStrictEqual({
+      title: "a human's title",
+      archived: 1,
+      deleted_at: null,
+    });
+
+    // A delete is final: the same turn and rebuild do not bring the row back.
+    const deleted = await edge(await write("DELETE", at, {}), env);
+    expect(deleted.status).toBe(200);
+    const buried = await rowOf(object.db, object.created);
+    expect(buried?.deleted_at).not.toBe(null);
+    await turnAndDrain("r2");
+    await rebuild("reindex-2");
+    expect((await rowOf(object.db, object.created))?.deleted_at).toBe(buried?.deleted_at);
+    const gone = await edge(await get(at), env);
+    expect(gone.status).toBe(404);
+    expect(await gone.json()).toMatchObject({ ok: false, code: "not_found" });
   } finally {
     await object.close();
   }

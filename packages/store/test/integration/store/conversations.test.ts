@@ -241,3 +241,41 @@ test("a human's rename, archive and soft delete write the row and no-op on a mis
     expect(await store.conversations.get(project.id, missing)).toBe(undefined);
   });
 });
+
+/** The row's edited_at, read straight from D1: the version a person's write stamps. */
+async function editedAt(id: ConversationId): Promise<string | null> {
+  const row = await harness.db
+    .prepare("SELECT edited_at FROM conversations WHERE id = ?")
+    .bind(id)
+    .first();
+  return (
+    v.parse(v.nullable(v.object({ edited_at: v.nullable(v.string()) })), row)?.edited_at ?? null
+  );
+}
+
+// Catches: a person's write that leaves the row unmarked, which the object's next index write
+// would then overwrite (0271n).
+test("a person's rename, archive and delete stamp edited_at; a deleted row is not edited again", async () => {
+  await harness.withStore(async (store) => {
+    const project = await store.projects.ensureDefault();
+    const id = v.parse(ConversationIdSchema, "e1");
+    await register({ id, projectId: project.id, title: "before" });
+    expect(await editedAt(id)).toBe(null);
+    await store.conversations.rename(project.id, id, "after");
+    expect(await editedAt(id)).not.toBe(null);
+    await store.conversations.setArchived(project.id, id, true);
+    expect(await editedAt(id)).not.toBe(null);
+    await store.conversations.softDelete(project.id, id);
+    const tombstone = await editedAt(id);
+    expect(tombstone).not.toBe(null);
+    // A deleted conversation is not renamed or unarchived: the tombstone ends it.
+    await store.conversations.rename(project.id, id, "resurrected");
+    await store.conversations.setArchived(project.id, id, false);
+    await store.conversations.softDelete(project.id, id);
+    const row = await store.conversations.get(project.id, id);
+    expect(row?.title).toBe("after");
+    expect(row?.archived).toBe(true);
+    expect(await editedAt(id)).toBe(tombstone);
+    expect(await editedAt(id)).not.toBe(null);
+  });
+});

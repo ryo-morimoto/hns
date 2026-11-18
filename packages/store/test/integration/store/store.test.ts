@@ -4,6 +4,10 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { createD1Harness, type D1Harness } from "../harness.ts";
 import { clock, counter } from "../../support.ts";
 import { migrateStore, openStore } from "../../../src/index.ts";
+import { MIGRATIONS } from "../../../src/migrations/index.ts";
+
+/** The latest schema step this build ships; the store records it at open. */
+const LATEST = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
 
 let harness: D1Harness;
 
@@ -29,7 +33,7 @@ test("opening a store migrates and seeds the default project", async () => {
     expect(projects[0]?.id).toBe("default");
     expect(projects[0]?.name).toBe("default");
   });
-  expect(await version()).toBe(8);
+  expect(await version()).toBe(LATEST);
 });
 
 test("reopening keeps the data and does not duplicate the default project", async () => {
@@ -46,15 +50,15 @@ test("reopening keeps the data and does not duplicate the default project", asyn
   } finally {
     await second.close();
   }
-  expect(await version()).toBe(8);
+  expect(await version()).toBe(LATEST);
 });
 
 test("migrateStore applies the schema without opening the repositories", async () => {
   await harness.reset();
   await migrateStore(harness.db);
-  expect(await version()).toBe(8);
+  expect(await version()).toBe(LATEST);
   await migrateStore(harness.db);
-  expect(await version()).toBe(8);
+  expect(await version()).toBe(LATEST);
 });
 
 test("a failing migration leaves no table or version row behind", async () => {

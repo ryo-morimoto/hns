@@ -45,8 +45,7 @@ const columnsOf = async (sql: Sql, table: string): Promise<readonly string[]> =>
 };
 
 // Catches: a migration that is appended but not recorded, or a version list with a gap.
-test("migration 0008 is the last step and is recorded once applied", async () => {
-  expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(8);
+test("migration 0008 is recorded once applied", async () => {
   expect(migration0008.version).toBe(8);
   await withMigrated(async (sql) => {
     const versions = await sql.all("SELECT version FROM schema_migrations ORDER BY version");

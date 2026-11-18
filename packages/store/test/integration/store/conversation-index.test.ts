@@ -3,6 +3,8 @@ import {
   openConversationIndex,
   type ConversationIndexRow,
 } from "../../../src/conversation-index/index.ts";
+import { ConversationIdSchema } from "@hns/core";
+import * as v from "valibot";
 import { createD1Harness, type D1Harness } from "../harness.ts";
 
 let harness: D1Harness;
@@ -124,5 +126,68 @@ test("the index state reads zeroed when absent and round-trips a transition", as
       "2026-01-01T00:00:03.000Z",
     );
     expect((await store.indexState.read("default")).pending).toBe(0);
+  });
+});
+
+/**
+ * The three columns a person owns, read straight from D1.
+ *
+ * @returns The row's title, archive flag, and tombstone.
+ */
+async function personOwned(): Promise<{
+  readonly title: string;
+  readonly archived: number;
+  readonly deleted_at: string | null;
+}> {
+  return v.parse(
+    v.object({ title: v.string(), archived: v.number(), deleted_at: v.nullable(v.string()) }),
+    await harness.db
+      .prepare("SELECT title, archived, deleted_at FROM conversations WHERE id = ?")
+      .bind("1")
+      .first(),
+  );
+}
+
+// Catches: the object's drain or rebuild overwriting a person's title, archive flag, or tombstone
+// — the defect that made a rename disappear, an archive reopen, and a delete resurrect on the next
+// turn (0271n). The rule is the writer's, so it is proved on the writer.
+test("an object write keeps a person's title, archive flag and tombstone (drain and rebuild)", async () => {
+  await harness.withStore(async (store) => {
+    const index = openConversationIndex(harness.db);
+    await index.upsert([row({ title: "object title" })]);
+    const id = v.parse(ConversationIdSchema, "1");
+    const project = await store.projects.ensureDefault();
+    await store.conversations.rename(project.id, id, "person title");
+    await store.conversations.setArchived(project.id, id, true);
+    // A drain: a newer object row, which would normally win on the monotonic upsert.
+    await index.upsert([row({ title: "object title", updatedAt: "2026-01-05T00:00:00.000Z" })]);
+    expect(await personOwned()).toStrictEqual({
+      title: "person title",
+      archived: 1,
+      deleted_at: null,
+    });
+    // A rebuild: the object saying what it holds is still not the person's answer.
+    await index.replaceAll("default", [row({ title: "object title" })]);
+    expect(await personOwned()).toStrictEqual({
+      title: "person title",
+      archived: 1,
+      deleted_at: null,
+    });
+    // A delete stays a tombstone through the same writes.
+    await store.conversations.softDelete(project.id, id);
+    const buried = (await personOwned()).deleted_at;
+    expect(buried).not.toBe(null);
+    await index.upsert([row({ deletedAt: null, updatedAt: "2026-01-06T00:00:00.000Z" })]);
+    await index.replaceAll("default", [row({ deletedAt: null })]);
+    expect((await personOwned()).deleted_at).toBe(buried);
+    // The object still owns activity: the drain moved the row's updated_at.
+    const activity = v.parse(
+      v.object({ updated_at: v.string() }),
+      await harness.db
+        .prepare("SELECT updated_at FROM conversations WHERE id = ?")
+        .bind("1")
+        .first(),
+    );
+    expect(activity.updated_at).toBe("2026-01-01T00:00:00.000Z");
   });
 });

@@ -51,6 +51,13 @@ export interface ConversationPage {
  * older build is not shown as a conversation that no object knows. Delete is a tombstone
  * (`deleted_at`): a deleted conversation disappears from `page` but `get` still returns it.
  * Missing rows return `undefined`.
+ *
+ * **The write direction has one exception, and it is a column.** The index is written from the
+ * objects (D078), so an index write normally replaces whatever the row said. `rename`,
+ * `setArchived`, and `softDelete` are a person's writes (0271n): each stamps `edited_at`, and the
+ * index writer then keeps the person's `title`, `archived`, and `deleted_at` when it writes that row
+ * again (drain or rebuild; the rule lives in `store/src/conversation-index/writer.ts`). Nothing in
+ * this repository writes the object's metadata.
  */
 export interface ConversationRepository {
   /**
@@ -83,9 +90,11 @@ export interface ConversationRepository {
    * Give the conversation a new title; a no-op when the conversation is missing.
    *
    * @remarks
-   * A human's write (0271n): it changes the **D1 row only**. The object's metadata is not
-   * written, so the next index drain that re-writes this row writes the object's title back
-   * (see {@link ConversationRepository}).
+   * A human's write (0271n): it changes the **D1 row only** and stamps `edited_at`, which is what
+   * makes the object's later drain or rebuild keep the new title instead of writing its own back
+   * (`store/src/conversation-index/writer.ts` owns that rule). A deleted conversation is not
+   * renamed: the tombstone ends the conversation, so a row with `deleted_at` set is a no-op here
+   * too — the face already answers `404`, and this is the store not outliving it.
    *
    * @param projectId - The conversation's project.
    * @param id - The conversation.
@@ -93,7 +102,11 @@ export interface ConversationRepository {
    */
   rename(projectId: ProjectId, id: ConversationId, title: string): Promise<void>;
   /**
-   * Archive or unarchive the conversation; a no-op when the conversation is missing.
+   * Archive or unarchive the conversation; a no-op when the conversation is missing or deleted.
+   *
+   * @remarks
+   * Also a human's write, so it stamps `edited_at` for the same reason `rename` does. `archived`
+   * is the flag the list hides and the header shows; `deleted_at` is the end of the conversation.
    *
    * @param archived - The value to store; false is the undo 0105 offers.
    */
@@ -103,9 +116,10 @@ export interface ConversationRepository {
    * missing, and when it is already buried.
    *
    * @remarks
-   * The tombstone is stamped from the store's clock, so it is the same clock `touch` uses. A row
-   * that is already deleted keeps its first tombstone: the face answers 404 either way, so a
-   * second delete changes nothing an operator could read.
+   * The tombstone is stamped from the store's clock, so it is the same clock `touch` uses, and so
+   * is `edited_at`: the delete is a human's write like the rename, and it is what keeps the object's
+   * next drain from reinstating the row. A row that is already deleted keeps its first tombstone:
+   * the face answers 404 either way, so a second delete changes nothing an operator could read.
    */
   softDelete(projectId: ProjectId, id: ConversationId): Promise<void>;
 }
@@ -181,23 +195,25 @@ export function conversationRepository(context: StoreContext): ConversationRepos
       );
     },
     async rename(projectId, id, title) {
-      await sql.run("UPDATE conversations SET title = ? WHERE project_id = ? AND id = ?", [
-        title,
-        projectId,
-        id,
-      ]);
+      await sql.run(
+        "UPDATE conversations SET title = ?, edited_at = ? " +
+          "WHERE project_id = ? AND id = ? AND deleted_at IS NULL",
+        [title, now(), projectId, id],
+      );
     },
     async setArchived(projectId, id, archived) {
-      await sql.run("UPDATE conversations SET archived = ? WHERE project_id = ? AND id = ?", [
-        archived ? 1 : 0,
-        projectId,
-        id,
-      ]);
+      await sql.run(
+        "UPDATE conversations SET archived = ?, edited_at = ? " +
+          "WHERE project_id = ? AND id = ? AND deleted_at IS NULL",
+        [archived ? 1 : 0, now(), projectId, id],
+      );
     },
     async softDelete(projectId, id) {
+      const at = now();
       await sql.run(
-        "UPDATE conversations SET deleted_at = ? WHERE project_id = ? AND id = ? AND deleted_at IS NULL",
-        [now(), projectId, id],
+        "UPDATE conversations SET deleted_at = ?, edited_at = ? " +
+          "WHERE project_id = ? AND id = ? AND deleted_at IS NULL",
+        [at, at, projectId, id],
       );
     },
   };

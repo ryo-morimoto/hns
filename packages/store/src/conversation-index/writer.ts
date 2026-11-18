@@ -8,10 +8,47 @@ const MAX_PARAMETERS = 90;
 
 const COLUMNS = "id, project_id, title, created_at, updated_at, archived, deleted_at, indexed_at";
 
+/**
+ * The columns an edit of one row takes from the object, or keeps the person's value (0271n).
+ *
+ * @remarks
+ * **This is where "a person's edit outranks the object's copy" lives** — the whole rule, in one
+ * expression per column, for the drain and the rebuild alike. A row with `edited_at` set was
+ * written by a human (0271n's `PATCH` / `DELETE`): its `title`, `archived`, and `deleted_at` are
+ * the person's, and the object's metadata no longer overwrites them. The object still owns every
+ * other column, so activity, ordering, and the cursor go on advancing. Without this, the object's
+ * next write would put back the title it was created with, un-archive the conversation, and
+ * resurrect a deleted one on the very next turn.
+ *
+ * The rule is deliberately **not** conditional on the operation: a rebuild (`reindex`) is the
+ * object saying what it holds, and what it holds is still not the person's answer to an edit of
+ * the row. Returning the row to the object's copy is a separate, explicit act — clearing
+ * `edited_at` — which no caller has yet (a future issue owns it).
+ */
+const keepEdited = (column: string): string =>
+  "CASE WHEN conversations.edited_at IS NULL THEN excluded." +
+  column +
+  " ELSE conversations." +
+  column +
+  " END";
+
+/**
+ * The upsert's update: the object's activity columns, and the three a person may own.
+ *
+ * @remarks
+ * `created_at`, `updated_at`, and `indexed_at` are the object's unconditionally: they are what
+ * the list orders and pages by, and a person's edit does not move a conversation in time.
+ * `edited_at` is never written here: only the store's human writes set it, and clearing it is a
+ * deliberate act of its own.
+ */
 const UPDATE =
-  "DO UPDATE SET title = excluded.title, created_at = excluded.created_at, " +
-  "updated_at = excluded.updated_at, archived = excluded.archived, " +
-  "deleted_at = excluded.deleted_at, indexed_at = excluded.indexed_at";
+  "DO UPDATE SET title = " +
+  keepEdited("title") +
+  ", created_at = excluded.created_at, updated_at = excluded.updated_at, archived = " +
+  keepEdited("archived") +
+  ", deleted_at = " +
+  keepEdited("deleted_at") +
+  ", indexed_at = excluded.indexed_at";
 
 const INSERT = "INSERT INTO conversations (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) ";
 
@@ -29,7 +66,10 @@ const UPSERT =
   UPDATE +
   " WHERE excluded.updated_at >= COALESCE(conversations.updated_at, '')";
 
-/** The rebuild upsert: reindex is authoritative, so it repairs a row whatever it says. */
+/**
+ * The rebuild upsert: reindex is authoritative for a row's timestamps and identity, so it repairs
+ * whatever they say — but a person's three columns stay theirs (see {@link keepEdited}).
+ */
 const UPSERT_FORCED = INSERT + "ON CONFLICT(project_id, id) " + UPDATE;
 
 /** One id column, for the ids already stored under a project. */
@@ -74,7 +114,9 @@ function chunks<T>(items: readonly T[], size: number): readonly (readonly T[])[]
  * The Session owns the conversations and this is the only table it may write (0145's index
  * exception, D078). Reads of the index go through the store's conversation repository; the
  * object never reads control data. `upsert` is monotonic so a resend of an older row cannot
- * roll a newer one back; `replaceAll` is the rebuild and writes what the object says.
+ * roll a newer one back; `replaceAll` is the rebuild and writes what the object says — for every
+ * column but `title`, `archived`, and `deleted_at`, which a person's edit owns once the row has
+ * `edited_at` (0271n, see {@link keepEdited}).
  */
 export interface ConversationIndex {
   /** Write or refresh rows; a row whose `updatedAt` is older than the stored one is left alone. */
