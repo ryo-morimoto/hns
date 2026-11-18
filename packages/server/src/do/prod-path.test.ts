@@ -114,7 +114,10 @@ function decodeBody(body: BodyInit | null | undefined): string {
  *
  * @param onMachine - What the fake machine answers for one granted call.
  */
-async function openObject(onMachine: () => Response): Promise<Fixture> {
+async function openObject(
+  onMachine: () => Response,
+  options: { readonly sendFails?: boolean | undefined } = {},
+): Promise<Fixture> {
   await d1.reset();
   const store = await openStore({ d1: d1.db });
   const service = createPolicyService({ policy: store.policy, bashSandbox: false });
@@ -170,7 +173,10 @@ async function openObject(onMachine: () => Response): Promise<Fixture> {
         },
         listConversations: async () => [],
         getConversation: async () => undefined,
-        send: async () => fakeTurn(),
+        send: async () => {
+          if (options.sendFails === true) throw new Error("the model is unreachable");
+          return fakeTurn();
+        },
         transcript: async () => [],
         watchConversation: async () => {
           throw new Error("unused");
@@ -461,6 +467,48 @@ test("after an abort the same conversation's next turn is granted afresh", async
     const issued = ledger.filter((record) => record.runId === "run-1" && record.revokedAt === null);
     expect(issued).toHaveLength(1);
     expect(issued[0]?.grantId).not.toBe(before.grantId);
+  } finally {
+    fixture.close();
+  }
+});
+
+// A send that fails does not begin a turn: the ended turn's grant is not revived by a failure.
+test("a failed send leaves the aborted turn's grant revoked", async () => {
+  const fixture = await openObject(machineDenial, { sendFails: true });
+  try {
+    await fixture.session.fetch(await send());
+    const contract = await readCall();
+    const call = (callId: string) =>
+      ({
+        v: 1,
+        callId,
+        toolId: "read_file",
+        toolVersion: contract.manifest.version,
+        args: { path: "a.txt" },
+      }) as const;
+    const first = await fixture.relayPath("run-1", {
+      call: call("tool:1:before-abort"),
+      manifest: contract.manifest,
+      bytes: 4096,
+    });
+    if (!first.ok) throw new Error("the object should answer a decision");
+    expect(
+      (
+        await fixture.session.fetch(
+          new Request("https://session/rpc/conversations/run-1/abort", { method: "POST" }),
+        )
+      ).status,
+    ).toBe(200);
+    // The send fails (500): the model could not be reached, so the turn never began.
+    expect((await fixture.session.fetch(await send())).status).toBe(500);
+    // The ended turn's relay is still refused: a failure did not revive its grant.
+    const after = await fixture.relayPath("run-1", {
+      call: call("tool:2:after-failed-send"),
+      manifest: contract.manifest,
+      bytes: 4096,
+    });
+    if (!after.ok) throw new Error("the object should answer a decision");
+    expect(after.answer.decision).toMatchObject({ outcome: "deny", code: "grant_revoked" });
   } finally {
     fixture.close();
   }
