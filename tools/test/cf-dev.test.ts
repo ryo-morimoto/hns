@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { judgeLock, parseLock, sameRecord } from "./cf-dev.ts";
+import { judgeLock, mayTakeOverAfterDeadline, parseLock, sameRecord } from "./cf-dev.ts";
 import type { LockRecord, LockSnapshot } from "./cf-dev.ts";
 
 const record = (token: string): LockRecord => ({
@@ -66,6 +66,13 @@ test("the record that was judged is the one a takeover may replace", () => {
 // because it replaced the record it judged instead of re-reading it under the guard.
 test("a takeover refuses a record another waiter has already replaced", () => {
   expect(sameRecord(held("stale", 10 * 60_000), held("winner", 5))).toBe(false);
+});
+
+// Catches: a worker killed between writing the record and starting cf dev, whose pid lives on, stalling
+// every suite for the ten minutes the lock waits for a record it will never see released.
+test("a held record with a free inspector port is taken over once the deadline passes", () => {
+  expect(mayTakeOverAfterDeadline(true)).toBe(true);
+  expect(mayTakeOverAfterDeadline(false)).toBe(false);
 });
 
 // Catches: a takeover deleting the record of a start that released and let a new holder create.

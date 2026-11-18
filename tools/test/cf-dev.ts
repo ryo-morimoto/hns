@@ -418,6 +418,11 @@ const timeoutError = (snapshot: LockSnapshot): Error =>
  * {@link LOCK_STALE_MS}; a live holder is waited for, at most {@link LOCK_TIMEOUT_MS}, and the wait
  * is logged so a slow suite explains itself.
  *
+ * A wait that reaches the deadline first asks the inspector itself: when nothing is listening on
+ * the port, the holder is not a cf dev and the record is taken over. A pid that outlives its lock
+ * (a worker killed between writing the record and exiting) would otherwise stall every suite for
+ * ten minutes, and the port is the only thing the lock protects.
+ *
  * @throws Error when the lock is still held after {@link LOCK_TIMEOUT_MS}, or when this process
  * already holds it: a second cf dev would lose the inspector port to the first.
  */
@@ -437,6 +442,22 @@ const acquireLock = async (): Promise<InspectorLock> => {
     const judgement = judgeLock(current, ownerAlive);
     if (judgement === "free") continue;
     if (judgement === "held") {
+      // A holder that is not serving the inspector is not a cf dev, whatever its pid says: the
+      // record outlived the process that wrote it. The port is what the lock protects, so a free
+      // port is the evidence the lock is free too. The takeover still goes through its guard, so
+      // two waiters cannot both take it.
+      if (Date.now() >= deadline && mayTakeOverAfterDeadline(await canBind(INSPECTOR_PORT))) {
+        const takeover = await takeOver(token, at, current);
+        if (takeover.taken) {
+          console.log(
+            "[cf dev] took the inspector lock from " +
+              describeHolder(current) +
+              ": its port was free",
+          );
+          if (takeover.orphan !== undefined) await killAbandoned(takeover.orphan);
+          break;
+        }
+      }
       if (Date.now() >= deadline) throw timeoutError(current);
       if (!announced) {
         console.log("[cf dev] waiting for the inspector lock held by " + describeHolder(current));
@@ -468,6 +489,20 @@ const acquireLock = async (): Promise<InspectorLock> => {
     },
   };
 };
+
+/**
+ * Whether a waiter whose deadline passed may take a lock the liveness check still calls held.
+ *
+ * @remarks
+ * A worker killed between writing its record and starting cf dev leaves a record whose pid lives
+ * on (reused, or a shell that outlived it) and a free inspector port. Waiting for
+ * {@link LOCK_STALE_MS} would stall every suite for ten minutes for a process that is not there,
+ * so the port decides: free means the holder is gone.
+ *
+ * @param portFree - Whether nothing is listening on the inspector port.
+ * @returns Whether a takeover should be attempted before reporting the timeout.
+ */
+export const mayTakeOverAfterDeadline = (portFree: boolean): boolean => portFree;
 
 const canBind = async (port: number): Promise<boolean> =>
   await new Promise<boolean>((resolveProbe) => {
