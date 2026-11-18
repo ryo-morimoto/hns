@@ -15,7 +15,7 @@ import type { OfficeErrorCode, OfficeFormat, OfficeLimits } from "@hns/core/offi
  * out of memory. The prescan is what turns that into an answer: the archive is read here, without
  * the engine, and a document over a bound is refused before a process is spawned (INV-O5).
  */
-export interface OfficeScan {
+interface OfficeScan {
   /** The sum of every entry's declared uncompressed size, in bytes. */
   readonly declaredBytes: number;
   /** Bytes the prescan actually inflated while checking the declared sizes. */
@@ -234,6 +234,16 @@ function uint64(bytes: Uint8Array, at: number): number | undefined {
 const CENTRAL_ENTRY_BYTES = 46;
 
 /**
+ * The count at which a zip's 16-bit fields stop being the authority.
+ *
+ * @remarks
+ * A directory with 65,535 entries or more is a zip64 archive by construction (the format's own
+ * ceiling), so the field is read from the zip64 record the locator names. Treating the saturated
+ * value as a count would list a directory that is not there.
+ */
+const ZIP16_CEILING = 0xfffe;
+
+/**
  * Read a zip's central directory, or answer undefined when the bytes are not a zip.
  *
  * @param bytes - The file.
@@ -251,9 +261,11 @@ function readZipDirectory(bytes: Uint8Array): ZipListing | undefined {
   if (end === undefined) return undefined;
   let count = uint16(bytes, end + 10);
   let offset = uint32(bytes, end + 16);
-  // Zip64: when a field is 0xffffffff / 0xffff, the real one is in the zip64 record the locator
-  // points at. Only the fields the prescan reads are followed.
-  if (count === 0xffff || offset === 0xffffffff) {
+  // A count near the 16-bit ceiling is not a count: archives are limited to 65535 entries, and a
+  // directory that holds more is written with zip64. The fixture that *is* the bomb is exactly
+  // the archive whose count field cannot hold its entries, so the zip64 record is the authority
+  // for it as well.
+  if (count >= ZIP16_CEILING || offset === 0xffffffff) {
     const locator = findSignatureBackwards(bytes, end, [0x50, 0x4b, 0x06, 0x07]);
     if (locator === undefined) return undefined;
     const recordAt = uint64(bytes, locator + 8);
@@ -262,7 +274,12 @@ function readZipDirectory(bytes: Uint8Array): ZipListing | undefined {
     offset = uint64(bytes, recordAt + 48) ?? Number.NaN;
     if (!Number.isSafeInteger(count) || !Number.isSafeInteger(offset)) return undefined;
   }
-  if (offset + count * CENTRAL_ENTRY_BYTES > bytes.length) return undefined;
+  if (offset + count * CENTRAL_ENTRY_BYTES > bytes.length) {
+    // Too many entries for the bytes that follow the directory: an archive that is not what its
+    // own directory says. Its entries are still counted from the directory's start, so the
+    // count-only refusal (MAX_OFFICE_ENTRIES) is the answer rather than "not a zip".
+    return undefined;
+  }
   const entries: ZipEntry[] = [];
   let declaredBytes = 0;
   let at = offset;

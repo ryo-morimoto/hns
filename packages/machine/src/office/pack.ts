@@ -28,7 +28,7 @@ export interface PackBindPath {
 }
 
 /** The part of a manifest `build` this machine reads: the environment and the binds (§11). */
-export interface PackBuild {
+interface PackBuild {
   /** Environment values, each relative to the pack root unless it is `<pack root>`. */
   readonly environment: Readonly<Record<string, string>>;
   /** Paths outside the pack the engine needs, bound read-only. */
@@ -157,7 +157,7 @@ export function packReport(load: PackLoad): OfficeEngineReport {
 const IMPLEMENTED: ReadonlySet<OfficeOperation> = new Set(["preview", "render", "convert"]);
 
 /** Whether this build runs one operation. */
-export function isImplemented(operation: OfficeOperation): boolean {
+function isImplemented(operation: OfficeOperation): boolean {
   return IMPLEMENTED.has(operation);
 }
 
@@ -248,11 +248,6 @@ async function digestOf(path: string): Promise<Digest> {
       reason: error instanceof Error ? error.message : "it cannot be read",
     };
   }
-}
-
-/** The formats a job may name; the pack's own list is what it declared (§11). */
-export function packFormats(pack: OfficePack): readonly OfficeFormat[] {
-  return pack.manifest.capabilities.formats;
 }
 
 /** The problem as one phrase that names the path, for a refusal's message. */

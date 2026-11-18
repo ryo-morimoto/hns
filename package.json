@@ -51,7 +51,8 @@
           "test/integration/**/*.test.ts"
         ],
         "ignoreBinaries": [
-          "mkfifo"
+          "mkfifo",
+          "bwrap"
         ]
       },
       "packages/server": {

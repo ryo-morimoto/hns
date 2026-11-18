@@ -645,7 +645,6 @@ export const MAX_OFFICE_EXPANDED_BYTES = 512 * 1024 * 1024;
  * runs; a job that names fewer pages is refused `unsupported_command` because the v0.8.7 CLI
  * cannot select pages (docs/office.md §2, §10).
  */
-export const OFFICE_DEFAULT_PREVIEW_MAX_PAGES = OFFICE_MAX_PDF_PAGES;
 
 /** Hex characters in a cache path hash (§4). */
 export const OFFICE_PATH_HASH_HEX_LENGTH = 16;

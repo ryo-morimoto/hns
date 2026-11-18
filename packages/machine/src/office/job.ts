@@ -50,11 +50,6 @@ export interface OfficeEngine {
 /** The slot's owner while a job runs; undefined when the engine is free. */
 let running: string | undefined;
 
-/** Whether an office job holds the machine's single slot now. */
-export function officeBusy(): boolean {
-  return running !== undefined;
-}
-
 /** The machine's own office bounds, which the job's are enforced under. */
 export interface OfficeEnvelope {
   readonly timeoutMs: number;
@@ -161,7 +156,16 @@ async function runJob(
 
   signal.throwIfAborted();
   const timeoutMs = officeJobTimeoutMs(job.limits.timeoutMs, envelope.timeoutMs);
-  const outcome = await runInSandbox(engine, pack, job, input.path, timeoutMs, envelope, host);
+  const outcome = await runInSandbox(
+    engine,
+    pack,
+    job,
+    input.path,
+    timeoutMs,
+    envelope,
+    host,
+    signal,
+  );
   const ms = (engine.now ?? Date.now)() - started;
   if (!outcome.ok) return engineFailure(outcome);
   // The bytes are read here, before the run is collected: the file is the only copy the cache can
@@ -230,11 +234,6 @@ export async function probeOfficeEngine(packRoot: string | undefined): Promise<O
 /** The job's answer as a failure. */
 function failure(error: OfficeErrorCode, message: string): OfficeFailure {
   return { ok: false, error, message };
-}
-
-/** The refusal's office code, through the contract's one table (docs/office.md §9). */
-export function officeCodeOfRefusal(refusal: MachineRefusal): OfficeErrorCode {
-  return officeErrorOfRefusal(refusal.code, refusal.message);
 }
 
 /**
@@ -309,7 +308,11 @@ async function resolveInput(
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     if (!(error instanceof MachineRefusal)) throw error;
-    return { ok: false, result: failure(officeCodeOfRefusal(error), error.message) };
+    // The machine refusal's office code, through the contract's one table (docs/office.md §9).
+    return {
+      ok: false,
+      result: failure(officeErrorOfRefusal(error.code, error.message), error.message),
+    };
   }
   const info = await stat(absolute).catch(() => undefined);
   if (info === undefined || !info.isFile()) {
@@ -421,6 +424,7 @@ async function runInSandbox(
   timeoutMs: number,
   envelope: OfficeEnvelope,
   host: PackHost,
+  signal: AbortSignal,
 ): Promise<CollectedRun> {
   if (!host.ok) return { ok: false, kind: "unavailable", reason: problemMessage(host.problem) };
   // The runs' directory is created when the engine is; an agent that was started with one that
@@ -432,25 +436,30 @@ async function runInSandbox(
     await writeFile(join(work, name), await readFile(input));
     // What the engine wrote is read **here**, while the run still exists: this function removes the
     // run once the engine returns, so a path handed back to the caller would already be gone.
-    const outcome = await runEngine({
-      pack,
-      binds: host.binds,
-      input: join(work, name),
-      operation: job.operation,
-      width: job.operation === "render" ? job.width : undefined,
-      work,
-      workRoot: engine.workRoot,
-      timeoutMs,
-      maxRssMb: envelope.maxRssMb,
-      maxOutputBytes: job.limits.maxOutputBytes,
-      bwrap: engine.bwrap,
-    });
+    const outcome = await runEngine(
+      {
+        pack,
+        binds: host.binds,
+        input: join(work, name),
+        operation: job.operation,
+        width: job.operation === "render" ? job.width : undefined,
+        work,
+        workRoot: engine.workRoot,
+        timeoutMs,
+        maxRssMb: envelope.maxRssMb,
+        maxOutputBytes: job.limits.maxOutputBytes,
+        bwrap: engine.bwrap,
+      },
+      signal,
+    );
     if (!outcome.ok) return outcome;
     const bytes = await readFile(outcome.output).catch(() => undefined);
     return bytes === undefined
       ? { ok: false, kind: "failed", reason: "the office engine's artifact could not be read back" }
       : { ...outcome, produced: bytes };
   } finally {
+    // The directory is removed **before** the outcome is handed back, and it is removed whole: a
+    // failed or timed-out run leaves exactly what a successful one leaves, nothing (INV-O4 / C10).
     await rm(work, { recursive: true, force: true }).catch(() => undefined);
   }
 }

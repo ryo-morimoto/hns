@@ -118,7 +118,10 @@ const MAGIC_SEARCH = {
  * kernel's high-water mark for that process's address space, which is the number a person wants
  * from "what did this cost" (U-02).
  */
-export async function runEngine(run: EngineRun): Promise<EngineOutcome> {
+export async function runEngine(
+  run: EngineRun,
+  signal?: AbortSignal | undefined,
+): Promise<EngineOutcome> {
   // The wrapper is the host's program and is looked up with the host's PATH; **the engine** is
   // given the fixed PATH below, not this one (see packEnvironment).
   const bwrap = run.bwrap ?? process.env["BWRAP"] ?? "bwrap";
@@ -150,6 +153,7 @@ export async function runEngine(run: EngineRun): Promise<EngineOutcome> {
     // Its own process group, so the deadline can signal the engine and everything it started.
     detached: true,
   });
+  let timedOut = false;
   let stderr = "";
   child.stdout?.resume();
   child.stderr?.on("data", (chunk: Buffer) => {
@@ -166,15 +170,25 @@ export async function runEngine(run: EngineRun): Promise<EngineOutcome> {
     },
   );
   const deadline = setTimeout(() => {
+    timedOut = true;
     killGroup(child.pid);
   }, run.timeoutMs);
+  // The request's own deadline (the office envelope) also ends the run: a job is clamped below it,
+  // but a clock that was set before the engine started can still win, and the group must go with
+  // it rather than keep a process the machine no longer waits for.
+  const abort = (): void => {
+    timedOut = true;
+    killGroup(child.pid);
+  };
+  signal?.addEventListener("abort", abort, { once: true });
   const peakRssMb = child.pid === undefined ? 0 : await watchPeakRss(child.pid, exited);
   clearTimeout(deadline);
   // A process group can outlive its leader: the group is signalled once more, always, and every
   // remaining member is reaped by the caller's await of `close` above.
   const finished = await exited;
   clearTimeout(deadline);
-  if (finished.signal !== null && Date.now() - started >= run.timeoutMs) {
+  signal?.removeEventListener("abort", abort);
+  if (timedOut || (finished.signal !== null && Date.now() - started >= run.timeoutMs)) {
     killGroup(child.pid);
     return { ok: false, kind: "timeout" };
   }
@@ -357,6 +371,33 @@ export function packEnvironment(pack: OfficePack, home: string): EngineEnvironme
   return v.parse(EngineEnvironmentSchema, values);
 }
 
+/**
+ * The wrapper's flags in the order {@link engineArgv} writes them.
+ *
+ * @remarks
+ * The order is the sandbox's meaning (a bind after a read-only overlay is the one that survives),
+ * so it is stated here once and walked by a test: a flag moved in the builder is a flag moved here
+ * or a test failure, never a silently weaker sandbox.
+ */
+export const ENGINE_ARGV_ORDER = [
+  "--die-with-parent",
+  "--ro-bind",
+  "--tmpfs",
+  "--dir",
+  "--bind",
+  "--dev",
+  "--proc",
+  "--unshare-pid",
+  "--unshare-ipc",
+  "--unshare-uts",
+  "--unshare-net",
+  "--new-session",
+  "--clearenv",
+  "--setenv",
+  "--chdir",
+  "--",
+] as const;
+
 /** The PATH one engine runs with: the system directories and nothing of the host's own. */
 const ENGINE_PATH = "/usr/bin:/bin";
 
@@ -373,7 +414,7 @@ const EngineEnvironmentSchema: v.GenericSchema<
 > = v.record(v.pipe(v.string(), v.regex(/^[A-Za-z_][A-Za-z0-9_]*$/u)), v.string());
 
 /** The environment one engine runs with. */
-export type EngineEnvironment = Readonly<Record<string, string>>;
+type EngineEnvironment = Readonly<Record<string, string>>;
 
 /** The pack's own variables, resolved and checked. */
 function packEnvironmentOf(pack: OfficePack): EngineEnvironment {
@@ -502,9 +543,4 @@ async function findExecutable(candidate: string, searchPath: string): Promise<st
     }
   }
   return undefined;
-}
-
-/** The content type an artifact carries, by operation. */
-export function contentTypeOf(operation: "preview" | "render" | "convert"): string {
-  return CONTENT_TYPE_OF_OPERATION[operation];
 }

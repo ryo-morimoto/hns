@@ -1,14 +1,13 @@
-import { stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import {
+  MACHINE_ARTIFACT_PATH,
   MAX_ARTIFACT_BYTES,
-  artifactTarget,
   officeArtifactContentType,
   officePathHash,
   parseArtifactQuery,
 } from "@hns/core/office";
 import type { ArtifactAnswer, ArtifactQuery, OfficeArtifactFileOperation } from "@hns/core/office";
 import { MachineRefusal } from "../refusal.ts";
-import { open } from "node:fs/promises";
 import type { OfficeCacheKey } from "@hns/core/office";
 import type { OfficeCache } from "./cache.ts";
 
@@ -29,33 +28,46 @@ export interface ArtifactResponse {
  * The query this machine would sign for one request target, or the refusal that rejects it.
  *
  * @param target - The request target as it arrived: `/artifact?…`, query included.
- * @returns The parsed query when it is the canonical spelling of itself.
- * @throws {MachineRefusal} `invalid_request` for a target that is not `/artifact` with a query, a
- * query with an unknown, repeated or malformed pair, a `length` over {@link MAX_ARTIFACT_BYTES},
- * or a query that is valid but not the one spelling of itself.
+ * @returns The parsed key and the range the target names.
+ * @throws {MachineRefusal} `invalid_request` for a target that is not `{@link MACHINE_ARTIFACT_PATH}`
+ * with a query, a query with an unknown, repeated or malformed pair, a `length` over
+ * {@link MAX_ARTIFACT_BYTES}, or a query that is valid but not the one spelling of itself.
  *
  * @remarks
  * **The signature covers the whole request target** (`docs/office.md` §5): the verifier hashes the
  * path and query the client sent, so the machine only has to check that what it received is the
- * canonical target for what it parsed. A query whose pairs were reordered, whose encoding was
- * different, or whose `version` was swapped for another still parses, and is refused here — before
- * the signature is even attempted — because it is not the target anybody signed.
+ * canonical target for what it parsed. A query whose pairs were reordered or whose `version` was
+ * swapped for another still parses, and is refused here — before the signature is even attempted —
+ * because it is not the target anybody signed.
  *
- * The `path` and `operation` pairs are not trusted for what they say: the cache path is built from
- * `officePathHash(path)` and from an operation that makes a file, so a `pathHash` cannot be
- * smuggled in, and a `convert` (which makes no cache entry) is not a key this route serves.
+ * **The query's shape is checked on the raw text, before anything is decoded**: the pairs must be
+ * exactly the five key parts, in that order, followed by `offset` then `length` when the target
+ * names them. That is the one order the server writes, so a reordered query, a repeated key, or a
+ * range put before a key part is refused even though it parses. The values are proved after it, by
+ * `parseArtifactQuery`, which is also what refuses a key part outside its spelling.
+ *
+ * The `operation` is not trusted for what it says: the cache path is built for an operation that
+ * makes a file, so a `convert` (which makes no cache entry) is not a key this route serves.
  */
 export function verifyArtifactTarget(target: string): ArtifactQuery {
   const question = target.indexOf("?");
   if (question === -1) {
     throw new MachineRefusal("invalid_request", "an artifact read names its key in the query");
   }
-  const route = target.slice(0, question);
+  if (target.slice(0, question) !== MACHINE_ARTIFACT_PATH) {
+    throw new MachineRefusal("invalid_request", "an artifact read is not the artifact route");
+  }
   const query = target.slice(question + 1);
+  const pairs = rawPairs(query);
+  // The pairs are checked first, on their raw text: the target must be the key's five parts and
+  // then, if they are named, `offset` and `length`. A query that parses to the same values in
+  // another order (or with a pair added somewhere else) is not the target anybody signed.
+  if (!isCanonicalPairs(pairs)) {
+    throw new MachineRefusal("invalid_request", "the artifact target is not the signed one");
+  }
   let entries: [string, string][];
   try {
-    const parsed = new URLSearchParams(query);
-    entries = [...parsed.entries()];
+    entries = [...new URLSearchParams(query).entries()];
   } catch {
     throw new MachineRefusal("invalid_request", "the artifact query cannot be read");
   }
@@ -74,20 +86,43 @@ export function verifyArtifactTarget(target: string): ArtifactQuery {
       "the artifact query names no artifact the cache holds",
     );
   }
-  const canonical = artifactTarget({
-    workspaceId: parsed.workspaceId,
-    path: parsed.path,
-    version: parsed.version,
-    operation: parsed.operation,
-    paramsHash: parsed.paramsHash,
-    offset: parsed.offset,
-    length: parsed.length,
-  });
-  if (canonical !== target) {
-    throw new MachineRefusal("invalid_request", "the artifact target is not the signed one");
-  }
-  void route;
   return parsed;
+}
+
+/** The artifact query's key parts, in the order the canonical spelling writes them. */
+const ARTIFACT_QUERY_KEYS = ["workspaceId", "path", "version", "operation", "paramsHash"] as const;
+
+/**
+ * The query's pairs exactly as they were written.
+ *
+ * @param query - The target's query, after the `?`.
+ * @returns Each pair's name, in order, without decoding it.
+ */
+function rawPairs(query: string): readonly string[] {
+  return query.split("&").map((pair) => {
+    const equals = pair.indexOf("=");
+    return equals === -1 ? pair : pair.slice(0, equals);
+  });
+}
+
+/**
+ * Whether the pairs are the canonical query's, in its order.
+ *
+ * @param names - The pair names, as they were written.
+ * @returns True for the five key parts and then, if named, `offset` and `length`; false for any
+ * other name, a repeat, an absent one, or the canonical names in another order.
+ *
+ * @remarks
+ * The check is of the names alone: the values are `parseArtifactQuery`'s to prove, and what this
+ * function adds is that the *shape* of the query is the one the server signs. An appended
+ * `&length=10` fails here because a sixth key part is not where the range goes; a repeated
+ * `workspaceId` fails because the fifth position must be `paramsHash`.
+ */
+function isCanonicalPairs(names: readonly string[]): boolean {
+  const expected: string[] = [...ARTIFACT_QUERY_KEYS];
+  if (names[expected.length] === "offset") expected.push("offset");
+  if (names[expected.length] === "length") expected.push("length");
+  return names.length === expected.length && expected.every((name, at) => names[at] === name);
 }
 
 /**

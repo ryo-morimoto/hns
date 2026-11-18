@@ -48,7 +48,7 @@ export interface Limits {
 }
 
 /** The office engine's bounds. */
-export interface OfficeLimits {
+interface OfficeLimits {
   /** Wall-clock budget for one office job, in milliseconds. Never below {@link MIN_OFFICE_TIMEOUT_MS}. */
   readonly timeoutMs: number;
   /** Address space one engine process may take, in MiB. */

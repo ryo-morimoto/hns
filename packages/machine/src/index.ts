@@ -52,47 +52,16 @@ export type {
   MirrorPushOutcome,
   MirrorPushRequest,
 } from "@hns/workspace/mirror-push";
-// The office engine (0236): its prescan, its cache, and the pack it runs. A deployment names the
-// pack and the cache; a test drives the executor without an agent.
-export {
-  artifactKeyOf,
-  checkPackHost,
-  contentTypeOf,
-  engineArgv,
-  loadPack,
-  officeBusy,
-  OfficeCache,
-  OFFICE_CACHE_MAX_BYTES,
-  OFFICE_CACHE_TTL_MS,
-  packEnvironment,
-  packReport,
-  probeOfficeEngine,
-  readRange,
-  runEngine,
-  runOfficeJob,
-  scanOfficeInput,
-  serveArtifact,
-  sha256OfFile,
-  verifyArtifactTarget,
-} from "./office/index.ts";
-export type {
-  ArtifactResponse,
-  CacheEntryFacts,
-  CacheEntryMetadata,
-  EngineEnvironment,
-  EngineOutcome,
-  EngineRun,
-  OfficeEnvelope,
-  OfficePack,
-  OfficeScan,
-  OfficeScanInput,
-  OfficeScanVerdict,
-  PackBindPath,
-  PackBuild,
-  PackHost,
-  PackLoad,
-  PackProblem,
-} from "./office/index.ts";
+// The office engine (0236): the cache the artifact route reads, the executor a caller of
+// runOperation drives, and the pieces a test of either exercises. The modules inside `office/`
+// are the agent's own; what is re-exported here is the package's public surface.
+export { OfficeCache } from "./office/cache.ts";
+export { engineArgv, packEnvironment, runEngine } from "./office/engine.ts";
+export type { EngineOutcome, EngineRun } from "./office/engine.ts";
+export { loadPack } from "./office/pack.ts";
+export { probeOfficeEngine, runOfficeJob } from "./office/job.ts";
+export { scanOfficeInput } from "./office/prescan.ts";
+
 export type { MachineOfficeOptions } from "./agent.ts";
 export { MachineRefusal, refusalStatus } from "./refusal.ts";
 export type { RefusalCode } from "./refusal.ts";

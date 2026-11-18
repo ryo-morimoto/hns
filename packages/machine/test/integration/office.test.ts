@@ -1,6 +1,16 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -718,7 +728,8 @@ describe.skipIf(skipReason !== undefined)("the office engine over the real pack"
   // C9: the engine runs with no network. A document that names an external target converts, and
   // the network namespace is what makes that harmless; the engine argv is where it is visible.
   test("C9: the engine's sandbox has no network, and an external link still converts", async () => {
-    const { engineArgv, loadPack } = await import("../../src/office/index.ts");
+    const { engineArgv } = await import("../../src/office/engine.ts");
+    const { loadPack } = await import("../../src/office/pack.ts");
     const loaded = await loadPack(pack);
     if (!loaded.ok) throw new Error(loaded.reason);
     const argv = engineArgv(
@@ -872,6 +883,41 @@ describe.skipIf(skipReason !== undefined)("the office engine over the real pack"
       },
       { office: officeSetup() },
     );
+  });
+
+  // C10: a conversion that fails leaves nothing behind. The pack presented here is a copy whose
+  // `bin/ibisOffice` is a shell script: it writes half a PDF into the output directory and exits
+  // non-zero, which is exactly what a crash mid-write looks like. The answer is a failure, the
+  // cache holds no entry, and nothing is left in the runs' directory (INV-O4).
+  test("C10: an engine that dies mid-write leaves no artifact behind", async () => {
+    const broken = join(work, "broken-pack");
+    await cp(pack, broken, { recursive: true });
+    // Its manifest still names the real binary, so the host check is what refuses it — unless the
+    // manifest is repointed too. A pack whose binary was replaced is "not the file its manifest
+    // names", which is `engine_unavailable`: the machine does not run a binary it cannot vouch for.
+    await writeFile(
+      join(broken, "bin", "ibisOffice"),
+      "#!/bin/sh\nprintf '%%PDF-1.7 half' > \"$3\"\nexit 1\n",
+      { mode: 0o755 },
+    );
+    try {
+      await withOffice(
+        async (fixture) => {
+          const cacheRoot = cacheRootOf(fixture);
+          const before = await treeOf(cacheRoot);
+          const answer = officeResultOf(
+            await fixture.call(officeCall(convertJob("proposal.docx"))),
+          );
+          expect(answer.ok).toBe(false);
+          if (answer.ok) return;
+          expect(answer.error).toBe("engine_unavailable");
+          expect(await treeOf(cacheRoot)).toStrictEqual(before);
+        },
+        { packRoot: broken },
+      );
+    } finally {
+      await rm(broken, { recursive: true, force: true });
+    }
   });
 
   // The route does not read ROOT: a workspace file whose bytes happen to be cached is not served
