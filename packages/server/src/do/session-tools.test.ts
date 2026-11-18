@@ -164,6 +164,7 @@ function fixture(): Fixture {
     issuer,
     audit,
     machine: idleMachine(),
+    agentUrl: "http://127.0.0.1:8788",
     controlPlaneKey: Buffer.from(new Uint8Array(32).fill(7)).toString("base64url"),
     machineId: "m1",
     manifests: async () => [MANIFEST],
@@ -175,11 +176,12 @@ function fixture(): Fixture {
       return "a" + String(eventId);
     },
     fetch: async (url, init) => {
-      requests.push({ url, headers: new Headers(init.headers) });
-      const body = new TextDecoder().decode(v.parse(v.instance(Uint8Array), init.body));
+      const target = url instanceof URL ? url.href : url instanceof Request ? url.url : url;
+      requests.push({ url: target, headers: new Headers(init?.headers) });
+      const body = new TextDecoder().decode(v.parse(v.instance(Uint8Array), init?.body));
       relayed.push({
         body: JSON.parse(body),
-        signature: new Headers(init.headers).get("x-hns-signature"),
+        signature: new Headers(init?.headers).get("x-hns-signature"),
       });
       return new Response(JSON.stringify({ ok: true, op: "tool", result: machineAnswer.current }), {
         status: 200,
@@ -243,7 +245,8 @@ test("C7: an allowed call is audited around the relay, with its grant", async ()
     bytes: 4096,
   });
   // The request is signed with the control-plane key: a signature header, and a machine route.
-  expect(f.requests[0]?.url).toBe("/rpc");
+  // The relay goes to the machine's configured origin and its one route.
+  expect(f.requests[0]?.url).toBe("http://127.0.0.1:8788/rpc");
   expect(f.relayed[0]?.signature).not.toBeNull();
   const rows = f.audits;
   expect(rows.map((row) => row.event)).toStrictEqual(["tool.call", "tool.result"]);

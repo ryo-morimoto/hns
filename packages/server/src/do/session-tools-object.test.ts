@@ -2,7 +2,6 @@ import { expect, test } from "vitest";
 import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { policyHash } from "@hns/core/capability";
 import type { PolicyDocument } from "@hns/core/capability";
-import { ModelUnavailableError } from "./models.ts";
 import type { AgentSession } from "@hns/agent/session";
 import { TOOL_RUN_TOKEN_HEADER } from "@hns/workspace/protocol";
 import { Session } from "./session.ts";

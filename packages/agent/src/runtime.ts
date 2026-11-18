@@ -255,9 +255,9 @@ export function grantRequestFor(contract: ToolContract): GrantRequest {
     toolId: contract.manifest.toolId,
     toolVersion: contract.manifest.version,
     manifestHash: contract.manifestHash,
-    // The tool's own output ceiling. The issuer clamps this to the manifest's limit, so the grant's
-    // byte bound is the manifest's: a turn's total model-facing output. A call that returns more
-    // than what is left of it is refused `counter_exhausted`, which is the budget working.
+    // The tool's own output ceiling: the issuer clamps this to the manifest's limit, and the
+    // policy's call budget is the machine's counter. A call that returns more than what is left of
+    // the bytes is refused `counter_exhausted`, which is the budget working.
     maxBytes: contract.manifest.outputLimits.maxBytes,
   };
 }
@@ -280,7 +280,28 @@ export function sessionGrantPath(input: {
   const cache = grantCache(
     input.now === undefined ? { source: input.source } : { source: input.source, now: input.now },
   );
-  return { source: cache.source, transport: input.transport };
+  const transport = input.transport;
+  return {
+    source: cache.source,
+    transport: {
+      async call(granted) {
+        const answer = await transport.call(granted);
+        // A grant the machine refused as expired or from a superseded policy is spent: dropping it
+        // here makes the next call ask for a fresh one instead of replaying a dead grant. Other
+        // denials are the policy's answer for this call and leave the cache alone; a revoked grant
+        // is the run's end, and nothing should be reissued for it.
+        const code = answer.decision.outcome === "deny" ? answer.decision.code : undefined;
+        if (code === "grant_expired" || code === "epoch_stale" || code === "grant_revoked") {
+          cache.clear();
+        }
+        return answer;
+      },
+      async closeRun() {
+        cache.clear();
+        await transport.closeRun();
+      },
+    },
+  };
 }
 
 /** The decision for a call whose grant could not be obtained: no grant, so nothing runs. */

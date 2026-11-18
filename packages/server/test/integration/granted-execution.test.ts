@@ -170,6 +170,7 @@ async function openObject(options: { readonly granted: boolean }): Promise<RealO
       issuer: options.granted ? issuer : undefined,
       audit,
       machine: idleMachine(),
+      agentUrl: "http://127.0.0.1:8788",
       controlPlaneKey: SEED,
       machineId: MACHINE_ID,
       manifests,

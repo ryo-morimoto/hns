@@ -6,6 +6,7 @@ import {
   GrantUnavailableError,
   grantCache,
   grantRequestFor,
+  sessionGrantPath,
   type GrantAnswer,
   type GrantRequest,
   type GrantSource,
@@ -187,6 +188,47 @@ test("a grant with no readable expiry is not cached", async () => {
     GrantUnavailableError,
   );
   expect(asked).toHaveLength(1);
+});
+
+// A grant the machine refused as expired is dropped: the next call asks for a fresh one (C3).
+test("a grant the machine refused as expired is asked for again", async () => {
+  let asked = 0;
+  const source: GrantSource = {
+    async issue() {
+      asked += 1;
+      return { ok: true, grant: grant("g" + String(asked), NOW + 60_000) };
+    },
+  };
+  const answers = deny("grant_expired", "the grant is not valid at this time");
+  const transportCalls: string[] = [];
+  const path = sessionGrantPath({
+    source,
+    now: () => NOW,
+    transport: {
+      async call(input) {
+        transportCalls.push(input.grant.payload.grantId);
+        return { decision: answers };
+      },
+      async closeRun() {
+        // The run's end is the cache's to forget; nothing else to end here.
+      },
+    },
+  });
+  const request = grantRequestFor(CONTRACT);
+  const first = await path.source.issue(request);
+  if (!first.ok) throw new Error("the first grant should exist");
+  await path.transport.call({
+    call: { v: 1, callId: "tool:1:a", toolId: "read_file", toolVersion: "1", args: { path: "a" } },
+    contract: CONTRACT,
+    bytes: 1,
+    grant: first.grant,
+  });
+  const second = await path.source.issue(request);
+  if (!second.ok) throw new Error("the second grant should exist");
+  // The expired grant was dropped: the second request asked the issuer again.
+  expect(asked).toBe(2);
+  expect(second.grant.payload.grantId).not.toBe(first.grant.payload.grantId);
+  expect(transportCalls).toStrictEqual([first.grant.payload.grantId]);
 });
 
 // The request names the contract and the manifest's output ceiling (what the grant's bytes bound).

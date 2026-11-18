@@ -6,7 +6,6 @@ import type { PolicyDocument } from "@hns/core/capability";
 import { PolicySnapshotBodySchema, TOOL_RUN_TOKEN_HEADER } from "@hns/workspace/protocol";
 import type { PolicySnapshotBody } from "@hns/workspace/protocol";
 import type { AgentSession } from "@hns/agent/session";
-import { ModelUnavailableError } from "./models.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
 import { createToolPath, type ToolPath } from "./session-tools.ts";
 import type { PolicyAudit } from "./audit.ts";
@@ -105,6 +104,7 @@ function toolPath(): ToolPath {
     },
     controlPlaneKey: Buffer.from(new Uint8Array(32).fill(1)).toString("base64url"),
     machineId: "m1",
+    agentUrl: "http://127.0.0.1:8788",
     manifests: async () => [],
     revoked: async () => false,
     grantOf: async () => undefined,
@@ -138,12 +138,15 @@ async function snapshot(revision = 1): Promise<PolicySnapshotBody> {
   });
 }
 
-// A send on the granted path with no snapshot is refused before the run: no policy, no grant.
-test("a send on the granted path needs the active policy", async () => {
+// A send with no snapshot is a Phase 0 turn: it runs here, and nothing is granted.
+test("a send without the active policy runs as a Phase 0 turn", async () => {
   const { session, sends } = fakeSession();
-  const response = await handleSessionRpc(sendBody(undefined), session, { tools: toolPath() });
-  expect(response.status).toBe(400);
-  expect(sends).toHaveLength(0);
+  const tools = toolPath();
+  const response = await handleSessionRpc(sendBody(undefined), session, { tools });
+  expect(response.status).toBe(200);
+  expect(sends).toHaveLength(1);
+  // The object kept no snapshot, so a relayed call has nothing to issue a grant under.
+  expect(tools.state.snapshot()).toBeUndefined();
 });
 
 // A snapshot that names another document is refused.

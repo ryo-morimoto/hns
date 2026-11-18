@@ -572,15 +572,9 @@ export async function handleSessionRpc(
       const parsed = v.safeParse(SendSchema, body.value);
       if (!parsed.success) return failure("invalid_request", "Invalid message input.");
       const tools = dependencies.tools;
-      if (tools !== undefined) {
+      if (tools !== undefined && parsed.output.policy !== undefined) {
         // The granted path: the turn is admitted under the policy the Worker read, and the object
-        // refuses a missing or older revision before any tool could run under it.
-        if (parsed.output.policy === undefined) {
-          return failure(
-            "invalid_request",
-            "The granted tool path needs the active policy revision with the turn.",
-          );
-        }
+        // refuses one older than a revision it already admitted.
         const admitted = await tools.state.admitTurn(asPolicySnapshotPayload(parsed.output.policy));
         if (!admitted.ok) {
           // A snapshot that is not one is the request's fault; one older than what this object
@@ -591,6 +585,9 @@ export async function handleSessionRpc(
           );
         }
       }
+      // A send with **no** snapshot is a Phase 0 turn: the agent runs the tools here, nothing is
+      // granted, and the turn is not refused. The object's granted path being open is not a reason
+      // to require the Worker to carry the policy on every face (D091, §10).
       const cost = dependencies.cost;
       if (cost !== undefined) {
         try {

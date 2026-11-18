@@ -30,7 +30,6 @@ import {
 } from "../ws.ts";
 import { LEGACY_SESSION_NAME } from "../session-name.ts";
 import { TOOL_RUN_ROUTE, TOOL_RUN_TOKEN_HEADER } from "@hns/workspace/protocol";
-import type { ToolManifest } from "@hns/core/capability";
 import type { ToolRunTransport } from "./session-tools.ts";
 import {
   ToolTransportError,
@@ -53,9 +52,10 @@ import {
 } from "./session-grants.ts";
 import {
   createToolPath,
-  type CallIdentityPayload,
+  type GrantedCallRequest,
   type GrantIssuer,
   type ToolPath,
+  type ToolPathOptions,
 } from "./session-tools.ts";
 import { GrantedAnswerSchema } from "@hns/workspace/protocol";
 import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
@@ -106,6 +106,15 @@ export interface SessionDependencies {
   readonly now?: (() => number) | undefined;
   /** Builds the 101 response; Node tests inject a factory because its Response refuses 101. */
   readonly upgradeResponse?: LiveUpgradeResponseFactory | undefined;
+  /**
+   * The machine wire the granted path relays over; `fetch` in production.
+   *
+   * @remarks
+   * A seam, like the socket pair: the granted path sends its signed request to the machine's
+   * origin, and a test that proves the object's transport, route, and relay must stand in for the
+   * machine's process without touching the Worker's network.
+   */
+  readonly machineFetch?: ToolPathOptions["fetch"] | undefined;
 }
 
 /**
@@ -208,8 +217,28 @@ export class Session {
   #index: SessionIndex | undefined;
   #grants: GrantPlane | undefined;
   #tools: ToolPath | undefined;
+  /** The token each run's relay was minted with, so a test can serve the route as its agent. */
+  readonly #runTokens = new Map<string, string>();
+  readonly #machineFetch: ToolPathOptions["fetch"] | undefined;
   /** The runs' relays, by conversation: one token and one transport per run. */
   readonly #transports = new Map<string, ToolRunTransport>();
+  /**
+   * The token one run's relay was minted with, for a test that serves the route itself.
+   *
+   * @internal
+   */
+  runToken(runId: string): string | null {
+    return this.#runTokens.get(runId) ?? null;
+  }
+  /**
+   * The runs' granted paths: one per run, so its grant cache covers the whole run's tool calls.
+   *
+   * @remarks
+   * The agent's hooks ask for a path at every call; answering a new object (and so a new cache)
+   * each time would issue a grant per call, which is the round trip the cache exists to remove.
+   * A path is dropped with its run's transport (`closeRun`).
+   */
+  readonly #grantPaths = new Map<string, RuntimeGrantPath>();
   /**
    * The grants this object revoked: the object's revocation statement, as the ledger wrote it.
    *
@@ -233,6 +262,7 @@ export class Session {
     this.#pair = dependencies.webSocketPair ?? defaultWebSocketPair;
     this.#now = dependencies.now ?? Date.now;
     this.#upgradeResponse = dependencies.upgradeResponse ?? defaultLiveUpgradeResponse;
+    this.#machineFetch = dependencies.machineFetch;
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -363,7 +393,7 @@ export class Session {
       { agentUrl, controlPlaneKey: seed },
       { now: this.#now },
     );
-    return createToolPath({
+    const options: ToolPathOptions = {
       workspaceId: name,
       sessionId: name,
       issuer: this.#grantIssuer,
@@ -371,6 +401,7 @@ export class Session {
       machine,
       controlPlaneKey: seed,
       machineId,
+      agentUrl,
       manifests: toolManifests,
       revoked: async (grantId) => {
         return this.#revokedGrants.has(grantId);
@@ -378,7 +409,11 @@ export class Session {
       grantOf: async (runId) => (await grants.boundTo(runId)).at(0),
       now: this.#now,
       eventId: () => ids.next(),
-    });
+    };
+    if (this.#machineFetch !== undefined) {
+      return createToolPath({ ...options, fetch: this.#machineFetch });
+    }
+    return createToolPath(options);
   }
 
   /**
@@ -438,15 +473,15 @@ export class Session {
     const known = this.#transports.get(runId);
     if (known !== undefined) return known;
     const token = tools.state.mint(runId);
+    this.#runTokens.set(runId, token);
     const origin = this.#objectUrl();
     const transports = this.#transports;
+    const grantPaths = this.#grantPaths;
+    // The object's own route, reached in this isolate: the granted path never goes through the
+    // deployment's network for it.
     const objectFetch = (request: Request): Promise<Response> => this.fetch(request);
     const transport: ToolRunTransport = {
-      async call(input: {
-        readonly call: CallIdentityPayload;
-        readonly manifest: ToolManifest;
-        readonly bytes: number;
-      }) {
+      async call(input: GrantedCallRequest) {
         const url = origin + "/rpc/conversations/" + encodeURIComponent(runId) + TOOL_RUN_ROUTE;
         // The object's own route: the run's token is what the route checks.
         const response = await objectFetch(
@@ -461,6 +496,7 @@ export class Session {
       async closeRun() {
         tools.state.forget(runId);
         transports.delete(runId);
+        grantPaths.delete(runId);
       },
     };
     transports.set(runId, transport);
@@ -493,15 +529,21 @@ export class Session {
    */
   #grantPathFor(runId: string): RuntimeGrantPath | undefined {
     if (this.#tools === undefined) return undefined;
-    // The run must have been admitted: an object with no snapshot issues nothing, and a Session
-    // opened before any turn is not one a tool call can spend.
+    // The object's granted path is open, but a run that was never admitted (no snapshot) keeps
+    // the Phase 0 tools: nothing can be granted against a revision the object was not told.
     if (this.#tools.state.snapshot() === undefined) return undefined;
+    const known = this.#grantPaths.get(runId);
+    if (known !== undefined) return known;
     const run = this.#runTransport(runId);
     if (run === undefined) return undefined;
-    return sessionGrantPath({
+    // One path (and so one grant cache) per run: a turn's tool calls share it, which is what makes
+    // a grant cover a turn rather than a call.
+    const path = sessionGrantPath({
       source: this.#agentGrantSource(runId),
       transport: this.#agentTransport(run),
     });
+    this.#grantPaths.set(runId, path);
+    return path;
   }
 
   /**
@@ -542,8 +584,9 @@ export class Session {
   #agentTransport(run: ToolRunTransport): ToolTransportPort {
     return {
       call: async (input) => {
+        // The route's own body: the call, its manifest, and the bytes, at the top level.
         const answer = await run.call({
-          call: { call: input.call, manifest: input.contract.manifest },
+          call: input.call,
           manifest: input.contract.manifest,
           bytes: input.bytes,
         });
@@ -569,6 +612,8 @@ export class Session {
    * binding instead (the `SESSION` binding's stub), which is the same route.
    */
   #objectUrl(): string {
+    // The object's own origin: a Durable Object reaches itself through its stub, and the stub's
+    // host is the internal session URL every other internal route is written against.
     return "https://session.internal";
   }
 

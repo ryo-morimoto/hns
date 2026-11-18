@@ -13,7 +13,7 @@ import { obj, str } from "@earendil-works/pi-schema";
 import * as v from "valibot";
 import { operationIdFrom } from "@hns/core";
 import type { MutationResult, OperationId } from "@hns/core";
-import type { DenialCode, PolicyDecision, ToolId } from "@hns/core/capability";
+import type { DenialCode, PolicyDecision, SignedGrant, ToolId } from "@hns/core/capability";
 import type { Workspace } from "@hns/workspace";
 import {
   INVALID_ARGUMENTS,
@@ -54,25 +54,23 @@ import type { ShellAccess } from "./shell.ts";
 /** Model-facing read size, in characters. Worst-case JSON escaping is 6x, so 256 KiB covers it. */
 const MAX_READ_CONTENT = 32 * 1024;
 
-/** The calls one grant covers: the policy's baseline `maxCallsPerGrant`. */
-const GRANT_CALLS = 10;
-
 /**
  * What one granted call counts against its grant's `maxBytes`.
  *
- * @param identity - The tool the call runs.
- * @returns The manifest's model-facing bound divided over the calls a grant covers, and at least one
- * byte.
+ * @param grant - The grant the call is about to spend, as the issuer signed it.
+ * @returns The grant's byte bound divided over the calls it covers, and at least one byte.
  *
  * @remarks
- * A grant's `maxBytes` is the manifest's own ceiling (the issuer clamps a request to it), and the
- * machine charges each call against it before the call runs, so each call charges its share: a
- * grant covers {@link GRANT_CALLS} calls rather than one full-size reply. Charging the whole bound
- * per call would make the second call of the same tool `counter_exhausted`, which is the cache's
- * whole point avoided.
+ * The machine charges each call against the grant's `maxBytes` before the call runs, and the grant's
+ * budget is the **policy's** (`maxCalls` = `maxCallsPerGrant`, `maxBytes` = the manifest's ceiling,
+ * both clamped by the issuer). Charging each call its share of that budget lets a grant pay for the
+ * calls the policy granted; charging the whole bound per call would make the second call of the same
+ * tool `counter_exhausted`, which is the cache's whole point. The numbers come from the signed
+ * grant, never from a constant here.
  */
-function grantCallBytes(identity: ToolIdentity): number {
-  return Math.max(1, Math.floor(identity.manifest.outputLimits.maxBytes / GRANT_CALLS));
+function grantCallBytes(grant: SignedGrant): number {
+  const perCall = Math.floor(grant.payload.maxBytes / Math.max(1, grant.payload.maxCalls));
+  return Math.max(1, perCall);
 }
 
 /** The largest wait a bash call may name, in milliseconds: one day. */
@@ -460,11 +458,9 @@ async function grantedCall(
       answer = await grants.transport.call({
         call: call.call,
         contract,
-        // What this call's output may reach, charged to the grant: the manifest's model-facing
-        // bound divided over the calls a grant covers, so a grant pays for a turn of calls. The
-        // tool never returns more than that (a read is capped below the manifest's bound; a write
-        // and bash are smaller), and the machine refuses a call that would overrun the grant.
-        bytes: grantCallBytes(identity),
+        // What this call counts against the grant's bytes: its share of the policy's budget, so a
+        // grant pays for the calls it was issued for (see `grantCallBytes`).
+        bytes: grantCallBytes(issued.grant),
         grant: issued.grant,
       });
     }
@@ -533,8 +529,15 @@ function refusalDetail(decision: PolicyDecision): string {
  */
 function servedResult(toolId: ToolId, result: MachineToolResult): ToolExecutionResult {
   // The kind the answer names is the tool's own: a read's answer for a write would be a result the
-  // machine never produced for this call, so it is not read as one.
-  void toolId;
+  // machine never produced for this call, so it is refused rather than read as one.
+  if (result.kind !== KIND_OF_TOOL[toolId]) {
+    return failureReply({
+      ok: false,
+      status: "failed",
+      code: "unreadable_answer",
+      message: "the machine answered another tool's result",
+    });
+  }
   if (result.kind === "read") {
     const content = Buffer.from(result.content, "base64").toString("utf8");
     const truncated = content.length > MAX_READ_CONTENT;
@@ -587,6 +590,13 @@ const MutationResultSchema = v.variant("status", [
     reason: v.picklist(["crash", "io", "timeout"]),
   }),
 ]);
+
+/** The kind of result each tool's operation produces. */
+const KIND_OF_TOOL: Readonly<Record<ToolId, MachineToolResult["kind"]>> = {
+  read_file: "read",
+  write_file: "write",
+  bash: "exec",
+};
 
 /** The machine's answer for the three workspace operations, as its schema reads it. */
 type MachineToolResult = v.InferOutput<typeof MachineToolResultSchema>;

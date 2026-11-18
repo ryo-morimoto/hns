@@ -212,15 +212,13 @@ export interface ToolRunTransport {
   /**
    * Relay one granted call; the answer is the machine's, as JSON.
    *
+   * @param input - The call, its manifest, and the bytes, in the **route's** shape
+   * ({@link GrantedCallRequest}); the route parses exactly this body.
    * @returns The machine's answer, which the route serializes: a decision and, for an allow, the
    * operation's result. It stays unparsed here because the object's own route parses it.
    */
   // oxlint-disable-next-line anti-slop/no-unknown-returns -- the wire answer, parsed by the route.
-  call(input: {
-    readonly call: CallIdentityPayload;
-    readonly manifest: ToolManifest;
-    readonly bytes: number;
-  }): Promise<GrantedAnswer | JsonValue>;
+  call(input: GrantedCallRequest): Promise<GrantedAnswer | JsonValue>;
   /** End the run: no further call relays. */
   closeRun(): Promise<void>;
 }
@@ -239,6 +237,8 @@ export interface ToolPathOptions {
   readonly controlPlaneKey: string | undefined;
   /** This machine's id; a grant is issued for it and the relay names it. */
   readonly machineId: string | undefined;
+  /** The machine agent's origin (`HNS_AGENT_URL`); the relay's requests go there. */
+  readonly agentUrl: string | undefined;
   /** The manifests the issuer checks a request's hash against: the object's own tool contracts. */
   readonly manifests: () => Promise<readonly ToolManifest[]>;
   /**
@@ -256,7 +256,9 @@ export interface ToolPathOptions {
   /** The event id for one audit row. */
   readonly eventId: () => string;
   /** The machine call; `fetch` in production, a fake in a test. */
-  readonly fetch?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
+  readonly fetch?:
+    | ((input: string | URL | Request, init?: RequestInit) => Promise<Response>)
+    | undefined;
 }
 
 /** The granted path one object runs. */
@@ -291,9 +293,17 @@ function toBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/gu, "-").replace(/\//gu, "_").replace(/=+$/u, "");
 }
 
-/** The machine's origin: the relay's URL, with the one route a machine answers. */
-function machineUrl(): string {
-  return MACHINE_RPC_PATH;
+/**
+ * The URL of the one route a machine answers.
+ *
+ * @param agentUrl - The machine's origin (`HNS_AGENT_URL`).
+ * @returns The origin and {@link MACHINE_RPC_PATH}, with one separator between them.
+ * @throws Error when the origin is empty: a relay with nowhere to go is a wiring defect, and the
+ * call is recorded as refused rather than sent to the object itself.
+ */
+function machineUrl(agentUrl: string): string {
+  if (agentUrl.length === 0) throw new Error("the machine's origin is not configured");
+  return agentUrl.replace(/\/+$/u, "") + MACHINE_RPC_PATH;
 }
 
 /** The headers of one signed machine request (0148's control-plane signature). */
@@ -303,6 +313,7 @@ async function signedHeaders(
   body: Uint8Array,
   requestId: string,
   now: number,
+  path: string,
 ): Promise<Headers> {
   const padded = seed.replace(/-/gu, "+").replace(/_/gu, "/");
   const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
@@ -320,7 +331,7 @@ async function signedHeaders(
     timestamp: String(now),
     nonce: crypto.randomUUID(),
     method: "POST",
-    path: machineUrl(),
+    path,
     bodyHash: createHash("sha256").update(body).digest("hex"),
   };
   const signed = await crypto.subtle.sign({ name: "Ed25519" }, key, signatureMessage(signature));
@@ -416,12 +427,6 @@ interface AuditedCall {
   readonly startedAt: number;
 }
 
-/** The call and manifest the agent relays, as its request carries them. */
-export interface CallIdentityPayload {
-  readonly call: ToolCall;
-  readonly manifest: ToolManifest;
-}
-
 /**
  * Issue, relay, and record one granted call.
  *
@@ -445,12 +450,14 @@ async function relayOne(input: RelayInput): Promise<ToolRelayOutcome> {
   const machine = options.machine;
   const machineId = options.machineId;
   const seed = options.controlPlaneKey;
+  const agentUrl = options.agentUrl;
   const issuer = options.issuer;
   if (
     issuer === undefined ||
     machine === undefined ||
     machineId === undefined ||
-    seed === undefined
+    seed === undefined ||
+    agentUrl === undefined
   ) {
     // Fail closed: an object that cannot issue or cannot relay runs no granted call.
     return {
@@ -541,7 +548,7 @@ async function relayOne(input: RelayInput): Promise<ToolRelayOutcome> {
   };
   let answer: GrantedAnswer;
   try {
-    answer = await relayToMachine(seed, machineId, body, options);
+    answer = await relayToMachine(seed, machineId, agentUrl, body, options);
   } catch (error) {
     // The relay itself failed: the call is recorded as refused, never as run.
     const decision = deny(
@@ -573,18 +580,21 @@ async function relayOne(input: RelayInput): Promise<ToolRelayOutcome> {
 async function relayToMachine(
   seed: string,
   machineId: string,
+  agentUrl: string,
   body: GrantedCall,
   options: ToolPathOptions,
 ): Promise<GrantedAnswer> {
   const bytes = new TextEncoder().encode(JSON.stringify(body));
+  const path = MACHINE_RPC_PATH;
   const headers = await signedHeaders(
     seed,
     machineId,
     bytes,
     "tool:" + body.call.callId,
     options.now(),
+    path,
   );
-  const url = machineUrl();
+  const url = machineUrl(agentUrl);
   const response = await (options.fetch ?? fetch)(url, {
     method: "POST",
     headers,
