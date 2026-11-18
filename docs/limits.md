@@ -1,13 +1,17 @@
 # 利用量と制限
 
-2026-11-06 / **実装済み（0027）**。要件15。
+2026-11-06 / **PoC の面は削除済み**（migration 0006 が `usage_log` を落とし、`startApp` と `GET /api/usage` も無くなった）。要件15 の制限は、下の「月次の運用上限」が**D1 と DO の記録の上で**引き継いでいる。
 
-## 記録
+## 記録（PoC。今は無い）
 
 - ターンが終わるたびに、Durable の `usage` の差分（トークン・コスト）を `usage_log` に1行残す。
 - `GET /api/usage` がセッション合計（モデル別・ツール別）と今日の合計を返す。
 
-## 制限（設定は `startApp` の `limits` か環境変数）
+**この 2 つは現存しない**（`usage_log` は migration 0006 で削除、`startApp` / `/api/usage` はこのリポジトリに無い）。PoC の記述として残し、**今の記録は `cost_turn`（下節）**。
+
+## 制限（PoC。今は無い。下の月次の運用上限が今の層）
+
+以下は 0027 の PoC の制限で、**`startApp` が無いので今は動かない**。同じ種類の制限は下の「月次の運用上限」で D1 / DO の側に置かれている（レートは `cost_limits` の行数・リクエスト数、時間は `turnTimeoutMs` 相当が 0146 の session 側）。
 
 | 制限          | 設定                                          | 超えたとき                         |
 | ------------- | --------------------------------------------- | ---------------------------------- |
@@ -19,6 +23,7 @@
 - 予算は `usage_log` の当日合計で判定する。実行中のターンは止めない（次から止まる）。
 - 中断は `POST /api/chat/abort`。実行中のターンだけ止める（`conversation.abort`）。
 - 中断されたターンも、消費した分は `usage_log` に残る。
+- **今の実装で対応するもの**: 中断は `/ws` の `abort` フレーム（→ object の `POST /rpc/conversations/<id>/abort`、`docs/contracts/live-ws.md`）。`core` の `Limits` 型（`turnsPerMinute` / `dailyTokenBudget` / `turnTimeoutMs`）は残っているが、**これを読む `startApp` は無い**。
 
 ## 月次の運用上限（プラットフォーム・provider）
 

@@ -4,14 +4,16 @@
 
 ## 現状（実測）
 
-- `packages/web/dist` の初期 JS は 1 chunk: **702KB raw / 208.9KB gzip**（2026-11-17、editor 未実装）。CSS は 3.4KB gzip。
-- 初期 chunk には React / Relay / TanStack Query / Base UI が入る。editor を足す前に、この数字を基準にする。
+- web の build 出力は **`deploy/assets/`**（`vite.config.ts` の `outDir`）。`packages/web/dist` ではない。
+- 2026-11-18 の実測（`npm run build -w @hns/web` の後、`gzip -c`）: **初期 JS は 1 chunk 220.7KB gzip / 約 703KB raw**、**CSS 4.5KB gzip**。
+  - 2026-11-17 の記録（208.9KB / 3.4KB）から増えている。**増分は 0105（会話画面）と 0229（ポリシー画面）**で、どちらも初期 chunk に載っている。
+  - 初期 chunk には React / Relay / TanStack Query / Base UI が入る。**W-P1（≤250KB gzip）までは残り約 29KB**。
 
 ## 性能
 
 | ID | 要件 | 目標 | 測り方 |
 | --- | --- | --- | --- |
-| W-P1 | 初期 JS | **≤250KB gzip**（現在 209KB） | build の出力。超えたら分割か依存を削る |
+| W-P1 | 初期 JS | **≤250KB gzip**（現在 220.7KB） | build の出力（`deploy/assets`）。超えたら分割か依存を削る |
 | W-P2 | CSS | **≤20KB gzip** | build |
 | W-P3 | 画面ごとの lazy chunk | **≤150KB gzip**（editor は 0106 の ≤350KB を例外） | build / route 分割 |
 | W-P4 | LCP（p75） | **≤2.5s**（edge / local） | 0114 / 0043 の実測 |

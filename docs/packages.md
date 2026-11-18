@@ -91,7 +91,17 @@ web は生成された SDL を build 時に読むだけで、schema を手で持
 ## REST 面
 
 REST は事前に宣言しない（D059）。GraphQL に載せない面（passkey・ファイルのバイト列・hooks・運用・machine）は、
-それを実装する issue が schema・認証・handler を同じ変更で足す。今はどの面も宣言されていない。
+それを実装する issue が schema・認証・handler を同じ変更で足す。
+
+**今ある REST の面**（`edge/handler.ts` が正本。面ごとの契約は [contracts/](contracts/README.md)）:
+
+| 面 | path | 実装した issue |
+| --- | --- | --- |
+| ファイルのバイト列 | `GET` / `POST /api/workspaces/:id/files` | 0157 |
+| checkpoint | `/api/workspaces/:id/checkpoints/...` | 0245 |
+| 会話と state | `GET` / `PATCH` / `DELETE /api/conversations/:id`（`/state`） | 0119 / 0271n |
+| machine の鍵 | `GET /api/machines/keys` | 0148 |
+| 運用 | `/api/events` / `/api/metrics` | 0162 |
 
 - 一覧・検索・書き込みのアプリ契約は GraphQL（`/graphql`）。
 - REST を足すときは、そのパッケージ内に schema と handler を置き、`core` に封筒を戻さない。
@@ -99,12 +109,12 @@ REST は事前に宣言しない（D059）。GraphQL に載せない面（passke
 ## exports の切り方
 
 - `@hns/core`: `.`（モデルと検証）、`./graphql`（モデルから起こした SDL。web の bundle には入れない）、`./capability`（ツール呼び出しの契約。web は import しない。0220 で追加）。
-- `@hns/workspace`: `.`（Workspace）、`./sandbox`（ExecutionEnv デコレータ）、`./objects`（git object 互換の R2 ストア）。
+- `@hns/workspace`: `.`（Workspace）、`./sandbox`（ExecutionEnv デコレータ）、`./objects`（git object 互換の R2 ストア）、`./checkpoint`・`./pack`（0243 / 0247 の checkpoint と pack の読み取り）、`./mirror`・`./mirror-push`（0246 のミラー）、`./protocol`（machine への要求の封筒）。
 - `@hns/store`: `.`（D1 のリポジトリ。Worker はこれをそのまま import する。`node:sqlite` を持たない）、
-  `./identity`（認証・秘密）。exec を使わないアプリが bubblewrap に依存しないようにする。
+  `./conversation-index`（会話の索引。D078）。
 - `@hns/agent`: `.`（Node の Agent）と `./session`（Worker-safe な複数会話 runtime。node: を import しない）。
-- `@hns/machine`: `.`（常駐エージェント。署名検証・ROOT 封じ込め・上限。プロセスの起動は 0148 の registry と合わせる）。
-- `@hns/server`: `.`（Worker の default と Session / Workspace Durable Object）と `bin`（`hns`）。`./graphql` は codegen 用の SDL（web は読まない）。
+- `@hns/machine`: `.`（常駐エージェント。署名検証・ROOT 封じ込め・上限）と `./cli`（`hns-machine enroll` / `run`。0270n）。
+- `@hns/server`: `.`（Worker の default と Session / Workspace Durable Object）、`./graphql`（codegen 用の SDL。web は読まない）、`./edge`・`./checkpoint`・`./machines`（face の入口を test と deploy が直接使う）。
 
 
 ## 今は切らないもの
