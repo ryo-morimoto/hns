@@ -126,7 +126,7 @@ export interface GrantRequest {
    * own limit** (a caller that does not care about the byte bound does not have to know it);
    * `0` is refused, because a grant that may return no byte is not a capability.
    */
-  readonly maxBytes?: number | undefined;
+  maxBytes?: number | undefined;
 }
 
 const NonEmpty = v.pipe(v.string(), v.minLength(1));
@@ -566,6 +566,21 @@ export interface PlaneRequest {
 export interface GrantPlane {
   /** Issue a grant (and record it), or the denial. */
   request(input: PlaneRequest): Promise<GrantIssue>;
+  /**
+   * Issue and record one grant for the run of the agent's own tool call.
+   *
+   * @param input - The request, the policy snapshot the Worker sent with the turn, who asks (the
+   * run), and the manifests.
+   * @returns The grant, or the denial that refused it.
+   *
+   * @remarks
+   * This is {@link GrantPlane.request} with the one thing the object knows and the Worker does
+   * not send: the snapshot the **run** was admitted under, which the object keeps for that
+   * conversation (see {@link ./session-tools.ts}). The Worker's own `requestGrant` (0224) is the
+   * other entry, for a person's request; both go through the same issuer, the same recorder, and
+   * the same ledger, so a grant is recorded wherever it came from.
+   */
+  one(input: PlaneRequest): Promise<GrantIssue>;
   /** The grants bound to a run that are still live. */
   boundTo(runId: string): Promise<readonly GrantRecord[]>;
   /**
@@ -606,7 +621,7 @@ let toolManifestsCache: Promise<readonly ToolManifest[]> | undefined;
  * The object already loads the harness (it opens the agent's session), so the tool table costs it
  * nothing new; that is why the Worker can stay free of it. Built once per isolate.
  */
-function toolManifests(): Promise<readonly ToolManifest[]> {
+export function toolManifests(): Promise<readonly ToolManifest[]> {
   toolManifestsCache ??= Promise.all(
     WORKSPACE_TOOLS.map(async (tool) => (await manifestFor(tool)).manifest),
   );
@@ -623,7 +638,7 @@ function toolManifests(): Promise<readonly ToolManifest[]> {
  */
 export function createGrantPlane(options: GrantPlaneOptions): GrantPlane {
   const { recorder, signer, now } = options;
-  return {
+  const plane: GrantPlane = {
     async request(input) {
       const issue =
         signer === undefined
@@ -648,6 +663,9 @@ export function createGrantPlane(options: GrantPlaneOptions): GrantPlane {
         throw error;
       }
       return issue;
+    },
+    async one(input) {
+      return await plane.request(input);
     },
     async boundTo(runId) {
       return await recorder.boundTo(runId);
@@ -691,4 +709,5 @@ export function createGrantPlane(options: GrantPlaneOptions): GrantPlane {
       return { revoked, failed };
     },
   };
+  return plane;
 }

@@ -41,10 +41,39 @@ import type {
 import type { AgentEventSink } from "./events.ts";
 import { failureOf } from "./failure.ts";
 import type { ReadReply, ToolFailure } from "./failure.ts";
+import {
+  GrantUnavailableError,
+  ToolTransportError,
+  grantRequestFor,
+  grantUnavailableDecision,
+  relayUnavailableDecision,
+} from "./runtime.ts";
+import type { GrantSource, ToolContract, ToolTransport } from "./runtime.ts";
 import type { ShellAccess } from "./shell.ts";
 
 /** Model-facing read size, in characters. Worst-case JSON escaping is 6x, so 256 KiB covers it. */
 const MAX_READ_CONTENT = 32 * 1024;
+
+/** The calls one grant covers: the policy's baseline `maxCallsPerGrant`. */
+const GRANT_CALLS = 10;
+
+/**
+ * What one granted call counts against its grant's `maxBytes`.
+ *
+ * @param identity - The tool the call runs.
+ * @returns The manifest's model-facing bound divided over the calls a grant covers, and at least one
+ * byte.
+ *
+ * @remarks
+ * A grant's `maxBytes` is the manifest's own ceiling (the issuer clamps a request to it), and the
+ * machine charges each call against it before the call runs, so each call charges its share: a
+ * grant covers {@link GRANT_CALLS} calls rather than one full-size reply. Charging the whole bound
+ * per call would make the second call of the same tool `counter_exhausted`, which is the cache's
+ * whole point avoided.
+ */
+function grantCallBytes(identity: ToolIdentity): number {
+  return Math.max(1, Math.floor(identity.manifest.outputLimits.maxBytes / GRANT_CALLS));
+}
 
 /** The largest wait a bash call may name, in milliseconds: one day. */
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
@@ -65,6 +94,15 @@ export function operationIdFor(callId: string): OperationId {
 }
 
 /**
+ * The granted path for the conversation a tool call runs in.
+ *
+ * @param identity - What the call's audit rows name; its `sessionId` is the conversation, which is
+ * the run whose grants the call may spend.
+ * @returns The path, or `undefined` for a call that runs in this process (Phase 0).
+ */
+export type GrantPathOf = (identity: AuditIdentity | undefined) => WorkspaceGrants | undefined;
+
+/**
  * What workspaceTools needs: the workspace to expose, whether exec is offered, where
  * observations go, and where the audit goes.
  */
@@ -83,6 +121,32 @@ export interface WorkspaceToolsOptions {
   readonly audit?: AuditSink | undefined;
   /** What an audit event names; required when `audit` is given. */
   readonly auditIdentity?: AuditIdentity | undefined;
+  /**
+   * The granted path: where grants come from and where calls are relayed; **absent means Phase 0**.
+   *
+   * @remarks
+   * With it, every admitted call is decided by its machine: the agent asks for a grant (cached per
+   * tool × manifest × machine), relays the call with the grant, and runs nothing unless the machine
+   * allowed it. Without it the tools keep the Phase 0 path — the agent's own admission is the
+   * decision, and the call runs in this process — which is what a deployment with the granted path
+   * switched off, and every pre-existing caller, gets. This is the one kill switch: nothing else in
+   * the tools turns the granted path on.
+   */
+  readonly grants?: GrantPathOf | undefined;
+}
+
+/**
+ * What the granted path needs: the issuer and the machine's relay.
+ *
+ * @remarks
+ * Both are the caller's: the Session object owns the run (its token and its revocations), and the
+ * issuer is the object's own. The agent holds no key, no URL, and no policy.
+ */
+export interface WorkspaceGrants {
+  /** Where a grant for one tool contract is asked for (the Session's issuer, cached). */
+  readonly source: GrantSource;
+  /** Where a granted call is relayed (the Session's relay for this run). */
+  readonly transport: ToolTransport;
 }
 
 /**
@@ -139,6 +203,15 @@ interface Admitted {
   readonly call: CallIdentity | undefined;
   readonly decision: PolicyDecision;
   readonly startedAt: number;
+  /**
+   * What the tool receives when the call ran on its machine, instead of the tool's own execution.
+   *
+   * @remarks
+   * The granted path decides and runs a call at one machine, so `beforeTool` already has the result;
+   * the registered tool then returns it unchanged (see `servedResult`). Absent on the Phase 0 path,
+   * where the tool runs here.
+   */
+  readonly served?: ToolExecutionResult | undefined;
 }
 
 /**
@@ -150,12 +223,63 @@ interface Admitted {
  */
 type CallMemory = Map<string, Admitted>;
 
+/**
+ * What each call's granted path already ran, by call id.
+ *
+ * @remarks
+ * The result is produced in `beforeTool` (the machine's answer), but the registered tool's
+ * `execute` is what reads a memory it shares with the hooks: the hooks cannot hand a value to
+ * `execute`, so the served result waits here for the tool that is about to be called with this id.
+ * `execute` deletes the entry; a call that never reaches its tool leaves it for the tool to find,
+ * and a later call has another id.
+ */
+type ServedMemory = Map<string, ToolExecutionResult>;
+
+/** The served results, per extension, keyed the way the tool hooks' memory is. */
+const servedResults = new WeakMap<Extension, ServedMemory>();
+
+/**
+ * The result a tool returns when its call already ran on its machine.
+ *
+ * @param extension - The extension whose tools run.
+ * @param callId - The call pi-durable is executing.
+ * @returns The served result, or undefined when this call runs here (Phase 0, or a refusal that
+ * never reached the machine).
+ *
+ * @remarks
+ * A tool built by `workspaceTools` checks here before it touches the workspace: on the granted path
+ * the machine already did the work, and running it a second time here would be a second execution of
+ * one call.
+ */
+export function servedResultFor(
+  extension: Extension,
+  callId: string,
+): ToolExecutionResult | undefined {
+  const served = servedResults.get(extension);
+  const result = served?.get(callId);
+  served?.delete(callId);
+  return result;
+}
+
 /** What the tool hooks need: the tools, the sinks, the environment, and the call memory. */
 interface ToolHookOptions {
-  readonly identityOf: (name: string) => Promise<ToolIdentity>;
-  readonly sinks: CallSinks;
-  readonly env: ShellAccess["env"];
-  readonly memory: CallMemory;
+  identityOf: (name: string) => Promise<ToolIdentity>;
+  sinks: CallSinks;
+  env: ShellAccess["env"];
+  memory: CallMemory;
+  /**
+   * The granted path for the conversation a call runs in; absent means Phase 0.
+   *
+   * @remarks
+   * With it, an admitted call is decided by its machine and its result comes from there; the
+   * registered tools never run it themselves in this process. It is a function because a Session
+   * gives each **run** its own path: the identity's session id is the conversation the tool runs
+   * in, which is the run whose grant the call may spend. A fixed path is a function that answers
+   * it for every identity.
+   */
+  grants?: GrantPathOf | undefined;
+  /** Where a granted call's result waits for its tool to return it. */
+  served: ServedMemory;
 }
 
 /**
@@ -184,7 +308,7 @@ interface ToolHookOptions {
  *   pi-durable keeps the tool's result when a hook throws, so the failure has to be the result itself.
  */
 function toolHooks(options: ToolHookOptions): ToolHooks {
-  const { identityOf, sinks, env, memory } = options;
+  const { identityOf, sinks, env, memory, grants, served } = options;
   const specFor = (callId: string, identity: ToolIdentity, context: Context): ToolCallSpec => ({
     identity,
     callId,
@@ -218,13 +342,31 @@ function toolHooks(options: ToolHookOptions): ToolHooks {
         });
         return { block: refusalWording(admission.decision) };
       }
+      const admitted = admission.admitted;
+      const path = grants?.(sinks.auditIdentity);
+      if (path === undefined) {
+        memory.set(call.id, {
+          call: admitted.call,
+          decision: admitted.decision,
+          startedAt: Date.now(),
+        });
+        return {
+          arguments: harnessArguments(admitted.args, identity.definition.toolId),
+        };
+      }
+      // The granted path: the machine decides and runs the call, and its decision is the one the
+      // result is recorded under. A refusal blocks here exactly as an admission refusal does.
+      const granted = await grantedCall(path, admitted.call, identity);
+      served.set(call.id, granted.served);
       memory.set(call.id, {
-        call: admission.admitted.call,
-        decision: admission.admitted.decision,
+        call: admitted.call,
+        decision: granted.decision,
         startedAt: Date.now(),
+        served: granted.served,
       });
+      if (granted.block !== undefined) return { block: granted.block };
       return {
-        arguments: harnessArguments(admission.admitted.args, identity.definition.toolId),
+        arguments: harnessArguments(admitted.args, identity.definition.toolId),
       };
     },
     async afterTool(call, result) {
@@ -244,7 +386,9 @@ function toolHooks(options: ToolHookOptions): ToolHooks {
           ok: succeeded(result),
           durationMs,
         });
-        return undefined;
+        // The granted path: the registered tool returns the result the machine produced (it ran
+        // nothing here), so this is the one that is committed.
+        return known?.served;
       } catch (caught) {
         // A caught value is unknown by definition; the message is the one thing worth reading.
         const error = caught instanceof Error ? caught : new Error(String(caught));
@@ -273,6 +417,200 @@ function toolHooks(options: ToolHookOptions): ToolHooks {
     },
   };
 }
+
+/**
+ * One call on the granted path: ask for a grant, relay the call, and read the machine's decision.
+ *
+ * @returns The decision the result is recorded under, what the tool returns (the machine's result,
+ * or the refusal), and the wording to block with when the call may not run.
+ *
+ * @remarks
+ * The order is the contract's: the grant is asked for (cached per tool × manifest × machine), then
+ * the call is relayed with it and the current policy, and **nothing runs here**. A call the machine
+ * refused is recorded under the machine's own code (`scope_exceeded`, `grant_expired`,
+ * `grant_revoked`, `counter_exhausted`, ...), which is the audit's vocabulary; the model reads the
+ * harness's error ({@link refusalWording}) and the run continues, exactly as an admission refusal
+ * does (the (A) contract).
+ *
+ * A grant that cannot be obtained, or a relay that fails, is **not** a policy answer: the call is
+ * denied as `grant_invalid` (no grant, no run — fail closed) and the model reads the same refusal
+ * shape.
+ */
+async function grantedCall(
+  grants: WorkspaceGrants,
+  call: CallIdentity,
+  identity: ToolIdentity,
+): Promise<{
+  readonly decision: PolicyDecision;
+  readonly served: ToolExecutionResult;
+  readonly block?: string | undefined;
+}> {
+  const contract: ToolContract = {
+    manifest: identity.manifest,
+    manifestHash: identity.manifestHash,
+  };
+  let refusal: PolicyDecision | undefined;
+  let answer: Awaited<ReturnType<ToolTransport["call"]>> | undefined;
+  try {
+    const issued = await grants.source.issue(grantRequestFor(contract));
+    if (!issued.ok) {
+      // The policy's own answer: it is the decision the call is recorded under.
+      refusal = issued.decision;
+    } else {
+      answer = await grants.transport.call({
+        call: call.call,
+        contract,
+        // What this call's output may reach, charged to the grant: the manifest's model-facing
+        // bound divided over the calls a grant covers, so a grant pays for a turn of calls. The
+        // tool never returns more than that (a read is capped below the manifest's bound; a write
+        // and bash are smaller), and the machine refuses a call that would overrun the grant.
+        bytes: grantCallBytes(identity),
+        grant: issued.grant,
+      });
+    }
+  } catch (error) {
+    if (!(error instanceof GrantUnavailableError || error instanceof ToolTransportError))
+      throw error;
+    refusal =
+      error instanceof GrantUnavailableError
+        ? grantUnavailableDecision(error)
+        : relayUnavailableDecision(error);
+  }
+  if (refusal !== undefined) {
+    return {
+      decision: refusal,
+      served: failureReply({ ok: false, status: "denied", message: refusalDetail(refusal) }),
+      block: refusalWording(refusal),
+    };
+  }
+  if (answer === undefined) {
+    throw new Error("a granted call answered neither a decision nor a result");
+  }
+  if (answer.decision.outcome === "deny") {
+    return {
+      decision: answer.decision,
+      served: failureReply({
+        ok: false,
+        status: "denied",
+        message: refusalDetail(answer.decision),
+      }),
+      block: refusalWording(answer.decision),
+    };
+  }
+  // The machine allowed the call and answered the operation's result; the tool returns it.
+  // The machine's answer is untrusted JSON until the operation's schema accepts it.
+  const operation = v.safeParse(MachineToolResultSchema, answer.result);
+  if (!operation.success) {
+    const unreadable = failureReply({
+      ok: false,
+      status: "failed",
+      code: "unreadable_answer",
+      message: "the machine answered a result this tool cannot read",
+    });
+    return {
+      decision: answer.decision,
+      served: unreadable,
+      block: refusalWording(answer.decision),
+    };
+  }
+  const result = servedResult(identity.definition.toolId, operation.output);
+  return { decision: answer.decision, served: result };
+}
+
+/** A decision's message, for the failure the model reads when it is blocked. */
+function refusalDetail(decision: PolicyDecision): string {
+  return decision.outcome === "deny" ? decision.message : "the call was not allowed";
+}
+
+/**
+ * The harness's result for a call the machine ran, built from the machine's own answer.
+ *
+ * @param toolId - The tool the call named.
+ * @param answer - The operation's result, as the machine answered it.
+ * @param api - The executing tool's API, for the output channel the harness reads.
+ * @returns The result the registered tool returns unchanged: the same envelope the Phase 0 path
+ * produces, so the model's JSON (and `succeeded`'s reading of it) does not change.
+ */
+function servedResult(toolId: ToolId, result: MachineToolResult): ToolExecutionResult {
+  // The kind the answer names is the tool's own: a read's answer for a write would be a result the
+  // machine never produced for this call, so it is not read as one.
+  void toolId;
+  if (result.kind === "read") {
+    const content = Buffer.from(result.content, "base64").toString("utf8");
+    const truncated = content.length > MAX_READ_CONTENT;
+    return {
+      output: text({
+        ok: true,
+        content: truncated ? content.slice(0, MAX_READ_CONTENT) : content,
+        version: result.version,
+        truncated,
+        characters: content.length,
+      }),
+      isError: false,
+    };
+  }
+  if (result.kind === "write") {
+    const outcome = v.safeParse(MutationResultSchema, result.result);
+    if (!outcome.success) {
+      return failureReply({
+        ok: false,
+        status: "failed",
+        code: "unreadable_answer",
+        message: "the machine answered a write outcome this contract cannot read",
+      });
+    }
+    return { output: text(outcome.output), isError: outcome.output.status !== "applied" };
+  }
+  // bash: pi-durable's shell result, delivered as the tool's own output and structured answer.
+  return {
+    output: [{ type: "text" as const, text: result.output }],
+    structuredOutput: { output: result.output, truncated: false, exitCode: result.exitCode },
+    isError: result.exitCode !== 0,
+  };
+}
+
+/** The workspace's write outcome, as the machine relays it. */
+const MutationResultSchema = v.variant("status", [
+  v.object({
+    status: v.literal("applied"),
+    operationId: v.string(),
+    version: v.pipe(v.string(), v.minLength(1)),
+  }),
+  v.object({
+    status: v.literal("conflict"),
+    operationId: v.string(),
+    currentVersion: v.pipe(v.string(), v.minLength(1)),
+  }),
+  v.object({
+    status: v.literal("unknown"),
+    operationId: v.string(),
+    reason: v.picklist(["crash", "io", "timeout"]),
+  }),
+]);
+
+/** The machine's answer for the three workspace operations, as its schema reads it. */
+type MachineToolResult = v.InferOutput<typeof MachineToolResultSchema>;
+
+/** The machine's answer for the three workspace operations, parsed at this boundary. */
+const MachineToolResultSchema = v.union([
+  v.object({
+    kind: v.literal("read"),
+    content: v.string(),
+    version: v.pipe(v.string(), v.minLength(1)),
+    size: v.number(),
+  }),
+  v.object({
+    kind: v.literal("write"),
+    /** The workspace's own outcome, parsed by its schema below: the machine adds nothing to it. */
+    // oxlint-disable-next-line anti-slop/no-unknown-type-aliases -- an operation's result is JSON.
+    result: v.unknown(),
+  }),
+  v.object({
+    kind: v.literal("exec"),
+    exitCode: v.number(),
+    output: v.string(),
+  }),
+]);
 
 /** A caught value's message, without its stack. */
 function errorMessage(error: Error): string {
@@ -395,6 +733,19 @@ const BashHarnessSchema = v.object({
 });
 
 /**
+ * The arguments pi-durable's bash takes, after `beforeTool` converted them.
+ *
+ * @remarks
+ * `harnessArguments` hands the tool seconds, not milliseconds, so this schema is what its
+ * `execute` receives; the tool re-validates them because a hook's return value is not the model's
+ * call, and the shell must never start on arguments nothing parsed.
+ */
+const BashExecuteSchema = v.object({
+  command: v.string(),
+  timeout: v.optional(v.number()),
+});
+
+/**
  * The line the model reads for a refused call: the harness's refusal, whose detail is this.
  *
  * @param decision - The refusal `admitCall` recorded.
@@ -496,10 +847,22 @@ function bashHarnessParameters(): JsonObject {
  * never thrown. There is no unsandboxed exec fallback: only "sandboxed" registers bash.
  */
 export function workspaceTools(options: WorkspaceToolsOptions): Extension {
-  const { workspace, shell } = options;
+  const { workspace, shell, grants } = options;
   const sinks = sinksOf(options);
   const identityOf = identityLookup();
   const memory: CallMemory = new Map();
+  // The served results are shared by the tools' `execute` and the hooks; the extension key is set
+  // below, once the extension that owns both exists.
+  const served: ServedMemory = new Map();
+  // The extension the tools belong to, set once it exists: a tool that ran before then is a
+  // wiring defect.
+  let installed: Extension | undefined;
+  const executing = (): Extension => {
+    if (installed === undefined) {
+      throw new Error("a workspace tool ran before its extension was installed");
+    }
+    return installed;
+  };
 
   const readDefinition = definitionOf("read_file");
   const writeDefinition = definitionOf("write_file");
@@ -510,7 +873,9 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
       parameters: obj({ path: str() }),
       // The tool bounds its own content; give the harness room so it does not cut the JSON.
       outputLimits: { ...readDefinition.outputLimits, retain: "head" },
-      execute: async (args) => {
+      execute: async (args, api) => {
+        const served = servedResultFor(executing(), api.callId);
+        if (served !== undefined) return served;
         try {
           const result = await workspace.read(args.path);
           const truncated = result.content.length > MAX_READ_CONTENT;
@@ -536,6 +901,8 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
       description: writeDefinition.description,
       parameters: obj({ path: str(), content: str(), expectedVersion: str() }),
       execute: async (args, api) => {
+        const served = servedResultFor(executing(), api.callId);
+        if (served !== undefined) return served;
         try {
           // The idempotency key is the tool call, not something the model can repeat.
           const outcome = await workspace.write({
@@ -558,15 +925,33 @@ export function workspaceTools(options: WorkspaceToolsOptions): Extension {
     // `harnessArguments` turns it into the seconds pi-durable's bash takes. The schema is closed, so an
     // unknown key is refused before anything runs.
     const parameters: typeof bash.parameters = bashHarnessParameters();
-    registrations.push({ ...bash, parameters });
+    const execute = bash.execute;
+    registrations.push({
+      ...bash,
+      parameters,
+      execute: async (args, api, context) => {
+        // A granted bash call ran on its machine; pi-durable's bash would run it again here.
+        const served = servedResultFor(executing(), api.callId);
+        if (served !== undefined) return served;
+        const parsed = v.safeParse(BashExecuteSchema, args);
+        if (!parsed.success) {
+          throw new Error("a bash call reached its tool without a command");
+        }
+        return await execute(parsed.output, api, context);
+      },
+    });
   }
-  const extension = defineExtension({
+  const hookOptions: ToolHookOptions = { identityOf, sinks, env: shell.env, memory, served };
+  if (grants !== undefined) hookOptions.grants = grants;
+  const extension: Extension = defineExtension({
     name: "hns-workspace",
     tools: registrations,
-    hooks: [hook(ToolTask, toolHooks({ identityOf, sinks, env: shell.env, memory }))],
+    hooks: [hook(ToolTask, toolHooks(hookOptions))],
   });
+  installed = extension;
+  servedResults.set(extension, served);
   // What `withAuditSink` needs to rebuild the hooks: the pieces the caller's closures hold.
-  workspaceSpecs.set(extension, { shell });
+  workspaceSpecs.set(extension, grants === undefined ? { shell } : { shell, grants });
   return extension;
 }
 
@@ -593,6 +978,8 @@ function identityLookup(): (name: string) => Promise<ToolIdentity> {
 /** What `withAuditSink` has to know about an extension to rebuild its hooks. */
 interface WorkspaceSpec {
   readonly shell: ShellAccess;
+  /** The granted path, when this extension was built with one. */
+  readonly grants?: GrantPathOf | undefined;
 }
 
 /**
@@ -605,10 +992,11 @@ interface WorkspaceSpec {
 const workspaceSpecs = new WeakMap<Extension, WorkspaceSpec>();
 
 /**
- * The workspace-tools extension as the one with these sinks.
+ * The workspace-tools extension as the one with these sinks and (optionally) this run's grants.
  *
  * @param extension - The extension `workspaceTools` returned.
  * @param sinks - The observation and audit sinks its hooks record to.
+ * @param grantsFor - The granted path for the conversation a hook runs in; absent keeps Phase 0.
  * @returns A new extension with the same name, tools, and task, and hooks that use `sinks`.
  *
  * @remarks
@@ -618,18 +1006,34 @@ const workspaceSpecs = new WeakMap<Extension, WorkspaceSpec>();
  * is. The call memory is fresh, which is what a new Session needs. A caller that does not hold an
  * extension this was made by should use `workspaceTools({ audit })` instead.
  */
-export function withAuditSink(extension: Extension, sinks: CallSinks): Extension {
+export function withAuditSink(
+  extension: Extension,
+  sinks: CallSinks,
+  grantsFor?: GrantPathOf | undefined,
+): Extension {
   const spec = workspaceSpecs.get(extension);
   if (spec === undefined) {
     throw new Error("the extension does not register the workspace tools");
   }
   const identityOf = identityLookup();
+  const served = servedResults.get(extension) ?? new Map<string, ToolExecutionResult>();
+  // One call memory per rebuilt extension, as before: `beforeTool` writes it and `afterTool` reads it.
+  const memory: CallMemory = new Map();
+  // A hook runs in one conversation, and a conversation is one run: the granted path is chosen per
+  // call from the identity the sinks name, so a run never spends another run's grant. Without a
+  // chooser the extension's own grants (the Phase 0 `undefined`) are the answer.
+  const grantsOf: GrantPathOf | undefined = grantsFor ?? spec.grants;
+  const hooksOf = (): ToolHooks => {
+    const options: ToolHookOptions = { identityOf, sinks, env: spec.shell.env, memory, served };
+    if (grantsOf !== undefined) options.grants = grantsOf;
+    return toolHooks(options);
+  };
+  // The tools keep their own extension's entry: their `execute` returns the result this extension's
+  // hooks served, so both read one map. The rebuilt extension is the installed one.
   return defineExtension({
     name: extension.name,
     tools: extension.tools ?? [],
-    hooks: [
-      hook(ToolTask, toolHooks({ identityOf, sinks, env: spec.shell.env, memory: new Map() })),
-    ],
+    hooks: [hook(ToolTask, hooksOf())],
   });
 }
 

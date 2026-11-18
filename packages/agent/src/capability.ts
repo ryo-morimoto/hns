@@ -986,10 +986,16 @@ export async function appendEvent(
     prevHash: null,
     hash: "",
   };
+  // An allow that names a grant records which capability the call was decided under: the grant id is
+  // the one value that ties this row to the issuance's ledger (0224) and to the machine's counter.
+  const granted =
+    decision.outcome === "allow" && decision.grantId !== undefined
+      ? { grantId: decision.grantId }
+      : {};
   const row: AuditRow =
     shared.callHash === undefined || shared.argsHash === undefined
-      ? base
-      : { ...base, callHash: shared.callHash, argsHash: shared.argsHash };
+      ? { ...base, ...granted }
+      : { ...base, callHash: shared.callHash, argsHash: shared.argsHash, ...granted };
   // The contract puts the decision on `tool.result` only (`AuditEvent`): a `tool.call` says what was
   // about to run, and the decision is judged once the run is over.
   const eventRow =

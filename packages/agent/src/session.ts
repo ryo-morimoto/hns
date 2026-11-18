@@ -31,6 +31,7 @@ import {
 } from "@hns/core";
 import * as v from "valibot";
 import type { AuditIdentity, AuditSink } from "./capability.ts";
+import type { RuntimeGrantPath } from "./runtime.ts";
 import type { AgentEventSink } from "./events.ts";
 import { withAuditSink } from "./tools.ts";
 import { lastAssistantText } from "./transcript.ts";
@@ -54,15 +55,28 @@ function withAudit(
   reader: HarnessOptions["registry"],
   options: SessionOptions,
 ): HarnessOptions["registry"] {
-  const { onAudit, auditIdentity } = options;
-  if (onAudit === undefined) return reader;
-  if (auditIdentity === undefined) {
+  const { onAudit, auditIdentity, grantPath } = options;
+  if (onAudit === undefined && grantPath === undefined) return reader;
+  if (onAudit !== undefined && auditIdentity === undefined) {
     throw new Error("an audit sink needs the workspace and session it records under");
   }
   const registry = createRegistry();
   for (const extension of reader.snapshot().installed()) {
+    // The hooks ask for the granted path of the conversation they run in: a conversation is a run,
+    // and its grants are the ones it may spend. Without a chooser an extension keeps Phase 0.
+    const grantsFor =
+      grantPath === undefined
+        ? undefined
+        : (identity: AuditIdentity | undefined) =>
+            identity === undefined ? undefined : grantPath(identity.sessionId);
     registry.install(
-      withAuditSink(extension, { onEvent: options.onEvent, audit: onAudit, auditIdentity }),
+      withAuditSink(
+        extension,
+        onAudit === undefined || auditIdentity === undefined
+          ? { onEvent: options.onEvent }
+          : { onEvent: options.onEvent, audit: onAudit, auditIdentity },
+        grantsFor,
+      ),
     );
   }
   return registry;
@@ -132,6 +146,17 @@ export interface SessionOptions {
    */
   readonly auditIdentity?: AuditIdentity | undefined;
   readonly newRequestId?: (() => string) | undefined;
+  /**
+   * The granted tool path for one run, as the Session object builds it; absent means Phase 0.
+   *
+   * @remarks
+   * Called with the conversation id of each run, it answers that run's granted path: the issuer and
+   * the run's relay. The runtime caches grants across the run's tool calls and drops them when the
+   * run ends; a Session that answers undefined keeps every run on the Phase 0 tools. This is the
+   * kill switch the deployment controls: the object closes the path (`undefined`) when it cannot
+   * issue or relay, and the agent then never takes a granted call.
+   */
+  readonly grantPath?: ((runId: string) => RuntimeGrantPath | undefined) | undefined;
 }
 
 /**

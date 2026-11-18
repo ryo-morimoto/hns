@@ -42,6 +42,12 @@ const alias: readonly SourceAlias[] = [
     replacement: source("./packages/workspace/src/sandbox.ts"),
   },
   {
+    // The granted call's wire: one envelope the Session object relays and the machine parses, so the
+    // two sides cannot drift. It imports only core, so every package may read it.
+    find: /^@hns\/workspace\/protocol$/,
+    replacement: source("./packages/workspace/src/protocol.ts"),
+  },
+  {
     // The pack's key is the object store's, so the Workspace object reads it from there rather
     // than spelling `checkpoints/<commit>.pack` a second time.
     find: /^@hns\/workspace\/objects$/,

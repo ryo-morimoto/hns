@@ -22,6 +22,10 @@ import {
   writeMachineLog,
   type MachineLogSink,
 } from "./log.ts";
+import type { GrantCounter } from "./capability/counter.ts";
+import { enrolledGrantKeys } from "./capability/keys.ts";
+import type { GrantKeys } from "./capability/keys.ts";
+import { runGrantedCall } from "./granted.ts";
 import { runOperation } from "./operations.ts";
 import { MachineRefusal, refusalStatus } from "./refusal.ts";
 import { RequestVerifier } from "./signature.ts";
@@ -33,7 +37,14 @@ import {
   parseOperation,
   parseSignedHeaders,
 } from "./wire.ts";
-import type { Operation, OperationName, RefusalBody, SuccessBody } from "./wire.ts";
+import type {
+  GrantedOperation,
+  GrantedResult,
+  OperationName,
+  RefusalBody,
+  RpcRequest,
+  SuccessBody,
+} from "./wire.ts";
 
 /** The only address the agent ever listens on: cloudflared connects from here. */
 const HOST = "127.0.0.1";
@@ -92,6 +103,31 @@ export interface MachineAgentOptions {
   readonly home?: string | undefined;
   /** The project's egress; unset means `deny` (D095). */
   readonly egress?: SandboxEgress | undefined;
+  /**
+   * The grants this machine will verify, and where its counters live; unset means no granted call
+   * can run (fail closed).
+   *
+   * @remarks
+   * Without it every `op: "tool"` is refused before anything is verified or run: a machine that has
+   * no key to check a grant with, or no counter to spend it from, cannot decide a granted call, and
+   * "cannot tell" is never "allow". The relay in front of the machine never presents a granted call
+   * to a machine that was not configured for one.
+   */
+  readonly grants?: MachineGrants | undefined;
+}
+
+/**
+ * What a machine needs to decide a granted call: the keys it verifies with, and the budget it spends.
+ *
+ * @remarks
+ * `keys` is the lookup over the enrolled control-plane keys ({@link ./capability/keys.ts}); `counter`
+ * is the machine's own per-grant spend under `~/.config/hns/grants`, which the agent's shell cannot
+ * read (0194). `enrolled` is the enrolment the keys are built from, used when `keys` is not given.
+ */
+interface MachineGrants {
+  readonly keys?: GrantKeys | undefined;
+  readonly enrolled?: ControlPlaneKeys | undefined;
+  readonly counter: GrantCounter;
 }
 
 /** A running agent. */
@@ -129,6 +165,12 @@ interface AgentContext {
   readonly checkpointPacks: CheckpointPackSink | undefined;
   /** The sandboxed exec, or the fail-closed state that refuses every command (D095). */
   readonly exec: MachineExec;
+  /** The keys and the counter a granted call is decided with; absent means none can run. */
+  readonly grants: MachineGrants | undefined;
+  /** This machine's id, the one a grant must name. */
+  readonly machineId: string;
+  /** The clock a grant's expiry is checked against. */
+  readonly now: () => number;
 }
 
 /**
@@ -212,6 +254,9 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     onLog: options.onLog ?? writeMachineLog,
     checkpointPacks: options.onCheckpointPack,
     exec,
+    grants: options.grants,
+    machineId: options.machineId,
+    now: options.now ?? Date.now,
   };
   const server = createServer();
   server.on("request", (request: IncomingMessage, response: ServerResponse): void => {
@@ -315,6 +360,9 @@ async function handleRequest(
   // A mirror's token is redacted from this request's log line even if a later field ever carried
   // it; the guard is set before the body is parsed so no failure path can log ahead of it.
   let mirrorToken: string | undefined;
+  // A granted call carries a signed grant, which is a capability: the same guard redacts it from the
+  // request's log line once it is parsed, and the answer never carries it.
+  let grantSignature: string | undefined;
   if (request.method !== "POST") {
     sendRefusal(response, new MachineRefusal("method_not_allowed", "the agent answers POST only"), {
       allow: "POST",
@@ -366,6 +414,14 @@ async function handleRequest(
     const operation = parseOperation(body);
     op = operation.op;
     if (operation.op === "mirror") mirrorToken = operation.token;
+    if (operation.op === "tool") {
+      grantSignature = operation.authorization.signature;
+      // A granted call's answer is a decision, never a JSON refusal: the caller records it whether it
+      // allowed or refused the call, so a refusal is written as a 200 with the denial in it.
+      const answer = await serveGrantedCall(operation, context, deadline.signal);
+      sendJson(response, { ok: true, op, result: grantedAnswerJson(answer) }, context.limits);
+      return;
+    }
     fsPath = logPathOf(operation);
     const result = await runOperation(
       operation,
@@ -387,13 +443,111 @@ async function handleRequest(
     logRequest(
       request,
       response,
-      mirrorToken === undefined
+      mirrorToken === undefined && grantSignature === undefined
         ? context
-        : { ...context, onLog: redactingSink(context.onLog, [mirrorToken]) },
+        : { ...context, onLog: redactingSink(context.onLog, [mirrorToken, grantSignature]) },
       started,
       fsPath,
       op,
     );
+  }
+}
+
+/**
+ * Decide one granted call, and run it only when the machine's verifier allowed it.
+ *
+ * @param operation - The relayed grant, call, manifest, and active policy.
+ * @param context - The machine's keys, counter, ROOT, bounds, and sandbox.
+ * @param signal - The request's deadline.
+ * @returns The decision, with the operation's result for an allow.
+ * @throws {MachineRefusal} `forbidden` when the machine was not configured to verify grants (fail
+ * closed), and whatever the operation refuses with once it is allowed.
+ *
+ * @remarks
+ * The active policy the request carries is the control channel's promise, and it is **required**: a
+ * machine that was told no revision has nothing to record an allow against, and
+ * `authorizeGrantedCall` refuses it (`policy_denied`). Nothing here caches a grant, a key, or a
+ * decision: every granted call is verified, spent, and run on its own request.
+ */
+async function serveGrantedCall(
+  operation: GrantedOperation,
+  context: AgentContext,
+  signal: AbortSignal,
+): Promise<GrantedResult> {
+  const grants = context.grants;
+  if (grants === undefined) {
+    throw new MachineRefusal(
+      "forbidden",
+      "this machine is not configured to verify grants, so no granted call runs",
+    );
+  }
+  const keys =
+    grants.keys ?? (grants.enrolled === undefined ? undefined : enrolledGrantKeys(grants.enrolled));
+  if (keys === undefined) {
+    throw new MachineRefusal(
+      "forbidden",
+      "this machine has no control-plane key to verify a grant",
+    );
+  }
+  const outcome = await runGrantedCall({
+    request: operation,
+    keys,
+    counter: grants.counter,
+    machineId: context.machineId,
+    now: new Date(context.now()),
+    root: context.root,
+    identity: context.identity,
+    signal,
+    limits: context.limits,
+    exec: context.exec,
+  });
+  return outcome.kind === "denied"
+    ? { decision: outcome.decision }
+    : { decision: outcome.decision, grantId: outcome.grantId, result: outcome.result };
+}
+
+/**
+ * The granted call's answer as JSON, member by member.
+ *
+ * @param answer - The decision, and for an allow the grant id and the operation's result.
+ * @returns The answer on the wire; the decision is the contract's own members, never the object it
+ * was parsed into, and the result is the operation's JSON.
+ *
+ * @remarks
+ * Built here rather than cast: a JSON body's members are what the relay parses, and a value whose
+ * shape only the cast promised would be a decision the relay reads wrongly.
+ */
+function grantedAnswerJson(answer: GrantedResult): JsonValue {
+  switch (answer.decision.outcome) {
+    case "deny": {
+      const decision = answer.decision;
+      const denial: JsonValue = {
+        outcome: "deny",
+        code: decision.code,
+        message: decision.message,
+      };
+      if (decision.policyRevision !== undefined) {
+        denial["policyRevision"] = decision.policyRevision;
+      }
+      if (decision.policyHash !== undefined) denial["policyHash"] = decision.policyHash;
+      return { decision: denial };
+    }
+    case "allow": {
+      const decision = answer.decision;
+      const allow: JsonValue = {
+        outcome: "allow",
+        policyRevision: decision.policyRevision,
+        policyHash: decision.policyHash,
+      };
+      if (decision.grantId !== undefined) allow["grantId"] = decision.grantId;
+      return {
+        decision: allow,
+        grantId: answer.grantId ?? "",
+        // SAFETY: every OperationResult member is a closed object of strings, numbers, and booleans,
+        // which is what JsonValue is; the operations build them and no field is a Uint8Array.
+        result: answer.result as JsonValue,
+      };
+    }
   }
 }
 
@@ -531,8 +685,9 @@ async function servePackUpload(
  * an unusable path (for example one with ..) still gets a best-effort line: observation must
  * not fail the request.
  */
-function logPathOf(operation: Operation): string {
+function logPathOf(operation: Exclude<RpcRequest, GrantedOperation>): string {
   if (operation.op === "health") return "/";
+  // A granted call is answered before this is called; the branch keeps the union honest.
   // A checkpoint names a Run, not a file; the log shows it below ROOT like any other path.
   // A mirror names the same Run, and its line names neither the remote nor the token.
   if (operation.op === "checkpoint" || operation.op === "mirror") return "/" + operation.runId;

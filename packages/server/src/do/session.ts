@@ -2,7 +2,12 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createRegistry, type Report, type Wake } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import type { AgentEvent } from "@hns/agent";
-import { openSession, type AgentLiveWatch, type AgentSession } from "@hns/agent/session";
+import {
+  openSession,
+  type AgentLiveWatch,
+  type AgentSession,
+  type SessionOptions,
+} from "@hns/agent/session";
 import { isoTimestamp } from "@hns/core";
 import { migrateStore } from "@hns/store";
 import { openConversationIndex } from "@hns/store/conversation-index";
@@ -24,11 +29,36 @@ import {
   type LiveUpgradeResponseFactory,
 } from "../ws.ts";
 import { LEGACY_SESSION_NAME } from "../session-name.ts";
+import { TOOL_RUN_ROUTE, TOOL_RUN_TOKEN_HEADER } from "@hns/workspace/protocol";
+import type { ToolManifest } from "@hns/core/capability";
+import type { ToolRunTransport } from "./session-tools.ts";
+import {
+  ToolTransportError,
+  sessionGrantPath,
+  type GrantSource as GrantSourcePort,
+  type RuntimeGrantPath,
+  type ToolTransport as ToolTransportPort,
+} from "@hns/agent";
+import * as v from "valibot";
 import { grantSigner, type GrantSigner } from "../capability/signing.ts";
 import { armWake } from "./alarm.ts";
 import { auditEventIds, auditSink, createPolicyAudit, type PolicyAudit } from "./audit.ts";
 import { createSqliteGrantRecorder, openGrantTables } from "./grant-store.ts";
-import { createGrantPlane, type GrantPlane } from "./session-grants.ts";
+import {
+  createGrantPlane,
+  toolManifests,
+  type GrantPlane,
+  type PolicySnapshot as GrantPolicySnapshot,
+  type GrantRequest,
+} from "./session-grants.ts";
+import {
+  createToolPath,
+  type CallIdentityPayload,
+  type GrantIssuer,
+  type ToolPath,
+} from "./session-tools.ts";
+import { GrantedAnswerSchema } from "@hns/workspace/protocol";
+import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
 import { grantInternalToken } from "./grant-subject.ts";
 import { modelsFor } from "./models.ts";
 import { SessionIndex } from "./session-index.ts";
@@ -54,7 +84,19 @@ export type SessionRuntimeFactory = (
   env: SessionEnv,
   hooks: SessionHooks,
   audit: PolicyAudit,
+  grantPath: RunGrantPathFactory | undefined,
 ) => Promise<AgentSession>;
+
+/**
+ * How a run's granted path is built, as `openSession` asks for one per run.
+ *
+ * @remarks
+ * The factory is asked once per conversation id (the run), and answers that run's path or
+ * `undefined` when the object's granted path is closed — which keeps every run on the Phase 0
+ * tools. It is a factory rather than the path itself so the object still owns what a run may hold:
+ * the token, the transport, and the issuer.
+ */
+export type RunGrantPathFactory = (runId: string) => RuntimeGrantPath | undefined;
 
 /** The host seams the Session takes from the Workers runtime; tests inject these. */
 export interface SessionDependencies {
@@ -112,13 +154,14 @@ async function openDurableSession(
   env: SessionEnv,
   hooks: SessionHooks,
   audit: PolicyAudit,
+  grantPathOf: RunGrantPathFactory | undefined,
 ): Promise<AgentSession> {
   const storage = await openDurableObjectSqliteStorage(state.storage, {
     prefix: "hns_session",
   });
   const { models, model } = modelsFor(env);
   const ids = auditEventIds(state.id?.name ?? LEGACY_SESSION_NAME);
-  return openSession({
+  const common: SessionOptions = {
     storage,
     models,
     registry: createRegistry(),
@@ -133,7 +176,10 @@ async function openDurableSession(
       sessionId: state.id?.name ?? LEGACY_SESSION_NAME,
       eventId: () => ids.next(),
     },
-  });
+  };
+  // The granted path is per run; the object builds each run's transport, so the agent's tool code
+  // holds only the issuer and the relay, never a key or a machine's URL.
+  return openSession(grantPathOf === undefined ? common : { ...common, grantPath: grantPathOf });
 }
 
 /**
@@ -161,6 +207,17 @@ export class Session {
   #audit: PolicyAudit | undefined;
   #index: SessionIndex | undefined;
   #grants: GrantPlane | undefined;
+  #tools: ToolPath | undefined;
+  /** The runs' relays, by conversation: one token and one transport per run. */
+  readonly #transports = new Map<string, ToolRunTransport>();
+  /**
+   * The grants this object revoked: the object's revocation statement, as the ledger wrote it.
+   *
+   * @remarks
+   * Written when a run's grants are revoked (its abort, or the object closing), so the granted path
+   * can refuse a grant before a machine sees it without reading the ledger per call.
+   */
+  readonly #revokedGrants = new Set<string>();
   #session: AgentSession | undefined;
   #closed = false;
 
@@ -242,7 +299,9 @@ export class Session {
     const grants = this.#grants;
     if (grants === undefined) return { revoked: [], failed: [] };
     try {
-      return await grants.revokeRun(runId);
+      const outcome = await grants.revokeRun(runId);
+      for (const grantId of outcome.revoked) this.#revokedGrants.add(grantId);
+      return outcome;
     } catch (error) {
       console.error("session grant revoke failed", error instanceof Error ? error.name : "unknown");
       return { revoked: [], failed: [] };
@@ -275,6 +334,245 @@ export class Session {
   }
 
   /**
+   * Open the object's granted tool path, or leave it closed.
+   *
+   * @returns The path, or undefined when the deployment cannot do every step of a granted call.
+   *
+   * @remarks
+   * A granted call needs all of: an issuer (the plane and its signer), a machine to relay to, the
+   * control-plane key the relay is signed with, and the machine's id the grant names. Missing any of
+   * them the path is **off**: sends carry no policy snapshot, the agent keeps the Phase 0 tools, and
+   * the relay route answers `unavailable` — the kill switch of this feature is the deployment's
+   * bindings, not a flag that a half-configured object could turn on.
+   *
+   * The machine is addressed by `HNS_AGENT_URL` (the machine this object serves) and its id by
+   * `HNS_MACHINE_ID`; the same control-plane key signs the relay as signs a grant (0148).
+   */
+  #openToolPath(): ToolPath | undefined {
+    const audit = this.#audit;
+    const grants = this.#grants;
+    if (audit === undefined || grants === undefined) return undefined;
+    const agentUrl = this.#env.HNS_AGENT_URL;
+    const machineId = this.#env.HNS_MACHINE_ID;
+    const seed = this.#env.HNS_CONTROL_PLANE_KEY;
+    if (agentUrl === undefined || machineId === undefined || seed === undefined) return undefined;
+    if (seed.length === 0) return undefined;
+    const name = this.#state.id?.name ?? LEGACY_SESSION_NAME;
+    const ids = auditEventIds(name);
+    const machine: MachineFiles = createSignedMachineFiles(
+      { agentUrl, controlPlaneKey: seed },
+      { now: this.#now },
+    );
+    return createToolPath({
+      workspaceId: name,
+      sessionId: name,
+      issuer: this.#grantIssuer,
+      audit,
+      machine,
+      controlPlaneKey: seed,
+      machineId,
+      manifests: toolManifests,
+      revoked: async (grantId) => {
+        return this.#revokedGrants.has(grantId);
+      },
+      grantOf: async (runId) => (await grants.boundTo(runId)).at(0),
+      now: this.#now,
+      eventId: () => ids.next(),
+    });
+  }
+
+  /**
+   * The object's issuer for one granted call: 0224's plane, with who asks and what runs supplied.
+   *
+   * @remarks
+   * The plane issues, records into the ledger and the issuance audit, and signs with the
+   * control-plane key. The request's facts (workspace, session, machine, tool, version, manifest
+   * hash, byte bound) are the object's own, built from the call the agent relayed and the snapshot
+   * the turn was admitted under; the requester is the run, so the grant is revoked when the run ends.
+   */
+  readonly #grantIssuer: GrantIssuer = {
+    issue: async (input) => {
+      const plane = this.#grants;
+      if (plane === undefined) {
+        return {
+          ok: false,
+          decision: { outcome: "deny", code: "grant_invalid", message: "no grant surface" },
+        };
+      }
+      const asked: GrantRequest = {
+        workspaceId: input.request.workspaceId,
+        sessionId: input.request.sessionId,
+        machineId: input.request.machineId,
+        toolId: input.request.toolId,
+        toolVersion: input.request.toolVersion,
+        manifestHash: input.request.manifestHash,
+      };
+      // Absent means the manifest's own bound, which the issuer applies.
+      const request: GrantRequest =
+        input.request.maxBytes > 0 ? { ...asked, maxBytes: input.request.maxBytes } : asked;
+      const issue = await plane.one({
+        request,
+        snapshot: input.snapshot,
+        requestedBy: { kind: "agent", id: input.agentId, runId: input.runId },
+        manifests: input.manifests,
+      });
+      return issue.ok ? { ok: true, grant: issue.grant } : { ok: false, decision: issue.decision };
+    },
+  };
+
+  /**
+   * The relay the agent's granted calls go through, bound to one run.
+   *
+   * @param runId - The conversation whose run asks.
+   * @returns The run's transport, or undefined when the granted path is closed.
+   *
+   * @remarks
+   * The transport the agent is given is **not** the object: it holds the run's token and the run id,
+   * and every call it makes is the object's `/rpc/conversations/<runId>/tool` route. The token is
+   * minted here, so a run's transport is the only holder of it; the object checks it on every relay
+   * and forgets it when the run ends.
+   */
+  #runTransport(runId: string): ToolRunTransport | undefined {
+    const tools = this.#tools;
+    if (tools === undefined) return undefined;
+    const known = this.#transports.get(runId);
+    if (known !== undefined) return known;
+    const token = tools.state.mint(runId);
+    const origin = this.#objectUrl();
+    const transports = this.#transports;
+    const objectFetch = (request: Request): Promise<Response> => this.fetch(request);
+    const transport: ToolRunTransport = {
+      async call(input: {
+        readonly call: CallIdentityPayload;
+        readonly manifest: ToolManifest;
+        readonly bytes: number;
+      }) {
+        const url = origin + "/rpc/conversations/" + encodeURIComponent(runId) + TOOL_RUN_ROUTE;
+        // The object's own route: the run's token is what the route checks.
+        const response = await objectFetch(
+          new Request(url, {
+            method: "POST",
+            headers: { "content-type": "application/json", [TOOL_RUN_TOKEN_HEADER]: token },
+            body: JSON.stringify(input),
+          }),
+        );
+        return await response.json();
+      },
+      async closeRun() {
+        tools.state.forget(runId);
+        transports.delete(runId);
+      },
+    };
+    transports.set(runId, transport);
+    return transport;
+  }
+
+  /**
+   * The newest policy snapshot, for issuing a grant from the agent's own source.
+   *
+   * @throws Error when the object's granted path is closed or no turn was admitted: a grant cannot
+   * be issued without the revision it is for.
+   */
+  #snapshotOrThrow(): GrantPolicySnapshot {
+    const snapshot = this.#tools?.state.snapshot();
+    if (snapshot === undefined) throw new Error("no policy snapshot was admitted");
+    return snapshot;
+  }
+
+  /**
+   * One run's granted path, as the agent's runtime takes it: the issuer, and the run's relay.
+   *
+   * @param runId - The conversation the hooks are running in.
+   * @param transport - The relay the runtime factory built; the session's own, once per session.
+   * @returns The path, or undefined when the object's granted path is closed.
+   *
+   * @remarks
+   * The source is this object's issuer, asked with the call's contract and relayed back here. The
+   * agent never holds the object: the source calls the object's own `#issueForAgent` through the
+   * route the transport uses, which is why the transport carries the run's token.
+   */
+  #grantPathFor(runId: string): RuntimeGrantPath | undefined {
+    if (this.#tools === undefined) return undefined;
+    // The run must have been admitted: an object with no snapshot issues nothing, and a Session
+    // opened before any turn is not one a tool call can spend.
+    if (this.#tools.state.snapshot() === undefined) return undefined;
+    const run = this.#runTransport(runId);
+    if (run === undefined) return undefined;
+    return sessionGrantPath({
+      source: this.#agentGrantSource(runId),
+      transport: this.#agentTransport(run),
+    });
+  }
+
+  /**
+   * The object's issuer, as the agent's `GrantSource` takes it: one contract, one grant.
+   *
+   * @param runId - The run the grant is bound to.
+   */
+  #agentGrantSource(runId: string): GrantSourcePort {
+    return {
+      issue: async (request) => {
+        const issued = await this.#grantIssuer.issue({
+          snapshot: this.#snapshotOrThrow(),
+          request: {
+            workspaceId: this.#state.id?.name ?? LEGACY_SESSION_NAME,
+            sessionId: this.#state.id?.name ?? LEGACY_SESSION_NAME,
+            machineId: this.#env.HNS_MACHINE_ID ?? "",
+            toolId: request.toolId,
+            toolVersion: request.toolVersion,
+            manifestHash: request.manifestHash,
+            maxBytes: request.maxBytes ?? 0,
+          },
+          runId,
+          agentId: this.#state.id?.name ?? LEGACY_SESSION_NAME,
+          manifests: await toolManifests(),
+        });
+        return issued.ok
+          ? { ok: true, grant: issued.grant }
+          : { ok: false, decision: issued.decision };
+      },
+    };
+  }
+
+  /**
+   * The run's relay, as the agent's `ToolTransport` takes it: the object's route, with its token.
+   *
+   * @param run - The run's transport (the token and the route).
+   */
+  #agentTransport(run: ToolRunTransport): ToolTransportPort {
+    return {
+      call: async (input) => {
+        const answer = await run.call({
+          call: { call: input.call, manifest: input.contract.manifest },
+          manifest: input.contract.manifest,
+          bytes: input.bytes,
+        });
+        const parsed = v.safeParse(GrantedAnswerSchema, answer);
+        if (!parsed.success) {
+          throw new ToolTransportError("the Session answered no decision");
+        }
+        return parsed.output;
+      },
+      closeRun: async () => {
+        await run.closeRun();
+      },
+    };
+  }
+
+  /**
+   * The object's own origin, for the run transports it hands the agent.
+   *
+   * @remarks
+   * In Workers a Durable Object reaches itself through its stub; the agent's transport is created
+   * by the object and called from the agent inside the same isolate, so the object's own `fetch`
+   * is the destination. A deployment that moves the agent out of the isolate reaches it through the
+   * binding instead (the `SESSION` binding's stub), which is the same route.
+   */
+  #objectUrl(): string {
+    return "https://session.internal";
+  }
+
+  /**
    * The token the Worker must present on the grant route.
    *
    * @returns The token, or undefined when the deployment has no session secret (the route then
@@ -299,6 +597,10 @@ export class Session {
       // Fail closed as well: a grant is a capability, and one handed out with no record of it must
       // not exist (docs/capability.md §5, §9). The tables share this object's SQLite, not D1.
       this.#grants = await this.#openGrantPlane();
+      // The granted tool path is on only when this object can do its whole job: issue (the plane),
+      // relay (the machine and the control-plane key), and record (the audit). Otherwise it stays
+      // closed, and a send carries no snapshot, which keeps the agent on the Phase 0 tools.
+      this.#tools = this.#openToolPath();
       try {
         // The event table shares the Session's SQLite but not the harness prefix. A failed
         // open must not stop conversations: observation is a side effect, not a precondition.
@@ -356,6 +658,7 @@ export class Session {
           },
         },
         audit,
+        this.#tools === undefined ? undefined : (runId) => this.#grantPathFor(runId),
       );
       this.#session = session;
       // The index is a copy: without the control database the object still runs, and the dirty
@@ -378,7 +681,9 @@ export class Session {
         // The close is the end of every run in the object, so no grant bound to one may outlive it.
         // The close path is awaited (a failure is recorded, not swallowed); the close itself does not
         // wait for it, because the harness has already stopped and the grant ends at its expiry.
-        void this.#revokeRuns(session);
+        void this.#revokeRuns(session).then(async () => {
+          for (const transport of this.#transports.values()) await transport.closeRun();
+        });
         if (end.kind === "failed") this.#state.abort("harness failed");
       });
       await armWake(this.#state.storage, session.wake(), Date.now());
@@ -440,6 +745,7 @@ export class Session {
         cost: this.#cost,
         audit: this.#audit,
         grants: this.#grants,
+        tools: this.#tools,
         grantToken: await this.#grantToken(),
         onRequestId: (id) => {
           turnRequestId = id;
@@ -536,6 +842,11 @@ export class Session {
     // caller the run ended, so the grants it held are gone by the time that answer is read.
     const aborted = abortedConversation(path, request.method, response.status);
     const revoked = aborted === undefined ? undefined : await this.#revokeRun(aborted);
+    if (aborted !== undefined) {
+      // The run ended: its relay token goes too, so a late call has nothing to relay with even
+      // before the ledger's revocation is read.
+      await this.#transports.get(aborted)?.closeRun();
+    }
     const turn = isTurn(path);
     if (turn && response.status >= 200 && response.status < 300) {
       if (turnRequestId !== undefined && this.#agentRequestIds.delete(turnRequestId)) {

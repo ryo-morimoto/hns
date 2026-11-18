@@ -254,6 +254,14 @@ test("the grant route refuses a caller that is not the Worker, and a requester t
         request: undefined,
       };
     },
+    one: async (input) => {
+      calls.push(input);
+      return {
+        ok: false,
+        decision: { outcome: "deny", code: "tool_disabled", message: "x" },
+        request: undefined,
+      };
+    },
     boundTo: async () => [],
     revokeRun: async () => ({ revoked: [], failed: [] }),
   };

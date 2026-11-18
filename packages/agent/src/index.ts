@@ -60,5 +60,28 @@ export {
 } from "./providers/opencode.ts";
 export type { OpenCodeModel, OpenCodeOptions } from "./providers/opencode.ts";
 export type { ShellAccess } from "./shell.ts";
-export { operationIdFor, toolNames, withAuditSink, workspaceTools } from "./tools.ts";
-export type { WorkspaceToolsOptions } from "./tools.ts";
+export {
+  operationIdFor,
+  servedResultFor,
+  toolNames,
+  withAuditSink,
+  workspaceTools,
+} from "./tools.ts";
+export type { WorkspaceGrants, WorkspaceToolsOptions } from "./tools.ts";
+export {
+  GrantUnavailableError,
+  ToolTransportError,
+  grantCache,
+  grantRequestFor,
+  sessionGrantPath,
+} from "./runtime.ts";
+export type {
+  GrantAnswer,
+  GrantCacheOptions,
+  GrantRequest,
+  GrantSource,
+  GrantedCallInput,
+  RuntimeGrantPath,
+  ToolContract,
+  ToolTransport,
+} from "./runtime.ts";

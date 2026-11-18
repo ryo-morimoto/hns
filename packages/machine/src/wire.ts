@@ -20,6 +20,8 @@ import type {
   MachineWriteRequest,
   SignedHeaders,
 } from "@hns/core";
+import { GrantedCallSchema } from "@hns/workspace/protocol";
+import type { GrantedAnswer, GrantedCall } from "@hns/workspace/protocol";
 import { MachineRefusal, REFUSAL_CODES } from "./refusal.ts";
 import type { RefusalCode } from "./refusal.ts";
 
@@ -168,6 +170,7 @@ export const OPERATION_NAMES = [
   "exec",
   "checkpoint",
   "mirror",
+  "tool",
 ] as const;
 
 /** One operation name. */
@@ -270,6 +273,36 @@ const ExecRequestSchema: v.GenericSchema<unknown, ExecRequest> = v.pipe(
   ),
 );
 
+/**
+ * One granted tool call, as the Worker relays it (0226).
+ *
+ * @remarks
+ * The request is the workspace package's envelope (one definition for the relay and this server):
+ * the grant, the call, the tool's manifest, and the active policy the machine compares the grant
+ * with. It is not one of the file operations: its result is the operation it names, run only after
+ * the machine's verifier allowed it.
+ */
+export type GrantedOperation = GrantedCall;
+
+/** What a granted call answered: the decision, and the operation's result for an allow. */
+export type GrantedResult = GrantedAnswer;
+
+/**
+ * What the relay sends the machine: the workspace package's granted-call envelope, unchanged.
+ *
+ * @remarks
+ * The relay (the Session object) builds this value; the machine parses it with the same schema, so
+ * one definition covers both sides. It is re-exported here so a caller of this package reads the
+ * wire types from one place.
+ */
+export type ToolGrantRequest = GrantedCall;
+
+/**
+ * Every body the machine's `/rpc` accepts: the operations {@link runOperation} runs, and the one
+ * granted call that is decided first.
+ */
+export type RpcRequest = Operation | GrantedOperation;
+
 /** The closed request body: an operation and the ROOT-relative path it names. */
 export type Operation =
   | { readonly op: "health" }
@@ -303,12 +336,21 @@ const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
  * UTF-8 JSON or do not name a known operation. A corrupt body is a refusal,
  * never a default.
  */
-export function parseOperation(body: Uint8Array): Operation {
+export function parseOperation(body: Uint8Array): RpcRequest {
   let raw: unknown;
   try {
     raw = JSON.parse(new TextDecoder().decode(body));
   } catch {
     throw new MachineRefusal("invalid_request", "the body is not JSON");
+  }
+  // `op: "tool"` is the granted-call envelope, which is the workspace package's contract: it parses
+  // there, so the relay and this server cannot drift, and a body it refuses is not a call to run.
+  if (v.safeParse(v.object({ op: v.literal("tool") }), raw).success) {
+    const granted = v.safeParse(GrantedCallSchema, raw);
+    if (!granted.success) {
+      throw new MachineRefusal("invalid_request", "the body is not a granted call");
+    }
+    return granted.output;
   }
   const parsed = v.safeParse(OperationSchema, raw);
   if (!parsed.success) {

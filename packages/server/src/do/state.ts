@@ -72,4 +72,20 @@ export interface SessionEnv {
    * a crash. Never logged.
    */
   readonly HNS_CONTROL_PLANE_KEY?: string | undefined;
+  /**
+   * The machine agent's origin a granted call is relayed to (0226).
+   *
+   * @remarks
+   * The object relays a run's granted call to the machine over the control-plane signature, so it
+   * needs the machine's own URL. Absent, the granted path stays closed (the agent keeps the Phase 0
+   * tools): a Session that cannot relay must not pretend a machine decided a call.
+   */
+  readonly HNS_AGENT_URL?: string | undefined;
+  /**
+   * The machine's id, which every grant the object issues and every relayed call names (0226).
+   *
+   * @remarks
+   * The machine verifies that a grant is addressed to it. Absent, the granted path stays closed.
+   */
+  readonly HNS_MACHINE_ID?: string | undefined;
 }

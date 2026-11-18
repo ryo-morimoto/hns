@@ -136,4 +136,12 @@ export interface WorkerEnv {
    * Workspace object when it is constructed; off never changes a checkpoint's answer.
    */
   readonly ARTIFACTS_MIRROR?: string | undefined;
+  /**
+   * The machine's id, which every grant the Session issues and every relayed call names (0226).
+   *
+   * @remarks
+   * The machine verifies that a grant is addressed to it; the Session object issues each grant for
+   * this id. Absent, the granted tool path stays closed (the agent keeps the Phase 0 tools).
+   */
+  readonly HNS_MACHINE_ID?: string | undefined;
 }

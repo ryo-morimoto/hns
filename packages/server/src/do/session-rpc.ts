@@ -18,7 +18,16 @@ import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
 import { AUDIT_MAX_LIMIT, denialOf, type AuditRow, type PolicyAudit } from "./audit.ts";
+import type { JsonValue } from "@hns/core";
+import { TOOL_RUN_ROUTE, TOOL_RUN_TOKEN_HEADER } from "@hns/workspace/protocol";
+import type { GrantedAnswer } from "@hns/workspace/protocol";
 import type { GrantPlane } from "./session-grants.ts";
+import {
+  GrantedCallRequestSchema,
+  failure as toolFailure,
+  json as toolJson,
+  type ToolPath,
+} from "./session-tools.ts";
 import { handleGrantsRpc } from "./session-grants-rpc.ts";
 import { ModelUnavailableError } from "./models.ts";
 
@@ -66,6 +75,17 @@ export interface SessionRpcDependencies {
   readonly grantToken?: string | undefined;
   /** The edge's per-request budgets, for the grant body. */
   readonly limits?: { readonly maxBodyBytes: number } | undefined;
+  /**
+   * The object's granted tool path: the policy snapshot a send is admitted under, the runs' tokens,
+   * and the relay a run's granted call goes through.
+   *
+   * @remarks
+   * Absent means the granted path is off: a send carries no snapshot (and the agent runs the tools
+   * in this object, Phase 0), and the relay route answers `unavailable` rather than run a call
+   * nobody decided. Present, the send requires a snapshot — a turn whose policy could not be read
+   * cannot run granted tools, and failing the send is the fail-closed answer.
+   */
+  readonly tools?: ToolPath | undefined;
 }
 
 /**
@@ -110,9 +130,44 @@ const CreateSchema = v.object({
   workspaceRoot: v.optional(v.string()),
 });
 
+/** A JSON value, for a body's member that is parsed by its own contract later. */
+const JsonValueSchema: v.GenericSchema<unknown, JsonValue> = v.lazy(() =>
+  v.union([
+    v.null(),
+    v.boolean(),
+    v.number(),
+    v.string(),
+    v.array(JsonValueSchema),
+    v.record(v.string(), JsonValueSchema),
+  ]),
+);
+
+/** A JSON object, for a body's member that is parsed as one later. */
+const JsonObjectSchema: v.GenericSchema<unknown, Readonly<Record<string, JsonValue>>> = v.record(
+  v.string(),
+  v.union([
+    v.null(),
+    v.boolean(),
+    v.number(),
+    v.string(),
+    v.array(v.any()),
+    v.record(v.string(), v.any()),
+  ]),
+);
+
 const SendSchema = v.object({
   text: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_INPUT_LENGTH)),
   requestId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(128))),
+  /**
+   * The workspace's active policy revision, as the Worker read it for this turn.
+   *
+   * @remarks
+   * The Session object never reads D1 (D049), so the Worker sends the revision it read. It is
+   * parsed and hash-checked here (`admitTurn`), and the object **does not pass it to the agent**:
+   * the model must not learn the policy. A turn on the granted path needs it; a turn whose policy
+   * the Worker could not read is refused rather than run under a stale one.
+   */
+  policy: v.optional(JsonValueSchema),
 });
 
 const LimitValue = v.pipe(
@@ -308,6 +363,105 @@ async function handleAuditRpc(
 }
 
 /**
+ * The send body's snapshot, as the state's parser takes it.
+ *
+ * @param policy - The body's `policy`, which is untrusted JSON.
+ * @returns The object, or an empty one for a value that is not: the state's parser refuses it, and
+ * the send fails.
+ */
+function asPolicySnapshotPayload(policy: JsonValue): Readonly<Record<string, JsonValue>> {
+  const parsed = v.safeParse(JsonObjectSchema, policy);
+  return parsed.success ? parsed.output : {};
+}
+
+/**
+ * Serve one run's granted call: `POST /rpc/conversations/<runId>/tool`.
+ *
+ * @param request - The agent's relay request.
+ * @param runId - The conversation whose run asks; the route's id is the run the token is checked for.
+ * @param tools - The object's granted path; undefined answers `unavailable` (fail closed).
+ * @returns The machine's answer, or the typed failure.
+ *
+ * @remarks
+ * The agent proves it is this run's agent with the token the object minted for it: a missing token,
+ * another run's token, an expired one, or a token for a conversation that has none is
+ * `forbidden_internal` (401), and nothing is issued or relayed. The body names the call and the
+ * manifest; a body that is not one is `invalid_request` before anything looks up a policy.
+ *
+ * The answer is the machine's own: an allow with the operation's result, or the denial. A failure of
+ * the relay is `unavailable`, never an allow.
+ */
+async function handleToolRelay(
+  request: Request,
+  runId: string | undefined,
+  tools: ToolPath | undefined,
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return failure("method_not_allowed", "Only POST is allowed here.");
+  }
+  if (tools === undefined) {
+    return toolFailure("unavailable", "The granted tool path is not open.");
+  }
+  if (runId === undefined) {
+    return failure("not_found", "No conversation is named.");
+  }
+  if (!tools.state.check(runId, request.headers.get(TOOL_RUN_TOKEN_HEADER))) {
+    // The run's own agent holds the token; nothing else relays as that run.
+    return failure("forbidden_internal", "This run has no relay token, or it is not valid.");
+  }
+  const body = await bodyOf(request);
+  if (!body.ok) return body.response;
+  const parsed = v.safeParse(GrantedCallRequestSchema, body.value);
+  if (!parsed.success) {
+    return failure("invalid_request", "Invalid granted call input.");
+  }
+  const outcome = await tools.relay(runId, parsed.output);
+  if (!outcome.ok) return toolFailure(outcome.code, outcome.message);
+  return toolJson(grantedAnswerJson(outcome.answer));
+}
+
+/**
+ * The machine's answer as the agent's JSON.
+ *
+ * @param answer - The decision, and for an allow the grant id and the operation's result.
+ * @returns The answer on the wire, member by member: the decision is the contract's own fields, and
+ * the result is the operation's JSON.
+ */
+function grantedAnswerJson(answer: GrantedAnswer): JsonValue {
+  switch (answer.decision.outcome) {
+    case "deny": {
+      const decision = answer.decision;
+      const denial: JsonValue = {
+        outcome: "deny",
+        code: decision.code,
+        message: decision.message,
+      };
+      if (decision.policyRevision !== undefined) {
+        denial["policyRevision"] = decision.policyRevision;
+      }
+      if (decision.policyHash !== undefined) denial["policyHash"] = decision.policyHash;
+      return { decision: denial };
+    }
+    case "allow": {
+      const decision = answer.decision;
+      const allow: JsonValue = {
+        outcome: "allow",
+        policyRevision: decision.policyRevision,
+        policyHash: decision.policyHash,
+      };
+      if (decision.grantId !== undefined) allow["grantId"] = decision.grantId;
+      return {
+        decision: allow,
+        grantId: answer.grantId ?? "",
+        // SAFETY: the machine's operation result is JSON by its wire contract (the machine writes a
+        // JSON body); the relay parsed the answer as one before this.
+        result: answer.result as JsonValue,
+      };
+    }
+  }
+}
+
+/**
  * Handle one internal Session RPC request.
  *
  * @param request - A request forwarded by the Worker through the `SESSION` binding.
@@ -353,6 +507,16 @@ export async function handleSessionRpc(
   }
   const id = segments[2];
   const tail = segments[3];
+  // The route's own name, without the leading separator the constant is exported with.
+  const toolTail = TOOL_RUN_ROUTE.replace(/^\//u, "");
+  if (segments.length === 4 && tail === toolTail) {
+    try {
+      return await handleToolRelay(request, id, dependencies.tools);
+    } catch (error) {
+      if (error instanceof Error) console.error("session rpc failed", error.name);
+      return failure("internal", "Unexpected Session failure.");
+    }
+  }
   try {
     if (id === undefined) {
       if (request.method === "POST") {
@@ -407,6 +571,26 @@ export async function handleSessionRpc(
       if (!body.ok) return body.response;
       const parsed = v.safeParse(SendSchema, body.value);
       if (!parsed.success) return failure("invalid_request", "Invalid message input.");
+      const tools = dependencies.tools;
+      if (tools !== undefined) {
+        // The granted path: the turn is admitted under the policy the Worker read, and the object
+        // refuses a missing or older revision before any tool could run under it.
+        if (parsed.output.policy === undefined) {
+          return failure(
+            "invalid_request",
+            "The granted tool path needs the active policy revision with the turn.",
+          );
+        }
+        const admitted = await tools.state.admitTurn(asPolicySnapshotPayload(parsed.output.policy));
+        if (!admitted.ok) {
+          // A snapshot that is not one is the request's fault; one older than what this object
+          // already admitted is a policy that moved, which is `unavailable` to this turn.
+          return failure(
+            admitted.code === "epoch_stale" ? "unavailable" : "invalid_request",
+            admitted.message,
+          );
+        }
+      }
       const cost = dependencies.cost;
       if (cost !== undefined) {
         try {
