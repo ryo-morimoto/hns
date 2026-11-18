@@ -1,15 +1,23 @@
 # 0105: Conversation 画面（transcript / streaming / abort）
 
 status: open
-priority: next
-design: pending
-depends-on: 0049, 0102, 0119, 0145, 0146, 0159
+priority: now
+design: agreed
+depends-on: 0102, 0119, 0145, 0146, 0159
 touches: packages/web/src/screens/conversation, packages/web/src/components/Transcript.tsx, packages/web/src/components/Composer.tsx, packages/web/src/components/Progress.tsx, packages/web/test/conversation, packages/core/src/stream.ts, packages/server/src/ws.ts
 
 ## Goal
 
 仕事の詳細。会話の transcript、進捗、送信・停止、下書き、接続状態を提供する。
 エディタは右パネルとして次増分（0106）に分ける。
+
+## 設計（lead）
+
+- **依存から 0049 を外す**。0049 は `usage()` / `inspect()` と server の pi-durable 依存除去で、**画面の受入（transcript / 送信 / 停止 / 下書き / 追従）は 0146 の `openSession` と 0118 の SSE だけで作れる**。usage の表示は画面の受入に無い。
+- **状態の取得は 0119 の `/api/conversations/:id/state`**（1 往復）。**一覧の線形探索をしない**。archived は `archived:true` で表示するだけ。
+- **送信は 0270n の `sendMessage`**（GraphQL）ではなく **0118 / 0159 の WS フレーム `send`** を使う（D077 の追記どおり。`clientMessageId` で dedupe・再送）。**REST POST を作らない**（既に作らない約束）。
+- **component は `packages/web/src/screens/conversation/`** に置き、`Shell` のルートに 1 本足す。**状態変換は純関数**（`conversation/state.ts`）にしてテストする。
+- **ストリーミングの delta が無い場合**は state の再取得で動かし、`TODO(0050)` を残す（issue の Notes どおり）。
 
 ## Acceptance criteria
 
