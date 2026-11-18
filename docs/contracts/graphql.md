@@ -22,16 +22,6 @@
 - `createProject` が最初の実例（0127）。
 - **`sendMessage(input: SendMessageInput!)`**（0270n）が会話への送信の面。`conversationId` は `Conversation` の global id（別 type や raw id は `invalid_request`）、`text` は session 契約の `MAX_INPUT_LENGTH`（空・超過は `invalid_request`）。Worker が D1 の active policy を読んで **snapshot（revision / hash / document）を body に載せ**、Session DO の `POST /rpc/conversations/<id>/messages` に転送する（`src/graphql/send-message-port.ts`）。**REST の送信面は作らない**（D059 / D077）。結果は `SendMessagePayload { submissionId, status }` か `MutationFailure`。
 
-## 会話の単体取得と state（0119）
-
-- `GET /api/conversations/<id>`（REST、**session 認証**）はその会話の **core の `Conversation` をそのまま**返す（`{ ok: true, conversation }`）。web / server で型を再定義しない。
-- **404 は 2 つを同じ答えにする**: 行が無い会話と、論理削除済み（`deleted_at`、[0029](../../work/issues/0029-conversation-management.md)）の会話。存在を漏らさない。**archived は 200** で `archived: true`（0105 がアーカイブ済みと表示できる）。
-- **D1 の `conversations` 行が読み取りの正本**（[journal-index](journal-index.md) の索引、D078）。サーバは行だけを読み、Session Object には尋ねない。Object の metadata は行の**元**（行はその写し）だが、先に Object を読むと 2 つが食い違ったとき答えがどちらかになる。
-- `GET /api/conversations/<id>/state` は **`/api/state` を 1 往復にまとめたもの**。Object の `GET /rpc/state`（会話の id を **URL で名指し**する。Object の名前は会話の id だが、旧 `default` の Object は複数の会話を持つ）の応答に **`conversation`（同じ DTO、D1 から）を加算**する。既存の field の綴りと意味は変えない。Object が `not_found` を返したら 404（行があっても Object が持たない会話は会話ではない）。
-- **どちらを読むか**: メタデータは **D1 が正本**（サーバは row だけを読む）。Object の state は Object が正本。重なる field は `conversation` の DTO だけにし、Object の応答は自分の分（id / title / archived / deleted）に限る。
-- id は `[\w-]{1,128}`。外れるものは **400**（`invalid_request`）。未認証は edge の **401**、DB / Object の不達は **503**。
-- 一覧・検索・pagination は 0121。ここは単体だけ。
-
 ## deploy の env と起動の 3 状態（0270n）
 
 granted tool path は **`HNS_AGENT_URL` / `HNS_MACHINE_ID` / `HNS_CONTROL_PLANE_KEY` の 3 つが揃ったとき**だけ開く。

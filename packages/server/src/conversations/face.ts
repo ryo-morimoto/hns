@@ -151,9 +151,19 @@ async function stateOfAnswer(answer: Response): Promise<StateAnswer> {
  * it is always present, so a reader never has to guess whether the deployment answered.
  *
  * The object is addressed by the conversation's own id, which is the object name a send uses
- * (0270n). An object that answers `not_found` means no object holds this conversation: the row is
- * the index's **copy** (D078), and a copy with no original is not a conversation, so the answer is
- * `404` and not a state built from a row alone.
+ * (0270n). An object that answers `not_found` means **the row and the object disagree**: D1 says a
+ * conversation exists and the object that should hold it does not. The row is the index's copy
+ * (D078) and a copy with no original is not a conversation, so this face answers `404` `not_found`
+ * rather than build a state from the row alone.
+ *
+ * The caller cannot tell that answer from "deleted or never existed", and it must not have to: no
+ * conversation is readable here. What distinguishes the two is the operator's tools — the index's
+ * own record (`index_state.last_error*` and the dirty backlog, see `docs/contracts/journal-index.md`)
+ * and the object itself. The rows are repaired from the objects, not the other way round: the
+ * Session object's next index drain rewrites or removes a row that disagrees, and
+ * `POST /rpc/reindex` rebuilds a project's rows from its objects in one go. Until one of those runs,
+ * the metadata route (`/api/conversations/<id>`) keeps serving the row, because D1 is what it reads;
+ * the state route is the one that says the original is missing.
  */
 async function stateOf(request: EdgeRequest, conversation: Conversation): Promise<Response> {
   const path = new URL(request.request.url).pathname;

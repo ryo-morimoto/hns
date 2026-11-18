@@ -118,12 +118,17 @@ export interface SessionDependencies {
    */
   readonly machineFetch?: ToolPathOptions["fetch"] | undefined;
   /**
-   * Opens the Session runtime; defaults to the production one (`openDurableSession`).
+   * Opens the runtime the object serves from; defaults to `openDurableSession` (pi-durable on the
+   * object's SQLite storage).
    *
    * @remarks
-   * A seam, like the socket pair: `GET /rpc/state` reads the conversation's metadata from the
-   * runtime, and a test that proves the route with a **real** `@hns/agent` session (rather than a
-   * fake that answers whatever the test wants) needs the production object around it.
+   * A seam, like {@link machineFetch}: a test that proves a route with a **real** `@hns/agent`
+   * session — rather than a fake that answers whatever the test wants — needs the production object
+   * around a runtime it can hold, and `openDurableSession` is bound to this object's storage and
+   * env. **The production Worker passes neither this nor `machineFetch`**, so nothing is
+   * substituted at the entry (`edge/worker.ts` exports its table so the test reads it).
+   *
+   * @internal
    */
   readonly open?: SessionRuntimeFactory | undefined;
 }
@@ -296,6 +301,12 @@ export class Session {
   #session: AgentSession | undefined;
   #closed = false;
 
+  /**
+   * @param state - The object's state (storage, name, the alarm methods).
+   * @param env - The object's bindings.
+   * @param open - The runtime factory; `openDurableSession` unless a test names another.
+   * @param dependencies - Host seams (`webSocketPair`, `machineFetch`, …); production passes none.
+   */
   constructor(
     state: SessionState,
     env: SessionEnv,

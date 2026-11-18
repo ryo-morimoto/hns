@@ -165,7 +165,15 @@ function recordResponse(event: EdgeResponseEvent, env: WorkerEnv): void {
   });
 }
 
-const dependencies: HandlerDependencies = {
+/**
+ * The production dependencies: every face the Worker serves, and nothing a test substitutes.
+ *
+ * @remarks
+ * Exported so a test can read the table a deployment runs: a dependency a test injects (a seam) must
+ * not appear here, because reaching the entry would put that substitution in production.
+ * @internal
+ */
+export const dependencies: HandlerDependencies = {
   graphql: createGraphQLFace(),
   ws: forwardToSession,
   obs: forwardObs,
