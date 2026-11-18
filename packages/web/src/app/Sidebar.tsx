@@ -302,6 +302,13 @@ export function Sidebar({
                         </li>
                       ))}
                     </ul>
+                    <a
+                      className="hns-sidebar__link"
+                      href={formatHash({ kind: "policy", projectId: project.id })}
+                      aria-current={route.kind === "policy" ? "page" : undefined}
+                    >
+                      ポリシー
+                    </a>
                   </div>
                 ) : null}
               </li>

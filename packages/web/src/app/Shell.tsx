@@ -1,6 +1,14 @@
 import { Drawer } from "@base-ui/react/drawer";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import type { ConversationLink, ProjectLink, TaskLink } from "./viewModel.ts";
 import { toGlobalId } from "@hns/core/graphql";
 import { useFragment, useLazyLoadQuery, useRelayEnvironment } from "react-relay";
@@ -11,6 +19,7 @@ import type { SidebarConversations$key } from "../__generated__/SidebarConversat
 import type { SidebarProjects$key } from "../__generated__/SidebarProjects.graphql";
 import type { SidebarTasks$key } from "../__generated__/SidebarTasks.graphql";
 import { Button } from "../components/Button.tsx";
+import { PolicyScreen, PolicyScreenFallback } from "../routes/policy/PolicyScreen.tsx";
 import { ConversationScreen } from "../screens/conversation/ConversationScreen.tsx";
 import { projectIdFrom } from "../routes/ids.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
@@ -209,9 +218,18 @@ function ShellFrame({
     route.kind === "conversation"
       ? conversations.find((item) => item.id === route.conversationId)?.title
       : undefined;
-  const location = route.kind === "conversation" ? (conversationTitle ?? "会話") : "Workspace";
+  const location =
+    route.kind === "conversation"
+      ? (conversationTitle ?? "会話")
+      : route.kind === "policy"
+        ? "ポリシー"
+        : "Workspace";
   const title =
-    route.kind === "conversation" ? (conversationTitle ?? "会話") : (project?.name ?? "Workspace");
+    route.kind === "conversation"
+      ? (conversationTitle ?? "会話")
+      : route.kind === "policy"
+        ? "ポリシー"
+        : (project?.name ?? "Workspace");
 
   const totals = totalsOf(summaries.data ?? []);
   const connection = projectsFailed ? "offline" : "online";
@@ -255,9 +273,9 @@ function ShellFrame({
         menuBadge={totals.needsYou}
         onOpenDrawer={() => setDrawerOpen(true)}
         onBack={
-          route.kind === "conversation"
-            ? () => navigate({ kind: "workspace", projectId: route.projectId })
-            : undefined
+          route.kind === "workspace"
+            ? undefined
+            : () => navigate({ kind: "workspace", projectId: route.projectId })
         }
         onOpenCommand={onOpenCommand}
       />
@@ -265,7 +283,12 @@ function ShellFrame({
       {mobile ? null : sidebar}
 
       <ProjectWorkspaceProvider workspace={workspaceContext}>
-        <main className="hns-shell__main">
+        {/*
+          The main region is focusable but not in the tab order: when a control that was on
+          screen goes away (a decided proposal, a failed send), focus moves here rather than to
+          <body>, so a keyboard user keeps their place.
+        */}
+        <main className="hns-shell__main" tabIndex={-1}>
           {rawProjectId === null ? (
             <EmptyState title="プロジェクトを選択" body="上のメニューからプロジェクトを選ぶ。" />
           ) : projectKey === null ? (
@@ -283,6 +306,8 @@ function ShellFrame({
               liveSocket={liveSocket}
               onReconnect={onReconnect}
             />
+          ) : route.kind === "policy" ? (
+            <PolicyView project={project} />
           ) : (
             <WorkspaceView project={project} conversations={conversations} tasks={tasks} />
           )}
@@ -362,6 +387,28 @@ function WorkspaceView({ project, conversations, tasks }: WorkspaceViewProps): R
       </p>
       <p className="hns-view__note">Workspace の中身はこれから作る。ここは shell の確認用。</p>
     </section>
+  );
+}
+
+/**
+ * The workspace's policy route.
+ *
+ * @remarks
+ * **The principal is not this screen's to know.** This build has no endpoint that names the
+ * signed-in subject (the edge verifies the cookie; 0108's login face adds the read), so the route
+ * cannot tell an agent session from a person's from the client alone, and it says so: the
+ * decision is offered to whoever the page is, and the face's `policy_denied` is the refusal that
+ * counts. When the session read lands, the route passes `canDecide` from it; the screen's
+ * no-permission state is already drawn for that value.
+ *
+ * The read is the one thing this route adds; the conversation's live socket belongs to a
+ * conversation's visit and is not opened here.
+ */
+function PolicyView({ project }: { readonly project: ProjectLink }): ReactElement {
+  return (
+    <Suspense fallback={<PolicyScreenFallback />}>
+      <PolicyScreen workspaceId={toGlobalId("Project", project.id)} canDecide />
+    </Suspense>
   );
 }
 

@@ -1,0 +1,257 @@
+/* The policy screen: what is allowed now, what is proposed, and the decision. */
+
+.hns-policy {
+  display: grid;
+  gap: 16px;
+  max-width: 860px;
+}
+
+.hns-policy:focus {
+  outline: none;
+}
+
+.hns-policy__header {
+  display: grid;
+  gap: 4px;
+}
+
+.hns-policy__no-permission {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.hns-policy__panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.hns-policy__subtitle {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hns-policy__meta {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.hns-policy__note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.hns-policy__reason {
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.hns-policy__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.hns-policy__table th {
+  width: 96px;
+  padding: 4px 8px 4px 0;
+  color: var(--text-3);
+  font-weight: 500;
+  text-align: left;
+  vertical-align: top;
+}
+
+.hns-policy__table td {
+  padding: 4px 0;
+  color: var(--text);
+  font-family: var(--mono);
+  word-break: break-word;
+}
+
+.hns-policy__history summary,
+.hns-policy__candidate summary {
+  color: var(--text-2);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.hns-policy__history-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 11.5px;
+}
+
+.hns-policy__form {
+  display: grid;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.hns-policy__field {
+  display: grid;
+  gap: 3px;
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+
+.hns-policy__field input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: 12px var(--mono);
+}
+
+.hns-policy__check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.hns-policy__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.hns-policy__proposals {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hns-policy__proposal {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.hns-policy__proposal-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hns-policy__proposal-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.hns-policy__diff {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.hns-policy__atoms {
+  display: grid;
+  gap: 4px;
+}
+
+.hns-policy__atoms-title {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hns-policy__list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hns-policy__atom,
+.hns-policy__decided {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.hns-policy__diff-empty {
+  margin: 0;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--ok-soft);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.hns-policy__diff-empty[data-tone="danger"] {
+  background: var(--danger-soft);
+}
+
+.hns-policy__decide {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.hns-policy__empty {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.hns-policy__report {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--ok-soft);
+}
+
+.hns-policy__report[data-tone="danger"] {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+.hns-policy__report-text {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+@media (max-width: 768px) {
+  .hns-policy__diff {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
