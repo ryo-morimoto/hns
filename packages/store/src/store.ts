@@ -14,6 +14,7 @@ import {
   type ProjectRepository,
   type TaskRepository,
 } from "./repositories/projects.ts";
+import { trailRepository, type TrailRepository } from "./repositories/trails.ts";
 import { workflowRepository, type WorkflowRepository } from "./repositories/workflows.ts";
 import { createSql, type D1Binding } from "./sql.ts";
 
@@ -34,6 +35,14 @@ import { createSql, type D1Binding } from "./sql.ts";
 export interface Store {
   readonly projects: ProjectRepository;
   readonly tasks: TaskRepository;
+  /**
+   * Trails, the unit of work that replaces Tasks (D104).
+   *
+   * @remarks
+   * Nothing reads this yet: the Trail surface is the issue after this one. `tasks` stays beside it
+   * until that surface has replaced every reader.
+   */
+  readonly trails: TrailRepository;
   readonly conversations: ConversationRepository;
   /** The conversation index's backlog and last failure, one row per workspace. */
   readonly indexState: IndexStateRepository;
@@ -90,6 +99,7 @@ export async function openStore(options: StoreOptions): Promise<Store> {
     return {
       projects,
       tasks: taskRepository(context),
+      trails: trailRepository(context),
       conversations: conversationRepository(context),
       indexState: indexStateRepository(context),
       workflows: workflowRepository(context),

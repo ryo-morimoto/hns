@@ -7,6 +7,20 @@ import {
   ProjectIdSchema,
   WorkspaceRootSchema,
   TASK_STATUSES,
+  TRAIL_ACTOR_KINDS,
+  TRAIL_CHANGE_STATES,
+  TRAIL_DECISION_ACTIONS,
+  TRAIL_EVAL_STATUSES,
+  TRAIL_FEEDBACK_CHANNELS,
+  TRAIL_FEEDBACK_SENTIMENTS,
+  TRAIL_FINDING_SEVERITIES,
+  TRAIL_FINDING_SOURCES,
+  TRAIL_FINDING_STATUSES,
+  TRAIL_GATE_KINDS,
+  TRAIL_GATE_STATUSES,
+  TRAIL_KINDS,
+  TRAIL_PRIORITIES,
+  TRAIL_STATES,
   WORKFLOW_NODE_STATUSES,
   WORKFLOW_RUN_STATUSES,
 } from "@hns/core";
@@ -18,6 +32,16 @@ import type {
   Firing,
   Project,
   Task,
+  Trail,
+  TrailChange,
+  TrailDecision,
+  TrailEval,
+  TrailFeedback,
+  TrailFinding,
+  TrailGate,
+  TrailMetric,
+  TrailNote,
+  TrailSession,
   Workflow,
   WorkflowEdge,
   WorkflowGraph,
@@ -468,3 +492,193 @@ export type PolicyRevisionRow = v.InferInput<typeof PolicyRevisionRowSchema>;
 export type PolicyActiveRow = v.InferInput<typeof PolicyActiveRowSchema>;
 /** The input shape of {@link PolicyProposalRowSchema}: a raw `policy_proposals` row. */
 export type PolicyProposalRow = v.InferInput<typeof PolicyProposalRowSchema>;
+
+// The Trail tables (D104). Each closed vocabulary is the core constant, so a value this build
+// does not know throws here instead of being read as a default; the same CHECK is on the column,
+// so a hand-edited row can be refused at the write as well as at the read.
+
+/** A Trail's display text: title, description, and acceptance are stored, never defaulted. */
+const text = v.string();
+/** The timestamp a Trail row records when something happened or was written. */
+const at = v.string();
+
+/**
+ * The `trails` table row.
+ *
+ * @remarks
+ * `state`, `kind`, and `priority` must be one of the core vocabularies; an unknown value throws
+ * rather than falling back. The store does not check a transition here — that is
+ * `assertTrailTransition` in the repository, because a row does not know where it came from.
+ */
+export const TrailRowSchema: v.GenericSchema<unknown, Trail> = v.object({
+  id: v.pipe(text, v.minLength(1)),
+  project_id: ProjectIdSchema,
+  title: v.pipe(text, v.minLength(1)),
+  description: text,
+  acceptance: text,
+  kind: v.picklist(TRAIL_KINDS),
+  state: v.picklist(TRAIL_STATES),
+  priority: v.picklist(TRAIL_PRIORITIES),
+  created_by: text,
+  created_at: at,
+  updated_at: at,
+});
+
+/**
+ * One `trail_changes` row: the `base..head` pair a Trail moved the code to.
+ *
+ * @remarks
+ * `repo_id` and `run_id` are null while a Trail has one repository or no run. `base_commit` and
+ * `head_commit` being different is the repository's check, not this schema's.
+ */
+export const TrailChangeRowSchema: v.GenericSchema<unknown, TrailChange> = v.object({
+  id: text,
+  trail_id: text,
+  workspace_id: text,
+  repo_id: v.nullable(text),
+  base_commit: text,
+  head_commit: text,
+  run_id: v.nullable(text),
+  state: v.picklist(TRAIL_CHANGE_STATES),
+  created_at: at,
+  updated_at: at,
+});
+
+/** One `trail_sessions` row: a link from a Trail to a conversation, session, or run. */
+export const TrailSessionRowSchema: v.GenericSchema<unknown, TrailSession> = v.object({
+  id: text,
+  trail_id: text,
+  conversation_id: v.nullable(ConversationIdSchema),
+  session_id: text,
+  run_id: v.nullable(text),
+  linked_at: at,
+});
+
+/**
+ * One `trail_feedback` row.
+ *
+ * @remarks
+ * `sentiment`, `channel`, and `actor` are closed; `occurred_at <= recorded_at` is the
+ * repository's check, because the row itself does not know which of the two it is being compared
+ * with.
+ */
+export const TrailFeedbackRowSchema: v.GenericSchema<unknown, TrailFeedback> = v.object({
+  id: text,
+  trail_id: text,
+  change_id: v.nullable(text),
+  channel: v.picklist(TRAIL_FEEDBACK_CHANNELS),
+  summary: text,
+  sentiment: v.picklist(TRAIL_FEEDBACK_SENTIMENTS),
+  source_url: v.nullable(text),
+  source: text,
+  actor: v.picklist(TRAIL_ACTOR_KINDS),
+  external_id: v.nullable(text),
+  occurred_at: at,
+  recorded_at: at,
+  supersedes_id: v.nullable(text),
+});
+
+/** One `trail_metrics` row: a product signal with its measurement window. */
+export const TrailMetricRowSchema: v.GenericSchema<unknown, TrailMetric> = v.object({
+  id: text,
+  trail_id: text,
+  change_id: v.nullable(text),
+  name: text,
+  value: v.number(),
+  unit: text,
+  window_start: at,
+  window_end: at,
+  source: text,
+  external_id: v.nullable(text),
+  occurred_at: at,
+  recorded_at: at,
+});
+
+/** One `trail_evals` row: a test, lint, or review verdict attached to a Trail. */
+export const TrailEvalRowSchema: v.GenericSchema<unknown, TrailEval> = v.object({
+  id: text,
+  trail_id: text,
+  change_id: v.nullable(text),
+  name: text,
+  status: v.picklist(TRAIL_EVAL_STATUSES),
+  detail: v.nullable(text),
+  source: text,
+  occurred_at: at,
+  recorded_at: at,
+});
+
+/** One `trail_notes` row: markdown a person wrote on the Trail. */
+export const TrailNoteRowSchema: v.GenericSchema<unknown, TrailNote> = v.object({
+  id: text,
+  trail_id: text,
+  body: text,
+  author: text,
+  occurred_at: at,
+  recorded_at: at,
+});
+
+/** One `trail_decisions` row: an approval, a change request, or a rejection. */
+export const TrailDecisionRowSchema: v.GenericSchema<unknown, TrailDecision> = v.object({
+  id: text,
+  trail_id: text,
+  change_id: v.nullable(text),
+  actor: text,
+  action: v.picklist(TRAIL_DECISION_ACTIONS),
+  head_commit: v.nullable(text),
+  note: text,
+  at: at,
+});
+
+/**
+ * One `trail_findings` row.
+ *
+ * @remarks
+ * `resolved_at` and `resolved_by` are null while the finding is open. An unknown severity is
+ * refused: `none` means "no weight", never "undecided".
+ */
+export const TrailFindingRowSchema: v.GenericSchema<unknown, TrailFinding> = v.object({
+  id: text,
+  trail_id: text,
+  change_id: v.nullable(text),
+  severity: v.picklist(TRAIL_FINDING_SEVERITIES),
+  source: v.picklist(TRAIL_FINDING_SOURCES),
+  status: v.picklist(TRAIL_FINDING_STATUSES),
+  file: v.nullable(text),
+  hunk: v.nullable(text),
+  summary: text,
+  created_at: at,
+  resolved_at: v.nullable(at),
+  resolved_by: v.nullable(text),
+});
+
+/** One `trail_gates` row: one gate's evaluation against one Trail or Change. */
+export const TrailGateRowSchema: v.GenericSchema<unknown, TrailGate> = v.object({
+  id: text,
+  trail_id: text,
+  change_id: v.nullable(text),
+  gate: v.picklist(TRAIL_GATE_KINDS),
+  status: v.picklist(TRAIL_GATE_STATUSES),
+  detail: v.nullable(text),
+  evaluated_at: at,
+});
+
+/** The input shape of {@link TrailRowSchema}: a raw `trails` row. */
+export type TrailRow = v.InferInput<typeof TrailRowSchema>;
+/** The input shape of {@link TrailChangeRowSchema}: a raw `trail_changes` row. */
+export type TrailChangeRow = v.InferInput<typeof TrailChangeRowSchema>;
+/** The input shape of {@link TrailSessionRowSchema}: a raw `trail_sessions` row. */
+export type TrailSessionRow = v.InferInput<typeof TrailSessionRowSchema>;
+/** The input shape of {@link TrailFeedbackRowSchema}: a raw `trail_feedback` row. */
+export type TrailFeedbackRow = v.InferInput<typeof TrailFeedbackRowSchema>;
+/** The input shape of {@link TrailMetricRowSchema}: a raw `trail_metrics` row. */
+export type TrailMetricRow = v.InferInput<typeof TrailMetricRowSchema>;
+/** The input shape of {@link TrailEvalRowSchema}: a raw `trail_evals` row. */
+export type TrailEvalRow = v.InferInput<typeof TrailEvalRowSchema>;
+/** The input shape of {@link TrailNoteRowSchema}: a raw `trail_notes` row. */
+export type TrailNoteRow = v.InferInput<typeof TrailNoteRowSchema>;
+/** The input shape of {@link TrailDecisionRowSchema}: a raw `trail_decisions` row. */
+export type TrailDecisionRow = v.InferInput<typeof TrailDecisionRowSchema>;
+/** The input shape of {@link TrailFindingRowSchema}: a raw `trail_findings` row. */
+export type TrailFindingRow = v.InferInput<typeof TrailFindingRowSchema>;
+/** The input shape of {@link TrailGateRowSchema}: a raw `trail_gates` row. */
+export type TrailGateRow = v.InferInput<typeof TrailGateRowSchema>;

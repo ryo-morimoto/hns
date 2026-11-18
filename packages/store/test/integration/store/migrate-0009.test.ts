@@ -43,7 +43,9 @@ const ColumnSchema = v.object({ name: v.string(), type: v.string(), required: v.
 
 // Catches: a migration that is appended but not recorded, or a version list with a gap.
 test("migration 0009 is the last step and is recorded once applied", async () => {
-  expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(9);
+  // 0009 is a step, not the last one: a later step appends after it, which is the point of a
+  // numbered list. What this test pins is that 0009 is in the list and 0009 is the step it says.
+  expect(MIGRATIONS.map((migration) => migration.version)).toContain(9);
   expect(migration0009.version).toBe(9);
   await withMigrated(async (sql) => {
     const versions = await sql.all("SELECT version FROM schema_migrations ORDER BY version");

@@ -7,6 +7,7 @@ import { migration0006 } from "./0006-drop-legacy-events.ts";
 import { migration0007 } from "./0007-policy.ts";
 import { migration0008 } from "./0008-machines.ts";
 import { migration0009 } from "./0009-conversation-edited.ts";
+import { migration0010 } from "./0010-trails.ts";
 import type { Migration } from "./migration.ts";
 
 /**
@@ -26,4 +27,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration0007,
   migration0008,
   migration0009,
+  migration0010,
 ];

@@ -8,6 +8,16 @@ import type {
   Firing,
   Project,
   Task,
+  Trail,
+  TrailChange,
+  TrailDecision,
+  TrailEval,
+  TrailFeedback,
+  TrailFinding,
+  TrailGate,
+  TrailMetric,
+  TrailNote,
+  TrailSession,
   Workflow,
   WorkflowRun,
   WorkflowRunNode,
@@ -22,6 +32,16 @@ import {
   PolicyRevisionRowSchema,
   ProjectRowSchema,
   TaskRowSchema,
+  TrailChangeRowSchema,
+  TrailDecisionRowSchema,
+  TrailEvalRowSchema,
+  TrailFeedbackRowSchema,
+  TrailFindingRowSchema,
+  TrailGateRowSchema,
+  TrailMetricRowSchema,
+  TrailNoteRowSchema,
+  TrailRowSchema,
+  TrailSessionRowSchema,
   WorkflowRowSchema,
   WorkflowRunNodeRowSchema,
   WorkflowRunRowSchema,
@@ -186,4 +206,130 @@ export function parsePolicyActive(input: unknown): PolicyActive {
  */
 export function parsePolicyProposal(input: unknown): StoredPolicyProposal {
   return v.parse(PolicyProposalRowSchema, input);
+}
+
+/**
+ * Parse a raw `trails` row into the public {@link Trail}.
+ *
+ * @remarks
+ * This is the one place a Trail row becomes a Trail. `state`, `kind`, and `priority` are closed
+ * vocabularies: a row that holds a value this build does not know throws, so a corrupted row is
+ * never read as a default state. The Trail table's CHECK refuses most such rows on the way in, so
+ * the corruption this catches is the kind the column cannot see (a value that is a vocabulary
+ * member plus a stray byte, a column of the wrong type, or a row written before the CHECK).
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated Trail.
+ * @throws ValiError if a required column is missing, a column has the wrong type, or `state`,
+ * `kind`, or `priority` is unknown.
+ *
+ * @example
+ * ```ts @import.meta.vitest
+ * const row = { id: "t1", project_id: "p1", title: "T", description: "", acceptance: "", kind: "feature", state: "draft", priority: "normal", created_by: "u1", created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z" };
+ * expect(parseTrail(row).state).toBe("draft");
+ * expect(() => parseTrail({ ...row, state: "blocked" })).toThrow();
+ * expect(() => parseTrail({ ...row, state: "merged " })).toThrow();
+ * ```
+ */
+export function parseTrail(input: unknown): Trail {
+  return v.parse(TrailRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_changes` row into the public {@link TrailChange}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated Change.
+ * @throws ValiError if a column is missing or `state` is unknown.
+ */
+export function parseTrailChange(input: unknown): TrailChange {
+  return v.parse(TrailChangeRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_sessions` row into the public {@link TrailSession}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated link.
+ * @throws ValiError if a column is missing or `conversation_id` is not a conversation id.
+ */
+export function parseTrailSession(input: unknown): TrailSession {
+  return v.parse(TrailSessionRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_feedback` row into the public {@link TrailFeedback}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated feedback.
+ * @throws ValiError if a column is missing or `channel`, `sentiment`, or `actor` is unknown.
+ */
+export function parseTrailFeedback(input: unknown): TrailFeedback {
+  return v.parse(TrailFeedbackRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_metrics` row into the public {@link TrailMetric}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated metric.
+ * @throws ValiError if a column is missing or `value` is not a number.
+ */
+export function parseTrailMetric(input: unknown): TrailMetric {
+  return v.parse(TrailMetricRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_evals` row into the public {@link TrailEval}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated evaluation.
+ * @throws ValiError if a column is missing or `status` is unknown.
+ */
+export function parseTrailEval(input: unknown): TrailEval {
+  return v.parse(TrailEvalRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_notes` row into the public {@link TrailNote}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated note.
+ * @throws ValiError if a column is missing.
+ */
+export function parseTrailNote(input: unknown): TrailNote {
+  return v.parse(TrailNoteRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_decisions` row into the public {@link TrailDecision}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated decision.
+ * @throws ValiError if a column is missing or `action` is unknown.
+ */
+export function parseTrailDecision(input: unknown): TrailDecision {
+  return v.parse(TrailDecisionRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_findings` row into the public {@link TrailFinding}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated finding.
+ * @throws ValiError if a column is missing or `severity`, `source`, or `status` is unknown.
+ */
+export function parseTrailFinding(input: unknown): TrailFinding {
+  return v.parse(TrailFindingRowSchema, input);
+}
+
+/**
+ * Parse a raw `trail_gates` row into the public {@link TrailGate}.
+ *
+ * @param input - A row read from SQLite.
+ * @returns The validated gate result.
+ * @throws ValiError if a column is missing or `gate` or `status` is unknown.
+ */
+export function parseTrailGate(input: unknown): TrailGate {
+  return v.parse(TrailGateRowSchema, input);
 }
