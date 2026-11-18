@@ -61,6 +61,7 @@ import {
 } from "./session-tools.ts";
 import { GrantedAnswerSchema } from "@hns/workspace/protocol";
 import { createSignedMachineFiles, type MachineCall, type MachineFiles } from "./machine.ts";
+import { SESSION_NAME_HEADER } from "../edge/env.ts";
 import { createOfficeRows } from "./office-rows.ts";
 import {
   OFFICE_CALL_TIMEOUT_MS,
@@ -1540,8 +1541,15 @@ export class Session {
       });
     const fail = (code: OfficeErrorCodeValue, message: string, status = 200) =>
       reply(officeFailureOf(code, message), status);
+    // The workspace is checked twice and both must agree with the object's own: the query names
+    // it (the port and the route both send it), and the edge's header names the object the read
+    // was addressed to. A request that named one workspace in one place and another in the other
+    // is refused, so nothing here can be tricked into reading another object's rows.
     const workspace = url.searchParams.get("workspaceId") ?? "";
-    if (workspace !== this.#workspace) return fail("not_authorized", "Another workspace.", 404);
+    const addressed = request.headers.get(SESSION_NAME_HEADER) ?? workspace;
+    if (workspace !== this.#workspace || addressed !== this.#workspace) {
+      return fail("not_authorized", "Another workspace.", 404);
+    }
     if (path === "/rpc/office/preview") {
       const pathValue = url.searchParams.get("path") ?? "";
       const version = url.searchParams.get("v") ?? undefined;

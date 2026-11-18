@@ -3,6 +3,7 @@ import * as v from "valibot";
 import { createCheckpointFace } from "../checkpoint/face.ts";
 import { createFilesFace } from "../files/content.ts";
 import { createKeysFace } from "../machines/keys.ts";
+import { createOfficePreviewFace } from "../office/face.ts";
 import { createConversationsFace, lookupConversation } from "../conversations/index.ts";
 import { createGraphQLFace } from "../graphql/index.ts";
 import { httpEntry } from "../obs/log.ts";
@@ -116,6 +117,31 @@ async function forwardToSession(request: EdgeRequest): Promise<Response> {
 }
 
 /**
+ * Forward one preview read to the workspace's Session object (0237).
+ *
+ * @internal
+ * @remarks
+ * The edge authenticated the session before this runs. The workspace id is resolved against D1
+ * **before** the object is addressed, so an unknown project never creates a Session object
+ * (D080), and the public path becomes the object's own `/rpc/office/preview` with its name
+ * header; the object checks that name against its rows and its own workspace.
+ */
+async function forwardOfficePreview(request: EdgeRequest): Promise<Response> {
+  return await createOfficePreviewFace()(request, async (workspaceId) => {
+    const parsed = v.safeParse(ProjectParamSchema, workspaceId);
+    if (!parsed.success) return undefined;
+    let project: Project | undefined;
+    try {
+      project = await lookupProject(request.env, parsed.output);
+    } catch (error) {
+      if (!(error instanceof StoreUnavailableError)) throw error;
+      return undefined;
+    }
+    return project === undefined ? undefined : sessionNameFor(project.id);
+  });
+}
+
+/**
  * Forward the observability API to the Session Durable Object.
  *
  * @internal
@@ -184,6 +210,9 @@ export const dependencies: HandlerDependencies = {
   // obs sink, the Trail lookup, the mirror reporter) are the object's own, from its bindings.
   workspace: {},
   machineKeys: createKeysFace(),
+  // The office preview's route (0237): the session's cookie is the authorisation, and the bytes
+  // stream from the workspace's object to the browser.
+  office: forwardOfficePreview,
   conversations: createConversationsFace(lookupConversation),
   onResponse: recordResponse,
 };

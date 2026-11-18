@@ -6,6 +6,7 @@ import { problem } from "./problem.ts";
 import { readSessionCookie, type Session } from "./session.ts";
 import { storeFor } from "./store.ts";
 import { incompleteToolPathMessage, toolPathMode } from "../do/tool-path-mode.ts";
+import { OFFICE_PREVIEW_PATH } from "@hns/core/office";
 
 /** What every face receives after authentication. */
 export interface EdgeRequest {
@@ -96,6 +97,16 @@ export interface HandlerDependencies {
    * deployment they name is not, and the edge answers 401 before this handler runs.
    */
   readonly machineKeys?: ((request: EdgeRequest) => Promise<Response>) | undefined;
+  /**
+   * The office preview face (0237): `GET /api/office/preview`, forwarded to the workspace's
+   * Session object.
+   *
+   * @remarks
+   * Optional, like every face, so an edge test that does not exercise previews needs no stub; a
+   * deployment without it answers 503 rather than 404, because the route is published and only
+   * the wiring is missing.
+   */
+  readonly office?: ((request: EdgeRequest) => Promise<Response>) | undefined;
   /** Called once per request; production forwards the entry to the Session object. */
   readonly onResponse?: ((event: EdgeResponseEvent, env: WorkerEnv) => void) | undefined;
   /**
@@ -522,6 +533,19 @@ async function route(
       workspaceId: checkpoints[1] ?? "",
       limits,
     });
+  }
+  if (path === OFFICE_PREVIEW_PATH) {
+    // Authenticated before the method, as every REST face is (D059): an anonymous caller learns
+    // that a session is required and nothing about the route's shape.
+    const session = await authenticate(request, env);
+    if (session === null) {
+      return problem("unauthorized", "A valid session cookie is required.", path);
+    }
+    if (request.method !== "GET") return methodNotAllowed("GET", path);
+    if (dependencies.office === undefined) {
+      return problem("unavailable", "The office preview face is not configured.", path);
+    }
+    return dependencies.office({ request, env, session, requestId, signal });
   }
   if (path === "/api/machines/keys") {
     if (request.method !== "GET") return methodNotAllowed("GET", path);
