@@ -702,6 +702,9 @@ function logPathOf(operation: Exclude<RpcRequest, GrantedOperation>): string {
       return "/";
     }
   }
+  // The office ops name no ROOT path: a job's `input.path` is workspace-relative and the engine
+  // reads it elsewhere, so the log line says only that the op ran.
+  if (operation.op === "office" || operation.op === "officeEngine") return "/";
   // A write names a project and a file; the log shows the resolved path, like a read does.
   const project = operation.op === "write" ? operation.projectRoot : "";
   try {

@@ -124,14 +124,38 @@ queued ─▶ generating ─▶ ready
 （§8 INV-O6。Worker の body 上限を通さない）。
 
 ```
-<cache>/<workspaceId>/<pathHash>/<version>/<operation>-<paramsHash>.<pdf|png>
+<cache>/<workspaceId>/<pathHash>/<version>/<operation>-<paramsHash>/<pdf|png>
 ```
+
+**キーは 5 つ組**（`OfficeCacheKey`）：`(workspaceId, pathHash, version, operation, paramsHash)`。どれも省略できない。
 
 - `version` は workspace の版で、実体は内容ハッシュ（`sha256:<hex>`）。したがって**同一内容は自然に同じキー**になる。
   「内容ハッシュをキーにしない」という以前の記述は誤り（レビュー B3）。版は内容である。
 - `pathHash` = SHA-256(workspace 相対パス) 先頭 16 hex。
 - `paramsHash` = **core の `officeParamsHash(operation, options)`** が返す 16 hex（JCS + SHA-256）。
   server も machine もこの 1 関数だけを使う（既定値の変更で静かに cache miss しないため。レビュー Q7）。
+- **パス系はハッシュの外、キーの中**。`paramsHash` は operation と、**成果物を変える option**
+  （pages・width・commands・to）だけをハッシュする。`workspaceId` / `pathHash` / `version`
+  は `officeParamsHash` の入力に**入れない**（同じ内容でもパスが違えば別の成果物なので、キーの
+  フィールドで分ける）。同じ成果物を 1 つのキーに写す 1 関数は `officeCachePath(key)` だけ。
+- **なぜ 5 つ組か（レビュー B1）**: `convert` の option は `{ to: "pdf" }` だけである。キーを
+  `operation` と `paramsHash` だけにすると、convert の key は**全 workspace・全ファイルで同じ値**に
+  なり、最初の変換の PDF が 2 つ目の変換の答えとして返る。`inspect` / `edit` / `recalc`
+  は成果物を作らないのでキーを持たない（`OfficeCacheKeySchema` の `operation` は
+  `preview` / `render` だけ）。
+- ファイル名は拡張子（`pdf` / `png`）だけ。ディレクトリの `operation-paramsHash` と合わせて
+  1 つのキーを表し、名前がキーの第 2 の綴りにならない。
+
+```ts
+export interface OfficeCacheKey {
+  readonly workspaceId: string;
+  readonly pathHash: string;    // SHA-256(パス) 先頭 16 hex
+  readonly version: string;      // "sha256:<hex>"
+  readonly operation: OfficeOperation;   // preview | render（成果物を作る 2 つだけ）
+  readonly paramsHash: string;            // officeParamsHash(operation, options)
+}
+```
+
 - TTL 7 日 / 合計 2 GB / LRU。起動時に前プロセスの期限切れを掃除する。削除失敗は記録し次の掃除で再試行。
 
 ## 5. machine の面
@@ -159,9 +183,10 @@ queued ─▶ generating ─▶ ready
   成果物として残すのは**別の 1 手**: 既存の `write` op の変種（`content` の代わりに構造化 `source`）で
   ROOT に資産化する。journal・版・`file.write` 監査は既存の write 経路がそのまま記録する。
   結果は `applied` / `conflict` / `unknown`（`operationId` で冪等、応答断は `unknown`、照合は stat）。
-  - `source` は **構造化**する: `{ kind: "office-cache", workspaceId, pathHash, version, operation, paramsHash }`
-    （文字列 key は持たない。`file` ではなく operation と paramsHash を渡し、machine が cache の内側で
-    `officeArtifactFile` から名前を導く）。サーバーは `office` の結果（`artifact` の構造化フィールド）から組み立てる。
+  - `source` は **構造化**する: `{ kind: "office-cache", ...OfficeCacheKey }`  =
+    `{ kind, workspaceId, pathHash, version, operation, paramsHash }`（文字列 key は持たない。
+    名前は machine が cache の内側で `officeCachePath` から導く）。サーバーは `office` の結果の
+    `artifact.key` をそのまま載せる。
     `source` と `content` は**排他**で、どちらか一方だけを載せる（両方・どちらも無しは schema が拒否する）。
     解決は `GET /artifact` と同じ 1 関数で cache 内に封じ込める（レビュー P3）。
   - `contentHash` は必須。machine は cache のバイト列の sha256 を照合してから rename する。
@@ -175,15 +200,26 @@ queued ─▶ generating ─▶ ready
   → 200 application/octet-stream（Content-Range / Content-Length）+ 署名ヘッダ
   ```
 
-  - **署名の対象は request target 全体**（path + query）。`MACHINE_ARTIFACT_PATH`（core）と、
-    query を正規順に並べる `artifactTarget(params)` を core に置き、server と machine が同じ関数を使う。
-    machine は受け取った `request.url` をそのまま検証する（query の差し替えは 401）。
+  - **route と正規形**: `MACHINE_ARTIFACT_PATH`（core、`"/artifact"`）と、query を固定順
+    （`workspaceId`・`path`・`version`・`operation`・`paramsHash`、続いて
+    `offset`・`length`）に並べて百分率エンコードする `artifactQuery(params)` / `artifactTarget(params)`
+    を core に置き、server と machine が同じ関数を使う。machine は受け取った `request.url` を
+    `parseArtifactQuery` で戻して `artifactTarget` と**バイト一致**で照合する（順序違い・キー追加・
+    値の差し替えは 401）。
+  - **署名の対象は request target 全体**（path + query）。**`paramsHash` の canonical 形は
+    `officeCanonicalize(value)`**（core）。office は JCS を 2 つ持たず、`./capability/canonical.ts`
+    の `canonicalize` に委ねる（2 つの canonical 形は 2 つのキーになるため）。RFC 8785、キーは UTF-16
+    コード単位順、安全な整数だけ。表現できない値はハッシュせず拒否する。
   - 既存の署名ヘッダと同じ鍵・時刻窓・nonce。
   - **cache のキーだけで解決**し、ROOT を読まない。`length` は最大 8 MiB、超えたら `invalid_request`。
   - server はバッファせず `ReadableStream` に流す。
-- `artifact` は構造化する: `{ workspaceId, pathHash, version, file, sha256, bytes, pages, missingFonts, engine }`。
-  `file` は `<operation>-<paramsHash>.pdf` か `<operation>-<paramsHash>.png`（拡張子は operation から導き、request の文字列は使わない）。
-  `artifact.key` は持たない：key はこの構造化フィールド（`workspaceId` / `pathHash` / `version` / `file`）から組み立てる。
+- `artifact` は構造化する:
+  `{ key, workspaceId, pathHash, version, file, sha256, bytes, pages, missingFonts, engine }`。
+  `key` は §4 の 5 つ組そのもの（`OfficeCacheKey`）。`workspaceId` / `pathHash` /
+  `version` は `key` の写しで、`file` は拡張子（`pdf` / `png`）だけ。
+  パスは `officeCachePath(key)` だけが組み立てる（server・machine・write が同じ 1 関数）。
+  クエリの `path` は人と workspace API が名乗る値で、machine が署名対象から
+  `officePathHash(path)` を計算する（`pathHash` を信頼せず、署名したバイト列から導く）。
 - `op: "office"` の JSON 応答に文書の中身を載せない（上記のメタだけ）。
   **JSON 応答の上限は 256 KiB**（`GET /artifact` は別 route なのでこの上限の外）。
 - **実行予算**: machine は 1 リクエストに `Limits.timeoutMs`（既定 30 秒）の deadline を張る。
@@ -270,6 +306,12 @@ type Mutation { requestDocumentPreview(path: String!): DocumentPreviewResult! }
 `MACHINE_REFUSAL_TO_OFFICE_ERROR` が 1 か所で持ち、`MACHINE_REFUSALS` の全コードが載っていることを
 テストで固定する（新しい拒否コードが黙って `engine_failed` に落ちない）。
 
+**写像の唯一の例外（N3）**: `source` write は 0241 が cache を読むまで `invalid_request` で
+拒否される（`OFFICE_CACHE_UNAVAILABLE_REASON`）。この理由のときだけ
+`officeErrorOfRefusal(refusal, reason)` は `unsupported_command` ではなく
+`engine_unavailable` を返す（契約は「未実装」の code を持たないため、「まだできない」に一番近い）。
+0241 が入ったら、この定数と例外は一緒に消える。
+
 ## 10. 上限（既定）
 
 | 項目 | 値 | 根拠 |
@@ -311,6 +353,28 @@ manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capa
   "files": { "bin/ibisOffice": "<sha256>" } }
 ```
 
-## 12. バージョンと互換
+## 12. golden fixture と契約の検査
+
+`packages/core/test/fixtures/office/` に**手で書いた JSON** を 25 個置く（型から起こすと、契約と
+実装のずれを検出できない）。内訳:
+
+| 群 | ファイル数 | 中身 |
+| --- | --- | --- |
+| job | 3 | preview / render / convert |
+| result | 4 | 同 3 つ + `officeEngine` の報告 |
+| error | 3 | `unsupported_format` / `engine_timeout` / `source_changed` |
+| 拒否 | 6 | 未知 operation・preview+commands・version 不正・limits 0・未知 error.code・workspaceId 無し |
+| command / cell | 4 | `OfficeCommand` 3 語彙 + `CellEdit` |
+| write | 3 | `source` / `content` / 両方（拒否） |
+| key | 2 | 同じ job・同じ version で `pathHash` 違い／`paramsHash` 違い |
+
+**合計 25 ファイル。** 受入の「fixture 12 件（成功 6・拒否 6）」とは数え方が違う: 成功として
+schema を通すのが job 3・result 3・error 3・command 4・write 2 の **15 本**、拒否が **6 本**、
+残る 4 本（`officeEngine` の報告と key の 2 つ）は key 単体の検査に使う。数え方は lead が Result に書く。
+
+型と schema の一致は `v.GenericSchema<unknown, T>`（コンパイルで固定）と `expectTypeOf` で、
+閉じた union の `switch` は `assertNever` で網羅を固定する。
+
+## 13. バージョンと互換
 
 `v: 1`。追加は optional field のみ。破壊は v2 とし、旧 v の受理を 1 リリース残す。結果に `engine.version` を含める。

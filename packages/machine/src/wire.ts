@@ -6,6 +6,8 @@ import {
   CheckpointPrepareResultSchema,
   MACHINE_RPC_PATH,
   MIRROR_FAILURES,
+  MachineOfficeEngineRequestSchema,
+  MachineOfficeRequestSchema,
   MachineReadResultSchema,
   MachineWriteRequestSchema,
   OBS_REQUEST_ID_PATTERN,
@@ -15,6 +17,8 @@ import type {
   CheckpointPackUploadResult,
   CheckpointPrepareResult,
   JsonValue,
+  MachineOfficeEngineRequest,
+  MachineOfficeRequest,
   MirrorFailure,
   MachineReadResult,
   MachineWriteRequest,
@@ -171,6 +175,8 @@ export const OPERATION_NAMES = [
   "checkpoint",
   "mirror",
   "tool",
+  "office",
+  "officeEngine",
 ] as const;
 
 /** One operation name. */
@@ -312,8 +318,17 @@ export type Operation =
   | MachineWriteRequest
   | CheckpointRequest
   | MirrorRequest
-  | ExecRequest;
+  | ExecRequest
+  | MachineOfficeRequest
+  | MachineOfficeEngineRequest;
 
+/**
+ * The closed request body, parsed at the boundary.
+ *
+ * @remarks
+ * The office ops' bodies are `@hns/core/office`'s schemas, not written again here: one wire has
+ * one definition, and both are strict. A body the contract refuses is a refusal, never a default.
+ */
 const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
   v.variant("op", [
     v.object({ op: v.literal("health") }),
@@ -325,6 +340,8 @@ const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
   CheckpointRequestSchema,
   MirrorRequestSchema,
   ExecRequestSchema,
+  MachineOfficeRequestSchema,
+  MachineOfficeEngineRequestSchema,
 ]);
 
 /**

@@ -11,7 +11,14 @@ import type { Checkpoint } from "@hns/workspace/checkpoint";
 import { mirrorRef } from "@hns/workspace/mirror";
 import { mirrorRemoteUrl, pushCheckpoint } from "@hns/workspace/mirror-push";
 import { GIT_OBJECT_TYPES, type GitObject, type GitObjectType } from "@hns/workspace/objects";
-import { fitsCheckpointPack, type MachineWriteRequest, type MachineWriteResult } from "@hns/core";
+import {
+  OFFICE_CACHE_UNAVAILABLE_REASON,
+  fitsCheckpointPack,
+  type MachineOfficeResult,
+  type MachineWriteRequest,
+  type MachineWriteResult,
+  type OfficeEngineReport,
+} from "@hns/core";
 import { containInRoot } from "./containment.ts";
 import { runExec } from "./exec.ts";
 import type { MachineExec } from "./exec.ts";
@@ -69,7 +76,9 @@ export type OperationResult =
   | MachineWriteResult
   | CheckpointResult
   | MirrorResult
-  | ExecResult;
+  | ExecResult
+  | MachineOfficeResult
+  | OfficeEngineReport;
 
 /**
  * One checkpoint at a time per root and Run.
@@ -150,6 +159,21 @@ export async function runOperation(
         operation,
         { maxOutputBytes: limits.maxResponseBytes, signal, root },
       );
+    case "office":
+      // The job is accepted by the contract and refused here until 0236 runs it: an unsupported
+      // one is an answer, not a defect, and saying "not yet" is truer than pretending to run.
+      signal.throwIfAborted();
+      throw new MachineRefusal(
+        "invalid_request",
+        "op office is not implemented in this build; 0236 adds the executor and the cache",
+      );
+    case "officeEngine":
+      // No pack has been read yet (0235 / 0236): the honest answer is "no engine", not an error.
+      signal.throwIfAborted();
+      return {
+        available: false as const,
+        reason: "no office pack is installed; 0235 adds the pack and 0236 reads its manifest",
+      };
   }
   const unreachable: never = operation;
   return unreachable;
@@ -750,10 +774,7 @@ function refusalForFileSystem(failure: FileSystemFailure): MachineRefusal {
  */
 function writeBytes(operation: MachineWriteRequest): Buffer {
   if ("source" in operation) {
-    throw new MachineRefusal(
-      "invalid_request",
-      "a source write needs the office cache, which this machine does not serve",
-    );
+    throw new MachineRefusal("invalid_request", OFFICE_CACHE_UNAVAILABLE_REASON);
   }
   return Buffer.from(operation.content, "base64");
 }

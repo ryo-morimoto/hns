@@ -5,11 +5,12 @@ import {
   OFFICE_PARAMS_HASH_PATTERN,
   OFFICE_SHA256_PATTERN,
   OfficeEngineReportSchema,
-  OfficeJobSchema,
+  OfficeEngineRequestSchema,
+  OfficeRequestSchema,
   OfficeResultSchema,
+  type OfficeCacheKey,
   type OfficeEngineReport,
   type OfficeJob,
-  type OfficeOperation,
   type OfficeResult,
 } from "./office.ts";
 import {
@@ -220,8 +221,8 @@ export type MachineWriteRequest = {
     }
 );
 
-/** The schema for {@link OfficeCacheSource}: the parts, each in its own spelling (§4). */
-export const OfficeCacheSourceSchema: v.GenericSchema<unknown, OfficeCacheSource> = v.object({
+/** The schema for {@link OfficeCacheSource}: the 5-tuple and its `kind`, and no other key (§4). */
+export const OfficeCacheSourceSchema: v.GenericSchema<unknown, OfficeCacheSource> = v.strictObject({
   kind: v.literal("office-cache"),
   workspaceId: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
   pathHash: v.pipe(v.string(), v.regex(OFFICE_PATH_HASH_PATTERN, "a path hash is 16 hex")),
@@ -274,29 +275,20 @@ export const MachineWriteRequestSchema: v.GenericSchema<unknown, MachineWriteReq
  * One read from the office cache, as a write names its bytes (0241; D103).
  *
  * @remarks
- * **Structured, never a key string.** The cache directory is built from these parts by
- * {@link officeArtifactFile} and the same resolution the artifact route uses, so a `source` can
- * only name a file inside the cache's version directory: the file name is derived from
- * `operation` and `paramsHash`, not taken from the request.
+ * **Structured, never a key string.** The parts are the artifact's 5-tuple ({@link OfficeCacheKey}),
+ * and the machine builds the cache path from them with {@link officeCachePath} — the same function
+ * the artifact route uses — so a `source` can only name a file inside the cache: no part is a
+ * path segment the request supplies, and the file name is derived from `operation`, not given.
  *
  * `version` is the artifact's content hash. The machine reads the cache's bytes, checks their
- * SHA-256 against `contentHash` (the write's own field), and renames only then: a file that was
- * replaced between the `office` answer and the write is refused as `engine_failed` rather than
- * copied (0241 C8).
+ * SHA-256 against `contentHash` (the write's own field), and renames only then: a file replaced
+ * between the `office` answer and the write is refused as `engine_failed` rather than copied
+ * (0241 C8).
+ *
+ * `kind` is the discriminator: the field is a union member so a second source (a run's output,
+ * a checkpoint's file) can be added without changing the write's own fields.
  */
-export interface OfficeCacheSource {
-  readonly kind: "office-cache";
-  /** The workspace the artifact belongs to. */
-  readonly workspaceId: string;
-  /** The cache's path hash: 16 lowercase hex (§4). */
-  readonly pathHash: string;
-  /** The artifact's version: `sha256:<hex>`, the content hash (§4). */
-  readonly version: string;
-  /** The operation that produced it; with `paramsHash` it names the file. */
-  readonly operation: OfficeOperation;
-  /** The cache's params hash: 16 lowercase hex (§4). */
-  readonly paramsHash: string;
-}
+export type OfficeCacheSource = { readonly kind: "office-cache" } & OfficeCacheKey;
 
 /** The unknown reasons a machine may answer with, taken from the core model. */
 export const MACHINE_WRITE_UNKNOWN_REASONS = MUTATION_UNKNOWN_REASONS;
@@ -428,11 +420,16 @@ export interface MachineOfficeRequest {
   readonly job: OfficeJob;
 }
 
-/** The office job as it arrives, parsed at the boundary with the contract's own schema. */
-export const MachineOfficeRequestSchema: v.GenericSchema<unknown, MachineOfficeRequest> = v.object({
-  op: v.literal("office"),
-  job: OfficeJobSchema,
-});
+/**
+ * The office job as it arrives, parsed at the boundary with the contract's own schema.
+ *
+ * @remarks
+ * `OfficeRequestSchema` is `./office.ts`'s, not a second object written here: one wire has one
+ * definition. It is strict, so a body with a second key is refused rather than silently dropped
+ * (0228 chose `strictObject` for the granted call for the same reason).
+ */
+export const MachineOfficeRequestSchema: v.GenericSchema<unknown, MachineOfficeRequest> =
+  OfficeRequestSchema;
 
 /**
  * The engine probe (§5): no parameters, one report.
@@ -445,11 +442,11 @@ export interface MachineOfficeEngineRequest {
   readonly op: "officeEngine";
 }
 
-/** The engine probe as it arrives, parsed at the boundary: no key but the op. */
+/** The engine probe as it arrives, parsed at the boundary with the contract's own schema. */
 export const MachineOfficeEngineRequestSchema: v.GenericSchema<
   unknown,
   MachineOfficeEngineRequest
-> = v.strictObject({ op: v.literal("officeEngine") });
+> = OfficeEngineRequestSchema;
 
 /**
  * What the office ops answer (§5).

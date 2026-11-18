@@ -16,23 +16,29 @@ import {
   MACHINE_ARTIFACT_PATH,
   MACHINE_REFUSAL_TO_OFFICE_ERROR,
   MAX_ARTIFACT_BYTES,
+  OFFICE_CACHE_UNAVAILABLE_REASON,
   OFFICE_ERROR_CODES,
   OFFICE_PARAMS_HASH_PATTERN,
   OFFICE_PATH_HASH_PATTERN,
   OFFICE_SHA256_PATTERN,
   OfficeArtifactSchema,
+  OfficeCacheKeySchema,
   OfficeCommandSchema,
   OfficeEngineReportSchema,
+  OfficeEngineRequestSchema,
   OfficeInputSchema,
   OfficeJobSchema,
   OfficeLimitsSchema,
+  OfficeRequestSchema,
   OfficeResultSchema,
   PREVIEW_STATUSES,
   artifactQuery,
   artifactTarget,
   assertNever,
   officeArtifactContentType,
+  officeArtifactDirectory,
   officeArtifactFile,
+  officeCachePath,
   officeCanonicalize,
   officeErrorOfRefusal,
   officeParamsHash,
@@ -92,6 +98,8 @@ const GOLDEN_COMMANDS = [
 ] as const;
 const GOLDEN_WRITES = ["write-source.json", "write-content.json"] as const;
 const GOLDEN_WRITE_REJECTIONS = ["reject-write-both.json"] as const;
+/** The two keys B1 fixes: the same job at another path, and the same path with other options. */
+const GOLDEN_KEYS = ["key-convert-other-path.json", "key-convert-other-params.json"] as const;
 
 /** Every fixture this file reads, so the count the issue fixes is asserted once. */
 const GOLDEN_FILES = [
@@ -103,6 +111,7 @@ const GOLDEN_FILES = [
   ...GOLDEN_COMMANDS,
   ...GOLDEN_WRITES,
   ...GOLDEN_WRITE_REJECTIONS,
+  ...GOLDEN_KEYS,
 ] as const;
 
 // Catches: a fixture that drifted from the schema, or a schema that drifted from a fixture.
@@ -158,7 +167,8 @@ test("the refusal fixtures are refused by the schema that reads them", () => {
 // (6 that parse and 6 that are refused) plus the command, cell-edit, and write fixtures; this is
 // the one place that count is written down.
 test("the golden fixtures are the files this issue fixed, and every one is read", () => {
-  expect(GOLDEN_FILES).toHaveLength(23);
+  // 25 files: the issue's 12 "golden" cases, the command/cell/write fixtures, and B1's two keys.
+  expect(GOLDEN_FILES).toHaveLength(25);
   expect(GOLDEN_JOBS.length + GOLDEN_RESULTS.length + GOLDEN_ERRORS.length).toBe(10);
   expect(GOLDEN_JOB_REJECTIONS.length + GOLDEN_RESULT_REJECTIONS.length).toBe(6);
   for (const name of GOLDEN_FILES) expect(fixture(name), name).toBeDefined();
@@ -371,16 +381,19 @@ describe("a switch over a closed union ends in never", () => {
   // named .exe; and an operation that makes no artifact being given one.
   test("the cache file name is derived from the operation, never given", () => {
     const hash = "a1b2c3d4e5f60718";
-    expect(officeArtifactFile("preview", hash)).toBe("preview-" + hash + ".pdf");
-    expect(officeArtifactFile("render", hash)).toBe("render-" + hash + ".png");
+    expect(officeArtifactFile("preview")).toBe("pdf");
+    expect(officeArtifactFile("render")).toBe("png");
+    expect(officeArtifactDirectory("preview", hash)).toBe("preview-" + hash);
+    expect(officeArtifactDirectory("render", hash)).toBe("render-" + hash);
     expect(officeArtifactContentType("preview")).toBe("application/pdf");
     expect(officeArtifactContentType("render")).toBe("image/png");
     for (const operation of ["inspect", "edit", "convert", "recalc"] as const) {
-      expect(() => officeArtifactFile(operation, hash), operation).toThrow();
+      expect(() => officeArtifactFile(operation), operation).toThrow();
+      expect(() => officeArtifactDirectory(operation, hash), operation).toThrow();
       expect(() => officeArtifactContentType(operation), operation).toThrow();
     }
-    expect(() => officeArtifactFile("preview", "not-hex")).toThrow();
-    expect(() => officeArtifactFile("preview", hash.toUpperCase())).toThrow();
+    expect(() => officeArtifactDirectory("preview", "not-hex")).toThrow();
+    expect(() => officeArtifactDirectory("preview", hash.toUpperCase())).toThrow();
   });
 
   // Catches: a refusal the machine may answer with and the table does not name, so the server's
@@ -396,7 +409,84 @@ describe("a switch over a closed union ends in never", () => {
     expect(officeErrorOfRefusal("busy")).toBe("engine_busy");
     expect(officeErrorOfRefusal("path_denied")).toBe("not_authorized");
     expect(officeErrorOfRefusal("invalid_request")).toBe("unsupported_command");
+    // N3: the one refusal that is not "outside the vocabulary". The machine refuses a `source`
+    // write until the cache and the copy exist (0241); an `unsupported_command` row would tell a
+    // person the engine cannot do it, which is a different, false story.
+    expect(officeErrorOfRefusal("invalid_request", OFFICE_CACHE_UNAVAILABLE_REASON)).toBe(
+      "engine_unavailable",
+    );
     expect(officeErrorOfRefusal("engine_exploded")).toBe("engine_failed");
+  });
+});
+
+// **B1.** The key is a 5-tuple, not "operation + params": convert's options are only
+// `{ to: "pdf" }`, so a shorter key would be one constant and every conversion in every
+// workspace would answer with the first one's PDF. These two tests are the two ways that bug
+// shows: another path and another option.
+describe("the cache key is (workspaceId, pathHash, version, operation, paramsHash)", () => {
+  // Catches: a key that dropped the path parts, so two files sharing a version share an entry.
+  // The fixtures write the same convert job twice; only the pathHash differs.
+  test("the same job, version, and operation at another path is another key", async () => {
+    const other = fixture("key-convert-other-path.json");
+    const key = v.parse(OfficeCacheKeySchema, { ...(other as { key: object }).key });
+    const base = v.parse(OfficeCacheKeySchema, {
+      ...key,
+      pathHash: v.parse(
+        OfficeCacheKeySchema,
+        (
+          fixture("result-convert.json") as {
+            artifact: { key: object };
+          }
+        ).artifact.key,
+      ).pathHash,
+    });
+    expect(key.workspaceId).toBe(base.workspaceId);
+    expect(key.version).toBe(base.version);
+    expect(key.operation).toBe(base.operation);
+    expect(key.paramsHash).toBe(base.paramsHash);
+    expect(key.pathHash).not.toBe(base.pathHash);
+    expect(officeCachePath(key)).not.toBe(officeCachePath(base));
+    // The params hash is the same for both: the path is outside the hash by design, and inside
+    // the key. A key made of the hash alone would be one entry.
+    const convert = await officeParamsHash("preview", { to: "pdf" });
+    expect(convert).toBe(await officeParamsHash("preview", { to: "pdf" }));
+  });
+
+  // Catches: a key that dropped the options, so two previews of different pages share an entry.
+  test("the same job at the same path with other options is another key", () => {
+    const other = fixture("key-convert-other-params.json");
+    const key = v.parse(OfficeCacheKeySchema, (other as { key: object }).key);
+    const base = v.parse(
+      OfficeCacheKeySchema,
+      (fixture("result-convert.json") as { artifact: { key: object } }).artifact.key,
+    );
+    expect(key.pathHash).toBe(base.pathHash);
+    expect(key.version).toBe(base.version);
+    expect(key.paramsHash).not.toBe(base.paramsHash);
+    expect(officeCachePath(key)).not.toBe(officeCachePath(base));
+  });
+
+  // Catches: convert's key being a constant. With no path parts a convert and another convert are
+  // indistinguishable; this pins that the fields that make them different are required.
+  test("a key without any one of the five parts does not parse", () => {
+    const key = (fixture("result-convert.json") as { artifact: { key: object } }).artifact.key;
+    expect(v.safeParse(OfficeCacheKeySchema, key).success).toBe(true);
+    for (const part of ["workspaceId", "pathHash", "version", "operation", "paramsHash"]) {
+      const without = { ...key } as Record<string, unknown>;
+      delete without[part];
+      expect(v.safeParse(OfficeCacheKeySchema, without).success, part).toBe(false);
+    }
+    expect(officeCachePath(v.parse(OfficeCacheKeySchema, key))).toContain("/preview-");
+    expect(() =>
+      officeCachePath(v.parse(OfficeCacheKeySchema, { ...key, paramsHash: "a1b2c3d4e5f6071" })),
+    ).toThrow();
+    // A workspace id is a name; a path segment would escape the cache directory.
+    expect(() =>
+      officeCachePath({ ...v.parse(OfficeCacheKeySchema, key), workspaceId: ".." }),
+    ).toThrow();
+    expect(() =>
+      officeCachePath({ ...v.parse(OfficeCacheKeySchema, key), workspaceId: "a/b" }),
+    ).toThrow();
   });
 });
 
@@ -533,6 +623,17 @@ test("the wire's operations are the contract's vocabulary", async () => {
   expect(
     v.safeParse(machine.MachineOfficeEngineRequestSchema, { op: "officeEngine", job }).success,
   ).toBe(false);
+  // N2: the machine's office schemas *are* the contract's, and both are strict. A second key on
+  // the body is refused, not dropped: a dropped key is a request the caller believes it sent.
+  expect(machine.MachineOfficeRequestSchema).toBe(OfficeRequestSchema);
+  expect(machine.MachineOfficeEngineRequestSchema).toBe(OfficeEngineRequestSchema);
+  expect(
+    v.safeParse(machine.MachineOfficeRequestSchema, { op: "office", job, extra: true }).success,
+  ).toBe(false);
+  expect(
+    v.safeParse(machine.MachineOfficeRequestSchema, { op: "office", job: { ...job, extra: 1 } })
+      .success,
+  ).toBe(false);
   const result = v.parse(machine.MachineOfficeResultSchema, fixture("result-preview.json"));
   expect(result.ok).toBe(true);
   const report = v.parse(
@@ -587,7 +688,7 @@ describe("@hns/core/office meets @hns/workspace", () => {
 
 // Catches: a machine and a server that each build the cache key — a params hash computed one way
 // for the write and another for the read, which would copy the wrong file into ROOT.
-test("the artifact's own fields build the target the machine verifies", async () => {
+test("the artifact's own fields build the target and the path the machine verifies", async () => {
   const result = v.parse(OfficeResultSchema, fixture("result-preview.json"));
   expect(result.ok).toBe(true);
   if (!result.ok) return;
@@ -596,12 +697,31 @@ test("the artifact's own fields build the target the machine verifies", async ()
     path: "提案書.docx",
     version: result.artifact.version,
     operation: "preview",
-    paramsHash: "a1b2c3d4e5f60718",
+    paramsHash: result.artifact.key.paramsHash,
   });
-  const file = officeArtifactFile("preview", "a1b2c3d4e5f60718");
-  expect(target).toContain("&paramsHash=a1b2c3d4e5f60718");
-  expect(result.artifact.file).toBe(file);
+  expect(target).toContain("&paramsHash=" + result.artifact.key.paramsHash);
+  expect(result.artifact.file).toBe(officeArtifactFile("preview"));
+  // The key the answer carries and the key the path is built from are the same 5-tuple.
+  expect(officeCachePath(result.artifact.key)).toBe(
+    [
+      result.artifact.workspaceId,
+      result.artifact.pathHash,
+      result.artifact.version,
+      "preview-" + result.artifact.key.paramsHash,
+      "pdf",
+    ].join("/"),
+  );
+  expect(result.artifact.key).toStrictEqual({
+    workspaceId: result.artifact.workspaceId,
+    pathHash: result.artifact.pathHash,
+    version: result.artifact.version,
+    operation: "preview",
+    paramsHash: result.artifact.key.paramsHash,
+  });
   const sameKey = await officeParamsHash("preview", { pages: [1, { from: 3, to: 5 }] });
   expect(sameKey).toMatch(OFFICE_PARAMS_HASH_PATTERN);
-  expect(officeArtifactFile("preview", sameKey)).toMatch(/^preview-[0-9a-f]{16}\.pdf$/u);
+  // The extension is the operation's, so the entry's file cannot become a .exe.
+  expect(officeCachePath({ ...result.artifact.key, paramsHash: sameKey })).toMatch(
+    /^ws-1\/[0-9a-f]{16}\/sha256:[0-9a-f]{64}\/preview-[0-9a-f]{16}\/pdf$/u,
+  );
 });

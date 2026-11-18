@@ -137,6 +137,21 @@ export const MACHINE_REFUSAL_TO_OFFICE_ERROR = {
 } as const satisfies Readonly<Record<string, OfficeErrorCode>>;
 
 /**
+ * The reason a machine gives when a `source` write arrives before the cache read exists (0241).
+ *
+ * @remarks
+ * The reason travels beside the refusal code as its message; this constant is its one spelling,
+ * so the machine that writes it and the server that reads it cannot drift. It is **temporary**:
+ * when 0241 reads the cache, this string and the mapping exception in {@link officeErrorOfRefusal}
+ * go away together.
+ */
+export const OFFICE_CACHE_UNAVAILABLE_REASON =
+  "a source write needs the office cache, which this machine does not serve";
+
+/** The diagnostic text a machine refusal carries beside its code. */
+export type MachineRefusalReason = string;
+
+/**
  * The preview states (§3).
  *
  * @remarks
@@ -486,13 +501,22 @@ export interface EngineManifest {
  * to know before blaming the document for its look.
  */
 export interface OfficeArtifact {
+  /**
+   * The 5-tuple the artifact lives under (§4).
+   *
+   * @remarks
+   * This is what the server copies into a `source` write and what the machine builds the cache
+   * path from. The three fields below repeat it for a reader; {@link key} is the one the paths
+   * are made from.
+   */
+  readonly key: OfficeCacheKey;
   /** The workspace the artifact belongs to. */
   readonly workspaceId: string;
   /** SHA-256 of the workspace-relative path, first 16 hex (§4). */
   readonly pathHash: string;
   /** The input's version: a content hash, `sha256:<hex>`. */
   readonly version: string;
-  /** The file name inside the cache's version directory: `<operation>-<paramsHash>.<pdf|png>`. */
+  /** The file name inside the cache's entry directory: `pdf` or `png` (§4). */
   readonly file: string;
   /** SHA-256 of the bytes, `sha256:<hex>`; the write path checks it before renaming (§5). */
   readonly sha256: string;
@@ -616,14 +640,127 @@ export const OFFICE_PARAMS_HASH_PATTERN = new RegExp(
 export const OFFICE_CELL_REF_PATTERN = /^[A-Z]{1,3}[1-9][0-9]{0,6}$/u;
 
 /**
- * The file name one cache entry has: `<operation>-<paramsHash>.<ext>` (§4).
+ * One cache entry's file name: its extension only, because the key is the directory (§4).
+ *
+ * @remarks
+ * The name is the content type's extension and nothing else. **The rest of the key is outside
+ * it**: `<cache>/<workspaceId>/<pathHash>/<version>/<operation>-<paramsHash>/<pdf|png>`. A name
+ * that also carried the version or the path would be a second spelling of the key, and two
+ * spellings are two keys.
+ */
+export const OFFICE_ARTIFACT_FILE_PATTERN = /^(?:pdf|png)$/u;
+
+/**
+ * The whole key one artifact lives under, as the 5-tuple (§4).
+ *
+ * @remarks
+ * `(workspaceId, pathHash, version, operation, paramsHash)` — **all five**, none optional. The
+ * reason is convert: its options are only `{ to: "pdf" }`, so a key made of `operation` and
+ * `paramsHash` alone would be **the same value for every file in every workspace**, and the
+ * first conversion would answer for the second. The path parts are in the key and **not** in the
+ * hash: the same bytes at two paths are two artifacts.
+ */
+export interface OfficeCacheKey {
+  /** The workspace the artifact belongs to. */
+  readonly workspaceId: string;
+  /** SHA-256 of the workspace-relative path, first 16 hex. */
+  readonly pathHash: string;
+  /** The input's version: its content hash, `sha256:<hex>`. */
+  readonly version: string;
+  /** The operation that produced it. */
+  readonly operation: OfficeOperation;
+  /** The hash of `{ operation, ...the operation's options }`, 16 hex ({@link officeParamsHash}). */
+  readonly paramsHash: string;
+}
+
+/** The directory inside one cache entry: `<operation>-<paramsHash>` (§4). */
+export function officeArtifactDirectory(operation: OfficeOperation, paramsHash: string): string {
+  if (!OFFICE_PARAMS_HASH_PATTERN.test(paramsHash)) {
+    throw new Error("an office params hash is 16 lowercase hex characters");
+  }
+  return artifactFileName(operation) + "-" + paramsHash;
+}
+
+/**
+ * The file name inside one cache entry's directory: the extension (§4).
+ *
+ * @param operation - The operation the artifact was produced for.
+ * @returns `pdf` for a preview, `png` for a render.
+ *
+ * @throws Error when the operation makes no artifact.
  *
  * @remarks
  * The extension is derived from the operation, never given: a preview is a PDF and a render is a
- * PNG, so the name cannot disagree with what the file is. The write path re-derives this name
- * before it reads from the cache, so a `source.file` cannot step outside its version directory.
+ * PNG, so the name cannot disagree with what the file is.
  */
-export const OFFICE_ARTIFACT_FILE_PATTERN = /^(?:preview|render)-[0-9a-f]{16}\.(?:pdf|png)$/u;
+export function officeArtifactFile(operation: OfficeOperation): string {
+  switch (operation) {
+    case "preview":
+      return "pdf";
+    case "render":
+      return "png";
+    case "inspect":
+    case "edit":
+    case "convert":
+    case "recalc":
+      throw new Error("an office operation that produces no artifact has no file");
+    default:
+      return assertNever(operation);
+  }
+}
+
+/**
+ * The cache path one entry lives at, relative to the cache's root (§4).
+ *
+ * @param key - The 5-tuple.
+ * @returns `<workspaceId>/<pathHash>/<version>/<operation>-<paramsHash>/<extension>`.
+ *
+ * @throws Error when a part is not the shape the key requires: this string is joined onto a
+ * directory, so a `..` reaching it would escape the cache.
+ *
+ * @remarks
+ * **The one place a key becomes a path.** The server computes the key to name an artifact; the
+ * machine builds the same path to read one; the write path re-derives it to copy one into ROOT.
+ * Nothing joins these parts by hand, so two lanes cannot disagree about a path that is safe.
+ */
+export function officeCachePath(key: OfficeCacheKey): string {
+  if (key.workspaceId === "" || key.workspaceId.includes("/") || key.workspaceId.includes("..")) {
+    throw new Error("a cache key's workspace id is a name, not a path");
+  }
+  if (!OFFICE_PATH_HASH_PATTERN.test(key.pathHash)) {
+    throw new Error("a cache key's path hash is 16 lowercase hex characters");
+  }
+  if (!OFFICE_SHA256_PATTERN.test(key.version)) {
+    throw new Error("a cache key's version is sha256:<64 hex>");
+  }
+  if (!OFFICE_PARAMS_HASH_PATTERN.test(key.paramsHash)) {
+    throw new Error("a cache key's params hash is 16 lowercase hex characters");
+  }
+  return [
+    key.workspaceId,
+    key.pathHash,
+    key.version,
+    officeArtifactDirectory(key.operation, key.paramsHash),
+    officeArtifactFile(key.operation),
+  ].join("/");
+}
+
+/** The directory's operation part: `preview` or `render`, and no other (§4). */
+function artifactFileName(operation: OfficeOperation): string {
+  switch (operation) {
+    case "preview":
+      return "preview";
+    case "render":
+      return "render";
+    case "inspect":
+    case "edit":
+    case "convert":
+    case "recalc":
+      throw new Error("an office operation that produces no artifact has no directory");
+    default:
+      return assertNever(operation);
+  }
+}
 
 /**
  * The canonical JSON one cache key is hashed over (RFC 8785, JCS), and what {@link officeParamsHash}
@@ -706,6 +843,17 @@ export type OfficeOptionValue =
  * about a key: the hash is JCS plus SHA-256 of `{ operation, ...params }`, first 16 hex. An
  * absent option and an option spelled differently hashed differently would be a silent miss; the
  * canonical form is what makes two spellings one key.
+ *
+ * **Only what changes the artifact is hashed.** The path parts — `workspaceId`, `pathHash`,
+ * `version` — are deliberately **not** inputs: they are fields of the key ({@link OfficeCacheKey})
+ * beside the hash, and a hash that mixed them in would give one artifact two keys depending on
+ * which side assembled it. What is hashed is the operation and the options that change what the
+ * engine produces (the pages, the width, the commands), so two jobs that ask for the same thing
+ * share an entry and two that do not never collide.
+ *
+ * A `paramsHash` for a job with no options is the hash of `{operation}` alone; that is correct
+ * **only because the key carries the path parts beside it** — see {@link OfficeCacheKey} for why
+ * `operation` alone is never a key.
  */
 // oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type, anti-slop/no-object-parameters -- the
 // argument is one operation's options, whose keys the caller takes from OfficeOperationOptions; the
@@ -716,38 +864,6 @@ export async function officeParamsHash(
 ): Promise<string> {
   const hex = await sha256Hex(officeCanonicalize({ operation, ...params }));
   return hex.slice(0, OFFICE_PARAMS_HASH_HEX_LENGTH);
-}
-
-/**
- * The file name one cache entry has, from the operation and its params hash (§4).
- *
- * @param operation - The operation the artifact was produced for.
- * @param paramsHash - The 16 hex {@link officeParamsHash} returned.
- * @returns `<operation>-<paramsHash>.pdf` for a preview, `.png` for a render.
- *
- * @throws Error when `paramsHash` is not 16 lowercase hex, or the operation makes no artifact.
- *
- * @remarks
- * This is the only place the name is built. The machine derives it again before reading, so a
- * `source.file` in a write cannot name a file outside the version directory.
- */
-export function officeArtifactFile(operation: OfficeOperation, paramsHash: string): string {
-  if (!OFFICE_PARAMS_HASH_PATTERN.test(paramsHash)) {
-    throw new Error("an office params hash is 16 lowercase hex characters");
-  }
-  switch (operation) {
-    case "preview":
-      return "preview-" + paramsHash + ".pdf";
-    case "render":
-      return "render-" + paramsHash + ".png";
-    case "inspect":
-    case "edit":
-    case "convert":
-    case "recalc":
-      throw new Error("an office operation that produces no artifact has no file");
-    default:
-      return assertNever(operation);
-  }
 }
 
 /**
@@ -911,7 +1027,17 @@ export function previewStatusOfError(code: OfficeErrorCode): "unsupported" | "fa
  * @returns The office code {@link MACHINE_REFUSAL_TO_OFFICE_ERROR} maps it to, or `engine_failed`
  * for a code the table does not know.
  */
-export function officeErrorOfRefusal(refusal: string): OfficeErrorCode {
+export function officeErrorOfRefusal(
+  refusal: string,
+  reason?: MachineRefusalReason,
+): OfficeErrorCode {
+  // The one refusal that is not the table's answer. `invalid_request` means "the body is not what
+  // the job names", and the table maps it to `unsupported_command` for a malformed body. The
+  // contract has no "not yet" code, so a `source` write before 0241 keeps `engine_unavailable` —
+  // "the machine cannot do this yet" — rather than telling a person the engine cannot convert.
+  if (refusal === "invalid_request" && reason === OFFICE_CACHE_UNAVAILABLE_REASON) {
+    return "engine_unavailable";
+  }
   if (!Object.hasOwn(MACHINE_REFUSAL_TO_OFFICE_ERROR, refusal)) return "engine_failed";
   // SAFETY: the branch above proved the key belongs to the table, whose values are office codes;
   // an unknown code (from a newer machine) never reaches the index.
@@ -1056,6 +1182,22 @@ export const OfficeJobSchema: v.GenericSchema<unknown, OfficeJob> = v.variant("o
 ]);
 
 /**
+ * The schema for {@link OfficeCacheKey}: the 5-tuple, each part in its own spelling (§4).
+ *
+ * @remarks
+ * `operation` is one of the two that make a file; `inspect`, `edit`, and `recalc` produce no
+ * artifact and therefore have no key. All five fields are required, so a key that dropped the
+ * path parts (the convert bug) does not parse.
+ */
+export const OfficeCacheKeySchema: v.GenericSchema<unknown, OfficeCacheKey> = v.object({
+  workspaceId: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  pathHash: v.pipe(v.string(), v.regex(OFFICE_PATH_HASH_PATTERN, "a path hash is 16 hex")),
+  version: v.pipe(v.string(), v.regex(OFFICE_SHA256_PATTERN, "a version is sha256:<64 hex>")),
+  operation: v.picklist(["preview", "render"]),
+  paramsHash: v.pipe(v.string(), v.regex(OFFICE_PARAMS_HASH_PATTERN, "a params hash is 16 hex")),
+});
+
+/**
  * The schema for {@link OfficeArtifact} (§5).
  *
  * @remarks
@@ -1063,13 +1205,11 @@ export const OfficeJobSchema: v.GenericSchema<unknown, OfficeJob> = v.variant("o
  * PDF is a failed conversion, not a success with no pages.
  */
 export const OfficeArtifactSchema: v.GenericSchema<unknown, OfficeArtifact> = v.object({
+  key: OfficeCacheKeySchema,
   workspaceId: v.pipe(v.string(), v.minLength(1)),
   pathHash: v.pipe(v.string(), v.regex(OFFICE_PATH_HASH_PATTERN, "a path hash is 16 hex")),
   version: v.pipe(v.string(), v.regex(OFFICE_SHA256_PATTERN, "a version is sha256:<64 hex>")),
-  file: v.pipe(
-    v.string(),
-    v.regex(OFFICE_ARTIFACT_FILE_PATTERN, "an artifact file is <operation>-<paramsHash>"),
-  ),
+  file: v.pipe(v.string(), v.regex(OFFICE_ARTIFACT_FILE_PATTERN, "an artifact file is pdf or png")),
   sha256: v.pipe(v.string(), v.regex(OFFICE_SHA256_PATTERN, "a sha256 is sha256:<64 hex>")),
   bytes: v.pipe(v.number(), v.integer(), v.minValue(0)),
   pages: v.optional(v.pipe(v.number(), v.integer(), v.minValue(OFFICE_MIN_PAGES))),
@@ -1152,15 +1292,16 @@ export const EngineManifestSchema: v.GenericSchema<unknown, EngineManifest> = v.
 });
 
 /** The schema for {@link OfficeRequest}: the machine's `op: "office"` body (§5). */
-export const OfficeRequestSchema: v.GenericSchema<unknown, OfficeRequest> = v.object({
+export const OfficeRequestSchema: v.GenericSchema<unknown, OfficeRequest> = v.strictObject({
   op: v.literal("office"),
   job: OfficeJobSchema,
 });
 
 /** The schema for {@link OfficeEngineRequest}: the machine's `op: "officeEngine"` body (§5). */
-export const OfficeEngineRequestSchema: v.GenericSchema<unknown, OfficeEngineRequest> = v.object({
-  op: v.literal("officeEngine"),
-});
+export const OfficeEngineRequestSchema: v.GenericSchema<unknown, OfficeEngineRequest> =
+  v.strictObject({
+    op: v.literal("officeEngine"),
+  });
 
 /** The keys an artifact read's query may name, and no others (§5). */
 const ARTIFACT_QUERY_KEYS: ReadonlySet<string> = new Set([
