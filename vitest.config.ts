@@ -105,6 +105,10 @@ const packageProjects = (name: string) => [
         `packages/${name}/test/integration/**/*.test.{ts,tsx}`,
         `packages/${name}/test/security/**/*.test.{ts,tsx}`,
       ],
+      // A suite that starts cf dev takes a machine-wide lock (tools/test/cf-dev.ts), so running
+      // two of them at once only makes the second queue behind the first. They are rare and short;
+      // one file at a time keeps the lock from timing out under a full check.
+      fileParallelism: false,
     },
   },
 ];
