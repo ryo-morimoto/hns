@@ -11,7 +11,7 @@
 
 ## メッセージ（閉じた union）
 
-語彙は `@hns/core` の `LIVE_CLIENT_MESSAGE_TYPES` / `LIVE_FRAME_TYPES` / `LIVE_SEND_RESULTS`。意味だけを書く。
+語彙は `@hns/core` の `LIVE_CLIENT_MESSAGE_TYPES` / `LIVE_FRAME_TYPES` / `LIVE_SEND_RESULT_TYPES` / `LIVE_SEND_REJECTIONS`。意味だけを書く。
 
 - **client → server**: `ping`（`pong` が返る）、`resync`（最新 snapshot の再送）、`send`（`{conversationId, clientMessageId, text}`）、`abort`（`{conversationId}`）。
 - **server → client（会話の view）**: `snapshot` / `append` / `delta` / `pong` / `error`。`delta` は in-flight の回答で、cursor を進めない。
@@ -23,7 +23,7 @@
 - **`clientMessageId` が同じなら同じ turn**。client は未応答の send を保持し、再接続で同じ id を再送する。server の連接は同じ id の pending を待たせて 1 回だけ実行する。object は `clientMessageId` を turn の `requestId` として route に渡す。
 - 送信は object の**自分の turn route**（`POST /rpc/conversations/<id>/messages`）を通す。よって認可・cost gate・policy snapshot・grant path は Worker からの送信と同じ 1 本で、**cost gate を通るのは 1 回**。
 - 空 text・64KiB（UTF-8）超・`conversationId` / `clientMessageId` の欠落は **`invalid_request` の error frame**で、turn は始まらない。未知の会話は `rejected: unknown_conversation`。
-- 失敗（object の不達・turn を記録できなかった）は `rejected: unavailable`。**client はこれを再送しない**（切断で終わった send だけを再送する）。
+- 失敗（object の不達・turn を記録できなかった）は `rejected: unavailable`。**答えの来た send は、どちらの答えでも client の未応答一覧から外れる**（`accepted` も `rejected` も送信を終わらせる）。再送されるのは、**答えが来ないまま切断で終わった send** だけ。
 
 ## 停止（abort）
 

@@ -135,6 +135,39 @@ test("a committed tool result from a settled turn is not a running tool", () => 
   expect(latestTurn([ENTRY("1", "pi.assistant", "alone")])).toBeNull();
 });
 
+// Catches: a tool call read as an empty assistant answer, so a turn that is running a tool
+// shows nothing (the wire's text keeps only text parts, so a call arrives as text: "").
+test("a tool call with no text is a running tool, not an answer", () => {
+  const idle = { kind: "idle" } as const;
+  const called = [
+    ENTRY("1", "pi.user", "go"),
+    { id: "2", kind: "pi.assistant", text: "", hasToolCall: true },
+  ];
+  expect(latestTurn(called)).toStrictEqual({ state: "tool" });
+  expect(progressOf(called, "", idle)).toStrictEqual({
+    kind: "tool",
+    label: "ツール実行中",
+    live: true,
+  });
+
+  // The same entry, said explicitly not to be a call, is not a call (and is not an answer
+  // either: nothing has been said).
+  const empty = [
+    ENTRY("1", "pi.user", "go"),
+    { id: "2", kind: "pi.assistant", text: "", hasToolCall: false },
+  ];
+  expect(latestTurn(empty)).toStrictEqual({ state: "waiting" });
+
+  // The call's result has come back: that is still a tool line, of the result, not a call.
+  const returned = [...called, ENTRY("3", "pi.tool-result", "ok")];
+  expect(latestTurn(returned)).toStrictEqual({ state: "tool" });
+
+  // A caller with only the wire fields (no hasToolCall) reads the empty assistant text as a call.
+  expect(latestTurn([ENTRY("1", "pi.user", "go"), ENTRY("2", "pi.assistant", "")])).toStrictEqual({
+    state: "tool",
+  });
+});
+
 // Catches: a stop the person made showing nothing until the view catches up, and the progress
 // line claiming the run is thinking after it was stopped.
 test("a stop outranks what the transcript still shows", () => {

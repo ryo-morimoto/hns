@@ -663,10 +663,17 @@ test("the progress line says what the run is doing", async () => {
   expect(progressText()).toContain("考え中");
   expect(document.body.textContent ?? "").toContain("答えの途中");
 
-  // The turn answers: the line is quiet, and the committed tool result above does not make it
-  // say a tool is executing now that the turn is over.
+  // The model answers with a call instead: the entry arrives with no text (the server projects
+  // text parts only), and the line says the turn is running a tool — the draft above is older.
   act(() => {
-    socket?.message(appendFrame(INTENT, { id: "4", kind: "pi.assistant", text: "答え" }, "4"));
+    socket?.message(appendFrame(INTENT, { id: "4", kind: "pi.assistant", text: "" }, "4"));
+  });
+  expect(progressText()).toBe("ツール実行中");
+
+  // The turn then answers in words: the line is quiet, and the committed tool result above does
+  // not make it say a tool is executing now that the turn is over.
+  act(() => {
+    socket?.message(appendFrame(INTENT, { id: "5", kind: "pi.assistant", text: "答え" }, "5"));
   });
   expect(progressText()).toBe("");
 });

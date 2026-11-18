@@ -96,8 +96,15 @@ interface ChatRpcAnswer {
  * @param status - The object's own status for the route.
  * @returns The refusal, in the vocabulary the client branches on: a conversation the object does
  * not hold is `unknown_conversation`, and anything else is a transient `unavailable`.
+ *
+ * @remarks
+ * Exported because it is the one place the object's 404 becomes the client's
+ * `unknown_conversation`. The socket's test builds the object's port over this function, so
+ * the mapping it checks is the production one rather than a copy of it.
+ *
+ * @internal
  */
-function refusalOf(
+export function refusalOf(
   message: string,
   status: number,
 ): { readonly ok: false; readonly code: LiveSendRejectionCode; readonly message: string } {

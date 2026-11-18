@@ -14,17 +14,28 @@ import { dependencies } from "./worker.ts";
  * here before it fails in a deployment.
  */
 
-/** The names `SessionDependencies` declares: every one is a substitution of a host or runtime. */
-const SEAMS: readonly (keyof SessionDependencies)[] = [
-  "webSocketPair",
-  "now",
-  "upgradeResponse",
-  "machineFetch",
-  "open",
-];
+/**
+ * The names `SessionDependencies` declares: every one is a substitution of a host or runtime.
+ *
+ * @remarks
+ * **The compiler keeps this list complete.** A key added to `SessionDependencies` makes this
+ * record fail to type-check — `Record<keyof SessionDependencies, true>` demands the new key — so
+ * a new seam cannot reach the entry without this list being edited in the same commit. (A
+ * runtime list derived from the type is not possible: a type has no keys at run time, and a
+ * `keyof`-typed array alone does not check that it is *exhaustive*.) The value is `true` because
+ * the record is only a set of names; the test reads `Object.keys`.
+ */
+const SEAMS: Record<keyof SessionDependencies, true> = {
+  webSocketPair: true,
+  now: true,
+  upgradeResponse: true,
+  machineFetch: true,
+  open: true,
+  cost: true,
+};
 
 test("the production Worker's dependency table carries no seam", () => {
-  for (const seam of SEAMS) {
+  for (const seam of Object.keys(SEAMS)) {
     expect(dependencies).not.toHaveProperty(seam);
   }
 });

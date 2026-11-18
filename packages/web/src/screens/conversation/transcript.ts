@@ -23,11 +23,29 @@ export type TranscriptItem =
     }
   | { readonly kind: "system"; readonly id: string; readonly text: string };
 
-/** One entry as the live protocol carries it. */
+/**
+ * One entry as the live protocol carries it.
+ *
+ * @remarks
+ * `text` is the model's **text parts** joined, so an assistant entry that only called a tool
+ * arrives with an empty `text` (the server's projection keeps the text and not the call). The
+ * screen cannot tell a call from an empty assistant turn by `text`, which is why {@link hasToolCall}
+ * says so explicitly and the screen reads it.
+ */
 export interface LiveEntryLike {
   readonly id: string;
   readonly kind: string;
   readonly text: string;
+  /**
+   * True when the entry carries a tool call; absent when the caller cannot say.
+   *
+   * @remarks
+   * The live protocol's `text` alone cannot answer this: a `toolCall` part is not text, so an
+   * entry whose only content is a call projects to `text: ""`. A source that knows the entry's
+   * model sets this; one that only has the wire fields leaves it out, and {@link hasToolCall}
+   * falls back to what the text can tell.
+   */
+  readonly hasToolCall?: boolean;
 }
 
 /** The assistant entry an interrupted run leaves behind; pi-durable commits it as aborted. */
@@ -209,11 +227,18 @@ const PROGRESS_LABELS: Record<ProgressKind, string> = {
  * has returned, so the entry's presence says the call is over; drawing "ツール実行中" from the
  * entry alone would leave a conversation that had stopped mid-run looking busy for minutes. So
  * the line follows **the turn**, not the entry's kind: a turn with pending input has started,
- * and while it runs its newest progress is either the model's draft (考え中), its call in flight
- * (ツール実行中, when a tool call was placed and no result has come back), or a tool result that
- * has landed and not been read yet (待ち). A turn the view says has ended — an answer after it,
- * or an aborted one — is quiet, and so is a transcript whose newest line is a tool result from
- * a finished turn.
+ * and while it runs its newest progress is either the model's draft (考え中), **its call in
+ * flight** (ツール実行中 — an assistant entry that carries a tool call and no text, whose result
+ * has not come back), or a tool result that has landed and not been read yet (待ち). A turn the
+ * view says has ended — a text answer after it, or an aborted one — is quiet, and so is a
+ * transcript whose newest line is a tool result from a finished turn.
+ *
+ * A tool-call entry is the one shape the wire makes ambiguous: the protocol's `text` joins text
+ * parts only, so a call projects to `text: ""` and an assistant entry that called a tool is
+ * indistinguishable from one that said nothing. {@link hasToolCall} is the one place that is
+ * decided: a caller that read the durable record says so (`hasToolCall`), and the wire-only
+ * fallback reads an empty assistant `text` as a call. Either way a call is **not** the turn's
+ * answer, and the line above says "ツール実行中" from it.
  */
 export function progressOf(
   entries: readonly LiveEntryLike[],
@@ -232,6 +257,12 @@ export function progressOf(
   // The newest turn's answer outranks the draft: the view can carry the answer before it clears
   // the draft it replaced, and the line must not claim the model is still writing.
   if (turn?.state === "answer") return null;
+  // A call the model made **after** the text that is streaming is newer evidence about the turn:
+  // the call was placed, so a tool is what is running now, not the model.
+  const newest = sortEntries(entries).at(-1);
+  if (newest !== undefined && newest.kind === "pi.assistant" && hasToolCall(newest)) {
+    return label("tool", true);
+  }
   if (draft !== "") return label("thinking", true);
   if (turn === null) return null;
   if (turn.state === "waiting") return label("waiting", true);
@@ -263,21 +294,37 @@ export function latestTurn(entries: readonly LiveEntryLike[]): LatestTurn | null
   const start = sorted.map((entry) => entry.kind).lastIndexOf("pi.user");
   if (start === -1) return null;
   const after = sorted.slice(start + 1);
-  if (
-    after.some(
-      (entry) =>
-        (entry.kind === "pi.assistant" && entry.text !== "") ||
-        entry.kind === ABORTED_ASSISTANT_KIND,
-    )
-  ) {
-    return { state: "answer" };
-  }
+  const answered = after.some(
+    (entry) =>
+      entry.kind === ABORTED_ASSISTANT_KIND ||
+      (entry.kind === "pi.assistant" && !hasToolCall(entry) && entry.text !== ""),
+  );
+  if (answered) return { state: "answer" };
   const last = after.at(-1);
   if (last === undefined) return { state: "waiting" };
+  // The newest line is the turn's tool result: the call returned and the turn has not read it.
   if (last.kind === "pi.tool-result") return { state: "tool" };
-  // A tool call whose result has not come back yet: what an in-flight call looks like while it
-  // runs is the model's own entry, so a turn whose newest entry is anything else is still in it.
+  // The newest line is the model's call, still out: its text is empty because a call is not text.
+  if (last.kind === "pi.assistant" && hasToolCall(last)) return { state: "tool" };
   return { state: "waiting" };
+}
+
+/**
+ * Whether one assistant entry carries a tool call.
+ *
+ * @param entry - An entry as the live protocol carries it.
+ * @returns True when the entry is a call (or the caller says it is).
+ *
+ * @remarks
+ * A caller that builds entries from the durable record sets `hasToolCall`; the protocol cannot,
+ * because its `text` keeps only the text parts. A caller with only the wire fields says nothing,
+ * and this falls back to what the text shows: an empty assistant `text` is a call, because an
+ * assistant entry whose model answered with prose is never empty. An entry the caller marked as
+ * having no call is never read as one.
+ */
+function hasToolCall(entry: LiveEntryLike): boolean {
+  if (entry.hasToolCall !== undefined) return entry.hasToolCall;
+  return entry.kind === "pi.assistant" && entry.text === "";
 }
 
 /**

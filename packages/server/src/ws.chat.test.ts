@@ -9,6 +9,7 @@ import {
   testUpgradeResponse,
   type FakeSocket,
 } from "../test/support/live.ts";
+import { refusalOf } from "./do/session.ts";
 import { LiveConnection, openLiveSocket, type LiveSendPort } from "./ws.ts";
 
 afterEach(() => {
@@ -256,11 +257,18 @@ test("a send with no chat port is answered unavailable", async () => {
   expect(answersOf(server)[0]).toMatchObject({ type: "rejected", code: "unavailable" });
 });
 
-// Catches: a send for a conversation this object does not hold reaching the turn route, where
-// it would be the route (not the socket) deciding the answer, and the client seeing a turn.
+// Catches: the object's 404 for a conversation it does not hold reaching the client as a
+// transient failure (which a person would retry forever) instead of `unknown_conversation`. The
+// port here is the production refusal: the test drives the object's status through
+// `refusalOf` rather than spelling the client's code itself.
 test("a send for an unknown conversation is rejected without a turn", async () => {
+  const asked: string[] = [];
   const chat = port({
-    send: async () => ({ ok: false, code: "unknown_conversation", message: "gone" }),
+    send: async (send) => {
+      asked.push(send.conversationId);
+      // The object answered the turn route `404`: no conversation has this id.
+      return refusalOf("The turn could not be started.", 404);
+    },
   });
   const { connection, server } = await open(chat.chat);
 
@@ -276,13 +284,12 @@ test("a send for an unknown conversation is rejected without a turn", async () =
     expect(answersOf(server)).toHaveLength(1);
   });
 
-  expect(answersOf(server)[0]).toStrictEqual({
+  expect(asked).toStrictEqual(["999"]);
+  expect(answersOf(server)[0]).toMatchObject({
     type: "rejected",
     clientMessageId: "c1",
     code: "unknown_conversation",
-    message: "gone",
   });
-  expect(chat.sends).toStrictEqual([{ conversationId: "999", text: "hi", clientMessageId: "c1" }]);
 });
 
 // Catches: an empty send reaching the object, where it would be a turn with nothing to run.
