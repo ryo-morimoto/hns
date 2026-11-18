@@ -84,6 +84,34 @@ function expectLeak(output: string): void {
 const product = (env: ExecutionEnv): ExecutionEnv =>
   createMachineSandboxEnv(env, { root: paths.root, projectRoot: paths.project, home: paths.home });
 
+/**
+ * Run the product's exec path with one part of the sandbox replaced.
+ *
+ * @param mutation - The part to break: the names the environment forwards, or the hide list.
+ * @returns A ready executor built the way the agent builds one, with that part mutated.
+ *
+ * @remarks
+ * The environment and the hide list are what the two probes below break, so they are passed
+ * through to the product builder rather than assembled by hand: what the probe measures is the
+ * product's `createMachineExec` -> `runExec` path with one decision changed.
+ */
+async function productExecWith(mutation: {
+  readonly env?: readonly string[] | undefined;
+  readonly hide?: readonly string[] | undefined;
+}): Promise<MachineExec> {
+  const sandboxEnv = createSandboxEnv(hostEnv(paths.project), {
+    root: paths.root,
+    project: { root: paths.root, projectRoot: paths.project },
+    readOnlyInside: [],
+    hide: mutation.hide ?? machineHideList(paths.home, paths.root),
+    egress: "deny",
+    envValues: machineShellEnv(),
+    env: mutation.env,
+    bwrap: report.available ? report.bwrap : undefined,
+  });
+  return { ready: true, env: sandboxEnv, sandbox: report };
+}
+
 // Control: the unmutated product passes the same assertions. Without this, every probe below
 // could be "failing" for a reason unrelated to the mutation.
 test.skipIf(skip)(
@@ -97,21 +125,11 @@ test.skipIf(skip)(
   },
 );
 
-// Mutation 1: the environment is passed through instead of allowlisted. `--clearenv` is what
-// stops the pass-through, so the mutation is a wrapper that sets the two variables a server is
-// likely to carry, which is what "pass it through" compiles to.
+// Mutation 1: the product's own allowlist is widened to pass the server's environment through.
+// The mutation runs the product path (createMachineExec -> runExec) and changes the one thing the
+// allowlist is: the names it forwards.
 test.skipIf(skip)("probe: an environment that is passed through is caught", async () => {
-  const leaked = executor((env) =>
-    createSandboxEnv(env, {
-      root: paths.root,
-      project: { root: paths.root, projectRoot: paths.project },
-      bwrap: report.available ? report.bwrap : "bwrap",
-      envValues: {
-        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
-        HNS_AGENT_URL: "https://provider.invalid",
-      },
-    }),
-  );
+  const leaked = await productExecWith({ env: ["ANTHROPIC_API_KEY", "HNS_AGENT_URL"] });
   const output = await run(leaked, "env");
   // The assertion the main suite makes against the product fails here, which is the proof.
   expectLeak(output);
@@ -141,17 +159,15 @@ test.skipIf(skip)("probe: running without the sandbox is caught", async () => {
   expect(output).toContain("sk-ant-must-not-leak");
 });
 
-// Mutation 4: the hide list is the product's but is never mounted (an empty fixed list).
+// Mutation 4: the product's fixed hide list is emptied. The mutation is applied to the product
+// path (createMachineExec -> runExec), so what fails is the product's own builder, not a wrapper
+// the test assembled.
 test.skipIf(skip)("probe: an empty fixed hide list is caught", async () => {
-  expect(machineHideList(paths.home)).toContain(join(paths.home, ".config", "hns"));
-  const none = executor((env) =>
-    createSandboxEnv(env, {
-      root: paths.root,
-      project: { root: paths.root, projectRoot: paths.project },
-      bwrap: report.available ? report.bwrap : "bwrap",
-      envValues: machineShellEnv(),
-    }),
-  );
+  const none = await productExecWith({ hide: [] });
   const output = await run(none, "cat " + join(paths.home, ".ssh", "id_ed25519"));
   expect(output).toContain("ssh-secret");
+  // The device key too: an empty list hides nothing, not even the key directory.
+  expect(await run(none, "cat " + join(paths.home, ".config", "hns", "device.key"))).toContain(
+    "device-secret",
+  );
 });

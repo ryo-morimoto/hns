@@ -12,7 +12,6 @@ import type {
 } from "@earendil-works/pi-durable/env";
 import { getOrThrow } from "@earendil-works/pi-durable/env";
 import type { SandboxReport } from "@hns/workspace/sandbox";
-import { createNoExecEnv } from "@hns/workspace/sandbox";
 import { containInRoot } from "./containment.ts";
 import { MachineRefusal } from "./refusal.ts";
 import { createMachineSandboxEnv } from "./sandbox.ts";
@@ -150,18 +149,6 @@ async function execCwd(root: string, relative: string | undefined): Promise<stri
     );
   }
   return contained.absolute;
-}
-
-/**
- * The environment a machine keeps when it has no sandbox: the file API, and an exec that refuses.
- *
- * @param env - The environment whose file API is kept.
- * @param sandbox - The failed probe's report, whose reason becomes the refusal message.
- * @returns An environment whose exec resolves to a typed `shell_unavailable` failure.
- */
-export function machineNoExecEnv(env: ExecutionEnv, sandbox: SandboxReport): ExecutionEnv {
-  if (sandbox.available) return env;
-  return createNoExecEnv(env, sandbox);
 }
 
 /** The default environment an agent wraps: the host's files and processes. */

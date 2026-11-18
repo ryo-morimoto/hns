@@ -17,7 +17,7 @@ export { REDACTED, machineEntry, redactingSink, requestIdOf, writeMachineLog } f
 export type { MachineLogInput, MachineLogSink } from "./log.ts";
 export { runOperation } from "./operations.ts";
 export type { OperationResult } from "./operations.ts";
-export { createMachineExec, machineHostEnv, machineNoExecEnv, runExec } from "./exec.ts";
+export { createMachineExec, machineHostEnv, runExec } from "./exec.ts";
 export type { MachineExec } from "./exec.ts";
 export {
   createMachineSandboxEnv,

@@ -558,9 +558,13 @@ export type SandboxEgress = "deny" | "inherit" | "allowlist";
  */
 export interface SandboxMountOptions {
   /**
-   * The directory whose siblings must stay invisible: a fresh tmpfs is mounted here and the
-   * project is bound inside it. Absolute and not "/". Omit for "the root's own siblings are
-   * visible", the workspace agent's older shape.
+   * The tree to keep out of the sandbox, and the project to bind back into it.
+   *
+   * @remarks
+   * A tmpfs hides what is below a path, never the path itself, so the wrapper masks the outermost
+   * of `root` and the project's parent and rebuilds the chain below it with empty directories.
+   * That is what keeps the siblings of every level out, not just the ones beside `root`.
+   * Absolute paths other than "/". Omit for the older shape, where only the root is bound.
    */
   readonly project?: { readonly root: string; readonly projectRoot: string } | undefined;
   /** A directory to bind read-only inside the root, such as `.git`; absolute. */
@@ -652,8 +656,9 @@ interface Hide {
  *
  * @remarks
  * The wrapper read-only binds / and then binds the root over it, so the host's
- * paths are read-only. With `options.project`, that root is first replaced by a fresh tmpfs,
- * so its siblings are not in the sandbox at all, and only the project is bound back in.
+ * paths are read-only. With `options.project`, a tmpfs replaces the outermost directory covering
+ * the project, so nothing beside it at any level is in the sandbox, and only the project is bound
+ * back in.
  * `--clearenv` drops the server's environment (keys, tokens); only PATH, LANG, TERM, HOME
  * (the root by default), and the names in `options.env` are set. `options.hide` is mounted
  * as tmpfs after the writable bind, so it shadows the real directory. A cwd outside the
@@ -671,6 +676,7 @@ export function createSandboxEnv(env: ExecutionEnv, options: SandboxOptions): Ex
   if (!home.startsWith("/")) throw new Error("the sandbox home must be an absolute path");
   const underRoot = (path: string): boolean => isUnder(root, path);
   const project = options.project;
+  let masked: string | undefined;
   if (project !== undefined) {
     if (!project.root.startsWith("/") || project.root === "/") {
       throw new Error("the sandbox project root must be an absolute path other than /");
@@ -678,8 +684,15 @@ export function createSandboxEnv(env: ExecutionEnv, options: SandboxOptions): Ex
     if (!project.projectRoot.startsWith("/") || project.projectRoot === "/") {
       throw new Error("the bound project must be an absolute path other than /");
     }
-    // The project is reached through the tmpfs at its own root, or it is bound where it already
-    // is. A project outside that root would be bound nowhere the sandbox can open.
+    // A tmpfs hides what is *below* the path it is mounted on, never the path itself, and an
+    // ancestor stays readable through its own parent. Masking the project, or the project's
+    // parent alone, therefore leaves a sibling of any *ancestor* visible (measured: a project at
+    // ROOT/a/b/proj still read ROOT/a/other). Masking this much and rebuilding the chain below it
+    // with empty directories is what closes it: the outermost path is the caller's root when the
+    // project is inside it, and the parent otherwise.
+    masked = isUnder(project.root, project.projectRoot)
+      ? project.root
+      : parentOf(project.projectRoot);
     if (!isUnder(project.root, project.projectRoot) && !isUnder(project.projectRoot, root)) {
       throw new Error("the bound project must be inside its root or contain the sandbox root");
     }
@@ -718,15 +731,13 @@ export function createSandboxEnv(env: ExecutionEnv, options: SandboxOptions): Ex
     const cwd = underRoot(requested) ? requested : root;
     // The read-only host first: every path starts closed, and what follows re-opens a part of it.
     const args = ["--die-with-parent", "--ro-bind", "/", "/"];
-    if (project === undefined) {
+    if (project === undefined || masked === undefined) {
       args.push("--bind", root, root);
     } else {
-      // The root gets a fresh tmpfs, so its siblings are not in the sandbox; the project is bound
-      // over it, and an ancestor the tmpfs does not know is created first.
-      args.push("--tmpfs", project.root);
-      for (const ancestor of ancestorsBetween(project.root, project.projectRoot)) {
-        args.push("--dir", ancestor);
-      }
+      // The parent gets a fresh tmpfs, so nothing beside the project is in the sandbox at all;
+      // the project is then bound writable back into it.
+      args.push("--tmpfs", masked);
+      for (const dir of ancestorsBetween(masked, project.projectRoot)) args.push("--dir", dir);
       args.push("--bind", project.projectRoot, project.projectRoot);
     }
     // `.git` is read-only inside the project (D095): overlaying it after the writable bind means
@@ -790,6 +801,17 @@ export function createSandboxEnv(env: ExecutionEnv, options: SandboxOptions): Ex
 export function isUnder(directory: string, path: string): boolean {
   const prefix = directory.endsWith("/") ? directory : directory + "/";
   return path === directory || path.startsWith(prefix);
+}
+
+/**
+ * The directory that contains a path.
+ *
+ * @param path - An absolute path other than "/".
+ * @returns Its parent, or "/" when the path is directly under the root.
+ */
+export function parentOf(path: string): string {
+  const cut = path.lastIndexOf("/");
+  return cut <= 0 ? "/" : path.slice(0, cut);
 }
 
 /**

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { requireBwrap } from "../../../../tools/test/cf-dev.ts";
 import { createMachineExec, runExec } from "../../src/exec.ts";
+import { machineHideList } from "../../src/sandbox.ts";
 import type { MachineExec } from "../../src/exec.ts";
 import { MachineRefusal } from "../../src/refusal.ts";
 import { parseOperation } from "../../src/wire.ts";
@@ -233,6 +234,58 @@ test.skipIf(skip)(
   },
 );
 
+// C2: the project is masked from its *parent*, so the siblings of an ancestor stay out too.
+// Masking the project or its own root is not enough: bwrap hides what is below a mount, and an
+// ancestor stays readable through its own parent.
+test.skipIf(skip)(
+  "C2: a sibling of an ancestor above the project is not in the sandbox",
+  async () => {
+    const deep = join(paths.root, "a", "b", "proj");
+    const beside = join(paths.root, "a", "other");
+    const atRoot = join(paths.root, "top.txt");
+    await mkdir(beside, { recursive: true });
+    await mkdir(deep, { recursive: true });
+    await writeFile(join(beside, "s.txt"), "deep-sibling-secret");
+    await writeFile(atRoot, "root-sibling-secret");
+    const exec = await createMachineExec(hostEnv(deep), {
+      sandbox: report,
+      root: paths.root,
+      projectRoot: deep,
+      home: paths.home,
+    });
+    const read = async (file: string): Promise<string> => {
+      const parsed = parseOperation(
+        new TextEncoder().encode(
+          JSON.stringify({ op: "exec", args: ["/bin/sh", "-c", "cat " + file] }),
+        ),
+      );
+      if (parsed.op !== "exec") throw new Error("not an exec");
+      return (
+        await runExec(exec, parsed, {
+          maxOutputBytes: 256 * 1024,
+          signal: new AbortController().signal,
+          root: join(paths.root, "a", "b", "proj"),
+        })
+      ).output;
+    };
+    expect(await read(join(beside, "s.txt"))).not.toContain("deep-sibling-secret");
+    expect(await read(atRoot)).not.toContain("root-sibling-secret");
+    // The project itself is still the writable tree it was bound as.
+    await writeFile(join(deep, "ok.txt"), "still here");
+  },
+);
+
+// ROOT/.hns holds the root marker and the machine's own files; a bound project at ROOT would
+// otherwise carry it into the shell.
+test.skipIf(skip)("C2: the machine's ROOT/.hns is not readable from the sandbox", async () => {
+  const machine = await readyExec();
+  const outcome = await exec(machine, {
+    args: ["/bin/sh", "-c", "cat .hns/root.json .hns/device.key 2>&1; ls -A .hns 2>&1"],
+  });
+  expect(outcome.output).not.toContain("workspace-1");
+  expect(outcome.output).not.toContain("root-device-secret");
+});
+
 // C3: .git is readable but not writable, and the rest of the project stays writable.
 test.skipIf(skip)(
   "C3: a write under .git is refused with EROFS and the project still writes",
@@ -258,13 +311,53 @@ test.skipIf(skip)(
 );
 
 // The order that makes .git read-only is a property of the argv, not of the moment it is checked.
-test.skipIf(skip)("C3: the .git read-only bind comes after the writable project bind", async () => {
+test.skipIf(skip)("the whole mount sequence is in the order the boundary needs", async () => {
+  await mkdir(join(paths.project, ".git"), { recursive: true });
   const argv = await machineArgv();
-  const gitBind = argv.lastIndexOf("--ro-bind");
-  const projectBind = argv.lastIndexOf("--bind");
-  expect(argv.at(gitBind + 1)).toBe(join(paths.project, ".git"));
-  expect(projectBind).toBeGreaterThan(-1);
-  expect(gitBind).toBeGreaterThan(projectBind);
+  const git = join(paths.project, ".git");
+  // Every mount, in order, to the end of the mount list: a tmpfs at ROOT first, the project bound
+  // writable inside it, .git read-only over that, then the hides, then the devices. Swapping any
+  // two adjacent entries is what this list is here to catch (a bind after the read-only overlay
+  // would make .git writable again).
+  const mounts = argv.slice(1, argv.indexOf("--clearenv"));
+  expect(mounts).toStrictEqual([
+    "--die-with-parent",
+    "--ro-bind",
+    "/",
+    "/",
+    "--tmpfs",
+    paths.root,
+    "--bind",
+    paths.project,
+    paths.project,
+    "--ro-bind",
+    git,
+    git,
+    "--tmpfs",
+    join(paths.home, ".config", "hns"),
+    "--tmpfs",
+    join(paths.home, ".ssh"),
+    "--tmpfs",
+    join(paths.root, ".hns"),
+    "--dev",
+    "/dev",
+    "--proc",
+    "/proc",
+  ]);
+  // The hides that follow are the fixed list, whole and in order, so a caller cannot slip one in
+  // or drop one: the first --tmpfs is the ROOT itself, and the rest are the hides the host has.
+  // Only existing paths are mounted, because bwrap cannot create a tmpfs over a name that is not
+  // there (a limitation the case above pins).
+  const hideMounts = mounts
+    .flatMap((arg, index) => (mounts[index - 1] === "--tmpfs" ? [arg] : []))
+    .slice(1);
+  expect(hideMounts).toStrictEqual(
+    machineHideList(paths.home, paths.root).filter((path) => existsSync(path)),
+  );
+  // The ones the fixture does have must all be there; an empty list would pass the line above.
+  expect(hideMounts).toContain(join(paths.home, ".config", "hns"));
+  expect(hideMounts).toContain(join(paths.home, ".ssh"));
+  expect(hideMounts).toContain(join(paths.root, ".hns"));
 });
 
 // C6: deny means the namespace itself has no route out.
@@ -290,10 +383,24 @@ test.skipIf(skip)("C6: the wrapper asks for the network to be unshared", async (
 // The wrapper is the machine's: /tmp is masked and the project is bound inside a fresh ROOT.
 test.skipIf(skip)(
   "the wrapper masks nothing the host does not have, so an absent hide path still starts",
-  () => {
-    // mkdir'ing the parent of .aws/.netrc is not done by the fixture, so those entries are absent.
-    expect(existsSync(join(paths.home, ".aws"))).toBe(false);
-    const outcome = runArgv([bwrap, "--version"]);
-    expect(outcome.status).toBe(0);
+  async () => {
+    // The fixture creates .ssh and .config/hns but not .aws, .config/gh, .git-credentials, or
+    // .netrc, so the wrapper meets hide paths that are absent under a read-only host.
+    const absent = join(paths.home, ".aws");
+    expect(existsSync(absent)).toBe(false);
+    const machine = await readyExec();
+    // A tmpfs over an absent path is "Can't mkdir parents ... Read-only file system" in bwrap, and
+    // that failure is the whole sandbox failing to start: the command must actually run.
+    const outcome = await exec(machine, { args: ["/bin/sh", "-c", "echo RAN"] });
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.output).toContain("RAN");
+    // And the paths that do exist are still masked in that same run.
+    expect(
+      (
+        await exec(machine, {
+          args: ["/bin/sh", "-c", "cat " + join(paths.home, ".ssh", "id_ed25519")],
+        })
+      ).output,
+    ).not.toContain("ssh-secret");
   },
 );

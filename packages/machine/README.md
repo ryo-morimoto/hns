@@ -75,10 +75,15 @@ maxBlobBytes / created）を返す。pack は `POST /rpc/checkpoint/<runId>/pack
 - **exec は sandbox の後ろだけ**（D095）。起動時に `detectSandbox()` が probe を通したときだけ `op: "exec"`
   が動く。通さなければ `forbidden`（403）で拒否し、**host の shell に落ちない**（fail closed。SKIP ではない）。
   `MachineAgent.shell` が `enabled` / `disabled` と理由を返す。
-  - mount の形: `--ro-bind / /` → `--tmpfs <ROOT>` → `--bind <project>` → `--ro-bind <project>/.git`。ROOT の兄弟は
-    見えず、`.git` は読めるが書けない（worktree の `.git` ファイルも同じ）。
-  - hide は **machine の固定リスト**（`machineHideList`: `~/.config/hns`、`~/.ssh`、`~/.aws`、`~/.config/gh`、
-    `~/.git-credentials`、`~/.netrc`）。呼び出し側から足せない。host に無いパスは mount しない。
+  - mount の形: `--ro-bind / /` → `--tmpfs <ROOT>` → 祖先を `--dir` → `--bind <project>` → `--ro-bind <project>/.git`。
+    **ROOT の下（ROOT 直下の兄弟だけでなく、ROOT のどの段の兄弟も）は見えない**。tmpfs は「そのパスの下」を隠し、
+    パス自身は親から見えるので、いちばん外側（ROOT の下に project があるなら ROOT）を mask し、その下を空の
+    `--dir` で作り直す。`.git` は読めるが書けない（worktree の `.git` ファイルも同じ）。
+  - hide は **machine の固定リスト**（`machineHideList`（`home`、`root`）: `~/.config/hns`、`~/.ssh`、`~/.aws`、
+    `~/.config/gh`、`~/.git-credentials`、`~/.netrc`、`<ROOT>/.hns`）。呼び出し側から足せない。
+    **起動時に存在するパスだけ**が隠れる: bwrap は read-only な親の下に無い名前へ tmpfs を作れず
+    （`Can't mkdir parents ... Read-only file system`）、無い名前には隠す中身も無い。起動後に作った
+    `~/.config/hns` は、その次の exec の時点で存在すれば隠れる（enroll は agent 起動前に作る）。
   - env は allowlist だけ: `PATH` / `HOME`（= ROOT、0045 H-1）/ `LANG` / `TERM` と、sandbox が固定する
     `TMPDIR=/tmp`、`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM`=/dev/null、`GIT_OPTIONAL_LOCKS=0`。server の
     provider 鍵・provider URL・control-plane 鍵・cloudflared token は**渡らない**（テストで固定）。

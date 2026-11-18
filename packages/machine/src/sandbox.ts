@@ -14,17 +14,24 @@ import type { SandboxEgress } from "@hns/workspace/sandbox";
  * The machine's fixed hide list: what a sandboxed shell must never reach.
  *
  * @param home - The account the machine runs as; defaults to `os.homedir()`.
+ * @param root - The machine's ROOT; when given, `<root>/.hns` is hidden too.
  * @returns Absolute paths, in a fixed order. The caller cannot add to them: a machine that needs
  * another path hidden gets it here, in a release, not from a request.
  *
  * @remarks
  * `~/.config/hns` holds the device key and the cloudflared token (docs/auth.md), so a shell must
  * not read it at all, not merely be refused writing to it. The rest are the other places a shell
- * can pick up a credential without being asked. Paths are passed whether or not they exist:
- * a directory created after the agent starts is still masked.
+ * can pick up a credential without being asked.
+ *
+ * **Only the paths that exist when the command starts can be masked.** bwrap cannot create a tmpfs
+ * over a name that is absent under the read-only host ("Can't mkdir parents ... Read-only file
+ * system"), and an absent name holds nothing to hide, so the wrapper mounts the ones that are
+ * there. A `~/.config/hns` created after the agent started is therefore *not* hidden until the
+ * next command re-reads the list; the machine's enroll/start flow is what creates it, before the
+ * agent runs.
  */
-export function machineHideList(home: string = homedir()): readonly string[] {
-  return [
+export function machineHideList(home: string = homedir(), root?: string): readonly string[] {
+  const fixed = [
     join(home, ".config", "hns"),
     join(home, ".ssh"),
     join(home, ".aws"),
@@ -32,6 +39,10 @@ export function machineHideList(home: string = homedir()): readonly string[] {
     join(home, ".git-credentials"),
     join(home, ".netrc"),
   ];
+  // ROOT's own control directory holds the root marker and whatever else the machine keeps about
+  // the workspace. A shell has no reason to read it, and inside a bound project it would otherwise
+  // be visible (a project bound at ROOT carries ROOT/.hns with it).
+  return root === undefined ? fixed : [...fixed, join(root, ".hns")];
 }
 
 /**
@@ -212,7 +223,7 @@ export function createMachineSandboxEnv(
     root: options.root,
     project: { root: options.root, projectRoot: options.projectRoot },
     readOnlyInside: readOnlyGitPaths(options.projectRoot),
-    hide: machineHideList(home),
+    hide: machineHideList(home, options.root),
     egress: options.egress ?? "deny",
     envValues: machineShellEnv(),
     bwrap: options.bwrap,

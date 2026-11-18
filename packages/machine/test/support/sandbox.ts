@@ -64,6 +64,11 @@ export async function sandboxPaths(base?: string): Promise<SandboxPaths> {
   await writeFile(join(home, ".ssh", "id_ed25519"), "ssh-secret");
   await writeFile(join(brother, "secret.txt"), "sibling-secret");
   await writeFile(join(project, "readme.txt"), "project\n");
+  // ROOT's own control directory: the machine keeps the root marker here, and a shell never needs
+  // it. It exists before the agent starts, which is what the mask can cover.
+  await mkdir(join(root, ".hns"), { recursive: true });
+  await writeFile(join(root, ".hns", "root.json"), '{"id":"workspace-1"}');
+  await writeFile(join(root, ".hns", "device.key"), "root-device-secret");
   return { base: baseDir, root, project, home, sibling: join(brother, "secret.txt") };
 }
 
@@ -104,9 +109,12 @@ export async function capturedArgv(
 class CommandRecorder implements ExecutionEnv {
   readonly #inner: ExecutionEnv;
   command: readonly string[] = [];
+  /** Kept apart from the inner one: reading it must not decide where a command runs. */
+  #cwd: string;
 
   constructor(inner: ExecutionEnv) {
     this.#inner = inner;
+    this.#cwd = inner.cwd;
   }
 
   get id(): string {
@@ -114,11 +122,11 @@ class CommandRecorder implements ExecutionEnv {
   }
 
   get cwd(): string {
-    return this.#inner.cwd;
+    return this.#cwd;
   }
 
   set cwd(value: string) {
-    this.#inner.cwd = value;
+    this.#cwd = value;
   }
 
   exec(
