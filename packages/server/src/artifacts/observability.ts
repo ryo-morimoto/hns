@@ -11,7 +11,7 @@ import {
 
 /**
  * The Artifacts mirror's observation: one line per decided mirror, and the aggregate a reader
- * asks for (0249).
+ * asks for.
  *
  * @remarks
  * The mirror is measured from **the outcomes it recorded**, not from the pushes it attempted: the
@@ -23,8 +23,8 @@ import {
  *
  * **No token ever reaches an entry.** The line carries the closed states and failure codes of the
  * checkpoint contract, the repository's name, and the push's duration — nothing a request, a
- * header, or a credential could ride. That is the same rule as 0246's redaction, expressed as a
- * type: there is no field for a token, so no branch can put one there.
+ * header, or a credential could ride. That is the same rule the machine's redaction follows,
+ * expressed as a type: there is no field for a token, so no branch can put one there.
  */
 
 /** What one decided mirror reports. Every field is a closed word, a count, or a duration. */
@@ -110,9 +110,10 @@ export interface MirrorRow {
  * @remarks
  * `total` is every row, so the two rates are shares of **all** mirror outcomes, not of the
  * failures among successes: a workspace whose mirror is mostly skipped shows a high skip rate and a
- * low failure rate. The p95 is the same nearest-rank definition `/api/metrics` uses for HTTP
- * durations, so two percentiles in one response are read the same way. An untimed push does not
- * enter the percentile.
+ * low failure rate. The p95 is **the same expression `/api/metrics` uses for HTTP durations**
+ * (`ordered[floor(length * 0.95)]` on the ascending durations, clamped to the last index), so two
+ * percentiles in one response are read the same way — it is an index into the sorted sample, not a
+ * nearest-rank definition. An untimed push does not enter the percentile.
  */
 export function mirrorMetricsOf(rows: readonly MirrorRow[], windowMs: number): ObsMirrorMetrics {
   const count = (status: MirrorStatus): number =>

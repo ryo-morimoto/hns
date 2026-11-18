@@ -20,11 +20,11 @@
 
 ## ミラーの観測（`artifacts.mirror`）
 
-- 1 回のミラー毎に 1 行。hop は `do`（判定した Workspace Object）、event は `artifacts.mirror`。
+- **1 回のミラー毎に必ず 1 行**。hop は `do`（判定した Workspace Object）、event は `artifacts.mirror`。sink が無い deployment でも行は出る（console に同じ entry）。
 - `detail` は **`mirror`（`MIRROR_STATUSES` の 1 つ）・`repos`（リポジトリ名）・`failure`（`failed` のときだけ `MIRROR_FAILURES` の 1 つ）**。remote も token も型に無い（0246 の redaction と同じ規則）。
 - `level` は `failed` だけ `warn`。ミラーの失敗で R2 の checkpoint は壊れないので `error` にしない（`/api/metrics` の `errors` を汚さない）。
 - `durationMs` は push の所要。`skipped`（push していない）には無い。
-- `/api/metrics` の `mirror` は窓の行から、p95（`skipped` は入れない）・失敗率・skip 率（どちらも**全ミラー結果**が分母）・repo 数（`repos` の distinct）を出す。
+- `/api/metrics` の `mirror` は窓の行から、p95（`skipped` は入れない）・失敗率・skip 率（どちらも**全ミラー結果**が分母）・**リポジトリ名の種類数**（`repos` の distinct。ミラーの総数でも push の数でもない）を出す。
 
 ## 変わったとき
 

@@ -16,6 +16,7 @@ import {
   type CheckpointRecord,
   type LeaseRefusal,
   type MutationResult,
+  formatObsLog,
   type MirrorFailure,
   type MirrorStatus,
   type ObsLogEntry,
@@ -119,10 +120,14 @@ export interface WorkspaceOptions {
    * Where the mirror's outcomes are observed; defaults to the `/api/metrics` path.
    *
    * @remarks
-   * A seam like `artifacts`: production hands the object the edge's observation sink when the
-   * Worker builds it, and a unit test supplies a collector. Absent means the mirror is not observed
-   * (the Worker that constructs the object without it keeps the console line), never that the
-   * mirror stops.
+   * A seam like `artifacts`: a unit test supplies a collector, and the edge (a later change) would
+   * supply the workspace's log. Absent means the decided mirror is written to the console as the
+   * structured line — **never** that it is not observed or that the mirror stops.
+   *
+   * **The edge does not wire this yet.** The Workspace object's observation is emitted on every
+   * deployment (on the console); what is not yet in place is the path from there into
+   * `/api/metrics`, which needs the edge to hand the object an obs sink without mixing it into the
+   * Session object's log. That wiring is its own issue; this lane's contract is the line itself.
    */
   readonly observe?: ((entry: ObsLogEntry) => void) | undefined;
 }
@@ -1108,11 +1113,12 @@ export class Workspace {
    * @param requestId - The correlation id of the reporting request.
    *
    * @remarks
-   * One entry per decided mirror, on the `do` hop, carrying the state, the failure code, the
-   * repository's name, and the push's duration — never the remote and never a token (0249). The
-   * sink is the edge's; when the object was built without one the line is only on the console, so
-   * a deployment that has not wired the sink still sees the outcome. An observation never changes
-   * the answer: a sink that throws is logged and swallowed, exactly like the Session's.
+   * **One entry per decided mirror, always** — on the `do` hop, carrying the state, the failure
+   * code, the repository's name, and the push's duration, never the remote and never a token.
+   * Where it goes is {@link #observe}: the workspace's log when the object was built with one
+   * (`observe`, the edge's sink), otherwise the console as the same structured line. An
+   * observation never changes the answer: a sink that throws is logged and the line still reaches
+   * the console, exactly like the Session's log.
    */
   #observeMirror(
     workspaceId: string,
@@ -1130,16 +1136,24 @@ export class Workspace {
       requestId,
       now,
     });
+    // **One line per decided mirror, always.** With a sink the line goes to the workspace's log
+    // (`/api/metrics` reads it back); without one — which is every Worker today, because the edge
+    // does not hand the object an obs sink yet — it goes to the console as the same structured
+    // entry every other hop writes. A sink that throws is logged and the line still reaches the
+    // console: the outcome is never silently lost.
     const observe = this.#observe;
-    if (observe === undefined) return;
-    try {
-      observe(entry);
-    } catch (error) {
-      console.error(
-        "workspace: the mirror observation was not written",
-        error instanceof Error ? error.name : "unknown",
-      );
+    if (observe !== undefined) {
+      try {
+        observe(entry);
+        return;
+      } catch (error) {
+        console.error(
+          "workspace: the mirror observation was not written",
+          error instanceof Error ? error.name : "unknown",
+        );
+      }
     }
+    console.log(formatObsLog(entry));
   }
 
   /** The pack limit the mirror's initial state reads; the contract's 64 MiB when unbound. */

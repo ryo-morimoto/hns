@@ -12,32 +12,29 @@ import { ensureDist } from "../../../../tools/test/ensure-dist.ts";
 import { sessionCookie, TEST_SECRET } from "../../test/support/edge.ts";
 
 /**
- * The Artifacts local simulator (0249, U-01 / C3).
+ * The Artifacts local simulator: create → push → binding read (C3).
  *
  * @remarks
- * The design puts the simulator on **cf dev**, not on a second minimal wrangler project: the
- * integration tier already starts one `cf dev` per suite with a machine-wide lock
- * (`tools/test/cf-dev.ts`), and a project of its own would only queue behind them. This suite is
- * one such project: it declares an `artifacts` binding with `remote: false` and asks the running
- * Worker to make a repository, because that is the question U-01 leaves open — whether the
- * **wrangler behind cf** simulates Artifacts locally at all, or sends the binding to the account
- * whatever the configuration says.
+ * The simulator runs on **cf dev**, not on a second minimal wrangler project: the integration tier
+ * already starts one `cf dev` per suite with a machine-wide lock (`tools/test/cf-dev.ts`), and a
+ * project of its own would only queue behind them. This suite is one such project: it declares an
+ * `artifacts` binding whose local switch is on and asks the running Worker to create a
+ * repository.
  *
- * **What was measured (2026-11-18).** cf 1.0.0-beta.28 lowers an artifacts binding to wrangler as
- * `{ binding, namespace }` and **drops `dev`**, so the local switch never reaches wrangler and the
- * binding is the remote service ("Mode: remote", "Establishing remote connection...").
- * wrangler 4.156.0 (what cf carries) does not accept `dev` on the binding at all ("Unexpected
- * fields found in artifacts[0] field: \"dev\""), so `remote: false` cannot be expressed. wrangler
- * 4.164.0 accepts it and starts the local simulator ("Mode: local", "Ready"), but its bundled
- * miniflare (5.20261117.0-beta) answers a create with "Binding ARTIFACTS needs to be run
- * remotely" — the simulator has git sidecar plumbing and no `create`. So **create → push →
- * binding read is not available in any local wrangler today**; the test records that with the
- * Worker's own answer instead of pretending the path ran.
+ * **The observation is either the simulator or its absence, and both are recorded plainly.**
+ * The suite measures where the binding went: a create that answers a repository is the simulator
+ * working (the test then asserts the repository's name and remote); a console that says the
+ * binding went **remote** is the fact that the local simulator is not available on this cf /
+ * wrangler, and the test is **skipped with that reason printed** — not failed for a reason a
+ * reader has to reconstruct. `HNS_REQUIRE_ARTIFACTS_SIMULATOR=1` turns the skip into a failure, the
+ * same way `HNS_REQUIRE_CF` turns a missing cf into one, so a release can demand the simulator
+ * where it is expected to exist.
  *
- * **The answer is measured, not assumed.** If the binding cannot be simulated locally, the
- * Worker's own answer says so, and the test records it rather than pretending the path ran. CI
- * never holds a Cloudflare token; a binding that needs one fails at create, which is the
- * measured answer.
+ * No path here holds a Cloudflare account: a binding sent to the account fails to start cf dev
+ * without a token, which is itself the measured answer.
+ *
+ * The second test is the observation a mirror outcome writes, read back through the product's
+ * `/api/metrics`; its project has no artifacts binding, so it runs wherever cf does.
  */
 
 const TIMEOUT_MS = 300_000;
@@ -47,10 +44,8 @@ const READY_TIMEOUT_MS = 40_000;
  * The cf config: one workspace object, one session object, and one artifacts binding.
  *
  * @remarks
- * `remote: false` is the "local only" request. wrangler 4.156.0 (the version cf 1.0.0-beta.28
- * carries) lists artifacts among the resources that "will never have a local simulator", so this
- * config is what the probe below measures: the Worker's create either answers a repository or the
- * binding's error.
+ * `dev: { remote: false }` is cf's spelling of "local only". Whether it reaches the dev server is
+ * what the probe measures: the binding either simulates a repository or goes to the account.
  */
 const CONFIG = [
   'import { bindings, defineConfig, exports } from "cf/config";',
@@ -134,7 +129,7 @@ const WORKER = [
   "    const url = new URL(request.url);",
   '    if (url.pathname === "/health") return new Response("ok");',
   '    if (url.pathname === "/sim") {',
-  "      // The one question U-01 asks: does the local simulator create a repository?",
+  "      // The question the suite measures: does the local simulator create a repository?",
   "      try {",
   '        const created = (await env.ARTIFACTS.create("hns-local-" + Date.now())) as { name: string };',
   "        const handle = (await env.ARTIFACTS.get(created.name)) as { info(): Promise<{ remote: string }> };",
@@ -220,34 +215,47 @@ async function call<T>(
   return v.parse(schema, JSON.parse(text));
 }
 
+/** Whether this run demands the simulator; a skip is then a failure (compare `HNS_REQUIRE_CF`). */
+const SIMULATOR_REQUIRED = process.env.HNS_REQUIRE_ARTIFACTS_SIMULATOR === "1";
+
+/**
+ * The reason the simulator was not exercised, or undefined when it was.
+ *
+ * @remarks
+ * `remote` is measured from the dev server's own words: a binding that resolves to the account
+ * starts a remote proxy session instead of a local simulator. It is printed and the test skips —
+ * the fact a reader needs — rather than the run failing with an error a reader has to decode.
+ */
+const simulatorGap = (reason: string): undefined | never => {
+  if (SIMULATOR_REQUIRED) {
+    throw new Error("the artifacts local simulator is required here but unavailable: " + reason);
+  }
+  console.log("[c3] skipped: the artifacts local simulator is unavailable — " + reason);
+  return undefined;
+};
+
 // C3 / T3: Given the local simulator, When the Worker creates a repository and reads it back,
-// Then the binding answered a repository with a remote — or the project records, in the binding's
-// own words, that this wrangler has no local simulator. Catches a claim that the path ran when the
-// binding was really sent to the account.
+// Then the binding answered a repository with a remote. When it did not, the test says why it
+// is skipping — "the binding went to the account" is a recorded fact, not a mysterious failure.
 test.skipIf(!isCfDevInstalled())(
   "C3: the artifacts binding behind cf dev is asked whether it simulates a repository",
   async () => {
     project = await writeProject();
-    // The project starts only when its artifacts binding is local; cf dev otherwise refuses to
-    // start (it establishes the remote proxy session as soon as a binding resolves remote, and
-    // that needs an account). So the probe is skipped with that reason measured, not guessed.
+    // cf dev starts only when every binding resolves locally: a remote one starts a proxy session
+    // that needs an account, and the start fails with that reason.
     try {
       running = await startCfDev({ cwd: project, readyTimeoutMs: READY_TIMEOUT_MS });
     } catch (error) {
       const output = error instanceof Error ? error.message : String(error);
-      const remote = output.includes("Establishing remote connection");
-      expect(remote, output).toBe(true);
-      console.log(
-        "[c3] cf dev sends the artifacts binding to the account: " + output.slice(0, 400),
-      );
+      if (!output.includes("Establishing remote connection")) throw error;
+      simulatorGap("cf dev sent the artifacts binding to the account (remote proxy session)");
       return;
     }
     const answer = await call("/sim", SimAnswer);
     if (!answer.ok) {
-      // U-01's answer, recorded: the simulator is up but cannot create — "Binding ARTIFACTS needs
-      // to be run remotely" in wrangler 4.164.0's miniflare. The suite states the fact.
-      expect(answer.error.name, answer.error.message).toBeTruthy();
-      console.log("[c3] the local simulator cannot create: " + answer.error.message);
+      // The dev server is up but the binding refuses to create: the simulator that started is not
+      // one (its binding answers "needs to be run remotely" on a newer wrangler).
+      simulatorGap("the local binding cannot create: " + String(answer.error.message ?? ""));
       return;
     }
     expect(answer.created.name).toMatch(/^hns-local-/u);

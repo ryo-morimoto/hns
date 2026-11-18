@@ -256,9 +256,10 @@ export interface ObsMirrorStates {
  * @remarks
  * Built from one event per mirror outcome, so a reader sees the mirror's health next to the HTTP
  * numbers. `total` is every outcome recorded in the window; the rates divide by it (0 when it is
- * 0). `p95Ms` is the push's time at the 95th percentile, 0 when nothing was timed. `repos` is how
- * many repositories the window touched — one per workspace whose mirror ran. Nothing here is a
- * token: the entry that carries these numbers has no key a token could take.
+ * 0). `p95Ms` is the push's time at the 95th percentile, 0 when nothing was timed. `repos` counts
+ * **distinct repository names** the window touched — a name, not pushes, and not the repositories
+ * that exist. Nothing here is a token: the entry that carries these numbers has no key a token
+ * could take.
  */
 export interface ObsMirrorMetrics {
   /** The measurement window, in milliseconds. */
@@ -271,7 +272,14 @@ export interface ObsMirrorMetrics {
   /** `skipped / total`, 0 when nothing was recorded. */
   readonly skipRate: number;
   readonly p95Ms: number;
-  /** Repositories the window's outcomes touched. */
+  /**
+   * How many **distinct repository names** the window's outcomes touched.
+   *
+   * @remarks
+   * Not "how many repositories the mirror has": a workspace whose repository was reached in the
+   * window counts once however many pushes it made, and a name seen in two windows counts in
+   * each. A count of names, nothing else.
+   */
   readonly repos: number;
 }
 

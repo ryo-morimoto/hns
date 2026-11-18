@@ -25,7 +25,7 @@ test("a workspace override is one of the two words, and an unknown row is no ove
   }
 });
 
-// C1 / T1: Catches an override that does not win — the workspace half of U-02 is worthless if the
+// C1 / T1: Catches an override that does not win — a workspace's own switch is worthless if the
 // deployment's default decides anyway, or if "off" in a mirroring deployment is ignored.
 test("a workspace override wins over the deployment in both directions", () => {
   expect(mirrorEnabled({ default: "on" })).toBe(true);

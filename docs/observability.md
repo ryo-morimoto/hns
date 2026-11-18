@@ -105,9 +105,9 @@ server（Durable Object）と machine は同じ `ObsLogEntry`（`@hns/core`）�
 
 - **kill switch は 1 つの判定**（`packages/server/src/artifacts/kill-switch.ts`）。**env 既定 + workspace override**（`POST /rpc/checkpoint/switch` で `on` / `off` / `null`）。off は
   **prepare が target を出さないだけ**で、checkpoint は成功し、run の mirror 状態は `pending` のまま残る（データを失わない）。戻せば次の prepare が拾う。switch は prepare のたびに読むので、object を再構成せずに止まる。
-- Workspace Object は、ミラーの結果を記録したときに `artifacts.mirror` を 1 行書く（`artifacts/observability.ts`）。書く先は edge が渡す sink（`observe`）。sink が無ければ console だけ。
-- `GET /api/metrics` の `metrics.mirror` は **p95・失敗率・skip 率・repo 数**を 24 時間の窓で出す。行は Session DO の `obs_events` から読み、token も remote も出さない。
-- **ローカルシミュレータは cf dev**（`packages/server/test/integration/artifacts-local.test.ts`）。wrangler 4.156.0（cf 1.0.0-beta.28）は Artifacts のローカルシミュレータを持たない（binding 表で "will never have a local simulator"、`remote: false` でも Mode は remote）。CI は Cloudflare アカウントを使わない。
+- **Workspace Object は、ミラーの結果を 1 件記録するたびに `artifacts.mirror` を 1 行、必ず出す**（`artifacts/observability.ts`）。行き先は: edge が sink（`observe`）を渡していればそこ、渡していなければ **console に同じ構造化 entry**（`formatObsLog`）。sink が throw しても console に出て、結果が黙って消えることはない。**sink から `/api/metrics` への配線はまだ無い**（edge が Workspace に obs を渡す形は別 issue）。したがって現時点で `/api/metrics` の `mirror` が読むのは、Session DO の `obs_events` にある行だけ。
+- `GET /api/metrics` の `metrics.mirror` は **p95・失敗率・skip 率・リポジトリ名の種類数**を 24 時間の窓で出す。token も remote も出さない。
+- **ローカルシミュレータは cf dev**（`packages/server/test/integration/artifacts-local.test.ts`）。cf / wrangler の版によっては binding がアカウント側（remote）に解決され、その場合は**シミュレータ無しの事実を記録して skip**する。`HNS_REQUIRE_ARTIFACTS_SIMULATOR=1` なら skip を失敗にする。CI は Cloudflare アカウントを使わない。
 
 ## 失敗コードと status
 

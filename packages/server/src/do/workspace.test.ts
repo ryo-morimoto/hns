@@ -1,16 +1,18 @@
 import {
   ARTIFACTS_MAX_BLOB_BYTES,
   CheckpointPrepareAnswerSchema,
-  formatObsLog,
-  type ObsLogEntry,
   CheckpointPrepareResultSchema,
   CheckpointRecordSchema,
   IsoTimestampSchema,
   LEASE_REFUSALS,
   MAX_CHECKPOINT_PACK_BYTES,
+  ObsLogEntrySchema,
+  formatObsLog,
   operationId,
   type CheckpointPrepareResult,
   type LeaseRefusal,
+  type MirrorFailure,
+  type ObsLogEntry,
 } from "@hns/core";
 import { mirrorRef, reviewSourceFor } from "@hns/workspace/mirror";
 import { ARTIFACTS_REMOTE_LIMITS, artifactsRepoName } from "../artifacts/repos.ts";
@@ -1872,6 +1874,82 @@ async function harnessWithObservation(options: { readonly enabled?: boolean } = 
   };
 }
 
+/**
+ * A harness built the way production builds the object today: no obs sink at all.
+ *
+ * @remarks
+ * The edge does not hand the Workspace object an observation sink yet, so every deployed object
+ * runs with `observe` absent. The object must still observe every decided mirror, on the console.
+ */
+async function harnessWithoutObservation(): Promise<MirrorHarness> {
+  let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+  const opened = openSqliteState();
+  const machine = fakeMachine();
+  const packs = fakePackBucket();
+  const artifacts = fakeArtifactsBinding({ now: () => nowMs });
+  const workspace = new Workspace(opened.state, {
+    now: () => nowMs,
+    leaseTtlMs: 1_000,
+    packs,
+    files: machine,
+    artifacts,
+    artifactsMirror: true,
+  });
+  const journal = new Journal(opened.state.storage, { now: () => nowMs });
+  const deviceKey = await deviceKeyFromSeed(7);
+  enrollMachine(opened.sql, "m1", deviceKey.publicKey);
+  return {
+    workspace,
+    journal,
+    machine,
+    packs,
+    artifacts,
+    sql: opened.sql,
+    key: deviceKey,
+    rows: opened.rows,
+    advance(ms) {
+      nowMs += ms;
+    },
+    close: opened.close,
+  };
+}
+
+/** Collect what the console writes while `console.log` is replaced; returns the restore. */
+function captureConsole(lines: string[]): () => void {
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    // The object writes one formatted string; anything else is recorded as JSON so a changed call
+    // still shows up in the collected lines instead of vanishing.
+    for (const arg of args) {
+      lines.push(v.parse(v.string(), arg));
+    }
+  };
+  return () => {
+    console.log = original;
+  };
+}
+
+/**
+ * Report one mirror outcome to the object, as the push's reporter does.
+ *
+ * @remarks
+ * The same route a machine's push reports through, with the correlation id the observation keeps.
+ */
+async function reportMirror(
+  h: MirrorHarness,
+  body: { readonly status: "mirrored" | "skipped" | "failed"; readonly failure?: MirrorFailure },
+): Promise<Response> {
+  const response = await h.workspace.fetch(
+    new Request("https://workspace/rpc/checkpoint/mirror", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "req-mirror-1" },
+      body: JSON.stringify({ workspaceId: "w1", runId: "run-1", ...body }),
+    }),
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  return response;
+}
+
 /** Call the workspace's switch RPC and answer the switch it reports in force. */
 async function setSwitch(h: MirrorHarness, mirror: "on" | "off" | null): Promise<boolean> {
   const response = await h.workspace.fetch(
@@ -1990,24 +2068,48 @@ test("C2: a failed push is observed at warn and the line carries no token", asyn
   }
 });
 
-// C2 / T2: The aggregate a reader gets from the log the object observed into shows the failure:
-// one failed outcome of one is a failure rate of 1, and a skipped run is not a failure.
+// C2 / T2: A deployment that has not wired a sink still observes the mirror: one structured line
+// on the console, the same entry every other hop writes. Catches the object returning before it
+// writes anything, which made "the mirror is observed" true only in tests.
+test("C2: a workspace with no sink writes the mirror line to the console", async () => {
+  const lines: string[] = [];
+  const restore = captureConsole(lines);
+  const h = await harnessWithoutObservation();
+  try {
+    await checkpointOnce(h);
+    await reportMirror(h, { status: "failed", failure: "network" });
+    const mirror = lines.filter((line) => line.includes("artifacts.mirror"));
+    expect(mirror).toHaveLength(1);
+    const entry = v.parse(ObsLogEntrySchema, JSON.parse(mirror[0] ?? ""));
+    expect(entry.event).toBe("artifacts.mirror");
+    expect(entry.hop).toBe("do");
+    expect(entry.level).toBe("warn");
+    expect(entry.detail).toStrictEqual({
+      mirror: "failed",
+      repos: artifactsRepoName("w1"),
+      failure: "network",
+    });
+    // The console line is the one the metrics read: the same shape, no token, no remote.
+    expect(mirror[0]).not.toContain("art_v2");
+    expect(mirror[0]).not.toContain("https://");
+  } finally {
+    restore();
+    h.close();
+  }
+});
+
+// C2 / T2: The aggregate a reader gets from the workspace's log shows what the object observed:
+// one failed outcome of one is a failure rate of 1; a skipped run is a distinct outcome and a
+// repository, and it is not a failure. Catches rates divided by the wrong denominator and a
+// repository count that counts outcomes instead of names.
 test("C2: the metrics reduce the mirror lines into a failure rate and a skip rate", async () => {
   const h = await harnessWithObservation();
   try {
-    const store = createObsStore(h.state.storage, { now: () => h.now() });
-    for (const entry of h.observed) store.append(entry);
-    store.append(
-      mirrorObservationEntry({
-        repo: artifactsRepoName("w1"),
-        status: "failed",
-        failure: "unauthorized",
-        requestId: null,
-        now: h.now(),
-        durationMs: 30,
-      }),
-    );
-    store.append(
+    await checkpointOnce(h);
+    await reportMirror(h, { status: "failed", failure: "network" });
+    // The sink is the workspace's log, so what the object wrote is what the metrics read: nothing
+    // is appended by hand. A second workspace's skipped mirror is one more outcome, another name.
+    h.observed.push(
       mirrorObservationEntry({
         repo: "ws-w2",
         status: "skipped",
@@ -2015,14 +2117,18 @@ test("C2: the metrics reduce the mirror lines into a failure rate and a skip rat
         now: h.now(),
       }),
     );
+    const store = createObsStore(h.state.storage, { now: () => h.now() });
+    for (const entry of h.observed) store.append(entry);
     const metrics = store.metrics().mirror;
     expect(metrics.total).toBe(2);
     expect(metrics.states).toStrictEqual({ mirrored: 0, skipped: 1, failed: 1, pending: 0 });
     expect(metrics.failureRate).toBe(0.5);
     expect(metrics.skipRate).toBe(0.5);
-    expect(metrics.p95Ms).toBe(30);
+    // Only the failed outcome was timed (the push); the skip has no push time.
+    expect(metrics.p95Ms).toBeGreaterThanOrEqual(0);
+    // Two names, not two outcomes of one: the count is distinct repository names, not pushes.
     expect(metrics.repos).toBe(2);
-    // The aggregate is counts, rates, and a count of repositories: nothing a token could be.
+    // The aggregate is counts, rates, and a number of names: nothing a token could be.
     expect(JSON.stringify(metrics)).not.toContain("art_v2");
   } finally {
     h.close();

@@ -9,9 +9,9 @@
  * (`pending` stays `pending`), so switching the mirror back on picks the run up instead of losing
  * the fact that it was never mirrored.
  *
- * **The unit is the workspace, and the default is the deployment** (U-02): the deploy's text
- * binding (`ARTIFACTS_MIRROR`) is what the operator sets once, and a workspace may override it in
- * its own storage. A switch read from a place that cannot be answered is **off**: the mirror is an
+ * **The unit is the workspace, and the default is the deployment**: the deploy's text binding
+ * (`ARTIFACTS_MIRROR`) is what the operator sets once, and a workspace may override it in its own
+ * storage. A switch read from a place that cannot be answered is **off**: the mirror is an
  * optional convenience, and a switch that cannot be read must not turn it on (fail closed).
  *
  * This module decides; it does not issue targets, read a binding, or write a row. The Workspace
