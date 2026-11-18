@@ -1,6 +1,6 @@
 # 0231: Trail の GraphQL と Sidebar（Task 置換）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D104 / work/research/trail-model-v1.md §6.2
@@ -17,12 +17,12 @@ GraphQL に Trail の読み取りと createTrail / updateTrail を追加し、Ta
 
 ## Acceptance criteria
 
-- [ ] SDL に Trail / TrailChange / TrailSession / TrailFinding / TrailDecision / TrailGate と閉じた enum が出る
-- [ ] SDL から Task / TaskStatus が消える
-- [ ] Query trails / trail(id) と createTrail / updateTrail が動く
-- [ ] Sidebar は Needs you / Active / Observing / Closed のリストで、カンバン列が無い
-- [ ] Relay の生成物と Web の型チェックが通る
-- [ ] 既存の Task 画面・参照が残っていない
+- [x] SDL に Trail / TrailChange / TrailSession / TrailFinding / TrailDecision / TrailGate と閉じた enum が出る
+- [x] SDL から Task / TaskStatus が消える
+- [x] Query trails / trail(id) と createTrail / updateTrail が動く
+- [x] Sidebar は Needs you / Active / Observing / Closed のリストで、カンバン列が無い
+- [x] Relay の生成物と Web の型チェックが通る
+- [x] 既存の Task 画面・参照が残っていない
 
 ## テスト条件
 
@@ -57,3 +57,14 @@ GraphQL に Trail の読み取りと createTrail / updateTrail を追加し、Ta
 ## Log
 
 - 2026-11-17: 作成（D104）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0231。blocking 0 / 低 7。低 2 件と契約の追記を統合前に修正）
+- HEAD: 9c0e11d（main に ff 統合）。gate は exit 0（1703 tests / 1704、main で 155.3s）。
+- **SDL から Task / TaskStatus が消えた**（golden・web の schema・生成物・web のソースの 4 か所で確認）。**Trail 系 6 型 + 閉じた enum 10 種**が出る。
+- **面**: `Query.trails(projectId?, first?)` / `trail(id)` / `createTrail` / `updateTrail`。`trail(id)` は **global id のみ**を受け、**無い行は `not_found`**（空 payload にしない——「削除」と「読み込み中」を区別するため）、**読めない行は `UNAVAILABLE`**。`createTrail` は **state を入力に取らない**（D104）、**作成者は session subject**。`QueryFailure` に `not_found` を追加（**他の Query は返さない**、web の生成 enum の差分は 1 値）。
+- **Sidebar** は Needs you（in_review）/ Active（draft, active）/ Observing（merged, observing）/ Closed（closed, abandoned）の **4 リスト**で、**カンバン列が無い**（`role=group` 4 つ、`listbox` / `grid` / `column` 不在）。
+- **実経路**: 実 SQLite + migration 0010 + 本番 `createGraphQLFace` + 本物の store で create → trail(id) の往復、project の絞り込み、`Trail.changes` の base/head、Sidebar と trail(id) の一致、**web の compiled operation が `tasks` を含まない**。**corrupt 行は `UNAVAILABLE`**（実 D1）。mutation 3 件 + 追加 1 件を検出。
+- **レビューで直したもの**: ①graphql 層が store の `ValiError` を `instanceof` で握っていた（**`listChanges` を他の読みと同じ `corrupt_row` の値に揃え、server から `valibot` の import を消した**。0230 の Result に書いた「唯一の throw 経路」をここで閉じた）②存在しない 0149 を指す TSDoc ③`docs/contracts/graphql.md` に Trail の面を追記。
+- **残件**: (1) **Change 行を budget に積んでいない**（`listChanges` に LIMIT が無く、行数は読んだ後でしか分からない。件数ぶん積んでページを返すのは follow-up）。(2) **Trail から `sessions` / `findings` / `decisions` / `gates` を辿る field は無い**（0232 以降。今は型として SDL に出るだけ）。(3) `overrides as Map<...>` の SAFETY 1 箇所（core の root factory 契約を MutableMap に変えるかは設計判断）。(4) **`createTrail` / `updateTrail` を呼ぶ UI はまだ無い**（0232 で詳細・レビュー面が付くまで API だけ）。
