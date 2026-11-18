@@ -7,7 +7,7 @@ const development = () => deploymentFor("development", undefined, undefined);
 
 test("the gateway is its own worker on the mode's database", () => {
   const worker = gatewayWorkerFor(
-    deploymentFor("staging", "https://agent.example", "ollama/llama3"),
+    deploymentFor("staging", "https://agent.example", "ollama/llama3", "machine-1"),
     {},
   );
   expect(worker.name).toBe("hns-stg-gateway");

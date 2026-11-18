@@ -25,6 +25,8 @@
 
 `requestGrant`（Session DO の `POST /rpc/grants`）を呼べるのは、**session cookie を持つ人**だけである。Worker が session cookie を検証し、その subject を grant の `requestedBy` として object に渡し、object は body の `requestedBy` がこの subject（またはその subject の `agent:` 名前空間の agent）と一致すること、および Worker が session secret から導いたトークンを提示することを検査する。**project / machine の所有権の検査は未実装**なので、session を持つ人なら誰でも任意の project・任意の登録済み machine を名指しして grant を要求できる（machine の mutation と同じ状態）。grant は `requestedBy` と監査の行にこの subject で残る。所有権を認可に使うのは follow-up。
 
+**会話への send**（`Mutation.sendMessage` → Session DO の `POST /rpc/conversations/<id>/messages`、0270n）も同じ状態である。Worker は D1 の索引から会話の行とその project を引き、**行が無い・削除済み・project が無い**を同じ `not_found` にする（存在の有無を漏らさない）が、**会話と project に owner が無い**ので、session を持つ人は**この deployment の任意の会話に送れる**。`created_by` を足したら、object を呼ぶ前の認可に使う（`src/graphql/send-message-port.ts` の TSDoc）。
+
 ## 秘密
 
 - 鍵は `~/.config/hns/`。デプロイの秘密は Cloudflare の secret で、リポジトリとログに置かない。

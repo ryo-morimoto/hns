@@ -3,6 +3,7 @@ import type { GraphQLContext } from "../context.ts";
 import { createProjectModule } from "./create-project.ts";
 import { requestGrantModule } from "./grants.ts";
 import { machinesModule } from "./machines.ts";
+import { sendMessageModule } from "./send-message.ts";
 import { policyModule } from "../policy/schema.ts";
 
 /**
@@ -41,6 +42,9 @@ export const MUTATION_MODULES: readonly MutationModule[] = [
   policyModule(),
   machinesModule(),
   requestGrantModule(),
+  // The chat's send face (0270n): the turn that admits a policy snapshot and opens 0226's
+  // granted path. Its module is last so the published SDL's Mutation grows at the end.
+  sendMessageModule(),
 ];
 
 /**

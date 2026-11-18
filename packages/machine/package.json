@@ -2,6 +2,9 @@
   "name": "@hns/machine",
   "version": "0.1.0",
   "description": "Machine-side agent: signed requests, ROOT containment, and limits",
+  "bin": {
+    "hns-machine": "./dist/bin.js"
+  },
   "files": [
     "dist",
     "README.md",
@@ -16,6 +19,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./cli": {
+      "source": "./src/cli.ts",
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
     }
   },
   "scripts": {

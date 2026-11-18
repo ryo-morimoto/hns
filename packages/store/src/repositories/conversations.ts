@@ -66,6 +66,17 @@ export interface ConversationRepository {
   page(query?: ConversationListQuery): Promise<ConversationPage>;
   /** The conversation with `id` in `projectId`, including a soft-deleted one, or `undefined`. */
   get(projectId: ProjectId, id: ConversationId): Promise<Conversation | undefined>;
+  /**
+   * The conversation with `id`, wherever its project is, including a soft-deleted one.
+   *
+   * @remarks
+   * The primary key is `(project_id, id)`, and a conversation id is unique within its project (the
+   * Session object's name), so the pair a send needs — the conversation and therefore its project —
+   * is one read. This is the lookup a face performs **before** it addresses an object (0270n): the
+   * object cannot read D1 (D049), so the Worker is what says which project a conversation belongs
+   * to, and a send names the object by the conversation's own id.
+   */
+  findById(id: ConversationId): Promise<Conversation | undefined>;
   /** Record activity by bumping `updated_at`; a no-op when the conversation is missing. */
   touch(projectId: ProjectId, id: ConversationId): Promise<void>;
 }
@@ -91,6 +102,12 @@ export function conversationRepository(context: StoreContext): ConversationRepos
       projectId,
       id,
     ]);
+    return row === undefined ? undefined : parseConversation(row);
+  };
+  const findById = async (id: ConversationId): Promise<Conversation | undefined> => {
+    // Without a project the row is found through the primary key's leading column no more; the
+    // read is by id alone, which SQLite answers from the key's rowid index.
+    const row = await sql.get("SELECT * FROM conversations WHERE id = ? LIMIT 1", [id]);
     return row === undefined ? undefined : parseConversation(row);
   };
 
@@ -127,6 +144,7 @@ export function conversationRepository(context: StoreContext): ConversationRepos
       return { items, nextCursor };
     },
     get,
+    findById,
     async touch(projectId, id) {
       await sql.run(
         "UPDATE conversations SET updated_at = ?, indexed_at = ? WHERE project_id = ? AND id = ?",

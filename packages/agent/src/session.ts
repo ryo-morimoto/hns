@@ -26,6 +26,7 @@ import {
   ConversationIdSchema,
   INDEX_DRAIN_BATCH,
   isoTimestamp,
+  MAX_TURN_INPUT_LENGTH,
   ProjectIdSchema,
   type Conversation,
 } from "@hns/core";
@@ -106,8 +107,15 @@ export const DEFAULT_CONVERSATION_PAGE = 50;
 export const MAX_TRANSCRIPT_PAGE = 200;
 /** The default transcript entries a single read returns. */
 export const DEFAULT_TRANSCRIPT_PAGE = 50;
-/** The longest user input accepted by one turn. */
-export const MAX_INPUT_LENGTH = 64 * 1024;
+/**
+ * The longest user input accepted by one turn.
+ *
+ * @remarks
+ * The value is `@hns/core`'s `MAX_TURN_INPUT_LENGTH`: a Worker face refuses an oversized text before
+ * it forwards the turn (0270n), and that face may not import this package's runtime. One value, two
+ * spellings, so the bound cannot drift.
+ */
+export const MAX_INPUT_LENGTH = MAX_TURN_INPUT_LENGTH;
 /** The most conversations one index drain returns; the rest waits for the next drain. */
 export const DEFAULT_INDEX_BATCH = INDEX_DRAIN_BATCH;
 /** The most conversations one index listing may ask for. */

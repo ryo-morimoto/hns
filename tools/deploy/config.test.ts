@@ -11,32 +11,45 @@ test("development uses the local defaults", () => {
     env: "dev",
     workerName: "hns-dev",
     agentUrl: "http://127.0.0.1:8788",
+    machineId: "machine-dev",
     model: "faux/echo",
   });
 });
 
 test("staging and production use their own workers", () => {
-  expect(deploymentFor("staging", "https://agent.example", "ollama/llama3").workerName).toBe(
-    "hns-stg",
-  );
-  expect(deploymentFor("production", "https://agent.example", "ollama/llama3").workerName).toBe(
-    "hns-prod",
-  );
+  expect(
+    deploymentFor("staging", "https://agent.example", "ollama/llama3", "machine-1").workerName,
+  ).toBe("hns-stg");
+  expect(
+    deploymentFor("production", "https://agent.example", "ollama/llama3", "machine-1").workerName,
+  ).toBe("hns-prod");
 });
 
-test("staging requires an https agent URL and a model", () => {
-  expect(() => deploymentFor("staging", undefined, "ollama/llama3")).toThrow(/HNS_AGENT_URL/);
+test("staging requires an https agent URL, a machine id, and a model", () => {
+  expect(() => deploymentFor("staging", undefined, "ollama/llama3", "machine-1")).toThrow(
+    /HNS_AGENT_URL/,
+  );
   expect(() => deploymentFor("staging", "http://agent.example", "ollama/llama3")).toThrow(/https/);
-  expect(() => deploymentFor("staging", "https://agent.example", undefined)).toThrow(/HNS_MODEL/);
-});
-
-test("production requires an https agent URL and a model", () => {
-  expect(() => deploymentFor("production", undefined, "ollama/llama3")).toThrow(/HNS_AGENT_URL/);
-  expect(() => deploymentFor("production", "https://agent.example", undefined)).toThrow(
+  expect(() => deploymentFor("staging", "https://agent.example", undefined, "machine-1")).toThrow(
     /HNS_MODEL/,
   );
+  expect(() => deploymentFor("staging", "https://agent.example", "ollama/llama3")).toThrow(
+    /HNS_MACHINE_ID/,
+  );
+});
+
+test("production requires an https agent URL, a machine id, and a model", () => {
+  expect(() => deploymentFor("production", undefined, "ollama/llama3", "machine-1")).toThrow(
+    /HNS_AGENT_URL/,
+  );
+  expect(() =>
+    deploymentFor("production", "https://agent.example", undefined, "machine-1"),
+  ).toThrow(/HNS_MODEL/);
   expect(() => deploymentFor("production", "http://agent.example", "ollama/llama3")).toThrow(
     /https/,
+  );
+  expect(() => deploymentFor("production", "https://agent.example", "ollama/llama3")).toThrow(
+    /HNS_MACHINE_ID/,
   );
 });
 
@@ -76,7 +89,9 @@ test("the worker exports and binds the Workspace Durable Object", () => {
 });
 // Catches: the object store reading env.OBJECTS without a declared R2 bucket binding.
 test("the worker binds the object store bucket", () => {
-  const worker = workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3"));
+  const worker = workerFor(
+    deploymentFor("production", "https://agent.example", "ollama/llama3", "machine-1"),
+  );
   expect(worker.env.OBJECTS).toStrictEqual({ type: "r2", name: "hns-prod-objects" });
 });
 
@@ -93,15 +108,40 @@ test("the harness worker declares no provider credential", () => {
 });
 
 // Catches: the Workspace object signing machine requests from an undeclared secret.
-test("the worker declares the machine URL and control-plane key", () => {
+test("the worker declares the machine URL, machine id, and control-plane key", () => {
   const worker = workerFor(deploymentFor("development", undefined, undefined));
   expect(worker.env.HNS_AGENT_URL).toStrictEqual({ type: "text", value: "http://127.0.0.1:8788" });
+  expect(worker.env.HNS_MACHINE_ID).toStrictEqual({ type: "text", value: "machine-dev" });
   expect(worker.env.HNS_CONTROL_PLANE_KEY).toStrictEqual({ type: "secret" });
+});
+
+// Catches: the granted tool path being "partly configured" by a deploy that declares the agent URL
+// and the control-plane key but not the machine id. The Session object and the edge refuse that
+// state at start (0270n), so the binding list a dry run prints must hold all three together.
+test("the dry-run binding list carries the three bindings of the granted tool path together", () => {
+  // The same names `do/tool-path-mode.ts` reads; a binding renamed here and not there would be a
+  // deployment that starts in the Phase 0 state with a granted path's bindings declared.
+  const granted = ["HNS_AGENT_URL", "HNS_MACHINE_ID", "HNS_CONTROL_PLANE_KEY"];
+  const production = workerFor(
+    deploymentFor("production", "https://agent.example", "ollama/llama3", "machine-1"),
+  );
+  for (const name of granted) expect(Object.keys(production.env)).toContain(name);
+  expect(production.env.HNS_MACHINE_ID).toStrictEqual({ type: "text", value: "machine-1" });
+  // None of the three is optional at deploy time: a missing id for staging or production is
+  // refused before a Worker is built.
+  expect(() =>
+    deploymentFor("production", "https://agent.example", "ollama/llama3", undefined),
+  ).toThrow(/HNS_MACHINE_ID/);
+  expect(() => deploymentFor("staging", "https://agent.example", "ollama/llama3")).toThrow(
+    /HNS_MACHINE_ID/,
+  );
 });
 
 // Catches: the harness losing its only path to a model (the gateway service binding).
 test("the harness worker binds the gateway service by name", () => {
-  const worker = workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3"));
+  const worker = workerFor(
+    deploymentFor("production", "https://agent.example", "ollama/llama3", "machine-1"),
+  );
   expect(worker.env.GATEWAY).toStrictEqual({ type: "worker", worker: "hns-prod-gateway" });
 });
 
@@ -115,7 +155,7 @@ test("the worker binds the assets and routes every request through the edge", ()
 // Catches: a production deploy that silently keeps the workers.dev host.
 test("production publishes on its custom domain and turns workers.dev off", () => {
   const worker = workerFor({
-    ...deploymentFor("production", "https://agent.example", "ollama/llama3"),
+    ...deploymentFor("production", "https://agent.example", "ollama/llama3", "machine-1"),
     domain: "hns.example.com",
   });
   expect(worker).toHaveProperty("domains", ["hns.example.com"]);
@@ -154,19 +194,21 @@ test("the worker binds the Artifacts namespace and the mirror's switch", () => {
   const previous = process.env.ARTIFACTS_MIRROR;
   try {
     delete process.env.ARTIFACTS_MIRROR;
-    const worker = workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3"));
+    const worker = workerFor(
+      deploymentFor("production", "https://agent.example", "ollama/llama3", "machine-1"),
+    );
     expect(worker.env.ARTIFACTS).toStrictEqual({ type: "artifacts", namespace: "hns-prod" });
     // Off unless the deploy says otherwise: a beta dependency is never switched on by omission.
     expect(worker.env.ARTIFACTS_MIRROR).toStrictEqual({ type: "text", value: "off" });
     process.env.ARTIFACTS_MIRROR = "on";
     expect(
-      workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3")).env
-        .ARTIFACTS_MIRROR,
+      workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3", "machine-1"))
+        .env.ARTIFACTS_MIRROR,
     ).toStrictEqual({ type: "text", value: "on" });
     process.env.ARTIFACTS_MIRROR = "yes";
     expect(
-      workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3")).env
-        .ARTIFACTS_MIRROR,
+      workerFor(deploymentFor("production", "https://agent.example", "ollama/llama3", "machine-1"))
+        .env.ARTIFACTS_MIRROR,
     ).toStrictEqual({ type: "text", value: "off" });
   } finally {
     if (previous === undefined) delete process.env.ARTIFACTS_MIRROR;

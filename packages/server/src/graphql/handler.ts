@@ -12,7 +12,12 @@ import {
 import type { JsonValue } from "@hns/core";
 import type { GraphQLRequest } from "../edge/handler.ts";
 import { DEFAULT_LIMITS, type EdgeLimits } from "../edge/limits.ts";
-import { createContext, type GraphQLReads, type GraphQLWrites } from "./context.ts";
+import {
+  createContext,
+  type GraphQLReads,
+  type GraphQLWrites,
+  type MessagePort,
+} from "./context.ts";
 import type { PolicyFace } from "./policy/face.ts";
 import {
   assertWithinBytes,
@@ -53,6 +58,8 @@ export interface GraphQLFaceDependencies {
   readonly reads?: Partial<GraphQLReads> | undefined;
   /** Replace one or more writes; production writes D1. */
   readonly writes?: Partial<GraphQLWrites> | undefined;
+  /** Replace the send port; production forwards a turn to the conversation's Session object. */
+  readonly messages?: MessagePort | undefined;
   /** Replace the policy face; production builds it over the control database. */
   readonly policy?: PolicyFace | undefined;
   /** Replace the feature mutation modules; production uses the registered collection. */
@@ -226,6 +233,7 @@ export function createGraphQLFace(
       session: request.session,
       reads: dependencies.reads,
       writes: dependencies.writes,
+      messages: dependencies.messages,
       policy: dependencies.policy,
       maxRows: rows.maxRowsPerRequest,
       maxRowsPerList: rows.maxRowsPerList,

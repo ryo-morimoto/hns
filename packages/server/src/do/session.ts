@@ -64,6 +64,7 @@ import { grantInternalToken } from "./grant-subject.ts";
 import { modelsFor } from "./models.ts";
 import { SessionIndex } from "./session-index.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
+import { incompleteToolPathMessage, toolPathMode } from "./tool-path-mode.ts";
 import type { SessionEnv, SessionState } from "./state.ts";
 
 /** The host callbacks the Session gives the runtime. */
@@ -684,6 +685,14 @@ export class Session {
       if (this.#env.HNS_ENV !== "dev" && this.#env.DB === undefined) {
         throw new Error("the control database binding is missing outside development");
       }
+      // Then the same check for the granted tool path: its three bindings are a set. All three
+      // present grants tools, none of them keeps the Phase 0 tools, and a **mixture** is a
+      // deployment error: it would otherwise leave a send that carries a policy snapshot with no
+      // granted path, which is a granted turn that silently runs with the model's own tools
+      // (0270n). The object answers `unavailable` from then on and the error names the bindings,
+      // never a value.
+      const mode = toolPathMode(this.#env);
+      if (mode.kind === "incomplete") throw new Error(incompleteToolPathMessage(mode));
       // Fail closed: a tool call may not run with no way to record its decision, so a table that
       // cannot be opened stops the object here (docs/capability.md §8). It is the object's own SQLite,
       // beside the harness's prefixed tables, and not D1 (D049).
@@ -786,7 +795,14 @@ export class Session {
       await this.#attachSockets();
       session.resume();
     } catch (error) {
-      console.error("session open failed", error instanceof Error ? error.name : "unknown");
+      // A partly configured tool path is the one start failure whose message says **which binding**
+      // is missing (0270n); an operator reads it here. Every other failure keeps the generic line:
+      // the log names an error class, never a binding's name or value.
+      const detail =
+        toolPathMode(this.#env).kind === "incomplete" && error instanceof Error
+          ? error.message
+          : "";
+      console.error("session open failed", error instanceof Error ? error.name : "unknown", detail);
       this.#state.abort("session open failed");
       throw error;
     }

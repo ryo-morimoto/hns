@@ -40,6 +40,11 @@ export const workerFor = (deployment: Deployment): DeployedWorker => {
       HNS_SESSION_SECRET: bindings.secret(),
       // The machine's origin; the Workspace object calls it through the tunnel.
       HNS_AGENT_URL: bindings.text(deployment.agentUrl),
+      // The machine's id, which every grant and every relayed call names (0226). It is declared
+      // beside the URL and the key because the three are one set: the Session object and the edge
+      // refuse a deployment that sets some of them (0270n), so the dry-run's binding list is what
+      // shows the path is configured.
+      HNS_MACHINE_ID: bindings.text(deployment.machineId),
       // The control-plane key the Worker signs machine requests with (D100). The public half is
       // enrolled on the machine; the registry that supplies both is 0148's.
       HNS_CONTROL_PLANE_KEY: bindings.secret(),
@@ -71,7 +76,12 @@ export const workerFor = (deployment: Deployment): DeployedWorker => {
 };
 
 export default defineConfig(({ mode }) => {
-  const base = deploymentFor(mode, process.env.HNS_AGENT_URL, process.env.HNS_MODEL);
+  const base = deploymentFor(
+    mode,
+    process.env.HNS_AGENT_URL,
+    process.env.HNS_MODEL,
+    process.env.HNS_MACHINE_ID,
+  );
   const deployment: Deployment = {
     ...base,
     domain: customDomainFor(base.mode, process.env.HNS_DOMAIN),

@@ -17,10 +17,18 @@ import { createKeysFace } from "./keys.ts";
 const BASE = "https://hns.test";
 const SEED = Buffer.from(new Uint8Array(32).fill(5)).toString("base64url");
 
-/** An environment with the session secret and, optionally, a control-plane seed. */
+/**
+ * An environment with the session secret and, optionally, a control-plane seed.
+ *
+ * @remarks
+ * The machine id travels with the key: the edge refuses a deployment whose tool-path bindings are
+ * some but not all (0270n), so a face test that sets the key sets the id too.
+ */
 function envWithKey(seed?: string): WorkerEnv {
-  const base = envWith({ secret: TEST_SECRET });
-  return seed === undefined ? base : { ...base, HNS_CONTROL_PLANE_KEY: seed };
+  const base: WorkerEnv = { ...envWith({ secret: TEST_SECRET }), HNS_MACHINE_ID: "machine-1" };
+  return seed === undefined
+    ? base
+    : { ...base, HNS_AGENT_URL: "https://machine.example", HNS_CONTROL_PLANE_KEY: seed };
 }
 
 /** Dependencies with only the keys face wired. */

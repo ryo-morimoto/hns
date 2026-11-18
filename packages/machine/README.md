@@ -133,6 +133,35 @@ const { decision } = await authorizeGrantedCall({
   exec からは読めない。
 - **RPC への配線は 0226**。この節の関数を呼ぶだけの入口はまだ無い（`activePolicy` は制御チャネルが運ぶ）。
 
+## CLI（0270n）
+
+```bash
+hns-machine enroll --root <ROOT> [--name <name>] [--machine-id <id>] [--url <https URL>] [--config-dir <dir>]
+hns-machine run [--enrollment <file|->] [--config-dir <dir>] [--control-plane-key <seed>]... [--port <port>]
+```
+
+- **enroll** は device 鍵を `<configDir>/device.json`（ディレクトリ 0700・ファイル 0600）に作り、
+  **公開鍵と fingerprint だけ**を JSON で出す。人が `Mutation.registerMachine` に貼る。既存の鍵が
+  あれば `--force` なしでは**失敗**する（黙って reimage しない）。
+- **run** は `startMachineAgent` を起動する。enrollment は `--enrollment`（ファイルか `-`）か、同じ
+  configDir の device.json。control-plane の公開鍵は `--control-plane-key`（Worker の seed と同じもの。
+  公開 half をここで導出する）か `<configDir>/control-plane.json`（`{ v: 1, publicKeys: [...] }`）。
+  **どちらも無ければ起動しない**（全要求が拒否される機械を「起動した」と見せない）。
+- enroll の出力は run の入力そのもの：`hns-machine enroll ... > e.json && hns-machine run --enrollment e.json`。
+
+## 起動した / していない（0270n）
+
+| 面                                                              | 今この面は起動するか | 誰が呼ぶか                                                                         |
+| --------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------- |
+| machine の agent（`startMachineAgent`）                         | ✓                    | `hns-machine run`（人が 1 コマンド）                                               |
+| machine の enrollment（device 鍵と公開鍵）                      | ✓                    | `hns-machine enroll` → 人が `registerMachine` に貼る                               |
+| 署名付き health / probe（`/api/machines/keys` / 0148 の probe） | ✓                    | `Query.machines` の読み（throttle）                                                |
+| signed wire（`/rpc` の read / write / checkpoint / exec）       | ✓                    | `Workspace` DO と `Session` DO の relay                                            |
+| capability grant の検証（0225）                                 | ✓                    | agent の `op: "tool"`（0226 の relay から）                                        |
+| artifact mirror の push（0246）                                 | ✗                    | **Worker → machine の push 配線が無い**（0246 の Result が 0249 の受入にしている） |
+| exec の seccomp（0194）                                         | ✗                    | 製品の exec に fd を渡す口が無い（0194 の Result の follow-up）                    |
+| enrollment token（machine が自分で enroll）                     | ✗                    | 設計が未着手（0148 の follow-up）                                                  |
+
 ## 開発
 
 ```bash

@@ -206,6 +206,7 @@ type Mutation {
   registerMachine(input: RegisterMachineInput!): RegisterMachineResult!
   revokeMachine(id: String!): RevokeMachineResult!
   requestGrant(input: RequestGrantInput!): RequestGrantResult!
+  sendMessage(input: SendMessageInput!): SendMessageResult!
 }
 
 union CreateProjectResult = CreateProjectPayload | MutationFailure
@@ -333,4 +334,16 @@ input RequestGrantInput {
   maxBytes: Int
   runId: String
   manifestHash: String
+}
+
+union SendMessageResult = SendMessagePayload | MutationFailure
+
+type SendMessagePayload {
+  submissionId: String!
+  status: String!
+}
+
+input SendMessageInput {
+  conversationId: String!
+  text: String!
 }

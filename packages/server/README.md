@@ -71,6 +71,21 @@ Worker の入口と Session / Workspace Durable Object。公開する面を Grap
   Worker が行い、実体（realpath / symlink / ROOT 外）は machine が ROOT を dirfd で解決して拒否する。
   したがって createProject が通した root を machine が拒否することはある（fail closed）。
 
+## 起動した / していない（0270n）
+
+| 面                                                                                 | 今この面は起動するか  | 誰が呼ぶか                                                                          |
+| ---------------------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------- |
+| Worker の send 面（`Mutation.sendMessage`）                                        | ✓                     | 画面 / client の `/graphql`（**画面の composer はまだ無い**：issue 0159 の送信 UI） |
+| policy snapshot を載せた send → granted path（0226）                               | ✓                     | 上の `sendMessage` の resolver → `conversationPortOver` → Session DO                |
+| deploy の env 3 つ（`HNS_AGENT_URL` / `HNS_MACHINE_ID` / `HNS_CONTROL_PLANE_KEY`） | ✓                     | `tools/deploy/cloudflare.config.ts` の binding（dry-run の一覧に出る）              |
+| env が一部だけの起動                                                               | ✓（起動時に失敗する） | edge の `toolPathMode` と Session の `#initialize`                                  |
+| `Mutation.requestGrant`（0224）                                                    | ✓                     | 画面 / client（agent の自動発行は 0226 の send）                                    |
+| `GET /api/machines/keys`（0225 の鍵取得 / 0148）                                   | ✓                     | machine の enrollment（`fetchControlPlaneKeys`）と人が読む                          |
+| 観測（`/api/events` / `/api/metrics`）                                             | ✓                     | 画面 / 運用                                                                         |
+| `/rpc/reindex` の公開トリガー                                                      | ✗                     | 内部 RPC のみ（D078 の決定 5。公開するのは 0039 / 0198 の後）                       |
+| artifact mirror の `/rpc/checkpoint/mirror`                                        | ✗                     | Workspace DO からの配線が無い（0246 の Result → 0249 の受入）                       |
+| machine への exec の呼び出し                                                       | ✗                     | Session DO に exec の面が無い（0194 の Result の follow-up）                        |
+
 ## D1 と DO
 
 - D1 は Worker だけが触る。DO から D1 を直接触らない（0150 / 0146）。

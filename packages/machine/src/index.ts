@@ -1,4 +1,15 @@
 export { startMachineAgent } from "./agent.ts";
+// The machine's start point (0270n): `hns-machine enroll` and `hns-machine run`, exported so a test
+// drives the same functions the bin script does.
+export {
+  CONTROL_PLANE_FILE,
+  DEFAULT_CONFIG_DIR,
+  DEVICE_FILE,
+  EnrollmentOutputSchema,
+  runCli,
+  USAGE,
+} from "./cli.ts";
+export type { CliOutcome, EnrollmentOutput } from "./cli.ts";
 export type {
   CheckpointPackSink,
   CheckpointPackUpload,

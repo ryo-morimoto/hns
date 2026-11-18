@@ -179,6 +179,17 @@ export interface Project {
   created_at: string;
 }
 
+/**
+ * The longest text one turn accepts (`Mutation.sendMessage`'s bound, 0270n).
+ *
+ * @remarks
+ * The agent's session contract is the one that enforces it (`@hns/agent/session`'s
+ * `MAX_INPUT_LENGTH`); this is the model's spelling, so a Worker face can refuse an oversized text
+ * **before** it forwards it without importing the harness's runtime into the Worker bundle. The two
+ * values are fixed together by a test.
+ */
+export const MAX_TURN_INPUT_LENGTH = 64 * 1024;
+
 /** One conversation inside a project. */
 export interface Conversation {
   id: ConversationId;

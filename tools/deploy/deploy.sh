@@ -45,9 +45,13 @@ check_secrets_file "$secrets" "${main_keys[@]}"
 check_secrets_file "$gateway_secrets" "${gateway_keys[@]}"
 
 : "${HNS_AGENT_URL:?set HNS_AGENT_URL to the tunnel URL}"
+# The machine id every grant and relayed call names (0226). It is required beside the URL: the
+# three bindings of the granted tool path are one set, and a deploy missing this one would build a
+# Worker that refuses every request at start (0270n).
+: "${HNS_MACHINE_ID:?set HNS_MACHINE_ID to the enrolled machine's id}"
 : "${HNS_MODEL:?set HNS_MODEL to the provider model}"
 : "${HNS_DOMAIN:?set HNS_DOMAIN to the custom domain (for example hns.example.com)}"
-export HNS_AGENT_URL HNS_MODEL HNS_DOMAIN
+export HNS_AGENT_URL HNS_MACHINE_ID HNS_MODEL HNS_DOMAIN
 
 # The Worker serves the built web app from deploy/assets; cf does not run the web build.
 ( cd ../.. && npm run build -w @hns/web )

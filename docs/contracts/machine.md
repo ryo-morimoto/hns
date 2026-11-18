@@ -48,6 +48,14 @@ machine の登録と到達性は **D1 のレコード**で保ち、接続を保�
 - **一覧は D1 直**（`Query.machines`）。索引は作らない（D049）。
 - **0245 が読む「記録済み machine」**は `machines` の行である。Workspace DO の `#checkpointMachine()` は現在の lease 保持者 → 記録済み machine の順に読み、`#deviceKey()` は `SELECT public_key FROM machines WHERE id = ?` でこの表を見る。0245 のテストが手で作っている `machines` の DDL は、0008 の実表に寄せるのが正しい（その寄せ替えは 0245 のレーンの follow-up）。
 
+## 起動点（0270n）
+
+machine を**人が 1 コマンドで起動**する: `hns-machine enroll --root <ROOT>`（公開鍵と fingerprint を出し、人が
+`Mutation.registerMachine` に貼る）→ `hns-machine run --enrollment <output | file | ->`（`startMachineAgent` を起動）。
+enroll の出力は run の入力そのもの。**enroll は既存の鍵を `--force` なしで上書きしない**（黙って reimage しない）。
+**run は control-plane の公開鍵が無ければ起動しない**（全要求が拒否される機械を「起動した」と見せない）。
+鍵は `<configDir>/device.json`（0700 / 0600）と `<configDir>/control-plane.json`、カウンタは `<configDir>/grants`。
+
 ## 変わったとき
 
 署名のメッセージ・ヘッダ・語彙を変えるなら、`core/machine.ts` と `machine/src/wire.ts` と `server/src/do/machine.ts` とこのファイルを同時に。**バイト列の互換はリリース前なので管理しない**が、変えたら test（`signature.test` / `wire.test`）で固定する。

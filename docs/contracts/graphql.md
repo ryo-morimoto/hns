@@ -20,6 +20,15 @@
 - Mutation の root は feature ごとの `mutations/<name>.ts` を集めたもの。**Mutation が 1 つも無い間は schema に Mutation を出さない**（空の root を作らない）。
 - resolver は**境界で認可**する（session の `sub` と所有者）。UI の状態や client が送った id を信じない。
 - `createProject` が最初の実例（0127）。
+- **`sendMessage(input: SendMessageInput!)`**（0270n）が会話への送信の面。`conversationId` は `Conversation` の global id（別 type や raw id は `invalid_request`）、`text` は session 契約の `MAX_INPUT_LENGTH`（空・超過は `invalid_request`）。Worker が D1 の active policy を読んで **snapshot（revision / hash / document）を body に載せ**、Session DO の `POST /rpc/conversations/<id>/messages` に転送する（`src/graphql/send-message-port.ts`）。**REST の送信面は作らない**（D059 / D077）。結果は `SendMessagePayload { submissionId, status }` か `MutationFailure`。
+
+## deploy の env と起動の 3 状態（0270n）
+
+granted tool path は **`HNS_AGENT_URL` / `HNS_MACHINE_ID` / `HNS_CONTROL_PLANE_KEY` の 3 つが揃ったとき**だけ開く。
+`src/do/tool-path-mode.ts` の `toolPathMode` が唯一の判定で、**全部ある = granted / 全部無い = Phase 0 / 一部だけ = 起動時に fail**
+（edge は全経路 503、Session は `#initialize` で throw して 503）。**黙って Phase 0 に落ちない**。
+エラーの文言は**どの binding が足りないか**を名指しし、**値を出さない**。deploy は `HNS_MACHINE_ID` の binding を
+dry-run の一覧に出す（staging / production では必須、development は既定値）。
 
 ## 上限
 

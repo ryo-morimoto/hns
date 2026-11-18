@@ -4,6 +4,7 @@ import type { WorkerEnv } from "./env.ts";
 import { DEFAULT_LIMITS, type EdgeLimits } from "./limits.ts";
 import { problem } from "./problem.ts";
 import { readSessionCookie, type Session } from "./session.ts";
+import { incompleteToolPathMessage, toolPathMode } from "../do/tool-path-mode.ts";
 
 /** What every face receives after authentication. */
 export interface EdgeRequest {
@@ -411,27 +412,37 @@ export function createEdge(
     const started = Date.now();
     const controller = new AbortController();
     let response: Response;
-    try {
-      response = await withDeadline(
-        route(request, env, path, requestId, controller.signal, dependencies, limits),
-        limits.maxRequestMs,
-        controller,
-      );
-    } catch (error) {
-      if (error instanceof DeadlineError) {
-        response = problem("timeout", "The request exceeded the configured deadline.", path);
-      } else {
-        console.error(
-          "DEBUGEDGE",
-          String(error),
-          error instanceof Error ? String(error.stack) : "",
+    // The three bindings of the granted tool path are a set (0270n). A deployment that sets some
+    // of them must not serve anything: every face that ran would run it in the state the operator
+    // did not ask for (the Phase 0 tools on the Session objects, no grant on the Worker). The
+    // answer is the same 503 on every path, before authentication, so a half-configured deploy is
+    // visible from a health check and never looks like a working one.
+    const mode = toolPathMode(env);
+    if (mode.kind === "incomplete") {
+      response = problem("unavailable", incompleteToolPathMessage(mode), path);
+    } else {
+      try {
+        response = await withDeadline(
+          route(request, env, path, requestId, controller.signal, dependencies, limits),
+          limits.maxRequestMs,
+          controller,
         );
-        console.error(
-          "edge: unhandled request",
-          requestId,
-          error instanceof Error ? error.name : "unknown",
-        );
-        response = problem("internal", "Unexpected failure.", path);
+      } catch (error) {
+        if (error instanceof DeadlineError) {
+          response = problem("timeout", "The request exceeded the configured deadline.", path);
+        } else {
+          console.error(
+            "DEBUGEDGE",
+            String(error),
+            error instanceof Error ? String(error.stack) : "",
+          );
+          console.error(
+            "edge: unhandled request",
+            requestId,
+            error instanceof Error ? error.name : "unknown",
+          );
+          response = problem("internal", "Unexpected failure.", path);
+        }
       }
     }
     const decorated = withResponseRequestId(response, requestId);

@@ -23,7 +23,16 @@ import { QueryReadError } from "./failures.ts";
 import { probeAll } from "../machines/probe.ts";
 import { policyFaceOver, type PolicyFace } from "./policy/face.ts";
 import { grantPortOver, type GrantPort } from "./grants.ts";
+import { conversationPortOver } from "./send-message-port.ts";
 import { grantInternalToken } from "../do/grant-subject.ts";
+
+/** The send port a resolver calls (0270n); its production implementation is `send-message-port.ts`. */
+export interface MessagePort {
+  readonly send: (
+    input: { readonly conversationId: string; readonly text: string },
+    subject: string,
+  ) => Promise<import("./send-message-port.ts").SendMessageResult>;
+}
 
 /**
  * The grant route token one isolate sends, derived once from the session secret.
@@ -176,6 +185,16 @@ export interface GraphQLContext {
    */
   readonly grants: GrantPort;
   /**
+   * The send port: `sendMessage` puts a turn into a conversation, with the project's active policy
+   * snapshot (0270n).
+   *
+   * @remarks
+   * The port finds the conversation in D1, reads the active policy of its project, and forwards the
+   * send to the conversation's Session object. It is a port so a resolver test needs no D1 and no
+   * Durable Object, and so the resolver holds no D1 read of its own.
+   */
+  readonly messages: MessagePort;
+  /**
    * The policy service's operations, as the policy fields call them.
    *
    * @remarks
@@ -208,6 +227,15 @@ export interface GraphQLContextOptions {
   readonly policy: PolicyFace | undefined;
   /** Replace the grant port; production builds it over the request's D1 and the SESSION binding. */
   readonly grants?: GrantPort | undefined;
+  /**
+   * Replace the send port; production builds it over the request's D1 and the SESSION binding.
+   *
+   * @remarks
+   * A test that sends through the GraphQL face without a Durable Object replaces this one port, and
+   * the resolver's own checks (the global id's type, the text bound, the budget) are what it then
+   * observes.
+   */
+  readonly messages?: MessagePort | undefined;
   /**
    * The token the session object expects on the grant route, derived from `HNS_SESSION_SECRET`.
    *
@@ -432,6 +460,16 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       signal: options.signal ?? new AbortController().signal,
       token: options.grantToken ?? grantTokenFor(options.env),
     });
+  const messages =
+    options.messages ??
+    conversationPortOver({
+      env: options.env,
+      requestId: options.requestId,
+      policy,
+      project: reads.project,
+      store: () => storeWith(options.env, options.requestId),
+      signal: options.signal ?? new AbortController().signal,
+    });
   const readOverrides = options.reads ?? {};
   const writeOverrides = options.writes ?? {};
   return {
@@ -439,6 +477,7 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
     session: options.session,
     policy,
     grants,
+    messages,
     budget: createRowBudget(options.maxRows),
     maxRowsPerList: options.maxRowsPerList,
     reads: {
