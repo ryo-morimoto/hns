@@ -10,8 +10,7 @@ import {
   GraphQLUnionType,
   type GraphQLFieldConfigMap,
 } from "graphql";
-import * as v from "valibot";
-import type { TrailChange } from "@hns/core";
+import type { TrailChangeValue } from "@hns/store";
 import { buildSchema, fromGlobalId, type MutationRootFactory } from "@hns/core/graphql";
 import type { GraphQLContext } from "./context.ts";
 import { failureType, allGraphqlCodes } from "./failure-type.ts";
@@ -76,15 +75,20 @@ function objectType(
  * @param context - The request's reads and budget.
  * @returns The Changes with their global ids.
  *
- * @throws QueryReadError with `unavailable` when the store cannot read the Change rows.
+ * @throws QueryReadError with `unavailable` when the store answers a `corrupt_row` refusal.
  *
  * @remarks
  * The list hangs off the Trail's own id, so a list read of many Trails reads each Trail's Changes
  * only when the selection asks for them (a field resolver runs per selected field, not per row).
- * `store.trails.listChanges` throws for a row it cannot parse (0230: it is the one throwing read
- * of that repository); an unreadable Change is `unavailable` like any other failed read, never an
- * empty list. The budget is charged one row for the Trail whose id this decodes; the Change rows
- * themselves are not charged until 0149 gives the store a bounded read.
+ * `store.trails.listChanges` answers a list holding a `corrupt_row` refusal for a Change it cannot
+ * parse (the same value the repository's other reads answer), and this resolver turns that into
+ * `unavailable`: a client can retry a broken read, and an empty list would hide exactly the row
+ * that is broken.
+ *
+ * **The budget is charged for the Trail whose id this decodes, not for the Change rows.** The
+ * store's `listChanges` has no `LIMIT`, so the number of rows is known only after the read; a
+ * caller cannot bound it in advance. Charging those rows and returning a page from them is a
+ * follow-up (the read has to take a limit first), not something this resolver can do correctly.
  */
 async function resolveTrailChanges(
   parent: TrailView,
@@ -95,17 +99,13 @@ async function resolveTrailChanges(
   if (!context.budget.spend(1)) {
     throw new QueryReadError("limit_exceeded", "This request reads more rows than it may.");
   }
-  let changes: readonly TrailChange[];
-  try {
-    changes = await context.reads.trailChanges(trailId);
-  } catch (error) {
-    // A corrupt Change row is a `ValiError`; it is a read that failed, not a defect of the
-    // caller's request, so it is a typed failure like an outage.
-    if (!(error instanceof v.ValiError)) throw error;
-    console.error("graphql: trail changes could not be parsed", context.requestId);
+  const changes = await context.reads.trailChanges(trailId);
+  const rows = changes.filter((value): value is TrailChangeValue => !value.refused);
+  if (rows.length !== changes.length) {
+    console.error("graphql: a stored trail change could not be read", context.requestId);
     throw new QueryReadError("unavailable", "The stored trail changes could not be read.");
   }
-  return changes.map(trailChangeView);
+  return rows.map(trailChangeView);
 }
 
 /**

@@ -211,6 +211,38 @@ test("a stored state outside the vocabulary fails the read", async () => {
   });
 });
 
+// Catches: the one read of the Trail repository that used to throw, after 0231 made every read
+// answer a value. A Change state is checked on the way in, so the row a legacy build wrote is
+// made here (a table without the CHECK); the read refuses it instead of throwing a ValiError.
+test("a stored Change state outside the vocabulary refuses the Change list", async () => {
+  await withStore(async (store) => {
+    const trail = await createTrailId(store, { title: "corrupt change" });
+    const good = await store.trails.addChange(trail, {
+      workspaceId: "ws-1",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+    });
+    expect(good.refused).toBe(false);
+    await harness.exec(
+      "DROP TABLE trail_changes; " +
+        "CREATE TABLE trail_changes (id TEXT PRIMARY KEY, trail_id TEXT NOT NULL, " +
+        "workspace_id TEXT NOT NULL, repo_id TEXT, base_commit TEXT NOT NULL, " +
+        "head_commit TEXT NOT NULL, run_id TEXT, state TEXT NOT NULL, created_at TEXT NOT NULL, " +
+        "updated_at TEXT NOT NULL);",
+    );
+    await harness.exec(
+      "INSERT INTO trail_changes (id, trail_id, workspace_id, repo_id, base_commit, head_commit, run_id, state, created_at, updated_at) " +
+        "VALUES ('corrupt', '" +
+        trail +
+        "', 'ws-1', NULL, 'aaa', 'bbb', NULL, 'reopened', " +
+        "'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');",
+    );
+    // One unreadable Change refuses the list rather than hiding itself, and nothing throws.
+    expect(await store.trails.listChanges(trail)).toStrictEqual([
+      { kind: "corrupt_row", refused: true },
+    ]);
+  });
+});
 // Catches: a state move stored without consulting the table — the issue's C4 refusal.
 test("merged cannot be abandoned, and the refusal names both states", async () => {
   await withStore(async (store) => {

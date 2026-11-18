@@ -6,7 +6,6 @@ import type {
   MachineRegistryRefusal,
   Project,
   ProjectId,
-  TrailChange,
 } from "@hns/core";
 import type {
   ConversationCursor,
@@ -14,6 +13,7 @@ import type {
   ConversationPage,
   IndexStateRow,
   Store,
+  TrailChangeValue,
   TrailCreateInput,
   TrailRowValue,
   TrailUpdate,
@@ -96,8 +96,17 @@ export interface GraphQLReads {
   ) => Promise<readonly (TrailRowValue | TrailWriteRefusal)[]>;
   /** The Trail with this id, or the store's `not_found` / `corrupt_row` refusal. */
   readonly trail: (id: string) => Promise<TrailRowValue | TrailWriteRefusal>;
-  /** The Changes of a Trail, oldest first. */
-  readonly trailChanges: (trailId: string) => Promise<readonly TrailChange[]>;
+  /**
+   * The Changes of a Trail, oldest first.
+   *
+   * @remarks
+   * The store answers a Change it cannot parse as a `corrupt_row` refusal in the list, like every
+   * other read of that repository, so the port keeps the union; the resolver turns it into a typed
+   * failure.
+   */
+  readonly trailChanges: (
+    trailId: string,
+  ) => Promise<readonly (TrailChangeValue | TrailWriteRefusal)[]>;
   /**
    * One page of the D1 conversation index, scoped to the project.
    *

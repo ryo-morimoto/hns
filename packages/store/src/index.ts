@@ -8,6 +8,7 @@ export type { D1Binding } from "./sql.ts";
 export type { ProjectRepository, TaskRepository } from "./repositories/projects.ts";
 export type {
   TrailChangeCreateInput,
+  TrailChangeValue,
   TrailCreateInput,
   TrailRepository,
   TrailRowValue,

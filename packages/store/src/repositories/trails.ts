@@ -11,7 +11,7 @@ import {
 } from "@hns/core";
 import type { StoreContext } from "../db.ts";
 import { parseTrail, parseTrailChange } from "../parse.ts";
-import { TrailRowSchema } from "../schemas.ts";
+import { TrailChangeRowSchema, TrailRowSchema } from "../schemas.ts";
 
 /**
  * A write the Trail repository refuses.
@@ -110,6 +110,15 @@ export interface TrailUpdate {
 export type TrailRowValue = Trail & { readonly refused: false };
 
 /**
+ * A Change a method returned as stored.
+ *
+ * @remarks
+ * The same discriminated shape as {@link TrailRowValue}: `refused: false` marks a row, and its
+ * absence is what makes {@link TrailWriteRefusal} the other half of the union.
+ */
+export type TrailChangeValue = TrailChange & { readonly refused: false };
+
+/**
  * Trails: the unit of work (D104), the rows a Task used to be.
 
  * @remarks
@@ -121,9 +130,14 @@ export type TrailRowValue = Trail & { readonly refused: false };
  *   their callers can act on "this row is unreadable". They do not call `parseTrail`, which
  *   throws for the same input: the schema is the one check, and these methods turn its failure
  *   into a value.
- * - `listChanges` calls `parseTrailChange`, which throws a `ValiError`. It is the **only**
- *   throwing read of this repository today; a caller that needs a refusal value for a Change
- *   gets one when it arrives, not before (no surface reads a Change list yet).
+ * - `listChanges` reads a `trail_changes` row through {@link TrailChangeRowSchema} with
+ *   `v.safeParse` the same way, and answers `corrupt_row` when it fails. A Change that does not
+ *   parse is refused, not thrown: a surface shows the Change list it read, and an unreadable row
+ *   in it means the list cannot be served.
+ *
+ * **No read of this repository throws for a stored row.** `parseTrail` / `parseTrailChange` are
+ * used for the rows this repository is about to **write**, so a malformed value is refused before
+ * it reaches SQLite; see `create` and `addChange`.
  *
  * `create` also parses the row it is about to write with `parseTrail` first, so a malformed
  * Trail is refused before it reaches SQLite. `addChange` parses the Change it is about to write
@@ -137,9 +151,9 @@ export type TrailRowValue = Trail & { readonly refused: false };
  * `not_found` for a Trail that moved underneath it. Each write is one statement, because D1 has
  * no interactive transaction.
  *
- * **Nothing calls this yet.** No GraphQL resolver or Web screen reads a Trail: that surface is
- * the next issue. The repository exists so that issue has one place to write a Trail's state
- * through, and so the transition table is checked in the layer that persists it.
+ * **The GraphQL face is the first caller** (0231): `Query.trails` / `trail(id)` and the Trail's
+ * `changes` list read through this repository, and `createTrail` / `updateTrail` write through
+ * it, so the state machine is checked in the layer that persists it.
  */
 export interface TrailRepository {
   /**
@@ -185,8 +199,15 @@ export interface TrailRepository {
    * row whose state is not in the vocabulary is `invalid_transition`, not a default.
    */
   transition(id: string, to: TrailState): Promise<TrailRowValue | TrailWriteRefusal>;
-  /** The Changes of a Trail, oldest first. */
-  listChanges(trailId: string): Promise<Array<TrailChange & { readonly refused: false }>>;
+  /**
+   * The Changes of a Trail, oldest first.
+   *
+   * @returns The Changes, or a one-entry array holding the `corrupt_row` refusal when a stored
+   * Change does not parse: the same shape `list` answers with, and for the same reason — a list
+   * that silently dropped a row it could not read would hide the corruption it is meant to
+   * surface. An empty list is an empty array.
+   */
+  listChanges(trailId: string): Promise<readonly (TrailChangeValue | TrailWriteRefusal)[]>;
   /**
    * Add a Change to a Trail.
    *
@@ -360,9 +381,15 @@ export function trailRepository(context: StoreContext): TrailRepository {
         "SELECT * FROM trail_changes WHERE trail_id = ? ORDER BY created_at",
         [trailId],
       );
-      return rows.map((row) => stored(parseTrailChange(row)));
-      // A stored Change that does not parse throws here: nothing reads a Change list yet, and a
-      // caller that arrives adds the refusal beside the Trail's.
+      // The rows are validated before they are typed, like `list`: an unknown value anywhere
+      // refuses the list instead of flowing on as a Change this build would misread.
+      const changes: TrailChangeValue[] = [];
+      for (const row of rows) {
+        const parsed = v.safeParse(TrailChangeRowSchema, row);
+        if (!parsed.success) return [{ kind: "corrupt_row", refused: true }];
+        changes.push(stored(parsed.output));
+      }
+      return changes;
     },
     async addChange(trailId, input) {
       if (input.baseCommit === input.headCommit)

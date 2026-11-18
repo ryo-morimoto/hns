@@ -338,6 +338,57 @@ test("a Trail's changes carry the base and head commits", async () => {
 });
 
 /**
+ * A Trail the store can hold but this build cannot read is `unavailable`, not a 500.
+ *
+ * @remarks
+ * The `trails` state column is CHECKed on the way in, so the row a legacy build wrote is made
+ * here: the table is recreated without its CHECK and a state no vocabulary contains is written.
+ * The resolver answers the store's `corrupt_row` refusal as `unavailable` — a client can retry a
+ * broken read — and never as an empty list or a payload that reads the row as a default.
+ */
+test("a Trail this build cannot read is unavailable on trail(id) and on trails", async () => {
+  await harness.withStore(async (store) => {
+    const created = await createOne(store);
+    await harness.exec(
+      "DROP TABLE trails; " +
+        "CREATE TABLE trails (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, " +
+        "description TEXT NOT NULL, acceptance TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, " +
+        "priority TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, " +
+        "updated_at TEXT NOT NULL);",
+    );
+    await harness.exec(
+      "INSERT INTO trails (id, project_id, title, description, acceptance, kind, state, priority, " +
+        "created_by, created_at, updated_at) " +
+        "VALUES ('corrupt', '" +
+        created.projectIdRaw +
+        "', 'A corrupt Trail', " +
+        "'', '', 'feature', 'blocked', 'normal', 'owner', " +
+        "'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');",
+    );
+
+    // The row is the one the new table holds: `corrupt`, the id the face is asked for.
+    const detail = (await post(store, HUMAN, byId(DETAIL(toGlobalId("Trail", "corrupt"))), {}))[
+      "trail"
+    ];
+    expect(detail).toStrictEqual({
+      __typename: "QueryFailure",
+      code: "UNAVAILABLE",
+      message: "The stored trail could not be read.",
+    });
+    const list = (
+      await post(store, HUMAN, selection(TRAILS), {
+        projectId: created.projectId,
+      })
+    )["trails"];
+    expect(list).toStrictEqual({
+      __typename: "QueryFailure",
+      code: "UNAVAILABLE",
+      message: "The stored trail could not be read.",
+    });
+  });
+});
+
+/**
  * The Trail the Sidebar lists is the one trail(id) reads: one unit, two faces.
  *
  * @remarks

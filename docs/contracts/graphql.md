@@ -31,6 +31,16 @@ granted tool path は **`HNS_AGENT_URL` / `HNS_MACHINE_ID` / `HNS_CONTROL_PLANE_
 dry-run の一覧に出す（**development でも必須**。既定値を置くと、ツールを渡すつもりの開発 deployment が
 名指ししていない machine に繋ぐ）。`npm run deploy:check` は `HNS_MACHINE_ID=<id>` を要る。
 
+## Trail の面（0231 / D104）
+
+Task と TaskStatus は SDL から消え、代わりに Trail 系の型と閉じた enum が出る（`Trail`・`TrailChange`・`TrailSession`・`TrailFinding`・`TrailDecision`・`TrailGate`、`TrailState` ほか）。**Task を返す query は無い**（`trails` がその読み）。
+
+- **`trails(projectId: ID, first: Int)`**（Query）: `projectId` は `Project` の global id（別 type や raw id は `invalid_request`）。**省略すると全 project** の Trail を新しい順で返す（Sidebar は project ごとに読む）。成功は `TrailList { trails: [Trail!]! }`、失敗は `QueryFailure`。
+- **`trail(id: ID!)`**（Query）: `Trail` の global id だけを受ける。成功は `TrailPayload { trail: Trail! }`。**無い Trail は `NOT_FOUND`**（空の payload にしない — 画面が「消えた」と「読み込み中」を区別できるように）、**この build が読めない行は `UNAVAILABLE`**（store の `corrupt_row`。空の一覧に潰さない）。他の失敗は `INVALID_REQUEST`（`Trail` でない id）と `UNAVAILABLE`（DB が開けない）。
+- **`createTrail(input: CreateTrailInput!)`**（Mutation）: `projectId`（`Project` の global id、存在しない project は `invalid_request`）、`title`、任意の `description` / `acceptance` / `kind` / `priority`（`feature` / `normal` が既定）。**state は入力にしない**（`draft` で始まり、遷移は表に従う）。作成者は session の subject。成功は `CreateTrailPayload { trail }`、失敗は `MutationFailure`。
+- **`updateTrail(id: ID!, input: UpdateTrailInput!)`**（Mutation）: 与えた欄だけを置き換える。**state は変えない**（状態遷移は 0232 のレビュー面の mutation が表に問い合わせる）。無い Trail は `NOT_FOUND`、読めない行は `UNAVAILABLE`。成功は `UpdateTrailPayload { trail }`、失敗は `MutationFailure`。
+- **`Trail.changes: [TrailChange!]!`**: Trail の id から読む（列ではない）。`baseCommit` / `headCommit` は保存値そのまま。読めない Change は `UNAVAILABLE`。
+
 ## 上限
 
 - 深さ・複雑度・行数・body の上限は Query と Mutation で同じ関数・同じ値。body は edge の `readBody`（1MiB）を通す。
