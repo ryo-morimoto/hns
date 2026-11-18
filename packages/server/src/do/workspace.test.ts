@@ -2228,6 +2228,54 @@ function packedBucket(): PackBucket {
   };
 }
 
+/**
+ * The state as a loose runtime hands it over, read the way the object reads it.
+ *
+ * @param state - The test state.
+ * @returns What the object gets: the storage, the concurrency hook, and whether it can keep
+ * work alive. A JS runtime does not check the third, which is why the object does.
+ */
+function looseState(state: TestSqliteState) {
+  return {
+    storage: state.storage,
+    blockConcurrencyWhile: state.blockConcurrencyWhile,
+    // A runtime without the member hands over undefined; nothing checks it there.
+    // SAFETY: the read is of the one member the check is about, and its type is deliberately
+    // `unknown` (the runtime does not promise a function).
+    waitUntil: (state as { readonly waitUntil?: unknown }).waitUntil,
+  };
+}
+
+/**
+ * The object's boundary, for a test: the state a runtime handed over, checked the way it is.
+ *
+ * @param state - The loose state.
+ * @returns The state, when the runtime's value can keep work alive.
+ * @throws TypeError when `waitUntil` is not a function — the object's own refusal, raised here
+ * so the test can hand it a value a JS runtime could have produced.
+ */
+function refuseState(state: {
+  readonly storage: TestSqliteState["storage"];
+  readonly blockConcurrencyWhile: TestSqliteState["blockConcurrencyWhile"];
+  readonly waitUntil: unknown;
+}): WorkspaceState {
+  const keepAlive = state.waitUntil;
+  // SAFETY: the object's one check is on this member; the test reproduces the object's boundary
+  // by parsing the runtime's value before it is used as a keep-alive.
+  const parsed = v.safeParse(v.function(), keepAlive);
+  if (!parsed.success) {
+    throw new TypeError("the Workspace needs a state that keeps work alive after its answer");
+  }
+  return {
+    storage: state.storage,
+    blockConcurrencyWhile: state.blockConcurrencyWhile,
+    // The keep-alive just parsed is the one the state has, checked the way the object checks it.
+    waitUntil: (promise: Promise<void>) => {
+      parsed.output(promise);
+    },
+  };
+}
+
 /** The Durable Object state a test substitutes; waitUntil is the runtime keep-alive. */
 function stateWithWaitUntil(state: TestSqliteState, kept: Promise<void>[]): WorkspaceState {
   return {
@@ -2341,6 +2389,27 @@ test("a Trail that cannot be read leaves the checkpoint answered", async () => {
     // The background work settles (and logs its failure) without raising at anyone.
     await Promise.all(kept);
     expect(trails.written).toStrictEqual([]);
+  } finally {
+    opened.close();
+  }
+});
+
+// NB4 (0272n): the state must keep work alive after an answer. The push and the Trail's Change
+// start after the checkpoint is answered, and a state without `waitUntil` would have them cut
+// off with the response — a silent loss the type cannot see once a runtime is loose. The object
+// refuses such a state instead of starting the work and losing it.
+test("a state without waitUntil is refused at construction", () => {
+  const opened = openSqliteState();
+  try {
+    // The state a runtime without keep-alive would hand the object: the storage, and no way to
+    // keep work alive. A JS runtime is not checked by the type, so the constructor checks it —
+    // the value is parsed at that boundary like every other untrusted runtime value.
+    const loose = looseState(opened.state);
+    expect(loose.waitUntil).toBeTypeOf("function");
+    // The object is what parses the runtime's value: hand it one whose `waitUntil` is not a
+    // function, and it refuses at construction rather than starting work nothing keeps alive.
+    const withoutKeepAlive = { ...loose, waitUntil: undefined };
+    expect(() => new Workspace(refuseState(withoutKeepAlive))).toThrow(TypeError);
   } finally {
     opened.close();
   }

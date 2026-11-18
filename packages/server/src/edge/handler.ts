@@ -1,13 +1,10 @@
 import { readBody } from "./body.ts";
 import { REQUEST_ID_HEADER, resolveRequestId, withResponseRequestId } from "./correlation.ts";
-import type { DurableObjectNamespace, WorkerEnv } from "./env.ts";
+import type { WorkerEnv } from "./env.ts";
 import { DEFAULT_LIMITS, type EdgeLimits } from "./limits.ts";
 import { problem } from "./problem.ts";
 import { readSessionCookie, type Session } from "./session.ts";
 import { storeFor } from "./store.ts";
-import type { ObsLogEntry } from "@hns/core";
-import type { MirrorReporter, TrailLookup } from "../do/workspace.ts";
-import { workspaceObjectStartUpHeaders } from "../do/workspace.ts";
 import { incompleteToolPathMessage, toolPathMode } from "../do/tool-path-mode.ts";
 
 /** What every face receives after authentication. */
@@ -102,27 +99,19 @@ export interface HandlerDependencies {
   /** Called once per request; production forwards the entry to the Session object. */
   readonly onResponse?: ((event: EdgeResponseEvent, env: WorkerEnv) => void) | undefined;
   /**
-   * How the Workspace object is started, once per binding.
+   * The Workspace start-up pass, run once per isolate and after the answer (0272n).
    *
    * @remarks
-   * A Durable Object is constructed by the runtime with the Worker environment; everything the
-   * object needs **besides its bindings** is a function of that environment, and this is where
-   * the Worker builds it (0272n): the obs sink the mirror is observed through (the Session
-   * object's log factory), the Trail lookup a completed checkpoint's Change is written with
-   * (the control database), and the way a mirror push that finishes after its answer is reported
-   * back to the object. Each is optional, and an absent one is the object's own documented
-   * fallback: no sink means the console line, no Trails means no Change, no reporter means the
-   * push's result is logged — never a checkpoint that fails for any of them.
+   * A Durable Object is constructed by the runtime with `(state, env)`, so the parts the object
+   * needs besides its bindings are built **by the object** from those bindings (the obs sink from",
+   * `SESSION`, the Trail lookup from `DB`, the reporter from `WORKSPACE`). What the Worker",
+   * adds is the one thing the object cannot do for itself: exist. A Worker cannot enumerate a",
+   * namespace's objects, so the projects the control database names are each reached with",
+   * `POST /rpc/start` once per isolate. Present in production; absent, objects are constructed",
+   * the first time a face reaches them, with their own defaults — never a face that fails for",
+   * this.",
    */
-  readonly workspace?:
-    | {
-        readonly observe?:
-          | ((env: WorkerEnv) => ((entry: ObsLogEntry) => void) | undefined)
-          | undefined;
-        readonly trails?: ((env: WorkerEnv) => TrailLookup) | undefined;
-        readonly reportMirror?: ((env: WorkerEnv) => MirrorReporter | undefined) | undefined;
-      }
-    | undefined;
+  readonly workspace?: { readonly build?: ((env: WorkerEnv) => void) | undefined } | undefined;
 }
 
 /** The fetch signature the Worker module exposes. */
@@ -272,57 +261,73 @@ function decorateAsset(response: Response, path: string): Response {
 }
 
 /**
- * Create the Workspace namespace the faces reach: each fetch carries the object's start-up.
- *
- * @param namespace - The `WORKSPACE` binding, or undefined when the deployment has none.
- * @param start - How the start-up is built from the environment; see
- * {@link HandlerDependencies.workspace}.
- * @returns A namespace whose stubs are the binding's, with the start-up attached to every fetch.
+ * The environments whose Workspace start-up has been attempted in this isolate.
  *
  * @remarks
- * **This is how a Durable Object receives what its constructor cannot compute.** The runtime
- * constructs an object with `(state, env)` only, so a sink, a lookup, or a reporter that is a
- * function of the environment is carried on the request that first reaches the object. The
- * object reads it once, in its constructor, under `blockConcurrencyWhile`; after that the
- * binding's own fetches need nothing.
- *
- * The headers are the object's own contract (`workspaceObjectStartUpHeaders`): they are set by
- * the Worker only, and the object serves no public request (D059), so nothing a caller sends
- * can reach them.
+ * A Worker isolate lives for many requests, and one pass per isolate is all the objects need:
+ * each object is constructed once and keeps what it was started with. The WeakSet also makes the
+ * pass once **per environment**, so a deployment's objects are started again only when a new
+ * isolate (and so a new bindings object) begins.
  */
-export function workspaceWithStartUp(
-  namespace: DurableObjectNamespace | undefined,
-  start: NonNullable<HandlerDependencies["workspace"]> | undefined,
+const STARTED = new WeakSet<WorkerEnv>();
+
+/**
+ * Run the Workspace start-up once per isolate, after the response has been answered.
+ *
+ * @param start - How the objects are started; see {@link HandlerDependencies.workspace}.
+ * @param env - The request's environment, with its bindings.
+ * @param requestId - The correlation id, for the log line a failure leaves.
+ *
+ * @remarks
+ * **Once per isolate, and never awaited by the request.** The first request in an isolate
+ * schedules the pass and answers immediately; every later request finds it scheduled and does
+ * nothing. A pass that fails is logged with its error's name and the answer stands: an object
+ * nothing started falls back to its own defaults (the console line, no Change, a logged push),
+ * which is exactly what it did before this pass existed.
+ */
+function startWorkspaceOnce(
+  start: NonNullable<HandlerDependencies["workspace"]>,
   env: WorkerEnv,
-): DurableObjectNamespace | undefined {
-  if (namespace === undefined) return undefined;
-  if (start === undefined) return namespace;
-  const headers = workspaceObjectStartUpHeaders({
-    observe: start.observe?.(env) !== undefined,
-    trails: start.trails !== undefined,
-    reportMirror: start.reportMirror?.(env) !== undefined,
+  requestId: string,
+): void {
+  if (STARTED.has(env)) return;
+  STARTED.add(env);
+  // Started, never awaited: the answer has been built, and the objects this pass reaches do not
+  // belong to this request. The promise's catch is the only thing attached, so a failure is a log
+  // line and nothing else.
+  startWorkspaceObjects(env, start).catch((error: Error) => {
+    console.error(
+      "edge: the Workspace start-up was not sent",
+      requestId,
+      error instanceof Error ? error.name : "unknown",
+    );
   });
-  return {
-    idFromName: (name) => namespace.idFromName(name),
-    get: (id) => {
-      const stub = namespace.get(id);
-      return {
-        fetch: (request: Request): Promise<Response> => {
-          const carried = new Headers(request.headers);
-          for (const [name, value] of Object.entries(headers)) carried.set(name, value);
-          // A plain body (no duplex pairing): the start-up is added to an ordinary request, not
-          // to a streamed one, so the forwarded request is a request the runtime accepts.
-          return stub.fetch(new Request(request, { headers: carried }));
-        },
-      };
-    },
-  };
 }
 
-/** An environment whose Workspace stubs carry the start-up the Worker built for it. */
-export function withWorkspace(env: WorkerEnv, start: HandlerDependencies["workspace"]): WorkerEnv {
-  const namespace = workspaceWithStartUp(env.WORKSPACE, start, env);
-  return namespace === undefined ? env : { ...env, WORKSPACE: namespace };
+/**
+ * The projects the control database names, read once per isolate.
+ *
+ * @param env - The request's environment, for `DB`.
+ * @returns Every project id (the workspace ids), memoized; none when the read fails.
+ *
+ * @remarks
+ * A Worker cannot enumerate a Durable Object namespace's objects, so the objects that can exist
+ * are the ones the control database names: one per project (the workspace id **is** the
+ * project id, D080). The list changes when a project is created, which the next isolate's pass
+ * sees; memoizing it keeps the pass off D1 on every request of a long-lived isolate.
+ */
+const PROJECT_IDS = new WeakMap<WorkerEnv, Promise<readonly string[]>>();
+
+function projectIdsOnce(env: WorkerEnv): Promise<readonly string[]> {
+  const known = PROJECT_IDS.get(env);
+  if (known !== undefined) return known;
+  const read = projectIdsFor(env).catch((error: Error) => {
+    // A failed read is forgotten, so a later pass tries again rather than keeping an empty list.
+    PROJECT_IDS.delete(env);
+    throw error;
+  });
+  PROJECT_IDS.set(env, read);
+  return read;
 }
 
 /**
@@ -333,9 +338,7 @@ export function withWorkspace(env: WorkerEnv, start: HandlerDependencies["worksp
  *
  * @remarks
  * The same table `/api/workspaces/<id>/...` is checked against (`projectFor`): a workspace id is
- * a project id, so the projects are the workspaces. A read that fails starts nothing this
- * request; the next request tries again, and an unstarted object falls back exactly as it would
- * have without this pass.
+ * a project id, so the projects are the workspaces.
  */
 async function projectIdsFor(env: WorkerEnv): Promise<readonly string[]> {
   try {
@@ -344,7 +347,7 @@ async function projectIdsFor(env: WorkerEnv): Promise<readonly string[]> {
     return projects.map((project) => project.id);
   } catch (error) {
     console.error(
-      "edge: the workspace start-up could not read the projects",
+      "edge: the Workspace start-up could not read the projects",
       error instanceof Error ? error.name : "unknown",
     );
     return [];
@@ -354,20 +357,17 @@ async function projectIdsFor(env: WorkerEnv): Promise<readonly string[]> {
 /**
  * Start every Workspace object this deployment has, once per reachable project.
  *
- * @param env - The request's environment, with the start-up stubs in place.
- * @param start - What the objects are started with.
+ * @param env - The request's environment, with the bindings each object is built from.
+ * @param start - What the objects are started with; see {@link HandlerDependencies.workspace}.
  *
  * @remarks
- * A Worker cannot enumerate a Durable Object namespace's objects, so the objects that can exist
- * are the ones the control database names: one per project (the workspace id **is** the project
- * id, D080). Each is reached with a `POST /rpc/start` the object answers `{ ok: true }` to, which
- * also constructs it if it had not been constructed yet — that is the point: the object's
- * constructor reads what this request carries (see `workspaceWithStartUp`).
+ * Each object is reached with a `POST /rpc/start`, which constructs it if it had not been
+ * constructed yet — that is the point: the pass is what makes an object exist before a face
+ * needs it, and its answer is the proof it was reached. A deployment with no `DB` starts
+ * nothing, and one whose `WORKSPACE` binding is absent has no objects to start.
  *
- * It runs after routing because the request that arrived was the one that could reach an
- * object: by the time it is answered, any object a face touched has been constructed with the
- * start-up. A deployment with no `DB` starts nothing, and one whose `WORKSPACE` binding is absent
- * has no objects to start.
+ * The projects are read once per isolate (`projectIdsOnce`), so the pass does not query D1 on
+ * every request, and the requests themselves are not waited on: see `startWorkspaceOnce`.
  */
 async function startWorkspaceObjects(
   env: WorkerEnv,
@@ -375,23 +375,20 @@ async function startWorkspaceObjects(
 ): Promise<void> {
   const namespace = env.WORKSPACE;
   if (namespace === undefined) return;
-  const headers = workspaceObjectStartUpHeaders({
-    observe: start.observe?.(env) !== undefined,
-    trails: start.trails !== undefined,
-    reportMirror: start.reportMirror?.(env) !== undefined,
-  });
-  const projects = env.DB === undefined ? [] : await projectIdsFor(env);
+  // The parts are built here so a deployment missing one of them fails the pass rather than
+  // starting an object half-configured; each builder is the object's own (do/workspace.ts).
+  start.build?.(env);
+  const projects = env.DB === undefined ? [] : await projectIdsOnce(env);
   for (const projectId of projects) {
     await namespace.get(namespace.idFromName(projectId)).fetch(
       new Request("https://workspace.internal/rpc/start", {
         method: "POST",
-        headers: { ...headers, "content-type": "application/json" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ workspaceId: projectId }),
       }),
     );
   }
 }
-
 /**
  * Serve a static request, falling back to `index.html` for a client-side route.
  *
@@ -635,20 +632,11 @@ export function createEdge(
         }
       }
     }
-    // After routing, once: the Workspace objects a face reached were started on the way in, and
-    // the rest of the request's time passes with the object already knowing its sink and lookup.
-    if (dependencies.workspace !== undefined) {
-      try {
-        await startWorkspaceObjects(env, dependencies.workspace);
-      } catch (error) {
-        // A start-up pass that fails is logged and the answer stands: the object's own fallback
-        // (console line, no Change, logged push) is what an unstarted object does anyway.
-        console.error(
-          "edge: the Workspace start-up was not sent",
-          requestId,
-          error instanceof Error ? error.name : "unknown",
-        );
-      }
+    // After the answer, not before it: the Workspace start-up is the only work here that is not
+    // about this request, so the caller never waits for it (0272n).
+    const workspaceStartUp = dependencies.workspace;
+    if (workspaceStartUp !== undefined) {
+      startWorkspaceOnce(workspaceStartUp, env, requestId);
     }
     const decorated = withResponseRequestId(response, requestId);
     try {

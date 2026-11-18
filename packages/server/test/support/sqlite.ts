@@ -12,10 +12,20 @@ function sqlBindings(
   return bindings.map((value) => (value instanceof ArrayBuffer ? new Uint8Array(value) : value));
 }
 
-/** The part of `DurableObjectState` the unit layer models. */
+/**
+ * The part of `DurableObjectState` the unit layer models.
+ *
+ * @remarks
+ * `waitUntil` is part of the real state (0272n made it required): the work that follows an answer
+ * is kept alive by it, so a test state has one too. The promises are collected and `drain` awaits
+ * them, which is how a test sees the push and the Change finish without a real isolate.
+ */
 export interface TestSqliteState {
   readonly storage: DurableObjectSqliteStorage;
   blockConcurrencyWhile<T>(run: () => Promise<T>): Promise<T>;
+  waitUntil(promise: Promise<void>): void;
+  /** Wait for every promise handed to `waitUntil` so far. */
+  drain(): Promise<void>;
 }
 
 /** An open in-memory state and its closer. */
@@ -70,52 +80,59 @@ function toRow(row: Record<string, SqlRowValue>): Record<string, SqlValue> {
 export function openSqliteState(): OpenSqliteState {
   const db = new DatabaseSync(":memory:");
   let queue: Promise<void> = Promise.resolve();
-  const state: TestSqliteState = {
-    storage: {
-      sql: {
-        exec(query, ...bindings) {
-          const values = bindings.map((value) =>
-            value instanceof ArrayBuffer ? new Uint8Array(value) : value,
-          );
-          const rows = db
-            .prepare(query)
-            .all(...values)
-            .map(toRow);
-          let index = 0;
-          return {
-            next() {
-              const value = rows[index];
-              if (value === undefined) return { done: true as const };
-              index += 1;
-              return { value };
-            },
-            toArray() {
-              return rows;
-            },
-          };
-        },
-      },
-      transaction<T>(run: () => Promise<T>): Promise<T> {
-        const result = queue.then(async () => {
-          db.exec("BEGIN IMMEDIATE");
-          try {
-            const value = await run();
-            db.exec("COMMIT");
-            return value;
-          } catch (error) {
-            db.exec("ROLLBACK");
-            throw error;
-          }
-        });
-        queue = result.then(
-          () => undefined,
-          () => undefined,
+  const storage: DurableObjectSqliteStorage = {
+    sql: {
+      exec(query, ...bindings) {
+        const values = bindings.map((value) =>
+          value instanceof ArrayBuffer ? new Uint8Array(value) : value,
         );
-        return result;
+        const rows = db
+          .prepare(query)
+          .all(...values)
+          .map(toRow);
+        let index = 0;
+        return {
+          next() {
+            const value = rows[index];
+            if (value === undefined) return { done: true as const };
+            index += 1;
+            return { value };
+          },
+          toArray() {
+            return rows;
+          },
+        };
       },
     },
-    blockConcurrencyWhile<T>(run: () => Promise<T>): Promise<T> {
-      return run();
+    transaction<T>(run: () => Promise<T>): Promise<T> {
+      const result = queue.then(async () => {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          const value = await run();
+          db.exec("COMMIT");
+          return value;
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      });
+      queue = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    },
+  };
+  const blockConcurrencyWhile = <T>(run: () => Promise<T>): Promise<T> => run();
+  const kept: Promise<void>[] = [];
+  const state: TestSqliteState = {
+    storage,
+    blockConcurrencyWhile,
+    waitUntil(promise: Promise<void>) {
+      kept.push(promise);
+    },
+    async drain() {
+      await Promise.all(kept);
     },
   };
   return {

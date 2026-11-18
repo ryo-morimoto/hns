@@ -37,14 +37,18 @@ import { Session } from "../../src/do/session.ts";
  *   standing in for Artifacts, and the Worker confirmation is the object binding call;
  * - the **Trail** is the store real repository over real SQLite rows, through the lookup the
  *   Worker hands the object (`trailLookupFor`);
- * - the **observation** is the product chain: the object line, the sink the edge builds
- *   (`storeObserveFor`), the real `cf dev` route `/api/events` on a Session object, and
- *   `/api/metrics` read back from the same route.
+ * - the **observation** is the product chain with only the network edges in-test: the object's
+ *   line, the sink `storeObserveFor` (the Session log's factory), the edge's `forwardObs` exchange
+ *   run as a function here, the **product `Session` object's `/rpc/events`** (`handleObsRpc`) over
+ *   real SQLite, and `/rpc/metrics` read back from it. No `cf dev` is started by this file: the
+ *   suite's real-runtime route is `session-do.test.ts`, and the network between the sink and the
+ *   object is the one piece this file stands in for.
  *
  * What this proves that the unit tests cannot: the pieces are joined in the order the product
- * runs them. The push is held at the remote until the answer has been read, so a checkpoint that
- * is answered while the machine has not pushed yet is the proof that the ack did not wait for the
- * mirror; and the metric is read from a running project, not from a value the test wrote.
+ * runs them. This test's own `files.mirror` (the stand-in for the machine's push) is held until
+ * the checkpoint's answer has been read, so an answer that arrives while the machine has not
+ * pushed yet is the proof that the ack did not wait for the mirror; and the metric is read back
+ * through the object's own log, not written into it by the test.
  */
 
 const RUN_ID = "run-0272n";

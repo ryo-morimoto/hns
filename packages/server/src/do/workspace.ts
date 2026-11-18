@@ -22,12 +22,15 @@ import {
   type ObsLogEntry,
   type WorkspaceLease,
 } from "@hns/core";
+import { openStore } from "@hns/store";
 import type {
+  D1Binding,
   JournalOutcomeEntry,
   TrailChangeCreateInput,
   TrailChangeValue,
   TrailWriteRefusal,
 } from "@hns/store";
+import { trailLookupFor } from "@hns/store/edge";
 import { mirrorRef } from "@hns/workspace/mirror";
 import { checkpointPackKey } from "@hns/workspace/objects";
 import * as v from "valibot";
@@ -50,6 +53,9 @@ import { mirrorObservationEntry } from "../artifacts/observability.ts";
 import { signedHeadersOf } from "../checkpoint/agent-wire.ts";
 import { BODY_HASH_HEADER, sha256Hex, verifyDeviceRequest } from "../checkpoint/signature.ts";
 import { R2PackTransport, type PackBucket } from "../checkpoint/transport.ts";
+import { checkpointMirrorReporter } from "../checkpoint/mirror-report.ts";
+import { storeObserveFor } from "../obs/store.ts";
+import type { DurableObjectNamespace } from "../edge/env.ts";
 import { readBody } from "../edge/body.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
@@ -58,66 +64,6 @@ import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
 
 /** How long an issued lease stays valid unless renewed. */
 const DEFAULT_LEASE_TTL_MS = 60_000;
-
-/**
- * The headers the Worker sets on the request that starts one Workspace object.
- *
- * @remarks
- * A Durable Object is constructed as `(state, env)`, so what the object needs besides its
- * bindings — an observation sink, the Trail lookup, the reporter for a push that outlives its
- * answer — cannot be computed by its constructor. The Worker sets these on the first request it
- * sends to the object, and the object reads them in its constructor (under
- * `blockConcurrencyWhile`, before any handler runs) and never again: the values are the
- * environment's, and an object lives as long as the environment's bindings do.
- *
- * **They are a bit each, not a capability.** The names of the three things are in the header, and
- * the object reaches them through the same bindings its constructor already reads, so a header
- * someone forged could only turn on the object's own documented behaviour early (a sink it
- * would have been handed anyway). The object serves no public request (D059), so the header is
- * not reachable from outside the deployment in the first place.
- */
-export const WORKSPACE_STARTUP_HEADER = "x-hns-workspace-startup";
-
-/** What the start-up header carries: which of the three the environment provided. */
-export interface WorkspaceStartUp {
-  readonly observe: boolean;
-  readonly trails: boolean;
-  readonly reportMirror: boolean;
-}
-
-/**
- * The header value for one deployment's start-up.
- *
- * @param start - Which parts the environment provided.
- * @returns The comma-separated names, in the order they are listed here.
- */
-export function workspaceObjectStartUpHeaders(start: WorkspaceStartUp) {
-  const parts: string[] = [];
-  if (start.observe) parts.push("observe");
-  if (start.trails) parts.push("trails");
-  if (start.reportMirror) parts.push("report-mirror");
-  return { [WORKSPACE_STARTUP_HEADER]: parts.join(",") };
-}
-
-/**
- * Read the start-up off one request's headers.
- *
- * @param headers - The request's headers.
- * @returns Which parts to construct with; every one false when the header is absent or names
- * something this build does not know.
- *
- * @remarks
- * An unknown name is ignored rather than refused: a newer Worker that has started sending a part
- * this object does not build yet must still be able to start it, with the rest as it asked.
- */
-export function workspaceStartUpOf(headers: Headers): WorkspaceStartUp {
-  const named = new Set((headers.get(WORKSPACE_STARTUP_HEADER) ?? "").split(","));
-  return {
-    observe: named.has("observe"),
-    trails: named.has("trails"),
-    reportMirror: named.has("report-mirror"),
-  };
-}
 
 /** The `workspace_meta` key of the workspace's own mirror switch (`on`/`off`). */
 const MIRROR_OVERRIDE_KEY = "artifacts_mirror";
@@ -136,15 +82,17 @@ export interface WorkspaceState {
   readonly storage: DurableObjectSqliteStorage;
   blockConcurrencyWhile<T>(run: () => Promise<T>): Promise<T>;
   /**
-   * The runtime's keep-alive for work that outlives its response, when the runtime has one.
+   * The runtime's keep-alive for work that outlives its response.
    *
    * @remarks
-   * Cloudflare's `DurableObjectState.waitUntil` is what lets the mirror's push run after the
-   * checkpoint's answer has been sent ({@link Workspace} calls it for the work that follows an
-   * ack). The test state does not have it, and the object then starts the same work without the
-   * keep-alive, so the path is the one production takes.
+   * Cloudflare's `DurableObjectState.waitUntil` is what keeps the mirror's push and the Trail's
+   * Change alive after the checkpoint's answer has been sent ({@link Workspace} calls it for the
+   * work that follows an ack). It is **required**: without it the work would be started and then
+   * cut off with the response, which is a silent loss of the two things the ack promised were
+   * downstream — so the type refuses a state that cannot keep work alive, and a runtime that
+   * lacks it fails at construction rather than dropping the work later.
    */
-  waitUntil?(promise: Promise<void>): void;
+  waitUntil(promise: Promise<void>): void;
 }
 
 /** Test seams for the clock, the lease lifetime, and the machine. */
@@ -199,42 +147,32 @@ export interface WorkspaceOptions {
    * supply the workspace's log. Absent means the decided mirror is written to the console as the
    * structured line — **never** that it is not observed or that the mirror stops.
    *
-   * **The edge wires it** (0272n): the production dependency table builds it with `storeObserveFor`
-   * — the same factory the Session object's log comes from — so the line reaches the one
-   * observability log and `/api/metrics` reads it back. The Worker's start-up reaches this
-   * constructor through {@link WorkspaceOptions.startup}.
+   * **Production builds it from `SESSION`** (0272n): the same factory the Session object's log
+   * comes from (`obs/store.ts`'s `storeObserveFor`), so the line reaches the one observability
+   * log and `/api/metrics` reads it back. There is no seam to pass it through: a Durable Object
+   * is constructed as `(state, env)`, so the bindings are where production hands the object
+   * everything it needs.
    */
   readonly observe?: ((entry: ObsLogEntry) => void) | undefined;
   /**
    * Where the Runs' Trails are read from, so a completed checkpoint writes its Change.
    *
    * @remarks
-   * A seam like `artifacts`: production supplies `trailLookupFor(env)` (the control database),
-   * and a unit test supplies a lookup. **Absent means no Change is ever written** — never that a
-   * Trail is invented: a run whose Trail cannot be read is a run with no Trail, and a Change needs
-   * one that a person created (0272n).
+   * A seam like `artifacts`: production builds it from `DB` (`trailLookupFor` over the store the
+   * Worker reads), and a unit test supplies a lookup. **Absent means no Change is ever written** —
+   * never that a Trail is invented: a run whose Trail cannot be read is a run with no Trail, and a
+   * Change needs one that a person created (0272n).
    */
   readonly trails?: TrailLookup | undefined;
-  /**
-   * The start-up a runtime forwarded on the object's first request, when it forwarded none here.
-   *
-   * @remarks
-   * A Durable Object is constructed as `(state, env)` by the runtime, so the Worker's start-up —
-   * which parts of `observe` / `trails` / `reportMirror` this deployment has — cannot be a
-   * constructor argument. It arrives as {@link WORKSPACE_STARTUP_HEADER} on the request that
-   * constructs the object, and the constructor reads it from there. This member is the same value
-   * given directly, for a test that builds the object itself.
-   */
-  readonly startup?: WorkspaceStartUp | undefined;
   /**
    * Where a mirror push that outlives its request is reported to the object.
    *
    * @remarks
    * The push runs after the checkpoint's answer, so it cannot report through the answer's request.
-   * The Worker sends its result back as the same `POST /rpc/checkpoint/mirror` the route already
-   * serves, addressed to this object (`checkpointMirrorReporter`). Absent means the result is
-   * only logged and observed on the console — never that the mirror stops, and never that the
-   * checkpoint changes.
+   * Production builds it from `WORKSPACE` (`checkpointMirrorReporter`), which sends the result
+   * back as the same `POST /rpc/checkpoint/mirror` the route already serves, addressed to this
+   * object. Absent means the result is only logged and observed on the console — never that the
+   * mirror stops, and never that the checkpoint changes.
    */
   readonly reportMirror?: MirrorReporter | undefined;
 }
@@ -251,6 +189,32 @@ export interface WorkspaceOptions {
 export interface WorkspaceBindings {
   /** The bucket for journal bodies over 256KB. */
   readonly OBJECTS?: (JournalBucket & PackBucket) | undefined;
+  /**
+   * The Session namespace binding: the one observability log the mirror is observed through.
+   *
+   * @remarks
+   * The object builds the obs sink from it (`storeObserveFor`), which appends over
+   * `/api/events` to the Session object's event table. Absent, the object writes the console
+   * line as it always did — never that it stops observing.
+   */
+  readonly SESSION?: DurableObjectNamespace | undefined;
+  /**
+   * The control database, which holds the Trails a completed checkpoint's Change is written to.
+   *
+   * @remarks
+   * The object builds the Trail lookup from it (`trailLookupFor`). Absent, no run is linked to a
+   * Trail, so no Change is written and no checkpoint fails for it.
+   */
+  readonly DB?: D1Binding | undefined;
+  /**
+   * The Workspace namespace, which the mirror reporter uses to reach this object again.
+   *
+   * @remarks
+   * A Durable Object reaches its sibling through the binding the Worker gives it. Absent, a
+   * push's result is logged and observed only — the mirror's state is the one thing left
+   * unrecorded, and the checkpoint never waited for it.
+   */
+  readonly WORKSPACE?: DurableObjectNamespace | undefined;
   /** The machine agent's origin (`http://127.0.0.1:<port>` in dev). */
   readonly HNS_AGENT_URL?: string | undefined;
   /**
@@ -610,6 +574,51 @@ async function bodyOf(
 }
 
 /**
+ * The observation sink the object is started with, from the bindings it already has.
+ *
+ * @param session - The SESSION namespace binding, or undefined when the deployment has none.
+ * @returns `storeObserveFor`'s sink (the Session object's log), or undefined when there is no
+ * binding — the object then writes its console line, as it always did.
+ *
+ * @remarks
+ * A Durable Object is constructed as `(state, env)`, so this is how production hands the object
+ * what its constructor cannot otherwise compute. The sink is the same factory the Session
+ * object's own log comes from, so `artifacts.mirror` reaches the one log `/api/metrics` reads
+ * (0272n).
+ */
+function startObserve(
+  session: DurableObjectNamespace | undefined,
+): ((entry: ObsLogEntry) => void) | undefined {
+  return session === undefined ? undefined : storeObserveFor({ SESSION: session });
+}
+
+/**
+ * The Trail lookup the object is started with, from the bindings it already has.
+ *
+ * @param db - The control database binding, or undefined when the deployment has none.
+ * @returns The store's lookup over the store the Worker reads, or undefined without `DB`.
+ *
+ * @remarks
+ * The lookup opens the store for the one call the Change needs (see `trailLookupFor`); the
+ * object never holds a store across events.
+ */
+function startTrails(db: D1Binding | undefined): TrailLookup | undefined {
+  return db === undefined ? undefined : trailLookupFor(() => openStore({ d1: db }));
+}
+
+/**
+ * The mirror reporter the object is started with, from the bindings it already has.
+ *
+ * @param workspace - The WORKSPACE namespace binding, or undefined when the deployment has none.
+ * @returns The sender for a push that outlives its answer, or undefined without the binding (its
+ * result is then logged and observed only).
+ */
+function startReportMirror(
+  workspace: DurableObjectNamespace | undefined,
+): MirrorReporter | undefined {
+  return workspace === undefined ? undefined : checkpointMirrorReporter(workspace);
+}
+/**
  * One workspace's Workspace Durable Object.
  *
  * @remarks
@@ -708,12 +717,14 @@ export class Workspace {
     // override; only the binding decides whether there is anything to issue a target from.
     this.#switch = mirrorSettingsOf(options, undefined);
     this.#mirror = artifacts === undefined ? undefined : new ArtifactsRepos(artifacts, this.#clock);
-    // The three parts that are not bindings: given directly (a test), or built here from what the
-    // Worker forwarded on the request that constructed this object (production). What was not
-    // provided stays undefined, and each fallback is the object's own documented one.
-    this.#observe = options.observe;
-    this.#trails = options.trails;
-    this.#reportMirror = options.reportMirror;
+    // The three parts that are not bindings are built here from the bindings production already
+    // gives (a Durable Object is constructed as `(state, env)`): the obs sink from SESSION (the
+    // Session log's own factory), the Trail lookup from DB, and the reporter from WORKSPACE. A
+    // seam still wins, so a unit test supplies any of them; what nobody provided stays undefined,
+    // and each fallback is the object's own documented one.
+    this.#observe = options.observe ?? startObserve(options.SESSION);
+    this.#trails = options.trails ?? startTrails(options.DB);
+    this.#reportMirror = options.reportMirror ?? startReportMirror(options.WORKSPACE);
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -1544,9 +1555,9 @@ export class Workspace {
    * @remarks
    * The Workspace object is constructed with the Durable Object state, so `waitUntil` is the
    * runtime's own: the work continues in the isolate after the response is sent, which is how the
-   * mirror's push can take seconds while the checkpoint's ack does not. Absent (a test state, or a
-   * runtime without it) the promise is still started here and a rejection is logged with its name
-   * only — never the body, never the token.
+   * mirror's push can take seconds while the checkpoint's ack does not. The state is required to
+   * have it (the constructor refuses one that does not), so there is no path where the work is
+   * started and nobody keeps it alive.
    */
   #afterAnswer(work: () => Promise<void>): void {
     const running = work().catch((error: Error) => {
@@ -1555,8 +1566,7 @@ export class Workspace {
         error instanceof Error ? error.name : "unknown",
       );
     });
-    const keepAlive = this.#state.waitUntil?.bind(this.#state);
-    if (keepAlive !== undefined) keepAlive(running);
+    this.#state.waitUntil(running);
   }
 
   /**
