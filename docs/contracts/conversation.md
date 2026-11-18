@@ -34,12 +34,15 @@
 
 - `/state` は **404** を返す。行は Object の metadata の**写し**（[journal-index](journal-index.md)、D078）で、**原物の無い行は会話ではない**。
 - 呼び出し側はこの 404 を「削除・未知」と**区別できない**（区別できてはならない: 読める会話が無い）。状態を確かめるのは operator の道具: `index_state` の `last_error*`、dirty な行の数、Object 自身。
-- **直す向きは Object → D1 だけ**（人の書き込みが D1 に乗る話は下の「人の書き込みと、その寿命」）: (1) その Object の次の **index drain**（RPC / alarm の後）が行を Object の metadata に合わせて書き直す・消す、(2) `POST /rpc/reindex` が project の行を Object から作り直す。直るまでは metadata（`/api/conversations/<id>`）は行を返し続け、`/state` だけが「原物が無い」と言う。
+- **直す向きは Object → D1 だけ**（人の書き込みの列は下の「人の書き込みと、Object との関係」）: (1) その Object の次の **index drain**（RPC / alarm の後）が行を Object の metadata に合わせて書き直す・消す、(2) `POST /rpc/reindex` が project の行を Object から作り直す。直るまでは metadata（`/api/conversations/<id>`）は行を返し続け、`/state` だけが「原物が無い」と言う。
 
-## 人の書き込み（0271n）と、その寿命
+## 人の書き込み（0271n）と、Object との関係
 
-- **`PATCH` / `DELETE` が書くのは D1 の `conversations` の行だけ**。Object の metadata は書き換えない（Object へ書く面が無い）。したがって向きは D078 のまま **Object → D1** で、人の編集はその向きに乗らない。
-- **この非対称は意図した契約で、寿命がある**。この face の読みはすべて D1 からなので、編集は**すぐ答えに出る**。だが Object は古い title と作成時の `isArchived` を持ったままで、Object がその行を書くとき（drain、`POST /rpc/reindex`）**Object の metadata が行を上書きし、人の title / archive は消える**。削除の tombstone も、Object が行を書き直したり消したりすれば「削除済み」ではなく「未知」になる。**編集が保つのは、Object がその行を書き直すまでの間**。永続させるには Object の metadata へ書く経路が要るが、この face はそれを持たない（0119 の「行は写し」の原則を破らないため）。実経路テスト（`packages/server/src/conversations/face.edge.test.ts`）が両方向とも固定している。
+- **`PATCH` / `DELETE` が書くのは D1 の `conversations` の行だけ**。Object の metadata は書き換えない（Object へ書く面が無い）。行の `edited_at` に人の編集の版が入る。
+- **人が書いた列は、Object の書き込みでは上書きしない**。`title` / `archived` / `deleted_at` は、行に `edited_at` がある限り**人が持つ**。規則は 1 箇所（`store/src/conversation-index/writer.ts` の `keepEdited`）にあり、**index drain も `POST /rpc/reindex` も同じ規則に従う**。`updated_at` / `created_at` / `indexed_at` は Object のもので、意味（活動の順序と cursor）は変わらない。
+  - 実測（`packages/server/src/conversations/face.edge.test.ts` の実経路テスト）: rename → **実際の turn 1 回**（本物の runtime が turn を終え、Object が drain する）→ `/api/conversations/<id>` の `title` は人が付けた値のまま。archive → 同じく `archived: true` のまま。delete → 同じ turn と reindex のあとも `404`（**復活しない**）。reindex しても人の値が残る。drain は `updated_at` を進めている（Object の列は書かれている）。
+- **Object を正に戻したいとき**は、`edited_at` を消す**明示的な操作**として別に用意する（今は無い。将来の issue）。reindex は「Object の写しを D1 に」の操作だが、人の編集を消す操作ではない。
+- **Object の metadata 自体は古いまま**なので、`/api/conversations/<id>/state` の Object 側の `title` / `archived` は Object の値を返す（この face の `conversation` は D1 の値）。
 
 ## 変わったとき
 

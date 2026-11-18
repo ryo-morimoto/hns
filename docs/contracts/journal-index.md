@@ -16,6 +16,7 @@
 - 索引は**写し**（INV-11）。正本は Session DO。D1 の行は DO から `reindex` で作り直せる。
 - DO は metadata に内部 `dirtyAt` を持ち、RPC の後に `pendingIndex`（dirty な行、1 回 50 行まで）→ D1 upsert → `markIndexed`（`dirtyAt === version` のときだけ消す CAS）を回す。
 - upsert は `updated_at` の単調（遅い書き込みが新しい行を巻き戻さない）。drain は索引を先に読み、変わっている行だけ書く。
+- **人が書いた列は Object が上書きしない**（0271n）。行に `edited_at` があれば、`title` / `archived` / `deleted_at` は人の値のまま（drain も `reindex` も同じ）。規則は `store/src/conversation-index/writer.ts` の `keepEdited` 1 箇所。`updated_at` / `created_at` / `indexed_at` は Object の列で、意味は変わらない。`edited_at` を消す（Object を正に戻す）操作はまだ無い。
 - **索引の失敗は操作を止めない**。dirty を残し、次の RPC で再送する。失敗は観測（`index.drain.failed`）に出すが、**課金の測定窓の外**（[observability](observability.md) の「索引の観測と測定窓」）。
 - 一覧は D1 のみ（`(project_id, updated_at DESC, id DESC)` の keyset）。未索引の行も一覧から落ちない。詳細は DO。
 - 未知の `projectId` は D1 を読む前に `invalid_request`（DO を作らない）。
