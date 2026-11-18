@@ -9,6 +9,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { RelayEnvironmentProvider } from "react-relay";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -18,7 +19,8 @@ import { conversationStateBody, interceptFetch } from "../../../test/support/con
 import { createTestEnvironment } from "../../../test/support/relay.ts";
 import { workspaceFixture } from "../../../test/support/workspaceFixtures.ts";
 import { Shell } from "../../app/Shell.tsx";
-import { LIVE_RECONNECT_DELAYS_MS } from "../../live/client.ts";
+import { LIVE_RECONNECT_DELAYS_MS, type LiveSocketFactory } from "../../live/client.ts";
+import { useLiveConnection } from "../../live/useLiveConnection.ts";
 import { ConversationScreen } from "./ConversationScreen.tsx";
 
 const INTENT = "conversation-intent";
@@ -158,15 +160,39 @@ function mountScreen(conversationId = INTENT) {
       <QueryClientProvider
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
-        <ConversationScreen
-          conversationId={conversationId}
-          projectId="project-hns"
-          liveSocket={factory}
-        />
+        <ScreenAtRoute conversationId={conversationId} socket={factory} />
       </QueryClientProvider>
     </RelayEnvironmentProvider>,
   );
   return { ...view, sockets };
+}
+
+/**
+ * The screen as its route mounts it: the route owns the one connection and hands it down.
+ *
+ * @param props.conversationId - The conversation the route names.
+ * @param props.socket - The socket factory the visit opens.
+ *
+ * @remarks
+ * The screen never opens a connection. This stands in for the route (the same hook, the same
+ * client), so a test drives the socket the production route would have opened, and the
+ * screen's sends travel on it.
+ */
+function ScreenAtRoute({
+  conversationId,
+  socket,
+}: {
+  readonly conversationId: string;
+  readonly socket: LiveSocketFactory;
+}): ReactElement {
+  const live = useLiveConnection(conversationId, { socket, projectId: "project-hns" });
+  return (
+    <ConversationScreen
+      conversationId={conversationId}
+      projectId="project-hns"
+      client={live.client}
+    />
+  );
 }
 
 /**
@@ -217,6 +243,29 @@ test("a body that is not the state route's answer is an error", async () => {
   renderShellOn(INTENT);
 
   expect(await screen.findByText("会話を開けません")).toBeTruthy();
+});
+
+// Catches: a visit opening more than one connection — the route's for the title and the
+// screen's for the transcript — which makes the object serve two subscribers for one conversation,
+// lets the two reconnect on their own, and counts the visit twice in whatever observes sockets.
+test("one conversation visit opens one socket", async () => {
+  interceptFetch(() => ({ kind: "reply", reply: { body: conversationStateBody() } }));
+
+  const { sockets } = renderShellOn(INTENT);
+  expect(await screen.findByLabelText("メッセージ")).toBeTruthy();
+
+  // The route's client is created in an effect, so let the commits settle before counting.
+  await waitFor(() => {
+    expect(sockets).toHaveLength(1);
+  });
+  act(() => {
+    sockets[0]?.open();
+  });
+  await waitFor(() => {
+    expect(document.body.textContent ?? "").toContain("ライブ更新を受信しています。");
+  });
+  // Nothing in the conversation's render opened a second connection, and neither did its read.
+  expect(sockets).toHaveLength(1);
 });
 
 // Catches: a 404 shown as a retryable outage, which tells a person to wait for a conversation
@@ -492,10 +541,9 @@ function repositoryRoot(): string {
 function screenSources(): readonly { readonly name: string; readonly source: string }[] {
   const dir = join(repositoryRoot(), "packages/web/src/screens/conversation");
   return readdirSync(dir)
-    .filter((name) => /\.tsx$/u.test(name) && !name.includes(".test."))
+    .filter((name) => name.endsWith(".tsx") && !name.includes(".test."))
     .map((name) => ({
       name,
-      // SAFETY: the name came from readdirSync on this file's own directory.
       source: stripComments(readFileSync(join(dir, name), "utf8")),
     }));
 }
@@ -586,6 +634,59 @@ test("the progress line says what the run is doing", async () => {
   });
   expect(progressText()).toContain("考え中");
   expect(document.body.textContent ?? "").toContain("答えの途中");
+});
+
+/** The transcript's scroll container. */
+function scroller(): HTMLElement {
+  const found = document.body.querySelector(".hns-transcript__scroll");
+  if (found instanceof HTMLElement) return found;
+  throw new Error("the transcript has no scroll container");
+}
+
+/**
+ * Give the scroll container the numbers a laid-out element would have.
+ *
+ * @param element - The transcript's scroll container.
+ * @param scrollTop - How far down the reader is.
+ * @param scrollHeight - How tall the content is.
+ * @param clientHeight - How tall the viewport is.
+ */
+function setMetrics(
+  element: HTMLElement,
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+): void {
+  Object.defineProperty(element, "scrollHeight", { configurable: true, value: scrollHeight });
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: clientHeight });
+  element.scrollTop = scrollTop;
+}
+
+// Catches: a 最新へ button that is offered but does nothing, or one that stays after the reader
+// asked for the end — the reader then cannot tell whether the view moved.
+test("最新へ comes back to the newest line and is gone once the reader is there", async () => {
+  const { socket } = await renderOpen([{ id: "1", kind: "pi.user", text: "最初の行" }]);
+  const element = scroller();
+  // jsdom lays nothing out, so the numbers the rule reads are supplied: the reader has scrolled
+  // up, far from the end.
+  setMetrics(element, 0, 1000, 100);
+  act(() => {
+    element.dispatchEvent(new Event("scroll"));
+  });
+
+  const button = await screen.findByRole("button", { name: "最新へ" });
+
+  // The click takes the view to the end and records it; the button goes away with the jump.
+  await userEvent.click(button);
+  expect(element.scrollTop).toBe(900);
+  expect(screen.queryByRole("button", { name: "最新へ" })).toBeNull();
+
+  // The reader is at the end now, so the next line does not bring the button back.
+  act(() => {
+    socket?.message(appendFrame(INTENT, { id: "2", kind: "pi.assistant", text: "次の行" }, "2"));
+  });
+  expect(await screen.findByText("次の行")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "最新へ" })).toBeNull();
 });
 
 // Catches: a long answer drawn as one unbroken node, or a long conversation re-sorting or

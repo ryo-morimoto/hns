@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { LiveFrame, LiveSendResult } from "@hns/core";
+import type { LiveFrame } from "@hns/core";
 import {
   browserLiveSocket,
   createLiveClient,
@@ -8,46 +8,58 @@ import {
 } from "./client.ts";
 import { initialLiveState, type LiveConversationState } from "./state.ts";
 
-/** Options for the React binding. */
-export interface LiveConnectionOptions {
-  /** Tests pass a fake; production uses the browser's WebSocket. */
-  readonly socket?: LiveSocketFactory | undefined;
-  /** The project the conversation belongs to; sent so the edge picks that Session object. */
-  readonly projectId?: string | undefined;
-  /** Receives every parsed frame; the conversation screen patches the Relay store here. */
-  readonly onFrame?: ((frame: LiveFrame) => void) | undefined;
-  /** Receives every send answer; the conversation screen decides what to say. */
-  readonly onSendResult?: ((result: LiveSendResult) => void) | undefined;
-}
-
 /** What {@link useLiveConnection} returns: the state a screen renders, and the client behind it. */
 export interface LiveConnection {
   /** The latest state; a new object after every change. */
   readonly state: LiveConversationState;
   /**
-   * The controller that carries commands.
+   * The controller that carries the connection's commands.
    *
    * @remarks
    * Null on the first pass, before the effect that opens the socket runs, and again while the
-   * conversation changes. A screen disables its composer meanwhile instead of guessing.
+   * conversation changes. The owner (the conversation route) hands it to the screen, so one
+   * visit has one client and one socket.
    */
   readonly client: LiveClient | null;
 }
 
+/** What one conversation's connection needs from its owner. */
+export interface LiveConnectionOptions {
+  /** Tests pass a fake; production uses the browser's WebSocket. */
+  readonly socket?: LiveSocketFactory | undefined;
+  /** The project the conversation belongs to; sent so the edge picks that Session object. */
+  readonly projectId?: string | undefined;
+  /** Receives every parsed frame; the route patches the Relay store here. */
+  readonly onFrame?: ((frame: LiveFrame) => void) | undefined;
+  /**
+   * Whether a connection should be opened at all; defaults to true.
+   *
+   * @remarks
+   * A shell rendered without a socket (every test that does not name one) shows the conversation
+   * it reads and no live part. The hook still runs — hooks are unconditional — and this is what
+   * keeps it from reaching for the platform's WebSocket behind a test's back.
+   */
+  readonly enabled?: boolean | undefined;
+}
+
 /**
- * Keep one conversation's live state, and the client that carries its commands, for the
- * lifetime of a component.
+ * Open and keep one conversation's connection for the lifetime of a component.
  *
  * @param conversationId - The decimal conversation id to subscribe to.
- * @param options - An optional socket factory, project, frame handler, and send-answer handler.
- * @returns The latest state and the live client.
+ * @param options - The socket factory, the project, and the frame handler.
+ * @returns The latest state and the client.
  *
  * @remarks
+ * **Exactly one component opens the connection.** The conversation route mounts this and passes
+ * the client down; a screen never opens its own, because two clients for one conversation are
+ * two subscribers on the object, two reconnects racing, and two rows in whatever counts
+ * connections.
+ *
  * The controller is created in an effect, so a server render never opens a socket. Leaving the
- * conversation (or unmounting) closes it and cancels a pending retry. The frame and answer
- * handlers are read through refs: a new handler must not reopen the socket. The client is
- * published after the effect, and cleared before the next one, so a command from the old
- * connection never reaches the new conversation.
+ * conversation (or unmounting) closes it and cancels a pending retry. The frame handler is read
+ * through a ref: a new handler must not reopen the socket. The client is published after the
+ * effect and cleared before the next one, so a command from the old connection never reaches
+ * the new conversation.
  */
 export function useLiveConnection(
   conversationId: string,
@@ -56,21 +68,17 @@ export function useLiveConnection(
   const socket = options.socket;
   const projectId = options.projectId;
   const onFrame = options.onFrame;
-  const onSendResult = options.onSendResult;
+  const enabled = options.enabled ?? true;
   const [state, setState] = useState(initialLiveState);
   const [client, setClient] = useState<LiveClient | null>(null);
   const frameHandler = useRef(onFrame);
-  const answerHandler = useRef(onSendResult);
 
   useEffect(() => {
     frameHandler.current = onFrame;
   }, [onFrame]);
 
   useEffect(() => {
-    answerHandler.current = onSendResult;
-  }, [onSendResult]);
-
-  useEffect(() => {
+    if (!enabled) return;
     const created = createLiveClient({
       conversationId,
       projectId,
@@ -80,18 +88,14 @@ export function useLiveConnection(
       },
     });
     const unsubscribe = created.subscribe(setState);
-    const unsubscribeAnswers = created.onSendResult((result) => {
-      answerHandler.current?.(result);
-    });
     setState(created.state);
     setClient(created);
     return () => {
       unsubscribe();
-      unsubscribeAnswers();
       created.close();
       setClient(null);
     };
-  }, [conversationId, projectId, socket]);
+  }, [conversationId, projectId, socket, enabled]);
 
   return { state, client };
 }

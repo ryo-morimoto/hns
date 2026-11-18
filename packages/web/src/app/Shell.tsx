@@ -1,6 +1,6 @@
 import { Drawer } from "@base-ui/react/drawer";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import type { ConversationLink, ProjectLink, TaskLink } from "./viewModel.ts";
 import { toGlobalId } from "@hns/core/graphql";
 import { useFragment, useLazyLoadQuery, useRelayEnvironment } from "react-relay";
@@ -13,12 +13,12 @@ import type { SidebarTasks$key } from "../__generated__/SidebarTasks.graphql";
 import { Button } from "../components/Button.tsx";
 import { ConversationScreen } from "../screens/conversation/ConversationScreen.tsx";
 import { projectIdFrom } from "../routes/ids.ts";
-import { formatHash } from "../routes/route.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
 import type { LiveSocketFactory } from "../live/client.ts";
-import { reapplyLiveTitles } from "../live/store.ts";
-import { DEFAULT_FETCH_POLICY, subscribesToLive, useScreenRead } from "./freshness.ts";
+import { applyLiveFrameToStore, forgetLiveTitle, reapplyLiveTitles } from "../live/store.ts";
+import { useLiveConnection } from "../live/useLiveConnection.ts";
+import { DEFAULT_FETCH_POLICY, useScreenRead } from "./freshness.ts";
 import { LiveConnection } from "./LiveConnection.tsx";
 import { ProjectWorkspaceProvider, type ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { QueryBoundary } from "./QueryBoundary.tsx";
@@ -374,13 +374,18 @@ interface ConversationViewProps {
 }
 
 /**
- * The conversation route.
+ * The conversation route, and the one live connection its visit has.
  *
  * @remarks
- * Two things happen here that the route owns rather than the screen: the title in the chrome
- * (the shell has to show it before the screen's own read finishes, and it tracks the socket's
- * rename), and the live connection's report upward so a reconnect refetches the lists. The
- * transcript, the composer, and the commands are the screen's.
+ * **One visit, one client, one socket.** The route creates the conversation's `LiveClient`
+ * here — not inside the screen — so the visit has a single connection: its frames patch the
+ * Relay store (the sidebar's title), its status is the line above the transcript, and the same
+ * client carries the screen's sends and stops. Two clients for one conversation would be two
+ * subscribers on the object, two reconnects racing, and two connections to count.
+ *
+ * The route also owns what the screen does not: the title in the chrome (it must show before
+ * the screen's read finishes, and it tracks a rename), and the reconnect report upward so the
+ * shell refetches the lists. The transcript, the composer, and the draft are the screen's.
  */
 function ConversationView({
   project,
@@ -389,34 +394,46 @@ function ConversationView({
   liveSocket,
   onReconnect,
 }: ConversationViewProps): ReactElement {
-  // The screen is drawn by the frame below, through the one connection the route owns: the
-  // screen's own status line and progress are the same facts the frame's connection carries.
-  const screen = <ConversationScreen conversationId={conversationId} projectId={project.id} />;
-  if (liveSocket === undefined || !subscribesToLive("conversation")) {
-    return (
-      <section className="hns-view" aria-labelledby="conversation-title">
-        <h1 id="conversation-title" className="hns-sr-only">
-          {title ?? "会話"}
-        </h1>
-        {screen}
-      </section>
-    );
-  }
+  const environment = useRelayEnvironment();
+  // Hooks are unconditional: a shell with no socket still calls the hook, and `enabled` is
+  // what keeps it from opening one the shell did not offer.
+  const live = useLiveConnection(conversationId, {
+    projectId: project.id,
+    socket: liveSocket,
+    enabled: liveSocket !== undefined,
+    onFrame: (frame) => {
+      applyLiveFrameToStore(environment, frame);
+    },
+  });
+  const previous = useRef(live.state.status);
+
+  useEffect(() => {
+    const reconnected = previous.current === "reconnecting" && live.state.status === "online";
+    previous.current = live.state.status;
+    if (reconnected) onReconnect();
+  }, [live.state.status, onReconnect]);
+
+  useEffect(() => {
+    return () => {
+      forgetLiveTitle(environment, conversationId);
+    };
+  }, [environment, conversationId]);
+
   return (
-    <LiveConnection
-      conversationId={conversationId}
-      projectId={project.id}
-      socket={liveSocket}
-      onReconnect={onReconnect}
-    >
-      {() => (
-        <section className="hns-view" aria-labelledby="conversation-title">
-          <h1 id="conversation-title" className="hns-sr-only">
-            {title ?? "会話"}
-          </h1>
-          {screen}
-        </section>
+    <section className="hns-view" aria-labelledby="conversation-title">
+      <h1 id="conversation-title" className="hns-sr-only">
+        {title ?? "会話"}
+      </h1>
+      {liveSocket === undefined ? null : (
+        // The status, the sidebar's title, and the screen's commands are all this one
+        // connection; nothing below opens another.
+        <LiveConnection state={live.state} label />
       )}
-    </LiveConnection>
+      <ConversationScreen
+        conversationId={conversationId}
+        projectId={project.id}
+        client={live.client}
+      />
+    </section>
   );
 }

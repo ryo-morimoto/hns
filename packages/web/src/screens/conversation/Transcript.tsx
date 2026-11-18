@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 import { Button } from "../../components/Button.tsx";
 import { classNames } from "../../design/classNames.ts";
-import { bottomOffset, followOf, type FollowState } from "./follow.ts";
+import { bottomOffset, followOf, type FollowState, type ScrollMetrics } from "./follow.ts";
 import { RichText } from "./RichText.tsx";
 import type { ProgressView, TranscriptItem } from "./transcript.ts";
 
@@ -73,61 +73,65 @@ export interface TranscriptProps {
   readonly progress: ProgressView | null;
 }
 
+/** The container's numbers, as the follow rule wants them. */
+function metricsOf(element: HTMLDivElement): ScrollMetrics {
+  return {
+    scrollTop: element.scrollTop,
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+  };
+}
+
 /**
  * The transcript: entries, the in-flight answer, and the way back to the newest line.
  *
  * @param props - The lines, the draft, and what the progress line says.
  *
  * @remarks
- * Follow is the reader's: the view moves only while they are at the end, and it stops moving the
- * moment they scroll up, with a 最新へ button to come back. The follow state is held in a ref as
- * well as state so a growth never reads a stale value; only the reader's own scrolling (and the
- * screen's own jump) change it.
+ * **Follow is the reader's, and it is state, not a ref.** The 最新へ button is drawn only while
+ * the reader is away from the end (`reading`), and whether it is offered must be decided by the
+ * last `scroll` event the reader caused, not by a number read back from a layout this code does
+ * not own. The rule itself is {@link followOf}, which is tested on its own.
+ *
+ * A render can add a line or a delta. While `following`, the view is taken to the new end;
+ * while `reading`, the view stays where the reader put it and the button appears.
+ *
+ * **最新へ** takes the view back to the end, records `following`, and drops the button, so new
+ * text moves the view again.
  */
 export function Transcript({ items, draft, empty, progress }: TranscriptProps): ReactElement {
   const scroller = useRef<HTMLDivElement>(null);
-  const following = useRef<FollowState>("following");
-  const [showLatest, setShowLatest] = useState(false);
+  const [follow, setFollow] = useState<FollowState>("following");
 
   const toBottom = (): void => {
     const element = scroller.current;
-    if (element === null) return;
-    element.scrollTop = bottomOffset({
-      scrollTop: element.scrollTop,
-      scrollHeight: element.scrollHeight,
-      clientHeight: element.clientHeight,
-    });
-    following.current = "following";
-    setShowLatest(false);
+    if (element !== null) {
+      element.scrollTop = bottomOffset(metricsOf(element));
+    }
+    setFollow("following");
   };
 
   // Every render can add a line or a delta; a reader at the end is taken to the new end, and a
   // reader who is not is offered the button instead of having the view pulled under them.
   useLayoutEffect(() => {
-    if (following.current === "following") {
-      toBottom();
-    } else {
-      setShowLatest(true);
-    }
-  });
+    if (follow !== "following") return;
+    const element = scroller.current;
+    if (element !== null) element.scrollTop = bottomOffset(metricsOf(element));
+  }, [follow, items.length, draft]);
 
   useEffect(() => {
     const element = scroller.current;
     if (element === null) return;
     const onScroll = (): void => {
-      const next = followOf({
-        scrollTop: element.scrollTop,
-        scrollHeight: element.scrollHeight,
-        clientHeight: element.clientHeight,
-      });
-      following.current = next;
-      if (next === "following") setShowLatest(false);
+      setFollow(followOf(metricsOf(element)));
     };
     element.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       element.removeEventListener("scroll", onScroll);
     };
   }, []);
+
+  const showLatest = follow === "reading";
 
   return (
     <div className="hns-transcript">

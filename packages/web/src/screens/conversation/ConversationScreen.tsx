@@ -1,6 +1,5 @@
 import type { Conversation, LiveSendResult } from "@hns/core";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
-import { LiveConnection } from "../../app/LiveConnection.tsx";
 import { Skeleton } from "../../components/Skeleton.tsx";
 import type { LiveClient } from "../../live/client.ts";
 import { explainConnection, type LiveConversationState } from "../../live/state.ts";
@@ -65,7 +64,7 @@ type ReadState =
 export function ConversationScreen({
   conversationId,
   projectId,
-  liveSocket,
+  client,
   readState,
   storage,
   randomId,
@@ -73,7 +72,15 @@ export function ConversationScreen({
   readonly conversationId: string;
   /** The project the route names; it is where the way back points. */
   readonly projectId: string;
-  readonly liveSocket?: Parameters<typeof LiveConnection>[0]["socket"];
+  /**
+   * The conversation's one live connection, owned by the route.
+   *
+   * @remarks
+   * The screen never opens one. The route's client is what carries the sends and stops this
+   * screen issues and what its transcript follows, so one visit has one socket; null (a shell
+   * rendered without one) draws the conversation the read returned and no live part.
+   */
+  readonly client: LiveClient | null;
   /**
    * Test seam for the one read.
    *
@@ -143,7 +150,7 @@ export function ConversationScreen({
       conversationId={conversationId}
       conversation={current.conversation}
       storedEntries={current.entries}
-      liveSocket={liveSocket}
+      client={client}
       storage={store.current ?? browserDraftStorage()}
       randomId={randomId}
     />
@@ -214,7 +221,7 @@ interface LoadedProps {
   readonly conversationId: string;
   readonly conversation: Conversation;
   readonly storedEntries: readonly LiveEntryLike[];
-  readonly liveSocket: Parameters<typeof LiveConnection>[0]["socket"];
+  readonly client: LiveClient | null;
   readonly storage: ReturnType<typeof browserDraftStorage>;
   readonly randomId: (() => string) | undefined;
 }
@@ -224,7 +231,7 @@ function LoadedConversation({
   conversationId,
   conversation,
   storedEntries,
-  liveSocket,
+  client: given,
   storage,
   randomId,
 }: LoadedProps): ReactElement {
@@ -237,7 +244,6 @@ function LoadedConversation({
   const [stop, setStop] = useState<StopState>({ kind: "idle" });
   const [outstanding, setOutstanding] = useState<OutstandingSend | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const client = useRef<LiveClient | null>(null);
   const waiting = useRef<OutstandingSend | null>(null);
   // The answer arrives after this render, so the draft store the composer writes to is read
   // through a ref rather than captured.
@@ -266,29 +272,32 @@ function LoadedConversation({
     [conversationId],
   );
 
-  const onReady = useCallback(
-    (created: LiveClient) => {
-      client.current = created;
-      // A send the old connection never answered is not lost with it: the new client keeps
-      // unanswered sends and writes them again on open.
-      const pending = waiting.current;
-      if (pending === null) return;
-      created.send(pending.clientMessageId, pending.text, conversationId);
-    },
-    [conversationId],
-  );
-
-  // One identity for the whole life of the mount: the bridge re-reports whenever this changes,
-  // and a new function every render would make it write state on every render.
-  const applyLive = useCallback((next: LiveConversationState) => {
-    setLive((previous) =>
-      previous.entries === next.entries &&
-      previous.draft === next.draft &&
-      previous.status === next.status
-        ? previous
-        : { entries: next.entries, draft: next.draft, status: next.status },
-    );
-  }, []);
+  // The route's client answers every send it carries; the screen listens for the answers to the
+  // sends it made, and its own outstanding one is cleared above. The same client is where the
+  // screen's live state comes from: its transcript, the draft, and the status line are all the
+  // one connection the route owns.
+  useEffect(() => {
+    if (given === null) {
+      setLive({ entries: [], draft: "", status: "connecting" });
+      return;
+    }
+    const apply = (next: LiveConversationState): void => {
+      setLive((previous) =>
+        previous.entries === next.entries &&
+        previous.draft === next.draft &&
+        previous.status === next.status
+          ? previous
+          : { entries: next.entries, draft: next.draft, status: next.status },
+      );
+    };
+    apply(given.state);
+    const unsubscribeState = given.subscribe(apply);
+    const unsubscribeAnswers = given.onSendResult(onSendResult);
+    return () => {
+      unsubscribeState();
+      unsubscribeAnswers();
+    };
+  }, [given, onSendResult]);
 
   const entries = mergeEntries(storedEntries, live.entries);
   const state = conversationStateOf({
@@ -332,11 +341,11 @@ function LoadedConversation({
       clientMessageId: newClientMessageId(randomId ?? defaultRandomId),
       text: trimmed,
     };
-    const put = client.current?.send(pending.clientMessageId, trimmed, conversationId) ?? null;
+    const put = given?.send(pending.clientMessageId, trimmed, conversationId) ?? null;
     if (put === "offline") {
       // The client has given up reconnecting, so this send will never go out on its own; it is
       // neither queued nor waiting, and the field it came from gets it back.
-      client.current?.abandonSend(pending.clientMessageId);
+      given?.abandonSend(pending.clientMessageId);
       setFailure("未接続のため送信できませんでした。再読み込みすると再開します。");
       updateDraft(trimmed);
       return;
@@ -360,28 +369,13 @@ function LoadedConversation({
     const command = pendingCommand.current;
     if (command === undefined) return;
     pendingCommand.current = undefined;
-    if (client.current?.abort(conversationId) === true) return;
+    if (given !== null && given.abort(conversationId)) return;
     setStop({ kind: "idle" });
     setFailure("接続していないため停止できません。");
   }, [stop, conversationId]);
 
   return (
     <section className="hns-conversation" aria-label="会話">
-      {/*
-        The screen opens a connection only when it was given one to open. Production always
-        gives one (main.tsx passes the browser's WebSocket through the shell); a shell without
-        one — a test that renders the route without a socket — draws the conversation it read
-        and no live part, rather than reaching the platform's real WebSocket from jsdom.
-      */}
-      {liveSocket === undefined ? null : (
-        <LiveConnection
-          conversationId={conversationId}
-          socket={liveSocket}
-          onReady={onReady}
-          onSendResult={onSendResult}
-          onState={applyLive}
-        />
-      )}
       <header className="hns-conversation__header">
         {/*
           The title is a text, not a heading: the route already has one (the conversation's own

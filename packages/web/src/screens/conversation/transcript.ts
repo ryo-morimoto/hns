@@ -33,22 +33,6 @@ export interface LiveEntryLike {
 /** The assistant entry an interrupted run leaves behind; pi-durable commits it as aborted. */
 export const ABORTED_ASSISTANT_KIND = "pi.assistant.aborted";
 
-/** What the screen was told about the run right now. */
-interface Progress {
-  /** The in-flight answer's text; empty when nothing is being generated. */
-  readonly draft: string;
-  /**
-   * True when the newest run ended `aborted`.
-   *
-   * @remarks
-   * The live view carries no run reason, so this is what a refresh of the state can say: the
-   * transcript ends with an aborted assistant entry. A stop made on this screen is shown at
-   * once (the person pressed the button); this is what confirms it after the fact, including
-   * after a reload.
-   */
-  readonly interrupted: boolean;
-}
-
 /** Everything the conversation screen shows, before it is cut into a view. */
 export interface ConversationState {
   /** The D1 row, as `/api/conversations/:id/state` answers it. */
