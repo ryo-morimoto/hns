@@ -1,6 +1,6 @@
 # 0236: machine で Office ジョブを実行する
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D102, D103, docs/office.md
@@ -27,23 +27,23 @@ timeout は必ず打ち切る。inspect / edit / recalc は sidecar（0242）が
 
 ## Acceptance criteria
 
-- [ ] `op: "office"` を受理し、preview / render / convert を実行する（他は `unsupported_command`）
-- [ ] `op: "officeEngine"` が pack の manifest を読み、`{ available, id, version, formats, operations }` を返す（manifest 無し・不正は `available: false` + reason）
-- [ ] 事前スキャン（エントリ数・展開後サイズ・セル数・画素数）で上限超過を**実行せず**拒否する
-- [ ] **op 単位の deadline**（`Limits.office.timeoutMs`、既定 90 秒）を適用し、job は `min(job.timeoutMs, office.timeoutMs - 5_000)` に clamp。
+- [x] `op: "office"` を受理し、preview / render / convert を実行する（他は `unsupported_command`）
+- [x] `op: "officeEngine"` が pack の manifest を読み、`{ available, id, version, formats, operations }` を返す（manifest 無し・不正は `available: false` + reason）
+- [x] 事前スキャン（エントリ数・展開後サイズ・セル数・画素数）で上限超過を**実行せず**拒否する
+- [x] **op 単位の deadline**（`Limits.office.timeoutMs`、既定 90 秒）を適用し、job は `min(job.timeoutMs, office.timeoutMs - 5_000)` に clamp。
   `office.timeoutMs < 60_000` の設定は起動時に拒否する。他の op の 30 秒は変えない
-- [ ] 実行中に別の job が来たら**待たせず** `engine_busy`。`officeEngine` は読み取り専用で、単一実行枠を取らない
-- [ ] `Limits.maxResponseBytes`（256 KiB）は JSON 応答の上限に限定し、artifact は `Limits.maxArtifactBytes`（8 MiB）で別に持つ
-- [ ] 同じキー（docs §4）はキャッシュを使い、実行しない。結果の `stats` に `cached: true` を返す
-- [ ] キャッシュは TTL 7 日 / 2 GB / LRU、起動時に前プロセスの期限切れを掃除
-- [ ] `GET /artifact`（バイナリ・署名付き）がキャッシュの派生だけを返す（ROOT は読まない・`length` は最大 8 MiB）
-- [ ] `GET /artifact` の署名は **request target 全体**（`MACHINE_ARTIFACT_PATH` + 正規化した query）を検証する。query を差し替えると 401
-- [ ] `convert` の結果 `artifact` に `sha256` を含める
-- [ ] bwrap が使えないときは `engine_unavailable`（fail closed）
-- [ ] office 実行の sandbox は pack を ro、cache を rw で bind し、`--unshare-net` で分離する
-- [ ] `convert` は **cache に PDF を作り、`artifact.key` と bytes を返す**（ROOT には書かない。資産化は 0241 の write 変種）
-- [ ] machine の拒否コードを docs §9 の表で `OfficeErrorCode` に写像する
-- [ ] `stats` に `{ ms, peakRssMb, cached }` を返す
+- [x] 実行中に別の job が来たら**待たせず** `engine_busy`。`officeEngine` は読み取り専用で、単一実行枠を取らない
+- [x] `Limits.maxResponseBytes`（256 KiB）は JSON 応答の上限に限定し、artifact は `Limits.maxArtifactBytes`（8 MiB）で別に持つ
+- [x] 同じキー（docs §4）はキャッシュを使い、実行しない。結果の `stats` に `cached: true` を返す
+- [x] キャッシュは TTL 7 日 / 2 GB / LRU、起動時に前プロセスの期限切れを掃除
+- [x] `GET /artifact`（バイナリ・署名付き）がキャッシュの派生だけを返す（ROOT は読まない・`length` は最大 8 MiB）
+- [x] `GET /artifact` の署名は **request target 全体**（`MACHINE_ARTIFACT_PATH` + 正規化した query）を検証する。query を差し替えると 401
+- [x] `convert` の結果 `artifact` に `sha256` を含める
+- [x] bwrap が使えないときは `engine_unavailable`（fail closed）
+- [x] office 実行の sandbox は pack を ro、cache を rw で bind し、`--unshare-net` で分離する
+- [x] `convert` は **cache に PDF を作り、`artifact.key` と bytes を返す**（ROOT には書かない。資産化は 0241 の write 変種）
+- [x] machine の拒否コードを docs §9 の表で `OfficeErrorCode` に写像する
+- [x] `stats` に `{ ms, peakRssMb, cached }` を返す
 
 ## テスト条件
 
@@ -180,3 +180,19 @@ pack が入った環境で smoke。`officeEngine` が available になったら 
 - 設計レビュー: issue-reviewer / **PASS with comments**（2026-11-17、5 ラウンド。blocking 0）
 - blocking: なし（R1〜R10 の整合修正を反映済み）
 - 次アクション: 0234 → 0235 → 0236 の順で実装レーンへ（0240 / 0242 は設計レビューで agreed に）
+
+## Result
+
+- verdict: **PASS**（reviewer-0236。FAIL 1 回 —— **署名が指す対象と実際に配る対象がバイト一致しない**（小文字 escape の再エンコードが通る）—— を直して PASS）
+- HEAD: 49d6236（main に ff 統合）。gate は **`HNS_REQUIRE_OFFICE_PACK=1` で** exit 0（**1906 tests / 1907**、main で 184.1s）。**machine の実 pack 統合 14 本は実エンジンで走る**（skip されていない）。
+- **`op: "office"`**（preview / render / convert）と **`op: "officeEngine"`**（**枠を取らない**）。**事前スキャンは spawn の前**で、**入力のサイズを信じない**（中央ディレクトリを先に読み、**展開は 64 MiB の予算で打ち切る**）。
+- **deadline** は **プロセスグループごと殺し**（timeout と **request の abort** の両方、`--die-with-parent`）、**他の op の 30 秒は不変**、**`office.timeoutMs < 60_000` は起動時に拒否**。
+- **単一実行枠**（2 本目は `engine_busy`）、**cache は 5 つ組**で **TTL 7 日 / 2 GiB / LRU**、**起動時に掃除**、**`stats {ms, peakRssMb, cached}`**。
+- **`GET /artifact`**: **署名は request target 全体**で、**`target !== artifactTarget(parseArtifactQuery(target))` をバイト一致で比較**。**小文字 escape / `%3a` / `+` / 余分な組 / 並べ替えはすべて拒否**、**canonical な range は往復**（欠けた range は欠けたまま）。**cache の派生だけを返し、ROOT を読まない**、8 MiB。
+- **sandbox**: **host ro / runs の tmpfs / run rw / pack ro / `bindPaths` ro（digest 検査）/ `--unshare-net` / `--clearenv` + manifest の env（固定 PATH）/ ULIMIT_AS を exec の前**。**bwrap が無ければ `engine_unavailable`**。**run の後始末は全経路**。
+- **C2（`too_many_pixels`）は engine が書いた PNG の IHDR を読み、cache する前に拒否**。**読めない寸法は `engine_failed`**（0 として数えない）、**cache を汚さない**。
+- **`unsupported_format` と `unsupported_command` を §9 の表どおりに分けた**（pack が扱わない形式 / op 未宣言・pages・sidecar）。
+- **`/tmp` の件は実装担当の再現ミス**（argv の貼り付けでエンジンに `&&` が渡っていた）と判明。**製品の `runEngine` を直接呼ぶと pack を `/tmp` 直下に作っても `ok`**。**テストはコピーで誤魔化していない**。
+- **レビューで直したもの**: ①署名対象のバイト一致 ②**受入にありながら未実装だった `too_many_pixels`** ③`unsupported_format` の写像（テストを書く過程で表とのずれが出た）④`HNS_OFFICE_CACHE` が `HNS_OFFICE_WORK` と同時設定で落ちる ⑤**新しい `no-unused-vars` 6 件と第二の正本**（`CONTENT_TYPE_OF_OPERATION`）。
+- **実運用で起動する**: machine が Office のジョブを実行し、`GET /artifact` で署名済みのバイトを配る。**server → machine の署名済み RPC 経由の実経路は未検証**（machine の HTTP route のみ）——**0237 で通す**。
+- **残件（正直に）**: ①**C3 は殺した後に子プロセスが残らないことを観測していない**（コードは `-pid` に送る）②**読めない PDF はページ数で拒否されない**（`pages: 0`、エンジンが型付きのコードで落ちる）③**`peakRssMb` は 50ms サンプル**で短いスパイクを取り逃し得る ④**1 machine 1 workspace の前提**（`workspaceId` は照合されず、cache の namespace と `/artifact` の key が呼び出し側任せ）⑤**50 MiB の入力を 2 回読む** ⑥`packReport` が**ホストを見ずに `available:true`** を返す（0235 の follow-up）⑦`unsupportedReason` の pages / sidecar の分岐は単体で固定されていない ⑧`bomb()` の CRC が 23 秒のうち 15 秒。
