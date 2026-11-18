@@ -80,9 +80,13 @@ test("codegen runs only when the artifacts can change", () => {
   const web: PackageInfo = { dir: "web", name: "@hns/web", dependsOn: [] };
   const runs = stage.run({ root: "/repo", packages: [web], all: false, tier: "unit" });
   expect(runs.map((run) => run.argv.join(" "))).toStrictEqual([
-    process.execPath + " --conditions=source tools/codegen/graphql.ts",
+    // The hook is what keeps `@earendil-works/*` (a source condition over a dist-only tarball)
+    // resolvable while the condition still makes `@hns/*` read the worktree.
+    process.execPath +
+      " --conditions=source --import ./tools/codegen/without-source-condition.ts tools/codegen/graphql.ts",
     "/repo/node_modules/.bin/relay-compiler",
-    process.execPath + " --conditions=source tools/codegen/verify.ts",
+    process.execPath +
+      " --conditions=source --import ./tools/codegen/without-source-condition.ts tools/codegen/verify.ts",
   ]);
 });
 

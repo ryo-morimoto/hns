@@ -79,12 +79,25 @@ export const stages: readonly Stage[] = [
       return [
         {
           cwd: root,
-          argv: [process.execPath, "--conditions=source", "tools/codegen/graphql.ts"],
+          // The hook keeps `@earendil-works/*` (source condition, dist-only tarball) resolvable.
+          argv: [
+            process.execPath,
+            "--conditions=source",
+            "--import",
+            "./tools/codegen/without-source-condition.ts",
+            "tools/codegen/graphql.ts",
+          ],
         },
         { cwd: root, argv: [binary(root, "relay-compiler")] },
         {
           cwd: root,
-          argv: [process.execPath, "--conditions=source", "tools/codegen/verify.ts"],
+          argv: [
+            process.execPath,
+            "--conditions=source",
+            "--import",
+            "./tools/codegen/without-source-condition.ts",
+            "tools/codegen/verify.ts",
+          ],
         },
       ];
     },
