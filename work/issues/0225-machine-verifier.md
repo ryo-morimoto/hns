@@ -1,6 +1,6 @@
 # 0225: Machine 側で grant を検証し、ローカルで許可/拒否する
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §5, §7
@@ -85,3 +85,15 @@ grant を発行しても、実行するマシンが検証しなければ意味�
   - カウンタの**プロセス間**の窓: 書き込みは rename で原子的だが、2 プロセスが同時に読むと残量を二重に使える。machine は ROOT ごとに 1 プロセスなので実害は無いが、file lock は入れていない（`docs/capability.md` §5 に追記するかは 0226 で判断）。
   - gate の `cf dev` 依存 suite（workspace-do / session-do / remote-write）は**並列実行で inspector lock 待ちの 60s timeout に当たる**ことがある（単独では 19s で通る）。私の変更とは無関係。CI の retry 方針は [testing.md](../../docs/procedures/testing.md) の flaky 規則どおり別途（retry で隠さない）。
   - `grant_invalid`（別マシン宛）は `DENIAL_CODES` に専用 code が無いので流用した。専用 code を足すなら core の表と retry 表を同時に変える（0226 までに判断）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0225。blocking 0 / 低 8）
+- HEAD: c4ee727（main に ff 統合）。gate は exit 0（1440 tests / 1441、main で 66.5s）。
+- 確認: `verifyGrant` は契約の `authorizeCall`（署名 / alg / 失効 / 期限 / epoch / manifest / tool / version / scope / exact）に委譲し、**machine が足すのは counter と提示された activePolicy だけ**。`PolicyDecision` を返し例外を投げない。**activePolicy は毎回の引数**で、grant に保存した snapshot は使わない（**古い snapshot で allow しない**ことを変異で確認）。**`GrantPayload.policyHash` を追加**して `epoch` と併せて policy を縛る（core / issuer / ledger / GraphQL / SDL に一貫）。
+- **カウンタ**: `<configDir>/grants/<grantId>.json`（0700 / 0600、temp + fsync + rename、grant ごとの lock）。**超過は書かずに `counter_exhausted`**、**壊れた JSON は `unsupported` でリセットしない**、**再起動・別プロセスをまたいで数える**。
+- **鍵**: `keyId` が 0224 の signer と一致（実測で同じ値）、**grant 同梱鍵を使わない**（TOFU にしない）。
+- **agent から見えない**: 0194 の実 sandbox の exec で `~/.config/hns/grants` が list / cat 不可（machine 側は読める）。
+- 実経路: 実 D1 revision + 実 0224 issuer + 実 WebCrypto で allow、期限 / 旧 revision / maxCalls / scope 外 / 失効 / 別鍵で deny。レビュアーが 6 種の変異を追加で実行（うち 1 種は冗長な二重防御で生存。挙動は変わらない）。
+- 非 blocking: `allow だが consume 失敗` を型で区別しない / `mayRetry` の呼び出し元が無い / 状態を消せば予算が戻る（docs に明記）/ **プロセス間 lock は未実装（1 プロセス前提）** / 既存 dir の mode は再適用しない / `lastEpoch` は引数で受けるだけで machine 側に保持先が無い（0226 の制御チャネル待ち）/ 別マシン宛は `grant_invalid` に流用（専用 code 無し）/ C2 のテストが alg ではなく鍵欠落の経路を測っている。
+- **実装した ≠ 起動する**: `authorizeGrantedCall` の製品呼び出しは 0 件。**起動点は 0226**（制御チャネルの activePolicy snapshot と RPC 配線）。
