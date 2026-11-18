@@ -39,7 +39,8 @@ import type { DenialCode, PolicyDecision, SignedGrant, ToolCall, ToolManifest } 
  *    revocation as a stale grant. Only when the caller passes no set does this step not run.
  * 5. **expiry** — `issuedAt` must not be after `now`, and `expiresAt` must be after it
  *    (`grant_expired`).
- * 6. **epoch** — `payload.epoch` must not be older than `lastEpoch` (`epoch_stale`).
+ * 6. **epoch** — `payload.epoch` must be exactly `lastEpoch` when the caller knows it, and it and
+ *    `payload.policyHash` must be the `activePolicy`'s revision and hash (`epoch_stale`).
  * 7. **manifest** — `manifestHash`, `toolId`, and `toolVersion` must agree with the call and its
  *    manifest (`manifest_mismatch`).
  * 8. **scope** — the call must fit the grant's scope (`path_outside_root`, `command_not_allowed`,
@@ -116,7 +117,8 @@ export interface AuthorizeCallInput {
   readonly now: Date;
   /** `callHash` of `call`, recomputed by the caller from the operation it will run. */
   readonly callHash: string;
-  /** The newest epoch this machine has accepted; a grant older than it is `epoch_stale`. */
+  /** The newest epoch this machine has accepted; a grant older (or newer) than it is
+   * `epoch_stale`, because the epoch it names is not the one the caller has been told is active. */
   readonly lastEpoch?: number | undefined;
   /**
    * The grant ids the caller has learned are revoked, or `undefined` when it knows nothing.
@@ -130,8 +132,9 @@ export interface AuthorizeCallInput {
    * not been told about revocations must not pretend it has.
    */
   readonly revokedGrants?: ReadonlySet<string> | undefined;
-  /** The active policy revision and hash the machine has. They are copied into an `allow` so the
-   * audit row names the revision the grant was issued under; an allow without them is impossible. */
+  /** The active policy revision and hash the machine has. The grant's `epoch` and `policyHash` must
+   * be this revision and hash, and they are copied into an `allow` so the audit row names the
+   * revision the grant was issued under; an allow without them is impossible. */
   readonly activePolicy?: { readonly revision: number; readonly hash: string } | undefined;
 }
 
@@ -218,7 +221,8 @@ function scopeDecision(
  * @returns `allow` with the grant id and the active policy revision, or a `deny` whose `code` is the
  * first check that failed. It throws nothing: an unusable key, a forged signature, or a value with
  * no canonical form are all denials. Without `activePolicy` there is nothing to record an allow
- * against, so the answer is `policy_denied` (fail closed).
+ * against, so the answer is `policy_denied` (fail closed); a grant that names another revision or
+ * another document is `epoch_stale`.
  */
 export async function authorizeCall(input: AuthorizeCallInput): Promise<PolicyDecision> {
   const parsedGrant = v.safeParse(SignedGrantSchema, input.grant);
@@ -265,6 +269,11 @@ export async function authorizeCall(input: AuthorizeCallInput): Promise<PolicyDe
   if (input.lastEpoch !== undefined && grant.payload.epoch < input.lastEpoch) {
     return denyOf("epoch_stale", "a newer policy epoch was already accepted", input);
   }
+  if (input.lastEpoch !== undefined && grant.payload.epoch > input.lastEpoch) {
+    // The caller already knows the newest epoch and this grant names a newer one: it was issued
+    // under a revision the caller has not been told about, so it cannot be the active one.
+    return denyOf("epoch_stale", "the grant's epoch is not the newest revision", input);
+  }
   if (
     grant.payload.manifestHash !== hashedManifest ||
     grant.payload.toolId !== call.toolId ||
@@ -278,6 +287,15 @@ export async function authorizeCall(input: AuthorizeCallInput): Promise<PolicyDe
   if (refusal !== null) return refusal;
   if (input.activePolicy === undefined) {
     return denyOf("policy_denied", "the active policy revision is unknown", input);
+  }
+  // The grant is bound to the revision **document**, not just its number: 0225's machine, which is
+  // told the active revision on every request, refuses a grant whose `policyHash` is another
+  // document's, so a reused or rolled-back epoch cannot keep an old scope alive.
+  if (
+    grant.payload.epoch !== input.activePolicy.revision ||
+    grant.payload.policyHash !== input.activePolicy.hash
+  ) {
+    return denyOf("epoch_stale", "the grant was issued under another policy revision", input);
   }
   return {
     outcome: "allow",

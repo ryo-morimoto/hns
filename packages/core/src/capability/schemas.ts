@@ -139,6 +139,7 @@ export const GrantPayloadSchema: v.GenericSchema<unknown, GrantPayload> = v.stri
   issuedAt: IsoTimestampSchema,
   expiresAt: IsoTimestampSchema,
   epoch: CountSchema,
+  policyHash: HashSchema,
   maxCalls: CountSchema,
   maxBytes: CountSchema,
   nonce: v.pipe(v.string(), v.minLength(1)),

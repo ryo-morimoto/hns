@@ -317,6 +317,7 @@ type GrantView {
   issuedAt: String!
   expiresAt: String!
   epoch: Int!
+  policyHash: String!
   maxCalls: Int!
   maxBytes: Int!
   alg: String!

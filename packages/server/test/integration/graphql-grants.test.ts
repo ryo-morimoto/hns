@@ -82,7 +82,7 @@ async function requestGrant(
   const result = await execute({
     schema,
     document: parse(
-      "mutation Grant($input: RequestGrantInput!) { requestGrant(input: $input) { __typename ... on RequestGrantPayload { policyRevision grant { grantId toolId machineId epoch maxCalls maxBytes scopeKind scopeRoots signature } } ... on MutationFailure { code message } } }",
+      "mutation Grant($input: RequestGrantInput!) { requestGrant(input: $input) { __typename ... on RequestGrantPayload { policyRevision grant { grantId toolId machineId epoch policyHash maxCalls maxBytes scopeKind scopeRoots signature } } ... on MutationFailure { code message } } }",
     ),
     contextValue: context,
     variableValues: { input },
@@ -103,6 +103,7 @@ const PayloadSchema = v.object({
       toolId: v.string(),
       machineId: v.string(),
       epoch: v.number(),
+      policyHash: v.string(),
       maxCalls: v.number(),
       maxBytes: v.number(),
       scopeKind: v.string(),
@@ -167,6 +168,7 @@ test("the mutation forwards the active D1 revision and answers the object's gran
             issuedAt: "2026-11-18T00:00:00.000Z",
             expiresAt: "2026-11-18T00:01:00.000Z",
             epoch: 1,
+            policyHash: "b".repeat(64),
             maxCalls: 10,
             maxBytes: 4096,
             nonce: "n",
@@ -190,6 +192,9 @@ test("the mutation forwards the active D1 revision and answers the object's gran
     // secret-shaped value, returned exactly as the object signed it.
     expect(payload.grant.signature).toBe("c2lnbmF0dXJl");
     expect(payload.policyRevision).toBe(1);
+    // The revision's hash reaches the reader with the grant: 0225's machine compares it with the
+    // active policy, so a face that dropped it would hand out a grant nothing can verify.
+    expect(payload.grant.policyHash).toBe("b".repeat(64));
     expect(payload.grant.scopeKind).toBe("read");
     // One forward, to the grant route, with the snapshot the object issues under.
     expect(forwarded).toHaveLength(1);

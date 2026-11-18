@@ -97,6 +97,42 @@ maxBlobBytes / created）を返す。pack は `POST /rpc/checkpoint/<runId>/pack
 - 書き込みは `write` op だけ（dirfd で ROOT の内側に限る）。
 - 秘密（cloudflared token・control-plane の秘密鍵）をログにも応答にも出さない。マシンは control-plane の秘密鍵を持たない。
 
+## capability grant の検証（0225）
+
+`@hns/machine` の `capability/` は、Session DO が発行した grant（0224）を**マシン自身で**検証して
+許可 / 拒否を決める。Worker に毎回聞かないので、ツール呼び出しごとの往復が無い。
+
+```ts
+import { GrantCounter, authorizeGrantedCall, fetchControlPlaneKeys } from "@hns/machine";
+
+const keys = await fetchControlPlaneKeys({ url, fetch, session }); // enrollment で 1 回
+const counter = new GrantCounter(join(homedir(), ".config", "hns", "grants"));
+const { decision } = await authorizeGrantedCall({
+  grant,
+  call,
+  manifest,
+  keys,
+  counter,
+  machineId,
+  now,
+  activePolicy,
+  bytes,
+});
+```
+
+- **検証**（`verifyGrant`）: このマシン宛か → 契約の `authorizeCall`（署名 → alg → 失効 → 期限 → epoch →
+  manifest / tool / version → scope → exact）→ 提示された `activePolicy` と `epoch` / `policyHash` の一致。
+  結果は `PolicyDecision`（例外を投げない）。`activePolicy` を渡されなければ `policy_denied`（fail closed）。
+- **鍵**: `GET /api/machines/keys`（0148）が配る control-plane の公開鍵を enrollment 時に取得し、
+  grant の `keyId`（`sha256Hex(JCS(base64url(公開鍵)))` の先頭 32 hex）で選ぶ。**grant 応答の鍵は使わない**
+  （TOFU にしない）。無い・読めない・不一致は `grant_invalid`。
+- **カウンタ**: `<configDir>/grants/<grantId>.json`（0600、ディレクトリ 0700）に `calls` / `bytes` を置き、
+  実行**前**にアトミックに消費する（JSON を temp に書いて rename、grant ごとの in-process lock）。再起動をまたいで
+  数え、`maxCalls` / `maxBytes` を超えると `counter_exhausted`。読めない・壊れている・書けないは**拒否**
+  （壊れた JSON は新しい予算にならない）。`~/.config/hns` は sandbox の hide（D095）なので、agent の
+  exec からは読めない。
+- **RPC への配線は 0226**。この節の関数を呼ぶだけの入口はまだ無い（`activePolicy` は制御チャネルが運ぶ）。
+
 ## 開発
 
 ```bash

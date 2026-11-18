@@ -425,6 +425,7 @@ export async function issueGrant(
     issuedAt: isoTimestamp(new Date(issuedAtMs).toISOString()),
     expiresAt: isoTimestamp(new Date(issuedAtMs + ttl * 1000).toISOString()),
     epoch: parsedSnapshot.snapshot.revision,
+    policyHash: parsedSnapshot.snapshot.hash,
     maxCalls,
     maxBytes,
     nonce: crypto.randomUUID(),

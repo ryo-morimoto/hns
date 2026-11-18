@@ -150,8 +150,11 @@ export type GrantAlgorithm = (typeof GRANT_ALGORITHMS)[number];
  * @remarks
  * The signature is over `JCS(payload)`, so every field below is authenticated. `epoch` is the
  * policy revision the grant was issued under; a machine refuses an epoch older than the newest one
- * it has seen. `maxCalls` and `maxBytes` bound what the grant may spend, and the counter is spent
- * by the machine outside this contract.
+ * it has seen. `policyHash` is **that revision's own hash** (`sha256Hex(JCS(document))`, the
+ * `PolicyRevision.hash`), so a machine can bind the grant to the exact policy document rather than
+ * to its number alone: an epoch that was reused for a different document is refused, and a machine
+ * that is told the active revision compares both. `maxCalls` and `maxBytes` bound what the grant may
+ * spend, and the counter is spent by the machine outside this contract.
  */
 export interface GrantPayload {
   readonly v: 1;
@@ -166,6 +169,8 @@ export interface GrantPayload {
   readonly issuedAt: IsoTimestamp;
   readonly expiresAt: IsoTimestamp;
   readonly epoch: number;
+  /** `sha256Hex(JCS(document))` of the policy revision the grant was issued under. */
+  readonly policyHash: string;
   readonly maxCalls: number;
   readonly maxBytes: number;
   readonly nonce: string;

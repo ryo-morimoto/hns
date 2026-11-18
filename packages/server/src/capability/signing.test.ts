@@ -30,6 +30,9 @@ const MANIFEST: ToolManifest = {
   outputLimits: { maxBytes: 1024, maxLines: 100 },
 };
 
+/** The active policy revision's hash, as the machine's control channel is told it. */
+const ACTIVE_HASH = "f".repeat(64);
+
 /** A payload the signer signs; only the fields a test reads vary. */
 function payloadOf(overrides: Partial<GrantPayload> = {}): GrantPayload {
   return {
@@ -45,6 +48,7 @@ function payloadOf(overrides: Partial<GrantPayload> = {}): GrantPayload {
     issuedAt: isoTimestamp("2026-01-01T00:00:30.000Z"),
     expiresAt: isoTimestamp("2026-01-01T00:01:30.000Z"),
     epoch: 7,
+    policyHash: ACTIVE_HASH,
     maxCalls: 10,
     maxBytes: 1024,
     nonce: "n1",
@@ -101,7 +105,7 @@ test("the control-plane signer produces grants authorizeCall allows", async () =
     key,
     now: NOW,
     callHash: (await digestCall(call)).callHash,
-    activePolicy: { revision: 7, hash: "f".repeat(64) },
+    activePolicy: { revision: 7, hash: ACTIVE_HASH },
   });
   expect(decision).toMatchObject({ outcome: "allow", grantId: "g1" });
 });
@@ -126,7 +130,7 @@ test("a grant whose alg is swapped is grant_algorithm_mismatch", async () => {
     key,
     now: NOW,
     callHash: (await digestCall(call)).callHash,
-    activePolicy: { revision: 7, hash: "f".repeat(64) },
+    activePolicy: { revision: 7, hash: ACTIVE_HASH },
   });
   expect(decision).toMatchObject({ outcome: "deny", code: "grant_algorithm_mismatch" });
 });

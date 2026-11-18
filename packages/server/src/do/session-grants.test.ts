@@ -174,7 +174,7 @@ async function authorize(grant: SignedGrant, args: TestArgs) {
     key: await verifierKey(),
     now: new Date(NOW.getTime() + 1000),
     callHash: (await digestCall(call)).callHash,
-    activePolicy: { revision: grant.payload.epoch, hash: "f".repeat(64) },
+    activePolicy: { revision: grant.payload.epoch, hash: grant.payload.policyHash },
   });
 }
 

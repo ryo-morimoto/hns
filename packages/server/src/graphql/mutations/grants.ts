@@ -52,6 +52,7 @@ interface RequestGrantPayloadView {
     readonly issuedAt: string;
     readonly expiresAt: string;
     readonly epoch: number;
+    readonly policyHash: string;
     readonly maxCalls: number;
     readonly maxBytes: number;
     readonly alg: string;
@@ -95,6 +96,8 @@ const GrantViewType = new GraphQLObjectType({
     issuedAt: { type: new GraphQLNonNull(GraphQLString) },
     expiresAt: { type: new GraphQLNonNull(GraphQLString) },
     epoch: { type: new GraphQLNonNull(GraphQLInt) },
+    /** The policy revision's own hash: the document the grant was issued under (0225). */
+    policyHash: { type: new GraphQLNonNull(GraphQLString) },
     maxCalls: { type: new GraphQLNonNull(GraphQLInt) },
     maxBytes: { type: new GraphQLNonNull(GraphQLInt) },
     alg: { type: new GraphQLNonNull(GraphQLString) },
@@ -219,6 +222,7 @@ export function requestGrantModule(): MutationModule {
                 issuedAt: grant.payload.issuedAt,
                 expiresAt: grant.payload.expiresAt,
                 epoch: grant.payload.epoch,
+                policyHash: grant.payload.policyHash,
                 maxCalls: grant.payload.maxCalls,
                 maxBytes: grant.payload.maxBytes,
                 alg: grant.payload.alg,

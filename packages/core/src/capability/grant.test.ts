@@ -105,6 +105,7 @@ function payloadOf(
     issuedAt: isoTimestamp("2026-01-01T00:00:30.000Z"),
     expiresAt: isoTimestamp("2026-01-01T00:01:30.000Z"),
     epoch: 7,
+    policyHash: ACTIVE.hash,
     maxCalls: 1000,
     maxBytes: 4096,
     nonce: "n1",
@@ -265,13 +266,38 @@ test("a grant the caller lists as revoked is grant_revoked, and that code wins o
 });
 
 // Catches: a grant issued under a policy revision the machine has already passed, so a revoked
-// capability keeps working until its TTL.
-test("a grant older than the last epoch is epoch_stale", async () => {
-  const grant = await signedGrant({ epoch: 6 });
-  const decision = await authorizeCall(await inputFor({ grant, lastEpoch: 7 }));
-  expect(decision).toMatchObject({ outcome: "deny", code: "epoch_stale" });
-  const equal = await authorizeCall(await inputFor({ grant, lastEpoch: 6 }));
+// capability keeps working until its TTL. An epoch is the active revision, not a floor: a grant for
+// another revision — older *or* newer than the one the caller was told is active — is stale, and a
+// grant that names the active revision must still name that revision's document.
+test("a grant under another epoch or policy document is epoch_stale", async () => {
+  const active = { revision: 6, hash: ACTIVE.hash };
+  const older = await signedGrant({ epoch: 6 });
+  expect(
+    await authorizeCall(await inputFor({ grant: older, lastEpoch: 7, activePolicy: active })),
+  ).toMatchObject({ outcome: "deny", code: "epoch_stale" });
+  // The same epoch number, but not the revision the caller was told is active (revision 7's hash).
+  expect(
+    await authorizeCall(await inputFor({ grant: older, lastEpoch: 6, activePolicy: ACTIVE })),
+  ).toMatchObject({ outcome: "deny", code: "epoch_stale" });
+  const equal = await authorizeCall(
+    await inputFor({ grant: older, lastEpoch: 6, activePolicy: active }),
+  );
   expect(equal.outcome).toBe("allow");
+  // A newer epoch the caller has not been told about is not the active revision either.
+  const newer = await signedGrant({ epoch: 8 });
+  expect(
+    await authorizeCall(await inputFor({ grant: newer, lastEpoch: 7, activePolicy: ACTIVE })),
+  ).toMatchObject({ outcome: "deny", code: "epoch_stale" });
+});
+
+// Catches: a grant whose epoch is right but whose policy document is another one being allowed, so a
+// revision that reuses a number (or a grant built from a stale document) keeps an old scope alive.
+test("a grant signed for another policy document is epoch_stale", async () => {
+  const grant = await signedGrant({ policyHash: "e".repeat(64) });
+  expect(await authorizeCall(await inputFor({ grant }))).toMatchObject({
+    outcome: "deny",
+    code: "epoch_stale",
+  });
 });
 
 // Catches: a grant for one manifest / tool / version being used for another.

@@ -53,3 +53,4 @@ export {
 } from "./signature.ts";
 export type { RequestSignature, RequestVerifierOptions, VerifiableRequest } from "./signature.ts";
 export * from "./wire.ts";
+export * from "./capability/index.ts";

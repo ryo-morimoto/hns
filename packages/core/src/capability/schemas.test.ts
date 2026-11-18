@@ -48,6 +48,7 @@ const PAYLOAD: GrantPayload = {
   issuedAt: isoTimestamp("2026-01-01T00:00:00.000Z"),
   expiresAt: isoTimestamp("2026-01-01T00:01:00.000Z"),
   epoch: 3,
+  policyHash: "b".repeat(64),
   maxCalls: 1000,
   maxBytes: 4096,
   nonce: "n1",
