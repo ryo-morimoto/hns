@@ -318,7 +318,7 @@ function patchOf(input: UpdateTrailArguments["input"]): UpdateTrailPatch {
  */
 export function trailModule(): MutationModule {
   return {
-    name: "review",
+    name: "trailWrites",
     fields: (
       objects: ReadonlyMap<string, GraphQLObjectType>,
       overrides: ReadonlyMap<string, GraphQLObjectType>,

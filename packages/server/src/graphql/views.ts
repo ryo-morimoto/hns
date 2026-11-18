@@ -53,8 +53,9 @@ export interface ConversationView {
  * the four that were missing beside `changes`; each hangs off the Trail's id the same way).
  *
  * The gates a reviewer reads now are **not** here either: they are computed from the head, the
- * findings, and the decisions (`Trail.gates`), because a stored answer would be an answer from
- * the moment it was written. `Trail.gateLine` is that computation as one line.
+ * findings, and the decisions (`Trail.gates`, whose `line` field is that computation as one
+ * line), because a stored answer would be an answer from the moment it was written. The evidence
+ * a gate left is `Trail.gatesRecorded`, which is a list like the others.
  */
 export interface TrailView {
   readonly id: string;

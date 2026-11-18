@@ -15,8 +15,8 @@ import { TrailDetail } from "./TrailDetail.tsx";
  * @remarks
  * **`not_found` is a state, not an error.** The face answers a missing Trail as a typed failure
  * (0231), so a screen can say "this Trail does not exist" instead of an empty one that looks like
- * loading. The read is the shell's screen read (`useScreenRead`), so a reconnect refreshes it like
- * any other.
+ * loading. The read is a plain `useLazyLoadQuery` with Relay's default policy; the screen's act is
+ * a mutation whose answer invalidates the record, so the next render asks the server again.
  */
 export function TrailDetailScreen({ trailId }: { readonly trailId: string }): ReactElement {
   return (

@@ -22,9 +22,6 @@ type DecisionActionName = "APPROVE" | "REQUEST_CHANGES" | "REJECT" | "%future ad
 /** The GraphQL gate kind names, plus the marker. */
 type GateKindName = "HUMAN_REVIEW" | "TESTS" | "FINDINGS" | "FRESHNESS" | "%future added value";
 
-/** The GraphQL gate status names, plus the marker. */
-type GateStatusName = "PENDING" | "PASS" | "FAIL" | "ASK" | "%future added value";
-
 /** One finding as the review screen reads it. */
 export interface ReviewFinding {
   readonly id: string;
@@ -44,13 +41,6 @@ export interface ReviewDecision {
   readonly headCommit: string | null;
   readonly note: string;
   readonly at: string;
-}
-
-/** One gate line as `Trail.gates` computes it. */
-interface ReviewGateLine {
-  readonly gate: GateKindName;
-  readonly status: GateStatusName;
-  readonly detail: string;
 }
 
 /** The words a gate goes by. */

@@ -446,6 +446,39 @@ test("C2: the screen says approved only for the head it holds", async () => {
 });
 
 /**
+ * The request the screen sends is the document it ships, with the variables the selection names.
+ *
+ * @remarks
+ * Catches a compiled document whose text is not the one the fixture answered (a stale
+ * `__generated__` file, a screen reading a different query), and a mutation sending a field the
+ * document does not select. The assertion is on the wire text, which is what the face parses.
+ */
+test("the screen's read and decision are the compiled documents, with their variables", async () => {
+  const decisions: JsonValue[] = [];
+  const { calls } = renderTrail(trailRecord({ findings: [] }), decisions);
+  await screen.findByRole("heading", { name: "The review face" });
+  const read = calls.find((call) => call.operation === "TrailDetailQuery");
+  if (read === undefined) throw new Error("the detail read was not sent");
+  // The compiled text breaks its operation line: `query TrailDetailQuery(\n  $id: ID!\n)`.
+  expect(read.query).toContain("query TrailDetailQuery(");
+  expect(read.query).toContain("$id: ID!");
+  expect(read.query).toContain("trail(id: $id)");
+  expect(read.query).toContain("...TrailDetailReview");
+  expect(read.variables["id"]).toBe(toGlobalId("Trail", TRAIL));
+
+  await userEvent.click(screen.getByRole("button", { name: "承認" }));
+  await waitFor(() => {
+    expect(decisions).toHaveLength(1);
+  });
+  const decideCall = calls.find((call) => call.operation === "TrailDetailDecideMutation");
+  if (decideCall === undefined) throw new Error("the decision was not sent");
+  expect(decideCall.query).toContain("mutation TrailDetailDecideMutation(");
+  expect(decideCall.query).toContain("$input: DecideTrailInput!");
+  expect(decideCall.query).toContain("decideTrail(input: $input)");
+  expect(decideCall.variables["input"]).toMatchObject({ action: "APPROVE", headCommit: HEAD });
+});
+
+/**
  * A Trail with no change cannot be approved, and says so.
  *
  * @remarks
