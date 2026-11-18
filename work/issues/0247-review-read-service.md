@@ -1,6 +1,6 @@
 # 0247: オフライン review の読み取りサービス（ReviewSource + R2 fallback）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D106 / 0243 / work/research/cloudflare-git-vcs.md

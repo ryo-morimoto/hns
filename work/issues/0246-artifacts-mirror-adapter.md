@@ -1,6 +1,6 @@
 # 0246: Artifacts ミラー adapter（repo・token・push・状態）
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: D106 / 0243 / 0245 / work/research/cloudflare-artifacts.md

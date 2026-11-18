@@ -1,6 +1,6 @@
 # 0248: Artifacts の review 読み取りと Trail UI の接続
 
-status: in-progress
+status: done
 priority: now
 design: agreed
 design-ref: lead 裁定 / D106 / 0246 / 0247 / 0232
