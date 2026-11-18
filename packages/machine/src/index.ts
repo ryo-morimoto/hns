@@ -17,6 +17,18 @@ export { REDACTED, machineEntry, redactingSink, requestIdOf, writeMachineLog } f
 export type { MachineLogInput, MachineLogSink } from "./log.ts";
 export { runOperation } from "./operations.ts";
 export type { OperationResult } from "./operations.ts";
+export { createMachineExec, machineHostEnv, machineNoExecEnv, runExec } from "./exec.ts";
+export type { MachineExec } from "./exec.ts";
+export {
+  createMachineSandboxEnv,
+  machineHideList,
+  machineSeccompFilter,
+  machineShellEnv,
+  readOnlyGitPaths,
+  SECCOMP_ARCHES,
+  seccompSupported,
+} from "./sandbox.ts";
+export type { MachineSandboxOptions } from "./sandbox.ts";
 // The list is the core model's (the Journal's stored reasons are derived from the same one);
 // re-exported so a caller importing the agent's surface reads one vocabulary.
 export { MACHINE_REFUSALS as REFUSAL_CODES } from "@hns/core";

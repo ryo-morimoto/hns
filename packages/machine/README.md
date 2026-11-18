@@ -72,8 +72,24 @@ maxBlobBytes / created）を返す。pack は `POST /rpc/checkpoint/<runId>/pack
   直列化する。残余の窓は hash と rename の間の同名差し替え（Linux に compare-and-rename が無い）。
 - 上限: 同時実行数（超えたら 429）、要求 body（413）、応答（413。切り詰めない）、1 要求の時間（408）。
   FIFO・device・socket は read しない（`O_NONBLOCK` の open と非 regular の拒否で thread pool を塞がない）。
-- exec は出さない。sandbox が無い環境で exec を出さない（fail closed）。0194 で足す。書き込みは
-  `write` op だけ（dirfd で ROOT の内側に限る）。
+- **exec は sandbox の後ろだけ**（D095）。起動時に `detectSandbox()` が probe を通したときだけ `op: "exec"`
+  が動く。通さなければ `forbidden`（403）で拒否し、**host の shell に落ちない**（fail closed。SKIP ではない）。
+  `MachineAgent.shell` が `enabled` / `disabled` と理由を返す。
+  - mount の形: `--ro-bind / /` → `--tmpfs <ROOT>` → `--bind <project>` → `--ro-bind <project>/.git`。ROOT の兄弟は
+    見えず、`.git` は読めるが書けない（worktree の `.git` ファイルも同じ）。
+  - hide は **machine の固定リスト**（`machineHideList`: `~/.config/hns`、`~/.ssh`、`~/.aws`、`~/.config/gh`、
+    `~/.git-credentials`、`~/.netrc`）。呼び出し側から足せない。host に無いパスは mount しない。
+  - env は allowlist だけ: `PATH` / `HOME`（= ROOT、0045 H-1）/ `LANG` / `TERM` と、sandbox が固定する
+    `TMPDIR=/tmp`、`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM`=/dev/null、`GIT_OPTIONAL_LOCKS=0`。server の
+    provider 鍵・provider URL・control-plane 鍵・cloudflared token は**渡らない**（テストで固定）。
+  - egress: `deny`（既定）と `allowlist` は `--unshare-net`、`inherit` は host の network。
+  - 出力は応答上限を超えたら `too_large`（切り詰めない）、時間切れは `deadline_exceeded`、cwd が ROOT の外なら
+    `invalid_request`。
+  - **seccomp は未接続**。フィルタ（io_uring / AF_VSOCK を EPERM）は `machineSeccompFilter` にあり単体でテストして
+    いるが、`bwrap --seccomp` は継承した fd しか取らず、pi-durable の exec は子に stdio しか渡さないため、
+    この配線では付けられない（付けると全 exec が "Can't read seccomp data" で落ちる）。fd を渡せる exec に入れ替える
+    のが前提条件で、follow-up。
+- 書き込みは `write` op だけ（dirfd で ROOT の内側に限る）。
 - 秘密（cloudflared token・control-plane の秘密鍵）をログにも応答にも出さない。マシンは control-plane の秘密鍵を持たない。
 
 ## 開発

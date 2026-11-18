@@ -194,6 +194,8 @@ beforeAll(async () => {
   if (!isCfDevInstalled()) return;
   ensureDist(["@hns/core", "@hns/store", "@hns/agent", "@hns/server"]);
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  // mkdtemp needs the parent; the cf projects' helper creates it, but this suite runs first here.
+  await mkdir(CF_DEV_WORK_DIR, { recursive: true });
   machineRoot = await mkdtemp(join(CF_DEV_WORK_DIR, "machine-root-"));
   await mkdir(join(machineRoot, "project"));
   machine = await startMachineAgent({

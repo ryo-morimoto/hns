@@ -7,6 +7,10 @@ import { MAX_CHECKPOINT_PACK_BYTES, MACHINE_RPC_PATH } from "@hns/core";
 import type { CheckpointPackUploadResult, JsonValue } from "@hns/core";
 import { Denied, FileFailure } from "@hns/workspace";
 import type { RootIdentity } from "@hns/workspace";
+import { detectSandbox } from "@hns/workspace/sandbox";
+import type { SandboxEgress, SandboxReport } from "@hns/workspace/sandbox";
+import { createMachineExec, machineHostEnv } from "./exec.ts";
+import type { MachineExec } from "./exec.ts";
 import { ConnectionGate } from "./connection.ts";
 import { normalizeRelative } from "./containment.ts";
 import { InFlight, resolveLimits } from "./limits.ts";
@@ -69,12 +73,40 @@ export interface MachineAgentOptions {
    * secret: the bytes are the repository's content, not a token.
    */
   readonly onCheckpointPack?: ((upload: CheckpointPackUpload) => Promise<void>) | undefined;
+  /**
+   * The sandbox probe's verdict; defaults to probing the host with `detectSandbox()`.
+   *
+   * @remarks
+   * The verdict decides whether `exec` runs or refuses (D095). A test passes one to prove the
+   * refusal without needing a host that lacks bubblewrap; a deployment leaves it unset, so the
+   * real probe runs once at start and its reason reaches the health answer.
+   */
+  readonly sandbox?: SandboxReport | undefined;
+  /**
+   * The account whose home the sandbox hides; defaults to `os.homedir()`.
+   *
+   * @remarks
+   * The hide list is fixed, but the account is not: a test points it at a temporary home, and a
+   * deployment keeps the operator's.
+   */
+  readonly home?: string | undefined;
+  /** The project's egress; unset means `deny` (D095). */
+  readonly egress?: SandboxEgress | undefined;
 }
 
 /** A running agent. */
 export interface MachineAgent {
   /** `http://127.0.0.1:<port>`, the address cloudflared proxies to. */
   readonly origin: string;
+  /**
+   * Whether this agent runs commands at all, and why not when it does not.
+   *
+   * @remarks
+   * `exec: "enabled"` means the probe passed and `op: "exec"` runs inside bubblewrap.
+   * `exec: "disabled"` means every exec is refused with `forbidden`; `reason` says what the
+   * probe saw. A caller that needs a shell reads this at start instead of discovering it later.
+   */
+  readonly shell: { readonly exec: "enabled" | "disabled"; readonly reason: string };
   /** The address the listener is bound to; always `127.0.0.1`. */
   readonly address: string;
   readonly port: number;
@@ -95,6 +127,8 @@ interface AgentContext {
   readonly onLog: MachineLogSink;
   /** Where an accepted checkpoint pack goes; set from {@link MachineAgentOptions.onCheckpointPack}. */
   readonly checkpointPacks: CheckpointPackSink | undefined;
+  /** The sandboxed exec, or the fail-closed state that refuses every command (D095). */
+  readonly exec: MachineExec;
 }
 
 /**
@@ -153,6 +187,16 @@ function deadlineRefusal(): MachineRefusal {
 export async function startMachineAgent(options: MachineAgentOptions): Promise<MachineAgent> {
   const limits = resolveLimits(options.limits);
   const canonical = await canonicalRoot(options.root);
+  const sandbox = options.sandbox ?? (await detectSandbox());
+  // The project is the ROOT itself; the sandbox mounts a fresh ROOT so the root's siblings are
+  // not in the shell, and binds this project writable inside it.
+  const exec = await createMachineExec(machineHostEnv(canonical.path), {
+    sandbox,
+    root: canonical.path,
+    projectRoot: canonical.path,
+    home: options.home,
+    egress: options.egress,
+  });
   const context: AgentContext = {
     root: canonical.path,
     identity: canonical.identity,
@@ -167,6 +211,7 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     inFlight: new InFlight(limits.maxConcurrency),
     onLog: options.onLog ?? writeMachineLog,
     checkpointPacks: options.onCheckpointPack,
+    exec,
   };
   const server = createServer();
   server.on("request", (request: IncomingMessage, response: ServerResponse): void => {
@@ -185,6 +230,7 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     origin: `http://${HOST}:${address.output.port}`,
     address: address.output.address,
     port: address.output.port,
+    shell: exec.ready ? { exec: "enabled", reason: "" } : { exec: "disabled", reason: exec.reason },
     get inFlight(): number {
       return context.inFlight.count;
     },
@@ -327,6 +373,7 @@ async function handleRequest(
       context.limits,
       deadline.signal,
       context.identity,
+      context.exec,
     );
     // SAFETY: every OperationResult member is a closed object of strings, numbers, and booleans,
     // which is what JsonValue is; the operations build them and no field is a Uint8Array.
@@ -489,6 +536,17 @@ function logPathOf(operation: Operation): string {
   // A checkpoint names a Run, not a file; the log shows it below ROOT like any other path.
   // A mirror names the same Run, and its line names neither the remote nor the token.
   if (operation.op === "checkpoint" || operation.op === "mirror") return "/" + operation.runId;
+  // An exec names a working directory, never the command: a command line can carry a secret in
+  // an argument, and the log line must not become the place it leaks.
+  if (operation.op === "exec") {
+    const cwd = operation.cwd ?? "";
+    try {
+      const relative = normalizeRelative(cwd);
+      return relative === "" ? "/" : "/" + relative;
+    } catch {
+      return "/";
+    }
+  }
   // A write names a project and a file; the log shows the resolved path, like a read does.
   const project = operation.op === "write" ? operation.projectRoot : "";
   try {

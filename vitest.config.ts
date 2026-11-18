@@ -95,7 +95,10 @@ const packageProjects = (name: string) => [
     extends: true,
     test: {
       name: `${name}-integration`,
-      include: [`packages/${name}/test/integration/**/*.test.{ts,tsx}`],
+      include: [
+        `packages/${name}/test/integration/**/*.test.{ts,tsx}`,
+        `packages/${name}/test/security/**/*.test.{ts,tsx}`,
+      ],
     },
   },
 ];

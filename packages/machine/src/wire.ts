@@ -165,6 +165,7 @@ export const OPERATION_NAMES = [
   "read",
   "list",
   "write",
+  "exec",
   "checkpoint",
   "mirror",
 ] as const;
@@ -228,6 +229,47 @@ const MirrorRequestSchema: v.GenericSchema<unknown, MirrorRequest> = v.object({
   expiresAt: v.pipe(v.string(), v.minLength(1)),
 });
 
+/**
+ * One shell command, run inside the machine's sandbox.
+ *
+ * @remarks
+ * The command is either one string the sandbox's shell parses or an exact argv; both run through
+ * bwrap, never on the host. `cwd` is ROOT-relative and defaults to the project root. `timeoutMs`
+ * may shorten the request's own deadline, never lengthen it. The operation exists only when the
+ * sandbox probe passed at start (D095): without it every exec is refused, not run unfenced.
+ */
+export interface ExecRequest {
+  readonly op: "exec";
+  /** A command for the shell to parse; ignored when `args` is given. */
+  readonly command?: string | undefined;
+  /** An exact argv, run without a shell. */
+  readonly args?: readonly string[] | undefined;
+  /** ROOT-relative working directory; the project root when absent. */
+  readonly cwd?: string | undefined;
+  /** A budget for this command, in milliseconds. */
+  readonly timeoutMs?: number | undefined;
+}
+
+const ExecRequestSchema: v.GenericSchema<unknown, ExecRequest> = v.pipe(
+  v.object({
+    op: v.literal("exec"),
+    command: v.optional(v.pipe(v.string(), v.maxLength(64 * 1024))),
+    args: v.optional(
+      v.pipe(
+        v.array(v.pipe(v.string(), v.maxLength(16 * 1024))),
+        v.minLength(1),
+        v.maxLength(1024),
+      ),
+    ),
+    cwd: v.optional(v.pipe(v.string(), v.maxLength(4096))),
+    timeoutMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  }),
+  v.check(
+    (input) => input.command !== undefined || input.args !== undefined,
+    "exec needs a command or args",
+  ),
+);
+
 /** The closed request body: an operation and the ROOT-relative path it names. */
 export type Operation =
   | { readonly op: "health" }
@@ -236,7 +278,8 @@ export type Operation =
   | { readonly op: "list"; readonly path: string }
   | MachineWriteRequest
   | CheckpointRequest
-  | MirrorRequest;
+  | MirrorRequest
+  | ExecRequest;
 
 const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
   v.variant("op", [
@@ -248,6 +291,7 @@ const OperationSchema: v.GenericSchema<unknown, Operation> = v.union([
   MachineWriteRequestSchema,
   CheckpointRequestSchema,
   MirrorRequestSchema,
+  ExecRequestSchema,
 ]);
 
 /**
@@ -281,6 +325,21 @@ export type MachineFileKind = (typeof MACHINE_FILE_KINDS)[number];
 
 /** What the health operation reports. */
 export type HealthResult = { readonly root: string; readonly pid: number };
+
+/**
+ * What the exec operation reports.
+ *
+ * @remarks
+ * The output is the sandbox's stdout and stderr, interleaved as the process wrote them, decoded
+ * as UTF-8 and measured in bytes against the response bound: a command that prints more is
+ * refused with `too_large` rather than truncated, because a truncated transcript reads as a
+ * complete one. A non-zero exit is a normal answer, not a refusal.
+ */
+export type ExecResult = {
+  readonly exitCode: number;
+  /** UTF-8 text; base64 is not needed because a refusal covers bytes that are not text. */
+  readonly output: string;
+};
 
 /** What the stat operation reports: absent, or the entry's kind and metadata. */
 export type StatResult =

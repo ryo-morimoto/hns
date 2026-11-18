@@ -13,11 +13,14 @@ import { mirrorRemoteUrl, pushCheckpoint } from "@hns/workspace/mirror-push";
 import { GIT_OBJECT_TYPES, type GitObject, type GitObjectType } from "@hns/workspace/objects";
 import { fitsCheckpointPack, type MachineWriteRequest, type MachineWriteResult } from "@hns/core";
 import { containInRoot } from "./containment.ts";
+import { runExec } from "./exec.ts";
+import type { MachineExec } from "./exec.ts";
 import type { Limits } from "./limits.ts";
 import { MachineRefusal } from "./refusal.ts";
 import type {
   CheckpointRequest,
   CheckpointResult,
+  ExecResult,
   HealthResult,
   ListResult,
   MachineFileKind,
@@ -65,7 +68,8 @@ export type OperationResult =
   | ListResult
   | MachineWriteResult
   | CheckpointResult
-  | MirrorResult;
+  | MirrorResult
+  | ExecResult;
 
 /**
  * One checkpoint at a time per root and Run.
@@ -121,6 +125,7 @@ export async function runOperation(
   limits: Limits,
   signal: AbortSignal,
   identity?: RootIdentity | undefined,
+  exec?: MachineExec | undefined,
 ): Promise<OperationResult> {
   switch (operation.op) {
     case "health":
@@ -138,6 +143,13 @@ export async function runOperation(
       return await checkpointPath(operation, root, identity, signal);
     case "mirror":
       return await mirrorPath(operation, root, identity, signal);
+    case "exec":
+      // An agent built without a sandbox still answers: the answer is the refusal.
+      return await runExec(
+        exec ?? { ready: false, reason: "the agent was started without a sandbox" },
+        operation,
+        { maxOutputBytes: limits.maxResponseBytes, signal, root },
+      );
   }
   const unreachable: never = operation;
   return unreachable;

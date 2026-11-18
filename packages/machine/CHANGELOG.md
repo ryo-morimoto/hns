@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The `exec` operation, available only when the sandbox probe passed at start: commands run inside bubblewrap with
+  the project writable, `.git` read-only, the machine's fixed hide list masked, and the allowlisted environment.
+  Without a passing probe every exec is refused with `forbidden`.
 - The `checkpoint` operation: snapshots ROOT's working tree as `refs/hns/checkpoints/<runId>` and answers metadata
   only (0243's prepare answer, with the pack's size and largest blob). One Run has one commit, however often it is
   asked.

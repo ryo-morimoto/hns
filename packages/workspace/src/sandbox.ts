@@ -545,8 +545,45 @@ export function createNoExecEnv(env: ExecutionEnv, status: SandboxUnavailable): 
   return new NoExecEnv(env, status);
 }
 
+/** What a project's exec may reach on the network. */
+export type SandboxEgress = "deny" | "inherit" | "allowlist";
+
+/**
+ * How the wrapper's mount list and network are built.
+ *
+ * @remarks
+ * The defaults are the shape the workspace's own agent has always used: the root bound over a
+ * read-only /, and the host's network. The machine passes `project` and `egress` so the tree
+ * is reached through a fresh ROOT and only that project is bound (D095).
+ */
+export interface SandboxMountOptions {
+  /**
+   * The directory whose siblings must stay invisible: a fresh tmpfs is mounted here and the
+   * project is bound inside it. Absolute and not "/". Omit for "the root's own siblings are
+   * visible", the workspace agent's older shape.
+   */
+  readonly project?: { readonly root: string; readonly projectRoot: string } | undefined;
+  /** A directory to bind read-only inside the root, such as `.git`; absolute. */
+  readonly readOnlyInside?: readonly string[] | undefined;
+  /** `deny` and `allowlist` add `--unshare-net`; `inherit` keeps the host's network. */
+  readonly egress?: SandboxEgress | undefined;
+  /**
+   * The file descriptor numbers bubblewrap should load seccomp filters from.
+   *
+   * @remarks
+   * `--seccomp` takes an **open fd number** and reads it before exec; a path is rejected with
+   * "Invalid fd". The descriptor must already be inherited by the process the wrapper spawns, so
+   * the caller has to be able to pass one. An environment whose exec only gives the child
+   * stdio (the pi-durable/pi-env `exec`) cannot, and must not set this: bwrap would start and
+   * every command would fail with "Can't read seccomp data".
+   */
+  readonly seccomp?: readonly string[] | undefined;
+  /** `HOME` inside the sandbox; defaults to the root. Absolute. */
+  readonly home?: string | undefined;
+}
+
 /** How to wrap exec: which directory is writable, and what to hide. */
-export interface SandboxOptions {
+export interface SandboxOptions extends SandboxMountOptions {
   /** The directory to make writable; absolute and not "/". Other host paths stay read-only. */
   readonly root: string;
   /** The bwrap executable; defaults to `$BWRAP`, then `bwrap` on PATH. */
@@ -558,6 +595,49 @@ export interface SandboxOptions {
    * be absolute, not "/", and not the root.
    */
   readonly hide?: readonly string[] | undefined;
+  /**
+   * Environment variables passed back after `--clearenv`, read from this process.
+   *
+   * @remarks
+   * `PATH`, `LANG`, and `TERM` are always passed when set; anything else is passed only when
+   * it is listed here, and `HOME` and `TMPDIR` are never taken from here. A variable that is
+   * listed but unset is simply not passed. Use {@link SandboxOptions.envValues} for values the
+   * sandbox itself should fix rather than copy from the server.
+   */
+  readonly env?: readonly string[] | undefined;
+  /**
+   * Environment values the sandbox sets, whatever this process has.
+   *
+   * @remarks
+   * These are the sandbox's own settings (`TMPDIR=/tmp`, git switches pointing at /dev/null), so
+   * they are written out rather than read from the server's environment: a server that happened
+   * to carry `GIT_CONFIG_GLOBAL` must not be able to redirect them. `HOME` is refused here
+   * because the wrapper sets it to the sandbox home.
+   */
+  readonly envValues?: Readonly<Record<string, string>> | undefined;
+}
+
+/**
+ * The variable names a sandboxed shell gets besides `HOME` / `TMPDIR`.
+ *
+ * @remarks
+ * These are read from the server's environment and passed only when set, so a host without
+ * `TERM` does not grow an empty one. The list is the allowlist: no key, token, or URL crosses.
+ */
+const PASSED_ENV = ["PATH", "LANG", "TERM"] as const;
+
+/** Whether a name is already passed by the fixed part of the allowlist. */
+const isPassed = (name: string): boolean => PASSED_ENV.some((passed) => passed === name);
+
+/**
+ * A directory to mask with tmpfs.
+ *
+ * @remarks
+ * Every requested path is kept so the /tmp decision can see what must stay visible; the wrapper
+ * mounts only the ones the host has (a missing path cannot be a tmpfs over a read-only parent).
+ */
+interface Hide {
+  readonly path: string;
 }
 
 /**
@@ -566,17 +646,19 @@ export interface SandboxOptions {
  * @param env - The environment whose file API is kept; only exec is wrapped.
  * @param options - The root to make writable and the paths to mask.
  * @returns An environment that runs every exec through the wrapper.
- * @throws {Error} When `options.root` is not absolute or is "/", or when a
- * hidden path is not absolute, is "/", or is the root itself.
+ * @throws {Error} When `options.root` is not absolute or is "/", when a hidden
+ * path is not absolute, is "/", or is the root itself, when `options.home` is not
+ * absolute, or when a bound project or read-only path is not below the root.
  *
  * @remarks
  * The wrapper read-only binds / and then binds the root over it, so the host's
- * paths are read-only. A fresh writable tmpfs is mounted at `/tmp` unless the root
- * lives under it, because masking /tmp would hide the root. `--clearenv` drops the
- * server's environment (keys, tokens); only PATH, HOME (the root), and a few
- * environment variables (locale, TERM, TZ) are passed back. `options.hide` is
- * mounted as tmpfs after the read-only bind, so it shadows the real directory. A
- * cwd outside the root is replaced by the root.
+ * paths are read-only. With `options.project`, that root is first replaced by a fresh tmpfs,
+ * so its siblings are not in the sandbox at all, and only the project is bound back in.
+ * `--clearenv` drops the server's environment (keys, tokens); only PATH, LANG, TERM, HOME
+ * (the root by default), and the names in `options.env` are set. `options.hide` is mounted
+ * as tmpfs after the writable bind, so it shadows the real directory. A cwd outside the
+ * root is replaced by the root. `deny` and `allowlist` egress add `--unshare-net`; every
+ * wrapper gets `--new-session`, so the terminal's TIOCSTI cannot type into the server.
  */
 export function createSandboxEnv(env: ExecutionEnv, options: SandboxOptions): ExecutionEnv {
   const root = options.root;
@@ -585,50 +667,154 @@ export function createSandboxEnv(env: ExecutionEnv, options: SandboxOptions): Ex
   }
   const bwrap = options.bwrap ?? process.env.BWRAP ?? "bwrap";
   const shell = options.shell ?? resolveShell();
-  const prefix = root.endsWith("/") ? root : root + "/";
-  const under = (path: string): boolean => path === root || path.startsWith(prefix);
-  const hidden = (options.hide ?? []).map((path) => {
-    if (!path.startsWith("/") || path === "/" || path === root) {
-      throw new Error("a hidden path must be absolute, not /, and not the root");
+  const home = options.home ?? root;
+  if (!home.startsWith("/")) throw new Error("the sandbox home must be an absolute path");
+  const underRoot = (path: string): boolean => isUnder(root, path);
+  const project = options.project;
+  if (project !== undefined) {
+    if (!project.root.startsWith("/") || project.root === "/") {
+      throw new Error("the sandbox project root must be an absolute path other than /");
     }
-    return path;
-  });
+    if (!project.projectRoot.startsWith("/") || project.projectRoot === "/") {
+      throw new Error("the bound project must be an absolute path other than /");
+    }
+    // The project is reached through the tmpfs at its own root, or it is bound where it already
+    // is. A project outside that root would be bound nowhere the sandbox can open.
+    if (!isUnder(project.root, project.projectRoot) && !isUnder(project.projectRoot, root)) {
+      throw new Error("the bound project must be inside its root or contain the sandbox root");
+    }
+  }
+  const hidden: Hide[] = [];
+  for (const path of options.hide ?? []) {
+    if (!path.startsWith("/") || path === "/") {
+      throw new Error("a hidden path must be absolute and not /");
+    }
+    // Every path is recorded, so the /tmp decision below knows what must stay visible; only the
+    // ones the host actually has are mounted (see the wrapper: an absent path cannot be a tmpfs
+    // over a read-only parent, and an absent path holds nothing to mask).
+    hidden.push({ path });
+  }
+  for (const path of options.readOnlyInside ?? []) {
+    if (!path.startsWith("/") || !underRoot(path) || path === root) {
+      throw new Error("a read-only path must be below the root");
+    }
+  }
+  // A hide under `/tmp` needs /tmp left alone: masking /tmp detaches every mount made below it,
+  // and the hide would look applied while the real directory stayed visible.
+  const tmpfsTmp = !root.startsWith("/tmp/") && !hidden.some((hide) => isUnder("/tmp", hide.path));
+  const extra = options.env ?? [];
+  const values = options.envValues ?? {};
+  for (const name of Object.keys(values)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name))
+      throw new Error("an environment name is not a name");
+  }
+  const egress = options.egress ?? "inherit";
 
   const wrap = (
     command: string | readonly string[],
     execOptions: ShellExecOptions | undefined,
   ): readonly string[] => {
-    const cwd = under(execOptions?.cwd ?? env.cwd) ? (execOptions?.cwd ?? env.cwd) : root;
-    const args = [
-      "--die-with-parent",
-      "--ro-bind",
-      "/",
-      "/",
-      "--bind",
-      root,
-      root,
-      "--dev",
-      "/dev",
-      "--proc",
-      "/proc",
-    ];
-    // A tmpfs at /tmp would hide a root that lives there, so leave /tmp read-only in that case.
-    if (!root.startsWith("/tmp/")) args.push("--tmpfs", "/tmp");
-    // Drop the server's environment (keys, tokens) and pass back only what a shell needs.
+    const requested = execOptions?.cwd ?? env.cwd;
+    const cwd = underRoot(requested) ? requested : root;
+    // The read-only host first: every path starts closed, and what follows re-opens a part of it.
+    const args = ["--die-with-parent", "--ro-bind", "/", "/"];
+    if (project === undefined) {
+      args.push("--bind", root, root);
+    } else {
+      // The root gets a fresh tmpfs, so its siblings are not in the sandbox; the project is bound
+      // over it, and an ancestor the tmpfs does not know is created first.
+      args.push("--tmpfs", project.root);
+      for (const ancestor of ancestorsBetween(project.root, project.projectRoot)) {
+        args.push("--dir", ancestor);
+      }
+      args.push("--bind", project.projectRoot, project.projectRoot);
+    }
+    // `.git` is read-only inside the project (D095): overlaying it after the writable bind means
+    // even a shell cannot write there, and a work tree's `.git` file is bound the same way.
+    for (const path of options.readOnlyInside ?? []) args.push("--ro-bind", path, path);
+    // It goes before every mount below it: mounting a parent after a child detaches the child.
+    if (tmpfsTmp) args.push("--tmpfs", "/tmp");
+    // Masked paths are mounted after everything they sit under, so nothing detached them since.
+    // A path the host does not have is skipped: bwrap cannot create a tmpfs over a name that is
+    // not there when its parent is read-only, and the whole sandbox would then fail to start.
+    for (const hide of hidden) {
+      if (existsSync(hide.path)) args.push("--tmpfs", hide.path);
+    }
+    args.push("--dev", "/dev", "--proc", "/proc");
+    // Drop the server's environment (keys, tokens) and pass back only the allowlist.
     args.push("--clearenv", "--setenv", "PATH", process.env.PATH ?? "/usr/bin:/bin");
-    args.push("--setenv", "HOME", root);
-    for (const name of ["LANG", "LC_ALL", "TERM", "TZ"]) {
+    args.push("--setenv", "HOME", home);
+    for (const name of PASSED_ENV.slice(1)) {
       const value = process.env[name];
       if (value !== undefined) args.push("--setenv", name, value);
     }
-    // Masked directories are mounted after the read-only root, so they shadow it.
-    for (const path of hidden) args.push("--tmpfs", path);
-    args.push("--unshare-pid", "--unshare-ipc", "--unshare-uts", "--chdir", cwd, "--");
+    // Extra names never override the ones above: HOME is the sandbox's, and a name already passed
+    // is not passed twice.
+    for (const name of extra) {
+      if (name === "HOME" || isPassed(name)) continue;
+      const value = process.env[name];
+      if (value !== undefined) args.push("--setenv", name, value);
+    }
+    // The sandbox's own values come last so they win over anything above with the same name.
+    for (const [name, value] of Object.entries(values)) {
+      if (name === "HOME")
+        throw new Error("the sandbox home is set by the wrapper, not by envValues");
+      args.push("--setenv", name, value);
+    }
+    args.push("--unshare-pid", "--unshare-ipc", "--unshare-uts", "--new-session");
+    // `allowlist` has no proxy in v1, so it is denied rather than pretended (D095).
+    if (egress !== "inherit") args.push("--unshare-net");
+    for (const fd of options.seccomp ?? []) args.push("--seccomp", fd);
+    args.push("--chdir", cwd, "--");
     const argv = Array.isArray(command) ? [...command] : [shell, "-c", command];
     return [bwrap, ...args, ...argv];
   };
 
   return new SandboxEnv(env, wrap);
+}
+
+/**
+ * Whether a path is a directory's own path or lies below it.
+ *
+ * @param directory - An absolute directory path.
+ * @param path - An absolute path.
+ * @returns True for `directory` itself and for anything under `directory/`.
+ *
+ * @example
+ * ```ts @import.meta.vitest
+ * expect(isUnder("/tmp", "/tmp/a")).toBe(true);
+ * expect(isUnder("/tmp", "/tmp")).toBe(true);
+ * expect(isUnder("/tmp", "/tmpx")).toBe(false);
+ * ```
+ */
+export function isUnder(directory: string, path: string): boolean {
+  const prefix = directory.endsWith("/") ? directory : directory + "/";
+  return path === directory || path.startsWith(prefix);
+}
+
+/**
+ * The directories between two nested paths that a tmpfs at the outer one does not create.
+ *
+ * @param outer - An ancestor directory.
+ * @param inner - A path strictly below `outer`.
+ * @returns Each missing ancestor from just below `outer` down to `inner`'s parent.
+ *
+ * @example
+ * ```ts @import.meta.vitest
+ * expect(ancestorsBetween("/a", "/a/b/c")).toStrictEqual(["/a/b"]);
+ * expect(ancestorsBetween("/a", "/a/b")).toStrictEqual([]);
+ * ```
+ */
+export function ancestorsBetween(outer: string, inner: string): readonly string[] {
+  const parts = inner.slice(outer.length).split("/").filter(Boolean);
+  const created: string[] = [];
+  let current = outer;
+  // The last part is the project itself, which --bind creates; its ancestors need --dir.
+  for (const part of parts.slice(0, -1)) {
+    current = current + "/" + part;
+    created.push(current);
+  }
+  return created;
 }
 
 /** An environment whose string and argv execs are rewritten into one wrapper call. */
