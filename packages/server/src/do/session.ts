@@ -576,8 +576,10 @@ export class Session {
    */
   #grantPathFor(runId: string): RuntimeGrantPath | undefined {
     if (this.#tools === undefined) return undefined;
-    // The object's granted path is open, but a run that was never admitted (no snapshot) keeps
-    // the Phase 0 tools: nothing can be granted against a revision the object was not told.
+    // The check is the **object's** snapshot, not this run's: once any send of this object carried
+    // one, every run here gets a granted path — including a run whose own send carried none. Before
+    // that (an object that has never seen a policy) there is no revision to issue a grant under, so
+    // no run gets one.
     if (this.#tools.state.snapshot() === undefined) return undefined;
     const known = this.#grantPaths.get(runId);
     if (known !== undefined) return known;
