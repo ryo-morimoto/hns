@@ -18,7 +18,7 @@
 | 会話・実行・ツール呼び出し                                            | pi-durable（外部）。`agent` が組み立てる |
 | ファイルの版・Journal・認可・イベント・exec 隔離                      | `workspace`                              |
 | Project / Task / Conversation / Workflow / Automation / Usage / Event | `store`                                  |
-| 利用者・セッション・秘密（passkey・token）                            | `store/identity`                         |
+| 利用者・セッション・秘密（passkey・token）                            | `server` の edge（`edge/session.ts` の cookie と codecs。0145）。`store` の `identity` subpath は無い |
 | マシン側の実行（fs・署名の検証。exec は 0194）                        | `machine`                                |
 | UI の一時状態                                                         | `web`                                    |
 
@@ -30,7 +30,7 @@
 | `@hns/record`    | 仕事の記録の schema・done level の導出・YAML・CLI                                          | core, valibot, yaml                   |
 | `@hns/workspace` | 版付き読み書き・Journal・認可・イベント。`./sandbox` で exec 隔離                                 | core, pi-durable/env                  |
 | `@hns/agent`     | Durable の組み立て、Tool（read/write/bash）、hooks（観測）、Model アダプタ（Ollama / OpenCode）。`./session` は Worker-safe な複数会話 runtime | core, workspace, pi-durable, pi-ai    |
-| `@hns/store`     | D1、migration、リポジトリ。`./identity` で token・passkey・セッション・秘密                     | D1                                    |
+| `@hns/store`     | D1、migration、リポジトリ、会話の索引（`./conversation-index`）。token・passkey・セッション・秘密は 0145 で移した先（今は `server/src/edge` の codecs） | D1                                    |
 | `@hns/server`    | Worker（edge）・Durable Object（Session / Workspace）・GraphQL の resolver・認証・WS・Workflow / Automation の組み立て。`./graphql` は codegen 用の SDL | core, agent, store, workspace（0145 の edge は core を使わない） |
 | `@hns/web`       | React UI（D043 で前倒し）。Relay で `/graphql` を読む（D055）                                      | core（モデル・SDL）                    |
 | `@hns/machine`   | マシン側の常駐エージェント。署名検証、ROOT 封じ込め、上限。`ExecutionEnv` と sandbox は 0194 | core, workspace, valibot              |
