@@ -2,6 +2,7 @@ import {
   CheckpointPrepareResultSchema,
   MACHINE_REFUSALS,
   MACHINE_RPC_PATH,
+  MIRROR_FAILURES,
   MachineReadResultSchema,
   MachineWriteResultSchema,
   SIGNED_HEADER_BY_FIELD,
@@ -13,6 +14,8 @@ import type {
   MachineRefusalCode,
   MachineWriteRequest,
   MachineWriteResult,
+  MirrorFailure,
+  MirrorTarget,
   RequestSignature,
 } from "@hns/core";
 import * as v from "valibot";
@@ -113,6 +116,90 @@ export type MachineFilesAnswer<T> =
       readonly refusal?: MachineRefusalCode | undefined;
     };
 
+/**
+ * What the machine's `op:"mirror"` answered: the status the contract records.
+ *
+ * @remarks
+ * The push's answer, not the Worker's record: the Workspace reports it to its own
+ * `/rpc/checkpoint/mirror`, which applies the transition table and re-checks the ref through the
+ * binding. `skipped` is the machine deciding the run is over Artifacts' push limit, so a skipped
+ * run costs no push. A refused or unanswered call is a value too: the mirror is best effort and
+ * its failure is recorded as `failed` by the caller, never thrown at the checkpoint.
+ */
+export type MachineMirrorAnswer =
+  | {
+      readonly ok: true;
+      readonly status: "mirrored";
+      readonly ref: string;
+      readonly commit: string;
+    }
+  | { readonly ok: true; readonly status: "skipped"; readonly reason: "too_large" }
+  | {
+      readonly ok: true;
+      readonly status: "failed";
+      readonly failure: MirrorFailure;
+      readonly ref: string;
+    }
+  | {
+      readonly ok: false;
+      /**
+       * Why no status arrived: the machine's own refusal (the call reached it and it said no), or
+       * that no usable answer came back at all (a transport failure, a bad key, a malformed body).
+       */
+      readonly failure: "refused" | "unavailable";
+      /** A short diagnostic: the machine's refusal code, or a fixed phrase. Never a body. */
+      readonly detail: string;
+    };
+
+/** The mirror answer's body: the machine's `parseMirrorResult` shape, read here.
+ *
+ * @remarks
+ * The server may import core, agent, store, and workspace only (docs/packages.md), so it cannot
+ * read `@hns/machine`'s parser; this is that parser's shape, and `agent-wire.ts` is where the
+ * same rule is written for the checkpoint's body. When the machine's contract changes, this
+ * changes with it.
+ */
+const MirrorResultSchema = v.variant("status", [
+  v.object({
+    status: v.literal("mirrored"),
+    ref: v.pipe(v.string(), v.minLength(1)),
+    commit: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/u)),
+  }),
+  v.object({ status: v.literal("skipped"), reason: v.literal("too_large") }),
+  v.object({
+    status: v.literal("failed"),
+    failure: v.picklist(MIRROR_FAILURES),
+    ref: v.pipe(v.string(), v.minLength(1)),
+  }),
+]);
+
+/**
+ * The body of one mirror request, as the machine's wire contract names it (0246).
+ *
+ * @param request - The Run, the target the Workspace issued, and the commit C the ref must land on.
+ * @returns The JSON text the agent parses.
+ *
+ * @remarks
+ * The token is a secret: it is in this body and nowhere else — not in a log line, not in an event,
+ * not in a stored record. The ref is the one the target names, which the machine re-derives from
+ * the Run and refuses when it differs.
+ */
+export function mirrorRequestBody(request: {
+  readonly runId: string;
+  readonly commit: string;
+  readonly target: MirrorTarget;
+}): string {
+  return JSON.stringify({
+    op: "mirror",
+    runId: request.runId,
+    remote: request.target.remote,
+    token: request.target.token,
+    ref: request.target.ref,
+    commit: request.commit,
+    expiresAt: request.target.expiresAt,
+  });
+}
+
 /** What every machine call carries: the target, the correlation id, and the deadline. */
 export interface MachineCall {
   /** The machine to call; the workspace's lease (or its last holder) names it. */
@@ -156,6 +243,23 @@ export interface MachineFiles {
     request: { readonly runId: string },
     call: MachineCall,
   ): Promise<MachineFilesAnswer<CheckpointPrepareResult>>;
+  /**
+   * Push one Run's checkpoint commit to Artifacts on the machine's side (0246).
+   *
+   * @remarks
+   * This is the transport 0246 left unimplemented: the Workspace issues the target and sends it
+   * here once, **after** the checkpoint was acknowledged. The machine pushes with git and reads
+   * the ref back, and answers the contract's status. Nothing about the push may change the
+   * checkpoint's answer, so every failure is a value: the caller reports it as the mirror's state
+   * and never fails the checkpoint for it (0245).
+   *
+   * Optional, so a port with no mirror (a test, or a deployment without a machine wire) is still a
+   * valid one: the Workspace reads an absent member as "no mirror can be pushed".
+   */
+  mirror?(
+    request: { readonly runId: string; readonly commit: string; readonly target: MirrorTarget },
+    call: MachineCall,
+  ): Promise<MachineMirrorAnswer>;
 }
 
 /**
@@ -367,6 +471,38 @@ export function createSignedMachineFiles(
         return { ok: true, result: v.parse(CheckpointPrepareResultSchema, answer.result) };
       } catch {
         return { ok: false, failure: "unavailable", detail: "unparseable checkpoint result" };
+      }
+    },
+    async mirror(request, call) {
+      // The same signed POST as every other operation, with the token in the body that is signed
+      // and nowhere else. A refusal or no answer is a value: the caller records it as the mirror's
+      // failure, and the checkpoint it belongs to was already acknowledged.
+      const answer = await send(
+        mirrorRequestBody({ runId: request.runId, commit: request.commit, target: request.target }),
+        call,
+      );
+      if (!answer.ok) {
+        return {
+          ok: false,
+          failure: answer.failure === "unavailable" ? "unavailable" : "refused",
+          detail: answer.detail,
+        };
+      }
+      // An answer whose body is not the contract's status is no answer: never a success, and never
+      // a failure word the machine did not say. Each member is built from the parsed fields, so
+      // what the type promises (a commit with `mirrored`, a failure with `failed`) is what is sent.
+      const parsed = v.safeParse(MirrorResultSchema, answer.result);
+      if (!parsed.success) {
+        return { ok: false, failure: "unavailable", detail: "unparseable mirror result" };
+      }
+      const result = parsed.output;
+      switch (result.status) {
+        case "mirrored":
+          return { ok: true, status: "mirrored", ref: result.ref, commit: result.commit };
+        case "skipped":
+          return { ok: true, status: "skipped", reason: result.reason };
+        case "failed":
+          return { ok: true, status: "failed", failure: result.failure, ref: result.ref };
       }
     },
   };

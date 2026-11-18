@@ -22,7 +22,12 @@ import {
   type ObsLogEntry,
   type WorkspaceLease,
 } from "@hns/core";
-import type { JournalOutcomeEntry } from "@hns/store";
+import type {
+  JournalOutcomeEntry,
+  TrailChangeCreateInput,
+  TrailChangeValue,
+  TrailWriteRefusal,
+} from "@hns/store";
 import { mirrorRef } from "@hns/workspace/mirror";
 import { checkpointPackKey } from "@hns/workspace/objects";
 import * as v from "valibot";
@@ -54,6 +59,66 @@ import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
 /** How long an issued lease stays valid unless renewed. */
 const DEFAULT_LEASE_TTL_MS = 60_000;
 
+/**
+ * The headers the Worker sets on the request that starts one Workspace object.
+ *
+ * @remarks
+ * A Durable Object is constructed as `(state, env)`, so what the object needs besides its
+ * bindings — an observation sink, the Trail lookup, the reporter for a push that outlives its
+ * answer — cannot be computed by its constructor. The Worker sets these on the first request it
+ * sends to the object, and the object reads them in its constructor (under
+ * `blockConcurrencyWhile`, before any handler runs) and never again: the values are the
+ * environment's, and an object lives as long as the environment's bindings do.
+ *
+ * **They are a bit each, not a capability.** The names of the three things are in the header, and
+ * the object reaches them through the same bindings its constructor already reads, so a header
+ * someone forged could only turn on the object's own documented behaviour early (a sink it
+ * would have been handed anyway). The object serves no public request (D059), so the header is
+ * not reachable from outside the deployment in the first place.
+ */
+export const WORKSPACE_STARTUP_HEADER = "x-hns-workspace-startup";
+
+/** What the start-up header carries: which of the three the environment provided. */
+export interface WorkspaceStartUp {
+  readonly observe: boolean;
+  readonly trails: boolean;
+  readonly reportMirror: boolean;
+}
+
+/**
+ * The header value for one deployment's start-up.
+ *
+ * @param start - Which parts the environment provided.
+ * @returns The comma-separated names, in the order they are listed here.
+ */
+export function workspaceObjectStartUpHeaders(start: WorkspaceStartUp) {
+  const parts: string[] = [];
+  if (start.observe) parts.push("observe");
+  if (start.trails) parts.push("trails");
+  if (start.reportMirror) parts.push("report-mirror");
+  return { [WORKSPACE_STARTUP_HEADER]: parts.join(",") };
+}
+
+/**
+ * Read the start-up off one request's headers.
+ *
+ * @param headers - The request's headers.
+ * @returns Which parts to construct with; every one false when the header is absent or names
+ * something this build does not know.
+ *
+ * @remarks
+ * An unknown name is ignored rather than refused: a newer Worker that has started sending a part
+ * this object does not build yet must still be able to start it, with the rest as it asked.
+ */
+export function workspaceStartUpOf(headers: Headers): WorkspaceStartUp {
+  const named = new Set((headers.get(WORKSPACE_STARTUP_HEADER) ?? "").split(","));
+  return {
+    observe: named.has("observe"),
+    trails: named.has("trails"),
+    reportMirror: named.has("report-mirror"),
+  };
+}
+
 /** The `workspace_meta` key of the workspace's own mirror switch (`on`/`off`). */
 const MIRROR_OVERRIDE_KEY = "artifacts_mirror";
 
@@ -70,6 +135,16 @@ type WorkspaceRpcCode = FailureCodeOf<"workspace-rpc">;
 export interface WorkspaceState {
   readonly storage: DurableObjectSqliteStorage;
   blockConcurrencyWhile<T>(run: () => Promise<T>): Promise<T>;
+  /**
+   * The runtime's keep-alive for work that outlives its response, when the runtime has one.
+   *
+   * @remarks
+   * Cloudflare's `DurableObjectState.waitUntil` is what lets the mirror's push run after the
+   * checkpoint's answer has been sent ({@link Workspace} calls it for the work that follows an
+   * ack). The test state does not have it, and the object then starts the same work without the
+   * keep-alive, so the path is the one production takes.
+   */
+  waitUntil?(promise: Promise<void>): void;
 }
 
 /** Test seams for the clock, the lease lifetime, and the machine. */
@@ -124,12 +199,44 @@ export interface WorkspaceOptions {
    * supply the workspace's log. Absent means the decided mirror is written to the console as the
    * structured line — **never** that it is not observed or that the mirror stops.
    *
-   * **The edge does not wire this yet.** The Workspace object's observation is emitted on every
-   * deployment (on the console); what is not yet in place is the path from there into
-   * `/api/metrics`, which needs the edge to hand the object an obs sink without mixing it into the
-   * Session object's log. That wiring is its own issue; this lane's contract is the line itself.
+   * **The edge wires it** (0272n): the production dependency table builds it with `storeObserveFor`
+   * — the same factory the Session object's log comes from — so the line reaches the one
+   * observability log and `/api/metrics` reads it back. The Worker's start-up reaches this
+   * constructor through {@link WorkspaceOptions.startup}.
    */
   readonly observe?: ((entry: ObsLogEntry) => void) | undefined;
+  /**
+   * Where the Runs' Trails are read from, so a completed checkpoint writes its Change.
+   *
+   * @remarks
+   * A seam like `artifacts`: production supplies `trailLookupFor(env)` (the control database),
+   * and a unit test supplies a lookup. **Absent means no Change is ever written** — never that a
+   * Trail is invented: a run whose Trail cannot be read is a run with no Trail, and a Change needs
+   * one that a person created (0272n).
+   */
+  readonly trails?: TrailLookup | undefined;
+  /**
+   * The start-up a runtime forwarded on the object's first request, when it forwarded none here.
+   *
+   * @remarks
+   * A Durable Object is constructed as `(state, env)` by the runtime, so the Worker's start-up —
+   * which parts of `observe` / `trails` / `reportMirror` this deployment has — cannot be a
+   * constructor argument. It arrives as {@link WORKSPACE_STARTUP_HEADER} on the request that
+   * constructs the object, and the constructor reads it from there. This member is the same value
+   * given directly, for a test that builds the object itself.
+   */
+  readonly startup?: WorkspaceStartUp | undefined;
+  /**
+   * Where a mirror push that outlives its request is reported to the object.
+   *
+   * @remarks
+   * The push runs after the checkpoint's answer, so it cannot report through the answer's request.
+   * The Worker sends its result back as the same `POST /rpc/checkpoint/mirror` the route already
+   * serves, addressed to this object (`checkpointMirrorReporter`). Absent means the result is
+   * only logged and observed on the console — never that the mirror stops, and never that the
+   * checkpoint changes.
+   */
+  readonly reportMirror?: MirrorReporter | undefined;
 }
 
 /**
@@ -171,6 +278,73 @@ export interface WorkspaceBindings {
    * push is attempted, and the checkpoint is still made and answered.
    */
   readonly ARTIFACTS_MIRROR?: string | undefined;
+}
+
+/**
+ * What the Workspace needs to know about a run's Trail: the Trail it is linked to, if any.
+ *
+ * @remarks
+ * Narrow on purpose: the object asks one operation of the control database's Trails
+ * (`trailLookupFor`), and writes nothing to D1 itself (D049).
+ */
+export interface TrailLookup {
+  /** The Trail a run is linked to, or undefined when no Trail is. A read, for a caller asking. */
+  trailForRun(runId: string): Promise<string | undefined>;
+  /**
+   * Open the Trail this run is linked to, as one operation.
+   *
+   * @returns The Trail's id and the repository to write its Change with, or undefined when the
+   * run is linked to no Trail.
+   *
+   * @remarks
+   * The link is read **inside** the operation that returns the repository, so the Trail that is
+   * found is the Trail the Change is written to: one call, one store, and the object never holds a
+   * repository across calls.
+   */
+  lookupForRun(runId: string): Promise<TrailChanges | undefined>;
+}
+
+/** The Trail a run is linked to, and the repository its Change is written with. */
+export interface TrailChanges {
+  /** The Trail's id. */
+  readonly trailId: string;
+  /** The store's Trail repository, narrowed to the two calls a Change needs. */
+  readonly trails: {
+    /** The Trail's latest Change, which the next Change's base comes from. */
+    headChange(trailId: string): Promise<TrailChangeValue | undefined>;
+    /** Add one Change; a refusal is a value, and writing it is how the Change exists. */
+    addChange(
+      trailId: string,
+      input: TrailChangeCreateInput,
+    ): Promise<TrailChangeValue | TrailWriteRefusal>;
+  };
+}
+
+/**
+ * How the Workspace records a mirror push that finished after its checkpoint was answered.
+ *
+ * @remarks
+ * The push cannot report through the request that started it: that request is answered first.
+ * The reporter sends the result to `POST /rpc/checkpoint/mirror` on this object from the edge
+ * (`checkpointMirrorReporter`), which reaches the binding the Worker holds. A failure to report
+ * is logged and the line is still observed; the mirror's state is the only thing left unrecorded,
+ * and the checkpoint was never waiting for it.
+ */
+export type MirrorReporter = (report: MirrorReport) => Promise<void>;
+
+/** One finished mirror push, as the reporter carries it. */
+export interface MirrorReport {
+  /** The workspace whose object is told; it names the repository the observation carries. */
+  readonly workspaceId: string;
+  readonly runId: string;
+  /** The state the machine reported. */
+  readonly status: "mirrored" | "failed" | "skipped";
+  /** Why a `failed` push failed; absent for the other states. */
+  readonly failure?: MirrorFailure | undefined;
+  /** When the push was sent, in milliseconds, for the observed duration. */
+  readonly startedAt: number;
+  /** The correlation id of the checkpoint request the push belongs to; null when it carried none. */
+  readonly requestId: string | null;
 }
 
 interface StoredLease {
@@ -494,6 +668,17 @@ export class Workspace {
   readonly #switch: MirrorSwitchSettings;
   /** Where a decided mirror is observed; undefined writes only the console line. */
   readonly #observe: ((entry: ObsLogEntry) => void) | undefined;
+  /**
+   * Where a run's Trail is read from, or undefined when this object writes no Change.
+   *
+   * @remarks
+   * The control database's lookup (`trailLookupFor`), never a D1 write of this object's own: the
+   * Change is written by the store that also reads the link, and a run linked to no Trail is
+   * never given one here.
+   */
+  readonly #trails: TrailLookup | undefined;
+  /** Where a mirror push that outlived its request reports its result; undefined just logs it. */
+  readonly #reportMirror: MirrorReporter | undefined;
   /** The queue that serializes the calls which can decide the project binding. */
   #bindingQueue: Promise<void> = Promise.resolve();
   readonly #ready: Promise<void>;
@@ -523,7 +708,12 @@ export class Workspace {
     // override; only the binding decides whether there is anything to issue a target from.
     this.#switch = mirrorSettingsOf(options, undefined);
     this.#mirror = artifacts === undefined ? undefined : new ArtifactsRepos(artifacts, this.#clock);
+    // The three parts that are not bindings: given directly (a test), or built here from what the
+    // Worker forwarded on the request that constructed this object (production). What was not
+    // provided stays undefined, and each fallback is the object's own documented one.
     this.#observe = options.observe;
+    this.#trails = options.trails;
+    this.#reportMirror = options.reportMirror;
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -1333,7 +1523,203 @@ export class Workspace {
       this.#putCheckpointRecord(input.runId, record);
       return watermark;
     });
-    return json({ ok: true, checkpoint: record, watermark: written.watermark.throughSeq });
+    const answer = json({ ok: true, checkpoint: record, watermark: written.watermark.throughSeq });
+    // **After the acknowledgement.** The checkpoint is complete and its answer is built; the two
+    // things that follow are downstream of it and neither can change it: the Trail's Change (it is
+    // written only because the checkpoint succeeded) and the mirror's push (0245: a failed push
+    // never fails the ack). Both are reached through `waitUntil`, so the runtime keeps them alive
+    // after this response while the caller's `fetch` receives the answer without waiting.
+    const requestId = request.headers.get("x-request-id");
+    this.#afterAnswer(() => this.#writeTrailChange(input.workspaceId, record));
+    if (record.mirror.status === "pending" && this.#mirrorSwitch()) {
+      this.#afterAnswer(() => this.#pushMirror(input.workspaceId, input.runId, record, requestId));
+    }
+    return answer;
+  }
+  /**
+   * Run work that belongs after the answer, without making the caller wait for it.
+   *
+   * @param work - The work; its failure is logged, never raised at a request.
+   *
+   * @remarks
+   * The Workspace object is constructed with the Durable Object state, so `waitUntil` is the
+   * runtime's own: the work continues in the isolate after the response is sent, which is how the
+   * mirror's push can take seconds while the checkpoint's ack does not. Absent (a test state, or a
+   * runtime without it) the promise is still started here and a rejection is logged with its name
+   * only — never the body, never the token.
+   */
+  #afterAnswer(work: () => Promise<void>): void {
+    const running = work().catch((error: Error) => {
+      console.error(
+        "workspace: work after the checkpoint answer failed",
+        error instanceof Error ? error.name : "unknown",
+      );
+    });
+    const keepAlive = this.#state.waitUntil?.bind(this.#state);
+    if (keepAlive !== undefined) keepAlive(running);
+  }
+
+  /**
+   * Write the Change of a run whose Trail it is linked to — and nothing when it is linked to none.
+   *
+   * @param workspaceId - The workspace the checkpoint belongs to; it is the Change's workspace.
+   * @param record - The completed checkpoint: its Run and its commit.
+   *
+   * @remarks
+   * This is the production writer `TrailChange` did not have (0232 / 0248): **the checkpoint's
+   * head commit, one row**, written because the checkpoint succeeded. The Change is `base..head`,
+   * and the base is the head commit of the Trail's latest Change, so consecutive Runs of one Trail
+   * form a chain of `base..head` pairs (which is the diff a review reads).
+   *
+   * **A run linked to no Trail gets no Change, and no Trail is created for it.** The only question
+   * asked is `lookupForRun`; a run whose answer is undefined is finished as far as the Trail is
+   * concerned. A Trail with no Change yet has no head to take a base from (the checkpoint's
+   * metadata does not name the commit the run started at), so its first Change is not written and
+   * the log says why: a Change whose base equals its head is refused by the store, and inventing a
+   * base would be a diff nobody can read. A Trail whose head Change already names this commit is
+   * left alone, so a retried complete writes one row.
+   *
+   * Every failure here is logged and swallowed: the checkpoint is complete whatever the Trail does,
+   * and a Trail the store refuses is not a reason for a checkpoint to be answered differently.
+   */
+  async #writeTrailChange(workspaceId: string, record: CheckpointRecord): Promise<void> {
+    const trails = this.#trails;
+    if (trails === undefined) return;
+    try {
+      const found = await trails.lookupForRun(record.runId);
+      // No Trail linked to this run: no Change, and no Trail is created for it.
+      if (found === undefined) return;
+      const { trailId, trails: changes } = found;
+      const head = await changes.headChange(trailId);
+      if (head === undefined) {
+        console.error("workspace: the Trail has no Change to take a base from", trailId);
+        return;
+      }
+      if (head.head_commit === record.commit) return;
+      const added = await changes.addChange(trailId, {
+        workspaceId,
+        baseCommit: head.head_commit,
+        headCommit: record.commit,
+        runId: record.runId,
+      });
+      // A typed refusal is logged by kind alone, never by the commits a person did not ask about.
+      if (added.refused) console.error("workspace: the Trail's Change was refused", added.kind);
+    } catch (error) {
+      console.error(
+        "workspace: the Trail's Change could not be written",
+        error instanceof Error ? error.name : "unknown",
+      );
+    }
+  }
+
+  /**
+   * Push a completed checkpoint to Artifacts once, and report what the machine answered.
+   *
+   * @param workspaceId - The workspace, which names the mirror's repository.
+   * @param runId - The Run the checkpoint belongs to.
+   * @param record - The completed checkpoint, with the commit the ref must land on.
+   * @param requestId - The correlation id of the checkpoint request.
+   *
+   * @remarks
+   * The transport is the machine's own signed route (0246): the target travels in one signed
+   * request and the machine pushes with git, so the Worker never holds the bytes. The target is
+   * issued here, after the ack, exactly as the prepare answer issues it — the push belongs to the
+   * checkpoint, not to a caller, so it is never read from a request.
+   *
+   * Every outcome goes to `#reportMirror`, which is the edge's `POST /rpc/checkpoint/mirror`
+   * sender: the transition table and the binding's read-back are the same ones a report from
+   * anywhere goes through, so `mirrored` is still the Worker's confirmation and not the machine's
+   * claim. Nothing here throws and nothing here changes the checkpoint: a push that cannot start
+   * is reported as `failed` with the closed word that explains it.
+   */
+  async #pushMirror(
+    workspaceId: string,
+    runId: string,
+    record: CheckpointRecord,
+    requestId: string | null,
+  ): Promise<void> {
+    const report = this.#reportMirror;
+    const files = this.#files;
+    const repos = this.#mirror;
+    const machineId = this.#checkpointMachine();
+    if (
+      report === undefined ||
+      files === undefined ||
+      files.mirror === undefined ||
+      repos === undefined ||
+      machineId === undefined
+    ) {
+      // Nothing to push with: the checkpoint is complete and the mirror stays `pending`, which
+      // says exactly that no push happened. The edge supplies the machine wire and the reporter;
+      // a deployment without them has nothing to push and nothing to report.
+      return;
+    }
+    const startedAt = this.#clock();
+    const issued = await repos.target({
+      repo: artifactsRepoName(workspaceId),
+      ref: mirrorRef(runId),
+      now: startedAt,
+    });
+    if (!issued.ok) {
+      console.error("workspace: the mirror target was not issued", issued.failure);
+      await this.#reportPush(report, {
+        workspaceId,
+        runId,
+        status: "failed",
+        failure: issued.failure,
+        startedAt,
+        requestId,
+      });
+      return;
+    }
+    const answer = await files.mirror(
+      { runId, commit: record.commit, target: issued.target },
+      // The request's own signal is already over by the time this runs: the push is bounded by
+      // the machine's deadline, not by a request nobody waits for.
+      { machineId, requestId: requestId ?? "", signal: new AbortController().signal },
+    );
+    if (!answer.ok) {
+      // The refusal code or the fixed phrase, never the body: enough to see which hop failed.
+      console.error("workspace: the mirror push did not answer", answer.failure, answer.detail);
+      await this.#reportPush(report, {
+        workspaceId,
+        runId,
+        status: "failed",
+        failure: answer.failure === "refused" ? "push_rejected" : "network",
+        startedAt,
+        requestId,
+      });
+      return;
+    }
+    await this.#reportPush(report, {
+      workspaceId,
+      runId,
+      status: answer.status,
+      failure: answer.status === "failed" ? answer.failure : undefined,
+      startedAt,
+      requestId,
+    });
+  }
+
+  /** Send one push result to the reporter; a failure is logged and observed, never raised. */
+  async #reportPush(report: MirrorReporter, value: MirrorReport): Promise<void> {
+    try {
+      await report(value);
+    } catch (error) {
+      console.error(
+        "workspace: the mirror report was not sent",
+        error instanceof Error ? error.name : "unknown",
+      );
+      // The state the record could not take is still observed: the same entry the route would
+      // have written, so a broken reporter does not hide the push.
+      this.#observeMirror(
+        value.workspaceId,
+        value.status,
+        value.failure,
+        value.startedAt,
+        value.requestId,
+      );
+    }
   }
 
   /**

@@ -21,6 +21,11 @@
       "source": "./src/conversation-index/index.ts",
       "types": "./dist/conversation-index/index.d.ts",
       "import": "./dist/conversation-index/index.js"
+    },
+    "./edge": {
+      "source": "./src/edge/trail-lookup.ts",
+      "types": "./dist/edge/trail-lookup.d.ts",
+      "import": "./dist/edge/trail-lookup.js"
     }
   },
   "scripts": {

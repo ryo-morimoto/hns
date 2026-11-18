@@ -36,8 +36,14 @@ import {
 import { base64Of, fakeMachine, versionOfText } from "../../test/support/machine.ts";
 import type { PackBucket } from "../checkpoint/transport.ts";
 import { openSqliteState, type TestSqliteState } from "../../test/support/sqlite.ts";
+import type { TrailChangeCreateInput } from "@hns/store";
 import { Journal } from "./journal.ts";
-import { Workspace, type WorkspaceBindings } from "./workspace.ts";
+import {
+  Workspace,
+  type TrailLookup,
+  type WorkspaceBindings,
+  type WorkspaceState,
+} from "./workspace.ts";
 
 const LeaseOk = v.object({
   ok: v.literal(true),
@@ -2132,5 +2138,210 @@ test("C2: the metrics reduce the mirror lines into a failure rate and a skip rat
     expect(JSON.stringify(metrics)).not.toContain("art_v2");
   } finally {
     h.close();
+  }
+});
+
+/** One Change a fake Trail repository wrote. */
+interface WrittenChange {
+  readonly trailId: string;
+  readonly input: TrailChangeCreateInput;
+}
+
+/**
+ * A Trail lookup whose repository records what it is asked, in memory.
+ *
+ * @remarks
+ * The object side of the Change writer (0272n): it reads the link the lookup names and writes
+ * one row. No Trail exists here — the lookup answers "linked" only for the run a test names —
+ * which is what lets a test see the object ask, and see it write nothing when there is no link.
+ */
+function fakeTrails(options: {
+  readonly linked?: ReadonlyMap<string, string>;
+  readonly head?: string;
+  readonly fail?: Error;
+}) {
+  const written: WrittenChange[] = [];
+  const looked: string[] = [];
+  const trails: TrailLookup = {
+    trailForRun: (runId) => Promise.resolve(options.linked?.get(runId)),
+    lookupForRun: async (runId) => {
+      looked.push(runId);
+      if (options.fail !== undefined) throw options.fail;
+      const trailId = options.linked?.get(runId);
+      if (trailId === undefined) return undefined;
+      return {
+        trailId,
+        trails: {
+          headChange: () =>
+            Promise.resolve(
+              options.head === undefined
+                ? undefined
+                : ({
+                    id: "change-head",
+                    trail_id: trailId,
+                    workspace_id: "w1",
+                    repo_id: null,
+                    base_commit: "b".repeat(40),
+                    head_commit: options.head,
+                    run_id: null,
+                    state: "open",
+                    created_at: "2026-01-01T00:00:00.000Z",
+                    updated_at: "2026-01-01T00:00:00.000Z",
+                    refused: false,
+                  } as const),
+            ),
+          addChange: (trailId, input) => {
+            written.push({ trailId, input });
+            return Promise.resolve({
+              id: "change-" + String(written.length),
+              trail_id: trailId,
+              workspace_id: input.workspaceId,
+              repo_id: null,
+              base_commit: input.baseCommit,
+              head_commit: input.headCommit,
+              run_id: input.runId ?? null,
+              state: "open",
+              created_at: "2026-01-01T00:00:00.000Z",
+              updated_at: "2026-01-01T00:00:00.000Z",
+              refused: false,
+            } as const);
+          },
+        },
+      };
+    },
+  };
+  return { trails, written, looked };
+}
+
+/**
+ * A bucket whose every key is present.
+ *
+ * @remarks
+ * The Trail tests complete a checkpoint without uploading a pack: what they are about is what
+ * happens **after** the ack, and `complete` refuses without its pack. This bucket answers every
+ * lookup with the key, so the checkpoint is complete and the writer is reached.
+ */
+function packedBucket(): PackBucket {
+  return {
+    put: (key) => Promise.resolve({ key }),
+    head: (key) => Promise.resolve({ key }),
+  };
+}
+
+/** The Durable Object state a test substitutes; waitUntil is the runtime keep-alive. */
+function stateWithWaitUntil(state: TestSqliteState, kept: Promise<void>[]): WorkspaceState {
+  return {
+    storage: state.storage,
+    blockConcurrencyWhile: (run) => state.blockConcurrencyWhile(run),
+    waitUntil: (promise) => {
+      kept.push(promise);
+    },
+  };
+}
+
+// The Trail Change (0272n, acceptance 2). The checkpoint is acknowledged first; the row is
+// written after it, for a run that is linked to a Trail, and never for one that is not.
+
+// Catches: a completed checkpoint writing no Change (the state 0232 / 0248 recorded: no
+// production writer), or one whose base is not the Trail head (a diff nobody can read).
+test("a checkpoint on a run linked to a Trail writes one Change at its head after the ack", async () => {
+  const opened = openSqliteState();
+  const machine = fakeMachine();
+  const kept: Promise<void>[] = [];
+  const head = "c".repeat(40);
+  const trails = fakeTrails({ linked: new Map([["run-1", "trail-1"]]), head });
+  const workspace = new Workspace(stateWithWaitUntil(opened.state, kept), {
+    now: () => Date.parse("2026-01-01T00:00:00.000Z"),
+    leaseTtlMs: 60_000,
+    packs: packedBucket(),
+    files: machine,
+    trails: trails.trails,
+  });
+  try {
+    expect((await workspace.fetch(post("/rpc/lease/acquire", leaseBody()))).status).toBe(200);
+    const prepared = await workspace.fetch(
+      post("/rpc/checkpoint/prepare", { workspaceId: "w1", runId: "run-1" }),
+    );
+    const answer = v.parse(CheckpointOk, await prepared.json());
+    const commit = v.parse(CheckpointPrepareResultSchema, answer.checkpoint).commit;
+    const completed = await workspace.fetch(
+      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-1", throughSeq: 1 }),
+    );
+    // The answer is the checkpoint, and it is back before the Change is written: the writer runs
+    // after the ack, so the ack does not wait for a Trail.
+    // The answer is the checkpoint, and the writer is downstream of it: the Change was started
+    // after the answer was built (`waitUntil`), and this test then waits for that work to finish.
+    expect(completed.status, await completed.clone().text()).toBe(200);
+    await Promise.all(kept);
+    expect(trails.written).toStrictEqual([
+      {
+        trailId: "trail-1",
+        input: { workspaceId: "w1", baseCommit: head, headCommit: commit, runId: "run-1" },
+      },
+    ]);
+  } finally {
+    opened.close();
+  }
+});
+
+// Catches: a run with no Trail being given one — the Change writer creating a Trail of its own,
+// which is exactly what the issue forbids.
+test("a run linked to no Trail writes no Change and creates no Trail", async () => {
+  const opened = openSqliteState();
+  const kept: Promise<void>[] = [];
+  const trails = fakeTrails({});
+  const workspace = new Workspace(stateWithWaitUntil(opened.state, kept), {
+    now: () => Date.parse("2026-01-01T00:00:00.000Z"),
+    leaseTtlMs: 60_000,
+    packs: packedBucket(),
+    files: fakeMachine(),
+    trails: trails.trails,
+  });
+  try {
+    await workspace.fetch(post("/rpc/lease/acquire", leaseBody()));
+    await workspace.fetch(post("/rpc/checkpoint/prepare", { workspaceId: "w1", runId: "run-2" }));
+    const completed = await workspace.fetch(
+      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-2", throughSeq: 1 }),
+    );
+    expect(completed.status, await completed.clone().text()).toBe(200);
+    await Promise.all(kept);
+    // The lookup was asked (that is the one question), and nothing was written.
+    expect(trails.looked).toStrictEqual(["run-2"]);
+    expect(trails.written).toStrictEqual([]);
+  } finally {
+    opened.close();
+  }
+});
+
+// Catches: a broken Trail stopping the checkpoint from being answered at all — the Change is
+// downstream of the checkpoint, and its failure is logged rather than raised.
+test("a Trail that cannot be read leaves the checkpoint answered", async () => {
+  const opened = openSqliteState();
+  const kept: Promise<void>[] = [];
+  const trails = fakeTrails({
+    linked: new Map([["run-3", "trail-3"]]),
+    fail: new Error("D1 is down"),
+  });
+  const workspace = new Workspace(stateWithWaitUntil(opened.state, kept), {
+    now: () => Date.parse("2026-01-01T00:00:00.000Z"),
+    leaseTtlMs: 60_000,
+    packs: packedBucket(),
+    files: fakeMachine(),
+    trails: trails.trails,
+  });
+  try {
+    await workspace.fetch(post("/rpc/lease/acquire", leaseBody()));
+    await workspace.fetch(post("/rpc/checkpoint/prepare", { workspaceId: "w1", runId: "run-3" }));
+    const completed = await workspace.fetch(
+      post("/rpc/checkpoint/complete", { workspaceId: "w1", runId: "run-3", throughSeq: 1 }),
+    );
+    expect(completed.status, await completed.clone().text()).toBe(200);
+    const done = v.parse(CheckpointOk, await completed.json());
+    expect(v.parse(CheckpointRecordSchema, done.checkpoint).runId).toBe("run-3");
+    // The background work settles (and logs its failure) without raising at anyone.
+    await Promise.all(kept);
+    expect(trails.written).toStrictEqual([]);
+  } finally {
+    opened.close();
   }
 });

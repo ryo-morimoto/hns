@@ -30,6 +30,12 @@ const alias: readonly SourceAlias[] = [
     find: /^@hns\/store\/conversation-index$/,
     replacement: source("./packages/store/src/conversation-index/index.ts"),
   },
+  {
+    // The Trail lookup the Workspace object is started with (0272n): the edge reads the store
+    // through it, so a test reaches the source rather than a dist build.
+    find: /^@hns\/store\/edge$/,
+    replacement: source("./packages/store/src/edge/trail-lookup.ts"),
+  },
   { find: /^@hns\/workspace$/, replacement: source("./packages/workspace/src/index.ts") },
   {
     // The checkpoint's subpath runs git; without this alias it falls back to a dist build, and a

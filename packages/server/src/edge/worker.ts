@@ -1,15 +1,18 @@
 import { ProjectIdSchema, type Project } from "@hns/core";
 import * as v from "valibot";
 import { createCheckpointFace } from "../checkpoint/face.ts";
+import { checkpointMirrorReporter } from "../checkpoint/mirror-report.ts";
+import { trailLookupFor } from "@hns/store/edge";
 import { createFilesFace } from "../files/content.ts";
 import { createKeysFace } from "../machines/keys.ts";
 import { createConversationsFace, lookupConversation } from "../conversations/index.ts";
 import { createGraphQLFace } from "../graphql/index.ts";
 import { httpEntry } from "../obs/log.ts";
+import { storeObserveFor } from "../obs/store.ts";
 import { ProjectParamSchema } from "../project-id.ts";
 import { LEGACY_SESSION_NAME, sessionNameFor } from "../session-name.ts";
 import { withRequestIdHeader } from "./correlation.ts";
-import { projectFor, StoreUnavailableError } from "./store.ts";
+import { projectFor, StoreUnavailableError, storeFor } from "./store.ts";
 import {
   createEdge,
   type EdgeRequest,
@@ -179,6 +182,19 @@ export const dependencies: HandlerDependencies = {
   obs: forwardObs,
   files: createFilesFace(),
   checkpoints: createCheckpointFace(),
+  workspace: {
+    // The same factory the Session object's log uses: the one observability log, through the
+    // SESSION binding, which is what puts `artifacts.mirror` in `/api/metrics`.
+    observe: storeObserveFor,
+    // The store's own lookup, given the store this Worker reads (the same one every face reads).
+    trails: (env: WorkerEnv) =>
+      trailLookupFor(env.DB === undefined ? undefined : () => storeFor(env)),
+    // A push that finished after its answer comes back as the object's own mirror route.
+    reportMirror: (env: WorkerEnv) => {
+      const namespace = env.WORKSPACE;
+      return namespace === undefined ? undefined : checkpointMirrorReporter(namespace);
+    },
+  },
   machineKeys: createKeysFace(),
   conversations: createConversationsFace(lookupConversation),
   onResponse: recordResponse,

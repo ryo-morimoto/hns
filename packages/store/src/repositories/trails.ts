@@ -383,6 +383,25 @@ export interface TrailRepository {
    * last one.
    */
   headChange(trailId: string): Promise<TrailChangeValue | undefined>;
+  /**
+   * The Trail a run is linked to, if any.
+   *
+   * @param runId - The run (a conversation) whose Trail is asked for.
+   * @returns The Trail's id, or undefined when no Trail is linked to that run.
+   *
+   * @remarks
+   * The link is `trail_sessions.run_id` — the row that says "this Trail's work happened in this
+   * run" (a Run is a conversation, so `conversation_id` names the same id and a link may carry
+   * either). This is the **only** question the checkpoint's Change writer asks before it writes
+   * (0272n): a run with no such link gets no Change, because a Change on a Trail nobody linked it
+   * to would be a Trail this platform invented for the run.
+   *
+   * A Trail whose newest link is not this run is not this run's Trail: the newest link wins, so a
+   * Trail that moved on to a later run does not keep receiving the earlier run's checkpoints. A
+   * row this build cannot parse is skipped rather than failing the read: one corrupt link is not a
+   * reason for a checkpoint's Change to fail.
+   */
+  trailForRun(runId: string): Promise<string | undefined>;
   /** Whether `value` is a Trail state this build knows (useful to a surface before a write). */
   isState(value: string): value is TrailState;
 }
@@ -680,6 +699,22 @@ export function trailRepository(context: StoreContext): TrailRepository {
       if (row === undefined) return undefined;
       const parsed = readReturned(TrailChangeRowSchema, row, "trail change was not read");
       return parsed.refused ? undefined : parsed;
+    },
+    async trailForRun(runId) {
+      // Both columns are the same run: a Run is a conversation, so a link that was written with
+      // only one of them set still names this run. Newest first, because a Trail that was linked
+      // to several runs belongs to the one it was linked to last.
+      const rows = await sql.all(
+        "SELECT trail_id FROM trail_sessions WHERE run_id = ? OR conversation_id = ? ORDER BY linked_at DESC, id DESC",
+        [runId, runId],
+      );
+      for (const row of rows) {
+        const parsed = v.safeParse(v.object({ trail_id: v.string() }), row);
+        // A link whose row does not name a Trail is corruption, not this run's Trail: the next
+        // link is asked instead of failing the whole answer.
+        if (parsed.success) return parsed.output.trail_id;
+      }
+      return undefined;
     },
     async baseCommit(trailId) {
       const row = await sql.get(

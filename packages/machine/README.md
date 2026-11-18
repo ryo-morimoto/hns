@@ -154,17 +154,17 @@ hns-machine run [--enrollment <file|->] [--config-dir <dir>] [--control-plane-ke
 
 ## 起動した / していない（0270n）
 
-| 面                                                                        | 今この面は起動するか | 誰が呼ぶか                                                                         |
-| ------------------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------- |
-| machine の agent（`startMachineAgent`）                                   | ✓                    | `hns-machine run`（人が 1 コマンド）                                               |
-| machine の enrollment（device 鍵と公開鍵）                                | ✓                    | `hns-machine enroll` → 人が `registerMachine` に貼る                               |
-| 署名付き health / probe（`/api/machines/keys` / 0148 の probe）           | ✓                    | `Query.machines` の読み（throttle）                                                |
-| signed wire（`/rpc` の read / write / checkpoint / exec）                 | ✓                    | `Workspace` DO と `Session` DO の relay                                            |
-| capability grant の検証（0225）                                           | ✓                    | agent の `op: "tool"`（0226 の relay から）                                        |
-| artifact mirror の push（0246）                                           | ✗                    | **Worker → machine の push 配線が無い**（0246 の Result が 0249 の受入にしている） |
-| exec の seccomp（0194）                                                   | ✗                    | 製品の exec に fd を渡す口が無い（0194 の Result の follow-up）                    |
-| enrollment token（machine が自分で enroll）                               | ✗                    | 設計が未着手（0148 の follow-up）                                                  |
-| `run` が `GET /api/machines/keys` から鍵を取る（`fetchControlPlaneKeys`） | ✗                    | CLI は seed か `control-plane.json` を読む。鍵面から取る口は follow-up             |
+| 面                                                                        | 今この面は起動するか | 誰が呼ぶか                                                                                                                 |
+| ------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| machine の agent（`startMachineAgent`）                                   | ✓                    | `hns-machine run`（人が 1 コマンド）                                                                                       |
+| machine の enrollment（device 鍵と公開鍵）                                | ✓                    | `hns-machine enroll` → 人が `registerMachine` に貼る                                                                       |
+| 署名付き health / probe（`/api/machines/keys` / 0148 の probe）           | ✓                    | `Query.machines` の読み（throttle）                                                                                        |
+| signed wire（`/rpc` の read / write / checkpoint / mirror / exec）        | ✓                    | `Workspace` DO と `Session` DO の relay                                                                                    |
+| capability grant の検証（0225）                                           | ✓                    | agent の `op: "tool"`（0226 の relay から）                                                                                |
+| artifact mirror の push（0246）                                           | ✓                    | Workspace DO の complete の ack の後の `op:"mirror"`（0272n）。署名は `createSignedMachineFiles`、push は `pushCheckpoint` |
+| exec の seccomp（0194）                                                   | ✗                    | 製品の exec に fd を渡す口が無い（0194 の Result の follow-up）                                                            |
+| enrollment token（machine が自分で enroll）                               | ✗                    | 設計が未着手（0148 の follow-up）                                                                                          |
+| `run` が `GET /api/machines/keys` から鍵を取る（`fetchControlPlaneKeys`） | ✗                    | CLI は seed か `control-plane.json` を読む。鍵面から取る口は follow-up                                                     |
 
 ## 開発
 

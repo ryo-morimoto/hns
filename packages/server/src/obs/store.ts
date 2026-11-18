@@ -12,6 +12,8 @@ import {
   type ObsMetrics,
 } from "@hns/core";
 import { mirrorMetricsOf, mirrorRowsOf } from "../artifacts/observability.ts";
+import type { WorkerEnv } from "../edge/env.ts";
+import { withRequestIdHeader } from "../edge/correlation.ts";
 
 /** How often the append path runs the retention delete; the cap delete runs only when exceeded. */
 export const OBS_PRUNE_EVERY = 256;
@@ -304,5 +306,70 @@ export function createObsStore(storage: ObsStorage, options: ObsStoreOptions = {
     count() {
       return countOf(sql);
     },
+  };
+}
+
+/** How long one append may take before it is abandoned; an observation is never worth a request. */
+export const OBS_APPEND_TIMEOUT_MS = 2_000;
+
+/**
+ * The one observability log's appender, for a Durable Object that cannot open the log itself.
+ *
+ * @param env - The Worker environment; its `SESSION` binding is the log's object.
+ * @param fetchImpl - The `fetch`; production leaves it out.
+ * @param timeoutMs - How long one append may take; defaults to {@link OBS_APPEND_TIMEOUT_MS}.
+ * @returns The sink, or undefined when the deployment has no SESSION binding.
+ *
+ * @remarks
+ * **The log lives in the Session object** (D049 / D053): the event table is that object's
+ * SQLite, and `/api/metrics` reads it back through `/rpc/metrics`. A Workspace object that
+ * decided something worth measuring therefore cannot write a row itself — it would be a second
+ * log nothing reads. This is the factory that gives it the one log: it `POST`s the entry to
+ * `/api/events` on the binding, which is the edge's own forward (`forwardObs`), so the row is
+ * appended by exactly the route the public API uses and its correlation id is the entry's.
+ *
+ * The sink is **best effort, as an observation must be**: a failed or slow append is logged with
+ * its status or its error's name and nothing is raised at the caller, because the thing being
+ * observed has already happened and was already answered. The entry is the allowlist's, so no
+ * token or remote can ride it: it was built by `mirrorObservationEntry`, which has no field for
+ * either.
+ */
+export function storeObserveFor(
+  env: WorkerEnv,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = OBS_APPEND_TIMEOUT_MS,
+): ((entry: ObsLogEntry) => void) | undefined {
+  if (env.SESSION === undefined) return undefined;
+  return (entry) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+    fetchImpl("https://edge.internal/api/events", {
+      method: "POST",
+      headers: withRequestIdHeader(
+        new Headers({ "content-type": "application/json" }),
+        entry.requestId ?? "",
+      ),
+      body: JSON.stringify(entry),
+      signal: controller.signal,
+      redirect: "manual",
+    })
+      .then((response) => {
+        // The status only: nothing this side needs is in the body, and a body left unread holds
+        // the connection the request would otherwise use again.
+        void response.body?.cancel();
+        if (!response.ok) console.error("obs: the entry was not stored", response.status);
+      })
+      .catch((error) => {
+        // The value thrown here is the network's (a failed fetch), and only its name is logged.
+        console.error(
+          "obs: the entry was not sent",
+          error instanceof Error ? error.name : "unknown",
+        );
+      })
+      .finally(() => {
+        clearTimeout(timer);
+      });
   };
 }
