@@ -9,7 +9,15 @@ import {
   type LiveFrame,
   type LiveSendResult,
 } from "@hns/core";
-import type { EntryRecord, SessionEnd, Wake } from "@earendil-works/pi-durable";
+import type {
+  ConversationId,
+  EntryRecord,
+  SessionEnd,
+  SettledSubmissionRecord,
+  SubmissionId,
+  Wake,
+} from "@earendil-works/pi-durable";
+import type { Turn } from "@hns/agent";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import * as v from "valibot";
 import type { SessionState } from "../../src/do/state.ts";
@@ -172,6 +180,14 @@ export function fakeState(): FakeState {
 /** A fake Session runtime and the controls a test uses to advance it. */
 export interface FakeSession {
   readonly session: AgentSession;
+  /** Every send the object routed to the runtime, in order: the conversation and its text. */
+  readonly sends: readonly {
+    readonly id: string;
+    readonly text: string;
+    readonly requestId: string | undefined;
+  }[];
+  /** Every abort the object routed to the runtime. */
+  readonly aborts: readonly string[];
   readonly listeners: ((next: AgentLiveView) => void)[];
   readonly initial: () => AgentLiveView;
   readonly stops: () => number;
@@ -180,12 +196,54 @@ export interface FakeSession {
   push(next: AgentLiveView): void;
 }
 
+/**
+ * The settled submission record one fake turn answers with.
+ *
+ * @param id - The submission's numeric id.
+ * @param conversationId - The conversation the submission belongs to.
+ * @param requestId - The deduplication key the route sent, when it sent one.
+ * @returns The record pi-durable settles an answered turn with.
+ *
+ * @remarks
+ * The record is the runtime's own shape: a test that reads the settlement id, or the request
+ * id a resend is deduplicated by, is reading what production reads.
+ */
+export function settledSubmission(
+  id: number,
+  conversationId: string,
+  requestId: string | undefined,
+): SettledSubmissionRecord {
+  // SAFETY: pi-durable brands ids at compile time only; the fake runtime hands out the numbers
+  // the test declared, and the record below is read field by field.
+  const settled = id as SubmissionId;
+  // SAFETY: as above; a conversation id is a decimal id in these fixtures, and the object
+  // numbers its conversations the same way.
+  const conversation = Number(conversationId) as ConversationId;
+  // SAFETY: as above; an entry id is the same pi-durable brand.
+  const entry = id as EntryRecord["id"];
+  const record = {
+    id: settled,
+    conversationId: conversation,
+    type: "input" as const,
+    status: "done" as const,
+    entry,
+    answer: entry,
+  };
+  return requestId === undefined ? record : { ...record, requestId };
+}
+
 /** Build a fake multi-conversation session with one watcher. */
 export function fakeSession(initial: AgentLiveView = view()): FakeSession {
   const listeners: ((next: AgentLiveView) => void)[] = [];
   let current = initial;
   let stops = 0;
   let missing = false;
+  const sends: {
+    readonly id: string;
+    readonly text: string;
+    readonly requestId: string | undefined;
+  }[] = [];
+  const aborts: string[] = [];
 
   const session: AgentSession = {
     closed: new Promise<SessionEnd>(() => undefined),
@@ -195,8 +253,13 @@ export function fakeSession(initial: AgentLiveView = view()): FakeSession {
       if (missing || id !== CONVERSATION.id) return undefined;
       return current.conversation;
     },
-    send: async () => {
-      throw new Error("not used");
+    send: async (id: string, text: string, requestId?: string) => {
+      if (missing || id !== CONVERSATION.id) throw new Error("conversation not found: " + id);
+      sends.push({ id, text, requestId });
+      const n = sends.length;
+      // The settlement is a real settled submission record: the route reads its id, and the
+      // shape is pi-durable's, so a change there fails here instead of at the call site.
+      return { settlement: settledSubmission(n, id, requestId), text } satisfies Turn;
     },
     transcript: async () => [],
     watchConversation: async (id: string): Promise<AgentLiveWatch> => {
@@ -211,7 +274,11 @@ export function fakeSession(initial: AgentLiveView = view()): FakeSession {
         },
       };
     },
-    abort: async () => false,
+    abort: async (id: string) => {
+      if (missing || id !== CONVERSATION.id) return false;
+      aborts.push(id);
+      return true;
+    },
     pendingIndex: async () => ({ entries: [], remaining: 0, legacy: 0 }),
     markIndexed: async () => undefined,
     indexRows: async () => [CONVERSATION],
@@ -223,6 +290,8 @@ export function fakeSession(initial: AgentLiveView = view()): FakeSession {
   return {
     session,
     listeners,
+    sends,
+    aborts,
     initial: () => current,
     stops: () => stops,
     missing: () => missing,

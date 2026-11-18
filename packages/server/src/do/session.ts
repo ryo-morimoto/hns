@@ -170,6 +170,17 @@ export interface SessionDependencies {
    * @internal
    */
   readonly open?: SessionRuntimeFactory | undefined;
+  /**
+   * The cost gate the object admits turns through.
+   *
+   * @remarks
+   * A seam, like `open`: production reads the gate from the control database (`DB`), and a test
+   * that proves **how often** a turn passes the gate needs a gate it can count. When given, it
+   * replaces the one the object would build, and the database is not read for it.
+   *
+   * @internal
+   */
+  readonly cost?: CostGate | undefined;
 }
 
 /**
@@ -275,6 +286,8 @@ export class Session {
   readonly #live = new Map<LiveSocket, LiveEntry>();
   readonly #agentRequestIds = new Set<string>();
   #cost: CostGate | undefined;
+  /** The gate a test injected; production leaves it out and the object reads `DB`. */
+  readonly #givenCost: CostGate | undefined;
   #obs: ObsStore | undefined;
   #audit: PolicyAudit | undefined;
   #index: SessionIndex | undefined;
@@ -359,6 +372,7 @@ export class Session {
     this.#now = dependencies.now ?? Date.now;
     this.#upgradeResponse = dependencies.upgradeResponse ?? defaultLiveUpgradeResponse;
     this.#machineFetch = dependencies.machineFetch;
+    this.#givenCost = dependencies.cost;
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -774,7 +788,9 @@ export class Session {
       // send after a deploy cannot fail closed on a missing limit row. A failed migration is
       // not a failed open: conversation reads do not need D1, and the gate still refuses a new
       // run while the limits are unreadable.
-      if (this.#env.DB !== undefined) {
+      if (this.#givenCost !== undefined) {
+        this.#cost = this.#givenCost;
+      } else if (this.#env.DB !== undefined) {
         try {
           await migrateStore(this.#env.DB);
         } catch (error) {
@@ -1152,7 +1168,15 @@ export class Session {
     for (const socket of sockets) await this.#attachSocket(socket);
   }
 
-  /** Attach one socket from its serialized subscription, or close it when it is unusable. */
+  /**
+   * Attach one socket from its serialized subscription, or close it when it is unusable.
+   *
+   * @remarks
+   * A socket that outlived an eviction is the **same** socket the client opened: it is reattached
+   * with the same chat port as a fresh upgrade, so a send or a stop it carries still reaches the
+   * object after the wake. A connection attached without one answers every send `unavailable`,
+   * which is exactly the moment a client is most likely to resend.
+   */
   async #attachSocket(socket: LiveSocket): Promise<LiveEntry | undefined> {
     const existing = this.#live.get(socket);
     if (existing !== undefined) return existing;
@@ -1167,6 +1191,7 @@ export class Session {
       const watch = await session.watchConversation(attachment.conversationId);
       const connection = new LiveConnection(socket, attachment.conversationId, {
         now: this.#now,
+        chat: this.#chatPort(),
       });
       const entry: LiveEntry = { connection, watch };
       connection.start(watch.initial);

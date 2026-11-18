@@ -9,6 +9,14 @@
 - `GET /rpc/state` は**内部**（Worker だけが呼ぶ）。会話の id を **URL で名指し**する: Object の名前は会話の id だが、旧 `default` の Object は複数の会話を持つため、名指しが無いと「どの会話の state か」が決まらない。
 - 一覧・検索・pagination は 0121。ここは単体だけ。
 
+## WS の `send` / `abort`（0105、D077）
+
+この面ではないが、会話を開いた画面が次にすることなので、ここから読めるようにしておく。**正本は [live-ws](live-ws.md)**。
+
+- 送信は WS の `send`（`{conversationId, clientMessageId, text}`）で、REST POST は無い。答えは `accepted`（`messageId`）か `rejected`（`code`）。同じ `clientMessageId` は同じ turn で、再接続の再送は二重に実行されない。
+- 停止は `abort`（`{conversationId}`）。run が終わったことは view（中断された assistant entry）で届き、`abort` 自身は frame を返さない。
+- **1 回の会話訪問は 1 本の socket**。画面は自分で 2 本目を開かない。
+
 ## 失敗
 
 - **404 は 3 つを同じ答えにする**: D1 に行が無い会話、論理削除済み（`deleted_at`、[0029](../../work/issues/0029-conversation-management.md)）、**D1 に行はあるが Object がその会話を持たない**。存在や状態を漏らさない。

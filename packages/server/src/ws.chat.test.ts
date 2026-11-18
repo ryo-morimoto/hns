@@ -1,4 +1,4 @@
-import type { LiveSendRejectionCode, LiveSendResult } from "@hns/core";
+import { LIVE_SEND_MAX_BYTES, type LiveSendRejectionCode, type LiveSendResult } from "@hns/core";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   CONVERSATION,
@@ -254,6 +254,76 @@ test("a send with no chat port is answered unavailable", async () => {
     expect(answersOf(server)).toHaveLength(1);
   });
   expect(answersOf(server)[0]).toMatchObject({ type: "rejected", code: "unavailable" });
+});
+
+// Catches: a send for a conversation this object does not hold reaching the turn route, where
+// it would be the route (not the socket) deciding the answer, and the client seeing a turn.
+test("a send for an unknown conversation is rejected without a turn", async () => {
+  const chat = port({
+    send: async () => ({ ok: false, code: "unknown_conversation", message: "gone" }),
+  });
+  const { connection, server } = await open(chat.chat);
+
+  connection.handleMessage(
+    JSON.stringify({
+      type: "send",
+      conversationId: "999",
+      clientMessageId: "c1",
+      text: "hi",
+    }),
+  );
+  await vi.waitFor(() => {
+    expect(answersOf(server)).toHaveLength(1);
+  });
+
+  expect(answersOf(server)[0]).toStrictEqual({
+    type: "rejected",
+    clientMessageId: "c1",
+    code: "unknown_conversation",
+    message: "gone",
+  });
+  expect(chat.sends).toStrictEqual([{ conversationId: "999", text: "hi", clientMessageId: "c1" }]);
+});
+
+// Catches: an empty send reaching the object, where it would be a turn with nothing to run.
+test("an empty send is refused on the connection, and the object is never asked", async () => {
+  const chat = port();
+  const { connection, server } = await open(chat.chat);
+
+  connection.handleMessage(
+    JSON.stringify({
+      type: "send",
+      conversationId: CONVERSATION.id,
+      clientMessageId: "c1",
+      text: "",
+    }),
+  );
+
+  expect(JSON.parse(server.sent.at(-1) ?? "")).toMatchObject({
+    type: "error",
+    code: "invalid_request",
+  });
+  expect(chat.sends).toStrictEqual([]);
+  expect(answersOf(server)).toStrictEqual([]);
+});
+
+// Catches: a text over the 64KiB wire limit reaching the object, which could only refuse it
+// after the send was already answered as something else.
+test("a send over 64KiB is refused on the connection, and the object is never asked", async () => {
+  const chat = port();
+  const { connection, server } = await open(chat.chat);
+  const text = "a".repeat(LIVE_SEND_MAX_BYTES + 1);
+
+  connection.handleMessage(
+    JSON.stringify({ type: "send", conversationId: CONVERSATION.id, clientMessageId: "c1", text }),
+  );
+
+  expect(JSON.parse(server.sent.at(-1) ?? "")).toMatchObject({
+    type: "error",
+    code: "invalid_request",
+  });
+  expect(chat.sends).toStrictEqual([]);
+  expect(answersOf(server)).toStrictEqual([]);
 });
 
 // Catches: a malformed send (no text, no client id) reaching the object, where it would be a

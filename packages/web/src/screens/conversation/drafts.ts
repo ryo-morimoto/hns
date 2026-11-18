@@ -64,6 +64,26 @@ export function writeDraft(
   }
 }
 
+/**
+ * Forget one conversation's draft.
+ *
+ * @param storage - Where it was kept; null forgets nothing.
+ * @param conversationId - The conversation that no longer exists.
+ *
+ * @remarks
+ * Called when the route answers `404` — deleted, unknown, or without its object: the screen
+ * will never open that conversation again to use the text, and keeping it would leave a key per
+ * conversation that was ever opened and later deleted.
+ */
+export function forgetDraft(storage: DraftStorage | null, conversationId: string): void {
+  if (storage === null) return;
+  try {
+    storage.removeItem(draftKey(conversationId));
+  } catch {
+    // A store that refuses the removal keeps the key; nothing on screen depends on it.
+  }
+}
+
 /** The browser's local storage, or null where the platform has none (a server render, a test). */
 export function browserDraftStorage(): DraftStorage | null {
   try {

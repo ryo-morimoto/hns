@@ -201,12 +201,19 @@ const PROGRESS_LABELS: Record<ProgressKind, string> = {
  * @returns The progress line, or null when the conversation is quiet.
  *
  * @remarks
- * The kinds are the three a person needs to tell apart — the model is thinking, a tool is
- * running, or the turn is waiting — plus `stopped`, which is the same line in the same place
- * whatever caused it. The order is: a stop this screen made, then an interrupted view, then the
- * draft (the model is answering), then a trailing tool entry with no answer after it (the tool
- * is running or its result is being read), then a trailing user turn with nothing after it
- * (the turn is waiting to be read).
+ * The kinds are the three a person needs to tell apart — the model is thinking, the turn is
+ * waiting, or a tool's result has landed — plus `stopped`, which is the same line in the same
+ * place whatever caused it.
+ *
+ * **A tool result is not a tool still running.** pi-durable commits a tool result when the tool
+ * has returned, so the entry's presence says the call is over; drawing "ツール実行中" from the
+ * entry alone would leave a conversation that had stopped mid-run looking busy for minutes. So
+ * the line follows **the turn**, not the entry's kind: a turn with pending input has started,
+ * and while it runs its newest progress is either the model's draft (考え中), its call in flight
+ * (ツール実行中, when a tool call was placed and no result has come back), or a tool result that
+ * has landed and not been read yet (待ち). A turn the view says has ended — an answer after it,
+ * or an aborted one — is quiet, and so is a transcript whose newest line is a tool result from
+ * a finished turn.
  */
 export function progressOf(
   entries: readonly LiveEntryLike[],
@@ -221,12 +228,56 @@ export function progressOf(
   if (stop.kind === "stopped") return label("stopped", false);
   if (isInterrupted(entries)) return label("stopped", false);
   if (stop.kind === "asked") return label("thinking", true);
+  const turn = latestTurn(entries);
+  // The newest turn's answer outranks the draft: the view can carry the answer before it clears
+  // the draft it replaced, and the line must not claim the model is still writing.
+  if (turn?.state === "answer") return null;
   if (draft !== "") return label("thinking", true);
-  const last = sortEntries(entries).at(-1);
-  if (last === undefined) return null;
-  if (last.kind === "pi.tool-result") return label("tool", true);
-  if (last.kind === "pi.user") return label("waiting", true);
+  if (turn === null) return null;
+  if (turn.state === "waiting") return label("waiting", true);
+  if (turn.state === "tool") return label("tool", true);
   return null;
+}
+
+/** Where the newest turn stands, from the entries it has left behind. */
+export interface LatestTurn {
+  /** The turn is waiting for the model, a tool is in flight, or a tool result is unread. */
+  readonly state: "waiting" | "tool" | "answer";
+}
+
+/**
+ * The newest turn, and what it is doing.
+ *
+ * @param entries - The merged transcript, oldest first.
+ * @returns The turn, or null when the transcript is empty.
+ *
+ * @remarks
+ * A turn starts at the newest user entry. Everything after it is what the turn has done so far:
+ * an assistant entry that says something is its answer, a tool call with no result after it is a
+ * call in flight, and a tool result with nothing after it is a result the turn has not read yet.
+ * An entry the protocol does not name (a future kind) is read as part of the turn rather than
+ * ending it, so a build that does not know it still shows the turn as active.
+ */
+export function latestTurn(entries: readonly LiveEntryLike[]): LatestTurn | null {
+  const sorted = sortEntries(entries);
+  const start = sorted.map((entry) => entry.kind).lastIndexOf("pi.user");
+  if (start === -1) return null;
+  const after = sorted.slice(start + 1);
+  if (
+    after.some(
+      (entry) =>
+        (entry.kind === "pi.assistant" && entry.text !== "") ||
+        entry.kind === ABORTED_ASSISTANT_KIND,
+    )
+  ) {
+    return { state: "answer" };
+  }
+  const last = after.at(-1);
+  if (last === undefined) return { state: "waiting" };
+  if (last.kind === "pi.tool-result") return { state: "tool" };
+  // A tool call whose result has not come back yet: what an in-flight call looks like while it
+  // runs is the model's own entry, so a turn whose newest entry is anything else is still in it.
+  return { state: "waiting" };
 }
 
 /**

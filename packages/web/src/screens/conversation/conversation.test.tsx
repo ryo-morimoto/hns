@@ -25,6 +25,8 @@ import { ConversationScreen } from "./ConversationScreen.tsx";
 
 const INTENT = "conversation-intent";
 const DESIGN = "conversation-design";
+/** The draft key the screen keeps this conversation's text under. */
+const DRAFT_KEY = "hns.conversation.draft:" + INTENT;
 const originalMatchMedia = window.matchMedia;
 const originalFetch = globalThis.fetch;
 
@@ -279,6 +281,32 @@ test("a conversation the route answers 404 for reads as not found", async () => 
   renderShellOn(INTENT);
 
   expect(await screen.findByText("この会話は見つかりません。")).toBeTruthy();
+});
+
+// Catches: a deleted conversation leaving its draft key behind, one per conversation that was
+// ever opened and later deleted.
+test("a conversation the route answers 404 for forgets its draft", async () => {
+  window.localStorage.setItem(DRAFT_KEY, "消えた会話の書きかけ");
+  interceptFetch(() => ({ kind: "reply", reply: { status: 404, body: { ok: false } } }));
+
+  renderShellOn(INTENT);
+
+  expect(await screen.findByText("この会話は見つかりません。")).toBeTruthy();
+  expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull();
+});
+
+// Catches: a 404 for one conversation clearing another conversation's draft.
+test("a 404 forgets only the conversation it names", async () => {
+  const other = "hns.conversation.draft:" + DESIGN;
+  window.localStorage.setItem(other, "別の会話の書きかけ");
+  window.localStorage.setItem(DRAFT_KEY, "消えた会話の書きかけ");
+  interceptFetch(() => ({ kind: "reply", reply: { status: 404, body: { ok: false } } }));
+
+  renderShellOn(INTENT);
+
+  expect(await screen.findByText("この会話は見つかりません。")).toBeTruthy();
+  expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull();
+  expect(window.localStorage.getItem(other)).toBe("別の会話の書きかけ");
 });
 
 // Catches: a failed read leaving the screen blank, with no way back to the workspace.
@@ -634,6 +662,13 @@ test("the progress line says what the run is doing", async () => {
   });
   expect(progressText()).toContain("考え中");
   expect(document.body.textContent ?? "").toContain("答えの途中");
+
+  // The turn answers: the line is quiet, and the committed tool result above does not make it
+  // say a tool is executing now that the turn is over.
+  act(() => {
+    socket?.message(appendFrame(INTENT, { id: "4", kind: "pi.assistant", text: "答え" }, "4"));
+  });
+  expect(progressText()).toBe("");
 });
 
 /** The transcript's scroll container. */

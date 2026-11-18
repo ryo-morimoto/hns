@@ -15,10 +15,12 @@ import {
   fakeSession,
   fakeSocket,
   fakeState,
+  parseFrames,
   testUpgradeResponse,
   view,
 } from "../../test/support/live.ts";
-import { Session } from "./session.ts";
+import { Session, type SessionDependencies } from "./session.ts";
+import type { CostGate } from "../cost/index.ts";
 
 const PATH = "https://session/ws?conversationId=" + CONVERSATION.id;
 
@@ -88,13 +90,61 @@ function liveSession(
     readonly 0: ReturnType<typeof fakeSocket>;
     readonly 1: ReturnType<typeof fakeSocket>;
   },
+  cost?: CostGate,
 ): Session {
-  return new Session(state, DEV, async () => fake.session, {
+  const common = {
     webSocketPair: pair,
     now: () => 0,
     upgradeResponse: testUpgradeResponse,
-  });
+  };
+  const dependencies: SessionDependencies = cost === undefined ? common : { ...common, cost };
+  return new Session(state, DEV, async () => fake.session, dependencies);
 }
+
+/** A cost gate that records how often a turn is admitted and run, and admits everything. */
+function countingGate(): CostGate & { readonly turns: string[] } {
+  const turns: string[] = [];
+  return {
+    turns,
+    admit: async () => undefined,
+    turn: async (activity, run) => {
+      turns.push(activity.conversationId);
+      return await run();
+    },
+  };
+}
+
+// Catches: a socket send counting as two turns in the cost ledger — the socket re-enters the
+// object's own turn route, and that route is the one place a turn is admitted and measured.
+test("a send on the socket passes the cost gate exactly once", async () => {
+  const state = fakeState();
+  const server = fakeSocket();
+  const fake = fakeSession();
+  const cost = countingGate();
+  const session = liveSession(state, fake, () => ({ 0: fakeSocket(), 1: server }), cost);
+  await session.fetch(upgrade());
+
+  await session.webSocketMessage(
+    server,
+    JSON.stringify({
+      type: "send",
+      conversationId: CONVERSATION.id,
+      clientMessageId: "c1",
+      text: "hi",
+    }),
+  );
+  await vi.waitFor(() => {
+    expect(fake.sends).toHaveLength(1);
+  });
+
+  expect(cost.turns).toStrictEqual([CONVERSATION.id]);
+
+  // The same turn over the route the Worker uses is also one admission, so the socket adds
+  // no second one.
+  const answered = await session.fetch(send(CONVERSATION.id));
+  expect(answered.status).toBe(200);
+  expect(cost.turns).toStrictEqual([CONVERSATION.id, CONVERSATION.id]);
+});
 
 // Catches: /ws staying a 501 stub, or accepting a socket without arming the watch.
 test("the Session upgrades /ws, accepts a hibernatable socket, and sends a snapshot", async () => {
@@ -139,6 +189,36 @@ test("a re-created Session reattaches an accepted socket and resyncs it", async 
 
   await revived.webSocketMessage(server, JSON.stringify({ type: "ping" }));
   expect(JSON.parse(server.sent.at(-1) ?? "{}")).toStrictEqual({ type: "pong", protocol: 1 });
+
+  // A socket that outlived an eviction is still the client's live connection: a send and a stop
+  // on it reach the object. A reattached connection without the chat port answers every send
+  // `unavailable` — exactly when a client is most likely to resend one.
+  await revived.webSocketMessage(
+    server,
+    JSON.stringify({
+      type: "send",
+      conversationId: CONVERSATION.id,
+      clientMessageId: "after-wake",
+      text: "still there?",
+    }),
+  );
+  // The answer is written when the turn route returns, so it is awaited rather than assumed.
+  await vi.waitFor(() => {
+    expect(
+      parseFrames(server).filter((frame) => frame.type === "accepted" || frame.type === "rejected"),
+    ).toStrictEqual([{ type: "accepted", clientMessageId: "after-wake", messageId: "1" }]);
+  });
+  expect(second.sends).toStrictEqual([
+    { id: CONVERSATION.id, text: "still there?", requestId: "after-wake" },
+  ]);
+
+  await revived.webSocketMessage(
+    server,
+    JSON.stringify({ type: "abort", conversationId: CONVERSATION.id }),
+  );
+  await vi.waitFor(() => {
+    expect(second.aborts).toStrictEqual([CONVERSATION.id]);
+  });
 
   await revived.webSocketClose(server);
   expect(second.stops()).toBe(1);

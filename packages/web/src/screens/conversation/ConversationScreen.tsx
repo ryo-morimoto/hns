@@ -5,7 +5,7 @@ import type { LiveClient } from "../../live/client.ts";
 import { explainConnection, type LiveConversationState } from "../../live/state.ts";
 import { formatHash } from "../../routes/route.ts";
 import { Composer } from "./Composer.tsx";
-import { browserDraftStorage, readDraft, writeDraft } from "./drafts.ts";
+import { browserDraftStorage, forgetDraft, readDraft, writeDraft } from "./drafts.ts";
 import { Transcript } from "./Transcript.tsx";
 import {
   conversationStateOf,
@@ -127,6 +127,11 @@ export function ConversationScreen({
         found = { ok: false, reason: "unavailable", message: "会話を読み込めませんでした。" };
       }
       if (!live) return;
+      if (!found.ok && found.reason === "not_found") {
+        // The conversation is gone (deleted, unknown, or without its object). Its draft is text
+        // for a conversation that can never open again, so the key goes with it.
+        forgetDraft(store.current ?? browserDraftStorage(), conversationId);
+      }
       setRead({
         for: conversationId,
         state: found.ok

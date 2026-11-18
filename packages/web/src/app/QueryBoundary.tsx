@@ -18,7 +18,7 @@ function ShellFallback(): ReactElement {
 /** The shell when a read failed; the details stay in the console, not the page. */
 function ShellFailure(): ReactElement {
   return (
-    <div className="hns-shell" data-panel="closed" data-render-error="true">
+    <div className="hns-shell" data-panel="closed">
       <main className="hns-shell__main">
         <section className="hns-view">
           <h1>読み込めません</h1>

@@ -14,6 +14,7 @@ import {
   conversationStateOf,
   isInterrupted,
   itemKindOf,
+  latestTurn,
   mergeEntries,
   progressOf,
   readConversationState,
@@ -86,7 +87,7 @@ test("only the newest entry says whether the run was stopped", () => {
 
 // Catches: the progress line saying "waiting" while the model is answering, or "thinking" while
 // a tool is executing.
-test("the progress line follows the newest thing in the transcript", () => {
+test("the progress line follows the newest turn, not the newest entry", () => {
   const idle = { kind: "idle" } as const;
   expect(progressOf([], "", idle)).toBeNull();
   expect(progressOf([ENTRY("1", "pi.user", "go")], "", idle)).toStrictEqual({
@@ -94,9 +95,44 @@ test("the progress line follows the newest thing in the transcript", () => {
     label: "待ち",
     live: true,
   });
-  expect(progressOf([ENTRY("1", "pi.tool-result", "ok")], "", idle)?.kind).toBe("tool");
+  // The turn's tool has returned and the model has not been asked for its next answer yet.
+  expect(
+    progressOf([ENTRY("1", "pi.user", "go"), ENTRY("2", "pi.tool-result", "ok")], "", idle)?.kind,
+  ).toBe("tool");
   expect(progressOf([ENTRY("1", "pi.user", "go")], "半分", idle)?.kind).toBe("thinking");
-  expect(progressOf([ENTRY("1", "pi.assistant", "done")], "", idle)).toBeNull();
+  // An answered turn is quiet.
+  expect(
+    progressOf([ENTRY("1", "pi.user", "go"), ENTRY("2", "pi.assistant", "done")], "", idle),
+  ).toBeNull();
+  // A transcript that is only a tool result has no turn in it: nothing claims a tool is running.
+  expect(progressOf([ENTRY("1", "pi.tool-result", "ok")], "", idle)).toBeNull();
+});
+
+// Catches: a tool result — which the server commits when the tool has *returned* — making the
+// progress line say a tool is still executing, so a finished or stopped conversation looks busy.
+test("a committed tool result from a settled turn is not a running tool", () => {
+  const idle = { kind: "idle" } as const;
+  const answered = [
+    ENTRY("1", "pi.user", "go"),
+    ENTRY("2", "pi.tool-result", "ok"),
+    ENTRY("3", "pi.assistant", "done"),
+  ];
+  expect(progressOf(answered, "", idle)).toBeNull();
+  const stopped = [
+    ...answered,
+    ENTRY("4", "pi.user", "again"),
+    ENTRY("5", ABORTED_ASSISTANT_KIND, ""),
+  ];
+  expect(progressOf(stopped, "", idle)?.kind).toBe("stopped");
+  // The tool call of a live turn is the newest thing the turn has: its result is still out.
+  expect(latestTurn([ENTRY("1", "pi.user", "go")])).toStrictEqual({ state: "waiting" });
+  expect(
+    latestTurn([ENTRY("1", "pi.user", "go"), ENTRY("2", "pi.tool-result", "ok")]),
+  ).toStrictEqual({ state: "tool" });
+  expect(
+    latestTurn([ENTRY("1", "pi.user", "go"), ENTRY("2", "pi.assistant", "done")]),
+  ).toStrictEqual({ state: "answer" });
+  expect(latestTurn([ENTRY("1", "pi.assistant", "alone")])).toBeNull();
 });
 
 // Catches: a stop the person made showing nothing until the view catches up, and the progress
