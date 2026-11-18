@@ -99,6 +99,16 @@ server（Durable Object）と machine は同じ `ObsLogEntry`（`@hns/core`）�
 - 成功した drain の `index.legacy_rows` / `index.rebuilt` は窓の外で 1 行だけ書く。drain は先に索引を
   読んで変更の無い行を書かないので、通常のターンでは行も D1 の書き込みも増えない。
 
+### ミラーの観測（`artifacts.mirror`）と kill switch
+
+形の契約は [contracts/observability.md](contracts/observability.md)。ここは手順だけ。
+
+- **kill switch は 1 つの判定**（`packages/server/src/artifacts/kill-switch.ts`）。**env 既定 + workspace override**（`POST /rpc/checkpoint/switch` で `on` / `off` / `null`）。off は
+  **prepare が target を出さないだけ**で、checkpoint は成功し、run の mirror 状態は `pending` のまま残る（データを失わない）。戻せば次の prepare が拾う。switch は prepare のたびに読むので、object を再構成せずに止まる。
+- Workspace Object は、ミラーの結果を記録したときに `artifacts.mirror` を 1 行書く（`artifacts/observability.ts`）。書く先は edge が渡す sink（`observe`）。sink が無ければ console だけ。
+- `GET /api/metrics` の `metrics.mirror` は **p95・失敗率・skip 率・repo 数**を 24 時間の窓で出す。行は Session DO の `obs_events` から読み、token も remote も出さない。
+- **ローカルシミュレータは cf dev**（`packages/server/test/integration/artifacts-local.test.ts`）。wrangler 4.156.0（cf 1.0.0-beta.28）は Artifacts のローカルシミュレータを持たない（binding 表で "will never have a local simulator"、`remote: false` でも Mode は remote）。CI は Cloudflare アカウントを使わない。
+
 ## 失敗コードと status
 
 サーバの面（edge・gateway・files・Session RPC・Workspace RPC）は、予期した失敗を閉じたコードで返す。

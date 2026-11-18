@@ -36,6 +36,11 @@
       "source": "./src/machines/index.ts",
       "types": "./dist/machines/index.d.ts",
       "import": "./dist/machines/index.js"
+    },
+    "./obs": {
+      "source": "./src/obs/index.ts",
+      "types": "./dist/obs/index.d.ts",
+      "import": "./dist/obs/index.js"
     }
   },
   "scripts": {

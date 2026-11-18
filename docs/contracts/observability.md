@@ -18,6 +18,14 @@
 - **測定窓は「turn の書き込みまで」**。`CostGate.turn` が測ってから `turnEnded`（drain）を呼ぶ。**失敗した drain の観測は append しない**（D1 障害で 1 ターンの行が増えると課金の測定が汚れる）。成功した drain の `index.*` は窓の外で 1 行だけ書く。
 - `session-cost.test.ts` の `ROWS_PER_TURN = 10` と `deploy/limits/RESULTS.md` はこの窓の定義に従う。
 
+## ミラーの観測（`artifacts.mirror`）
+
+- 1 回のミラー毎に 1 行。hop は `do`（判定した Workspace Object）、event は `artifacts.mirror`。
+- `detail` は **`mirror`（`MIRROR_STATUSES` の 1 つ）・`repos`（リポジトリ名）・`failure`（`failed` のときだけ `MIRROR_FAILURES` の 1 つ）**。remote も token も型に無い（0246 の redaction と同じ規則）。
+- `level` は `failed` だけ `warn`。ミラーの失敗で R2 の checkpoint は壊れないので `error` にしない（`/api/metrics` の `errors` を汚さない）。
+- `durationMs` は push の所要。`skipped`（push していない）には無い。
+- `/api/metrics` の `mirror` は窓の行から、p95（`skipped` は入れない）・失敗率・skip 率（どちらも**全ミラー結果**が分母）・repo 数（`repos` の distinct）を出す。
+
 ## 変わったとき
 
 イベント・detail・hop を足すなら `core` の語彙とこのファイル。測定窓を変えるなら `cost/gate.ts` と `deploy/limits/RESULTS.md` を同じ変更で。

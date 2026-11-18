@@ -36,6 +36,11 @@ export const OBS_DETAIL_KEYS = [
   "removed",
   "rows",
   "attempt",
+  // The mirror's outcome: its closed state, its closed failure code, and the repository it
+  // pushed to. Names and counts only — a token has no key here by construction.
+  "mirror",
+  "failure",
+  "repos",
 ] as const;
 /** One allowed detail key. */
 export type ObsDetailKey = (typeof OBS_DETAIL_KEYS)[number];
@@ -233,6 +238,43 @@ export interface ObsEventCount {
   readonly count: number;
 }
 
+/** The events one mirror statistics read in the window, by state. */
+export interface ObsMirrorStates {
+  /** Pushes the Worker confirmed at the mirror's ref. */
+  readonly mirrored: number;
+  /** Runs Artifacts would refuse (over its limits) or that had nothing to push. */
+  readonly skipped: number;
+  /** Pushes that failed, for any reason in `MIRROR_FAILURES`. */
+  readonly failed: number;
+  /** Runs whose mirror is still open. */
+  readonly pending: number;
+}
+
+/**
+ * The Artifacts mirror (`artifacts.mirror`) in the metrics window.
+ *
+ * @remarks
+ * Built from one event per mirror outcome, so a reader sees the mirror's health next to the HTTP
+ * numbers. `total` is every outcome recorded in the window; the rates divide by it (0 when it is
+ * 0). `p95Ms` is the push's time at the 95th percentile, 0 when nothing was timed. `repos` is how
+ * many repositories the window touched — one per workspace whose mirror ran. Nothing here is a
+ * token: the entry that carries these numbers has no key a token could take.
+ */
+export interface ObsMirrorMetrics {
+  /** The measurement window, in milliseconds. */
+  readonly windowMs: number;
+  readonly total: number;
+  /** Outcomes by state; `pending` is present only when a row was recorded with it. */
+  readonly states: ObsMirrorStates;
+  /** `failed / total`, 0 when nothing was recorded. */
+  readonly failureRate: number;
+  /** `skipped / total`, 0 when nothing was recorded. */
+  readonly skipRate: number;
+  readonly p95Ms: number;
+  /** Repositories the window's outcomes touched. */
+  readonly repos: number;
+}
+
 /**
  * The aggregate `/api/metrics` returns.
  *
@@ -261,6 +303,8 @@ export interface ObsMetrics {
   readonly agentResponses: number;
   /** The busiest event names in the window, descending, at most 25. */
   readonly byEvent: readonly ObsEventCount[];
+  /** The Artifacts mirror in the window (0249). */
+  readonly mirror: ObsMirrorMetrics;
   /** Rows stored now. */
   readonly stored: number;
   /** The configured retention in days. */

@@ -1,4 +1,8 @@
-import type { ArtifactsBinding, ArtifactsRepoHandle } from "../../src/artifacts/repos.ts";
+import type {
+  ArtifactsBinding,
+  ArtifactsLogOptions,
+  ArtifactsRepoHandle,
+} from "../../src/artifacts/repos.ts";
 
 /**
  * A fake `env.ARTIFACTS`, shaped like the Workers binding's calls the mirror reads.
@@ -82,18 +86,25 @@ export function fakeArtifactsBinding(options: FakeArtifactsOptions = {}): FakeAr
         expiresAt,
       });
     },
-    log: (options: { readonly ref?: string; readonly limit?: number } = {}) => {
+    log: (options: ArtifactsLogOptions = {}) => {
       if (pendingLogFailure !== undefined) {
         const error = pendingLogFailure;
         pendingLogFailure = undefined;
         return Promise.reject(error);
       }
-      const ref = options.ref ?? "refs/heads/main";
-      const commits = repo.refs.get(ref);
-      if (commits === undefined) return Promise.reject(artifactError("NOT_FOUND"));
-      const limit = options.limit ?? 50;
+      // The binding's own answers: a ref it cannot resolve is an **empty array**, not a throw, and
+      // the page is commits with their metadata (workerd's `ArtifactsRepo.log`).
+      const ref = options.ref ?? "HEAD";
+      const commits = repo.refs.get(ref) ?? [];
+      const limit = Math.min(Math.max(options.limit ?? 50, 0), 1000);
+      const offset = options.offset ?? 0;
       return Promise.resolve(
-        commits.slice(0, limit).map((hash) => ({ hash, ref, message: "checkpoint" })),
+        commits.slice(offset, offset + limit).map((hash) => ({
+          hash,
+          treeHash: "0".repeat(40),
+          message: "checkpoint",
+          committedAt: Math.floor(clock() / 1000),
+        })),
       );
     },
   });
@@ -149,7 +160,12 @@ export function fakeArtifactsBinding(options: FakeArtifactsOptions = {}): FakeAr
         return Promise.reject(error);
       }
       const repo = repos.get(name);
-      return Promise.resolve(repo === undefined ? null : handleOf(repo));
+      // The real `Artifacts.get` **throws** NOT_FOUND for a name the namespace has no repository
+      // for; answering null would let the mirror's "create it" path be exercised by a shape the
+      // product never sees (0248's NB-1).
+      return repo === undefined
+        ? Promise.reject(artifactError("NOT_FOUND"))
+        : Promise.resolve(handleOf(repo));
     },
     failNextCreate(error: Error) {
       pendingCreateFailure = error;

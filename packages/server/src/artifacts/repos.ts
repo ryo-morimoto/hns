@@ -24,7 +24,9 @@ import * as v from "valibot";
  * @remarks
  * `token` is the write token the new repository is handed. It is a plaintext secret, so the
  * repository is created **with** a target rather than being asked for a second token: one token
- * per creation, and no token lives anywhere else.
+ * per creation, and no token lives anywhere else. `remote` is the repository's git remote, which
+ * a create answer carries (workerd's `ArtifactsCreateRepoResult`); the mirror reads it there
+ * instead of asking the handle for `info` right after creating it.
  */
 export interface ArtifactsRepoCreated {
   readonly name?: string | undefined;
@@ -38,9 +40,28 @@ export interface ArtifactsRepoInfo {
 }
 
 /**
+ * One commit of a repository's history, as the binding's `log` answers it.
+ *
+ * @remarks
+ * workerd's `ArtifactsCommitMetadata`, narrowed to the fields the mirror reads: the read-back
+ * compares the ref's tip with the commit a push reported. `treeHash` is the commit's root tree,
+ * which a reader that walks the tree also needs; the mirror itself does not read it.
+ */
+export interface ArtifactsCommitMetadata {
+  readonly hash: string;
+  readonly treeHash: string;
+}
+
+/**
  * The part of a repository handle this module calls.
  *
  * @remarks
+ * **The shape is the real binding's** (workerd's `ArtifactsRepo`; 0246 declared `get` as a
+ * null-answering lookup and `log` with a required `ref`, and neither is what the binding does —
+ * 0248 fixed the environment's type and this is the writer's half of the same fix). `get` on the
+ * namespace **throws** `NOT_FOUND`; it never answers null. `log`'s options are all optional and
+ * its answer is a list of commits with metadata.
+ *
  * Each method's answer stays `unknown` **on purpose**: the handle is the binding's, whose types
  * the Worker bundle does not carry, and the value is parsed by this module's own schema the
  * moment it arrives (`RepoInfoSchema`, `RepoTokenSchema`, `RepoLogSchema`). Narrowing the
@@ -54,9 +75,23 @@ export interface ArtifactsRepoHandle {
   /** Issue a token scoped to the repository; `ttl` is seconds. */
   // oxlint-disable-next-line anti-slop/no-unknown-returns -- the binding's boundary: the value is untrusted until RepoInfoSchema, RepoTokenSchema, or RepoLogSchema parses it.
   createToken(scope: "read" | "write", ttl?: number): Promise<unknown>;
-  /** Commits on `ref` (the default branch when absent), newest first. */
+  /**
+   * Commits along the first-parent chain, newest first.
+   *
+   * @remarks
+   * The binding's own spelling (`ArtifactsRepo.log`): every field optional, `ref` defaulting to
+   * `HEAD`, `limit` to 50 and capped at 1000. It answers **an empty array**, not a throw, for a
+   * ref it cannot resolve, so an absent ref is read from the page and not from an error.
+   */
   // oxlint-disable-next-line anti-slop/no-unknown-returns -- the binding's boundary: the value is untrusted until RepoInfoSchema, RepoTokenSchema, or RepoLogSchema parses it.
-  log(options?: { readonly ref?: string; readonly limit?: number }): Promise<unknown>;
+  log(options?: ArtifactsLogOptions): Promise<unknown>;
+}
+
+/** What `log` accepts: the binding's own options, all optional (workerd's `ArtifactsRepo.log`). */
+export interface ArtifactsLogOptions {
+  readonly ref?: string | undefined;
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
 }
 
 /**
@@ -64,12 +99,15 @@ export interface ArtifactsRepoHandle {
  *
  * @remarks
  * `create` takes the options the mirror sends (none today, so the parameter is optional and
- * empty) and its answer is parsed at the boundary; `get` answers a handle or null.
+ * empty) and its answer is parsed at the boundary; `get` answers a handle **or throws
+ * `NOT_FOUND`** when the namespace has no repository of that name (workerd's `Artifacts.get`).
+ * A null answer is not the binding's, but it is still read as an absence so a fake written to an
+ * older shape fails the same closed way instead of crashing.
  */
 export interface ArtifactsBinding {
   /** Create a repository; the answer carries the write token it was created with. */
   create(name: string, options?: ArtifactsCreateOptions): Promise<ArtifactsRepoCreated>;
-  /** A repository's handle, or null when the namespace has no repository of that name. */
+  /** A repository's handle; throws the binding's `NOT_FOUND` when it does not exist. */
   get(name: string): Promise<ArtifactsRepoHandle | null>;
 }
 
@@ -135,8 +173,11 @@ export type TargetOutcome =
   | { readonly ok: false; readonly failure: MirrorFailure };
 
 /** A repository handle the read-back reads: its log shape, narrowed. */
-const RepoLogSchema: v.GenericSchema<unknown, readonly { readonly hash: string }[]> = v.array(
-  v.object({ hash: v.string() }),
+const RepoLogSchema: v.GenericSchema<unknown, readonly ArtifactsCommitMetadata[]> = v.array(
+  v.object({
+    hash: v.string(),
+    treeHash: v.string(),
+  }),
 );
 
 /** The `create` answer as it arrives, narrowed to the fields the mirror reads. */
@@ -280,8 +321,21 @@ export class ArtifactsRepos {
    * workspace cannot disagree about which repository is its mirror.
    */
   async ensure(name: string): Promise<RepoOutcome> {
-    const existing = await this.#handle(name);
-    if (existing !== undefined) return await this.#present(name, existing);
+    // The lookup **throws** NOT_FOUND for a repository that is not there (the real binding's
+    // `get`); that is the one answer that is not a failure but "create it".
+    const present:
+      | { readonly ok: true; readonly handle: ArtifactsRepoHandle | undefined }
+      | { readonly ok: false; readonly failure: MirrorFailure } = await this.#handle(name).then(
+      (handle) => ({ ok: true as const, handle }),
+      (error: Error) => ({ ok: false as const, failure: failureOfBinding(error) }),
+    );
+    if (present.ok) {
+      // A fake of the older shape answers null for a repository it does not have; that is the
+      // same answer `NOT_FOUND` is, so it takes the same path instead of creating it.
+      if (present.handle !== undefined) return await this.#present(name, present.handle);
+    } else if (present.failure !== "repo_unavailable") {
+      return { ok: false, failure: present.failure };
+    }
     try {
       const created = v.parse(RepoCreatedSchema, await this.#binding.create(name));
       if (created.remote === undefined) return { ok: false, failure: "repo_unavailable" };
@@ -289,7 +343,8 @@ export class ArtifactsRepos {
     } catch (error) {
       const failure = failureOfBinding(errorOf(error));
       if (failure === "unknown" && isAlreadyExists(errorOf(error))) {
-        const raced = await this.#handle(name);
+        // Two prepares raced: the loser reads the repository the winner made.
+        const raced = await this.#handle(name).catch(() => undefined);
         if (raced !== undefined) return await this.#present(name, raced);
       }
       return { ok: false, failure };
@@ -316,7 +371,7 @@ export class ArtifactsRepos {
     const ensured = await this.ensure(request.repo);
     if (!ensured.ok) return ensured;
     try {
-      const handle = await this.#handle(request.repo);
+      const handle = await this.#handle(request.repo).catch(() => undefined);
       if (handle === undefined) return { ok: false, failure: "repo_unavailable" };
       const issued = await this.#issueToken(handle);
       if (issued === undefined) return { ok: false, failure: "unknown" };
@@ -361,23 +416,59 @@ export class ArtifactsRepos {
     readonly ref: string;
     readonly commit: string;
   }): Promise<MirrorConfirmation> {
+    return await this.confirm(request, { absentRepository: "absence" });
+  }
+
+  /**
+   * Whether the repository holds one commit at one ref, with the caller's reading of a missing
+   * repository.
+   *
+   * @param request - The repository, the ref, and the commit.
+   * @param reading - How a repository the namespace does not have is read: `absence` for a
+   * read-back that can be re-checked (the mirror's confirmation, 0246's contract), `failure` for
+   * a reader that must keep the binding's own word (`repo_unavailable`; the Workspace RPC behind
+   * `/rpc/checkpoint/mirror`).
+   * @returns `held`, `absent`, or the closed failure.
+   *
+   * @remarks
+   * The binding's `get` **throws** `NOT_FOUND` for a repository that is not there; whether that is
+   * "the push did not land" or "the binding could not answer" depends on the caller, and both
+   * readings are in the contract's vocabulary. There is one read-back, not two: the page, the
+   * tip, and the commit comparison are identical for both.
+   */
+  async confirm(
+    request: {
+      readonly repo: string;
+      readonly ref: string;
+      readonly commit: string;
+    },
+    reading: { readonly absentRepository: "absence" | "failure" },
+  ): Promise<MirrorConfirmation> {
+    const absent =
+      reading.absentRepository === "absence"
+        ? ({ ok: false, absence: "repo" } as const)
+        : ({ ok: false, failure: "repo_unavailable" } as const);
     let handle: ArtifactsRepoHandle | undefined;
     try {
       handle = await this.#handle(request.repo);
     } catch (error) {
-      return { ok: false, failure: failureOfBinding(errorOf(error)) };
+      const failure = failureOfBinding(errorOf(error));
+      if (failure === "repo_unavailable") return absent;
+      return { ok: false, failure };
     }
-    if (handle === undefined) return { ok: false, absence: "repo" };
+    if (handle === undefined) return absent;
     let log: v.InferOutput<typeof RepoLogSchema>;
     try {
-      // The log page is the head of the history: the first entry is the ref's tip.
+      // The log page is the head of the history: the first entry is the ref's tip. The binding's
+      // `log` answers an **empty array** for a ref it cannot resolve (it does not throw for one),
+      // so an absent ref is the empty page and is read below.
       const parsed = v.safeParse(RepoLogSchema, await handle.log({ ref: request.ref, limit: 1 }));
       if (!parsed.success) return { ok: false, failure: "unknown" };
       log = parsed.output;
     } catch (error) {
       const failure = failureOfBinding(errorOf(error));
-      // The binding answers NOT_FOUND for a ref (or repository) it cannot resolve: that is an
-      // absence, not a failure. Everything else is the failure it names.
+      // A repository that is gone (the handle was fine, the read is not) is not the push's
+      // failure: an empty page is the absence the caller can re-check.
       if (failure === "repo_unavailable") return { ok: false, absence: "ref" };
       return { ok: false, failure };
     }
@@ -410,7 +501,14 @@ export class ArtifactsRepos {
     return { token: issued.output.plaintext, expiresAt };
   }
 
-  /** A repository's handle, or undefined plus the failure that prevented one. */
+  /**
+   * A repository's handle.
+   *
+   * @param name - The repository name.
+   * @returns The handle, or undefined when the namespace answered null (a fake of the older shape).
+   * @throws The binding's `NOT_FOUND` when the namespace has no such repository — the real
+   * `get`'s answer, which the caller reads as "not there" rather than as a defect.
+   */
   async #handle(name: string): Promise<ArtifactsRepoHandle | undefined> {
     const handle = await this.#binding.get(name);
     return handle === null ? undefined : handle;

@@ -16,6 +16,9 @@ import {
   type CheckpointRecord,
   type LeaseRefusal,
   type MutationResult,
+  type MirrorFailure,
+  type MirrorStatus,
+  type ObsLogEntry,
   type WorkspaceLease,
 } from "@hns/core";
 import type { JournalOutcomeEntry } from "@hns/store";
@@ -31,6 +34,13 @@ import {
   parseCheckpointRecord,
 } from "../checkpoint/flow.ts";
 import { ArtifactsRepos, artifactsRepoName, type ArtifactsBinding } from "../artifacts/repos.ts";
+import {
+  mirrorEnabled,
+  mirrorOverrideFrom,
+  mirrorSettingsOf,
+  type MirrorSwitchSettings,
+} from "../artifacts/kill-switch.ts";
+import { mirrorObservationEntry } from "../artifacts/observability.ts";
 import { signedHeadersOf } from "../checkpoint/agent-wire.ts";
 import { BODY_HASH_HEADER, sha256Hex, verifyDeviceRequest } from "../checkpoint/signature.ts";
 import { R2PackTransport, type PackBucket } from "../checkpoint/transport.ts";
@@ -42,6 +52,9 @@ import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
 
 /** How long an issued lease stays valid unless renewed. */
 const DEFAULT_LEASE_TTL_MS = 60_000;
+
+/** The `workspace_meta` key of the workspace's own mirror switch (`on`/`off`). */
+const MIRROR_OVERRIDE_KEY = "artifacts_mirror";
 
 const LEASE_ACTIONS = ["acquire", "renew", "release"] as const;
 type LeaseAction = (typeof LEASE_ACTIONS)[number];
@@ -93,14 +106,25 @@ export interface WorkspaceOptions {
    */
   readonly artifacts?: ArtifactsBinding | undefined;
   /**
-   * Whether the Artifacts mirror is switched on; defaults to `ARTIFACTS_MIRROR`.
+   * The deployment's mirror default, as a test seam; defaults to `ARTIFACTS_MIRROR`.
    *
    * @remarks
-   * The kill switch (0249 adds the workspace override and the metrics). Off means a prepare
-   * hands out no target and no mirror is attempted, so the run stays `pending` and its review is
-   * the machine's; a checkpoint's acknowledgement never depends on the switch.
+   * The kill switch's deployment half (`artifacts/kill-switch.ts`, 0249). It is the value the
+   * deploy would have written; a workspace's own stored override still wins over it. Off means a
+   * prepare hands out no target and no mirror is attempted, so the run keeps the state it had and
+   * its review is the machine's; a checkpoint's acknowledgement never depends on the switch.
    */
   readonly artifactsMirror?: boolean | undefined;
+  /**
+   * Where the mirror's outcomes are observed; defaults to the `/api/metrics` path.
+   *
+   * @remarks
+   * A seam like `artifacts`: production hands the object the edge's observation sink when the
+   * Worker builds it, and a unit test supplies a collector. Absent means the mirror is not observed
+   * (the Worker that constructs the object without it keeps the console line), never that the
+   * mirror stops.
+   */
+  readonly observe?: ((entry: ObsLogEntry) => void) | undefined;
 }
 
 /**
@@ -137,8 +161,9 @@ export interface WorkspaceBindings {
    * The mirror's kill switch (`"on"`/`"off"`); absent or anything else is off.
    *
    * @remarks
-   * A text binding the deploy sets. The smallest switch 0246 needs: it stops issuing targets and
-   * the mirror is not attempted. The workspace override and the metrics are the follow-up.
+   * A text binding the deploy sets. It is the **default** for every workspace; a workspace's own
+   * stored override wins over it (`artifacts/kill-switch.ts`). Off stops issuing targets, so no
+   * push is attempted, and the checkpoint is still made and answered.
    */
   readonly ARTIFACTS_MIRROR?: string | undefined;
 }
@@ -222,6 +247,12 @@ const CheckpointMirrorSchema = v.object({
 });
 
 /** A stored checkpoint: its Run, the machine's prepare answer (JSON), and its record (JSON). */
+/** The workspace's own mirror switch; `null` removes the override. */
+const MirrorSwitchSchema = v.object({
+  workspaceId: NonEmptyText,
+  mirror: v.nullable(v.picklist(["on", "off"])),
+});
+
 const CheckpointRowSchema = v.object({
   run_id: NonEmptyText,
   prepare: v.string(),
@@ -441,13 +472,23 @@ export class Workspace {
   /** Where packs go; undefined fails the checkpoint path closed at the RPC. */
   readonly #packs: R2PackTransport | undefined;
   /**
-   * The Artifacts mirror, or undefined when it is switched off or unbound.
+   * Where a mirror target is issued from, or undefined when Artifacts is unbound.
    *
    * @remarks
-   * The mirror never decides a checkpoint's answer: undefined here means a prepare hands out no
-   * target and a run waits at `pending`, which is a run whose review is the machine's.
+   * **The switch is not folded into this value any more** (0249): a workspace can turn its mirror
+   * on or off after the object was constructed, so the switch is read on every prepare
+   * ({@link #mirrorSwitch}) and only an unbound binding decides here. The mirror never decides a
+   * checkpoint's answer: no target means a run keeps the state it had, and its review is the
+   * machine's.
    */
   readonly #mirror: ArtifactsRepos | undefined;
+  /**
+   * The switch as the object was constructed: the deployment's default (a test seam or
+   * `ARTIFACTS_MIRROR`). The workspace's stored override is read on each decision.
+   */
+  readonly #switch: MirrorSwitchSettings;
+  /** Where a decided mirror is observed; undefined writes only the console line. */
+  readonly #observe: ((entry: ObsLogEntry) => void) | undefined;
   /** The queue that serializes the calls which can decide the project binding. */
   #bindingQueue: Promise<void> = Promise.resolve();
   readonly #ready: Promise<void>;
@@ -473,11 +514,11 @@ export class Workspace {
     const packs = options.packs ?? options.OBJECTS;
     this.#packs = packs === undefined ? undefined : new R2PackTransport(packs);
     const artifacts = options.artifacts ?? options.ARTIFACTS;
-    const switchedOn = options.artifactsMirror ?? mirrorSwitchFrom(options);
-    this.#mirror =
-      switchedOn && artifacts !== undefined
-        ? new ArtifactsRepos(artifacts, this.#clock)
-        : undefined;
+    // The switch is read once here for its default and again on every prepare for the workspace's
+    // override; only the binding decides whether there is anything to issue a target from.
+    this.#switch = mirrorSettingsOf(options, undefined);
+    this.#mirror = artifacts === undefined ? undefined : new ArtifactsRepos(artifacts, this.#clock);
+    this.#observe = options.observe;
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
 
@@ -823,6 +864,7 @@ export class Workspace {
    *   cannot be handed to another.
    * - `POST /rpc/checkpoint/complete` — the watermark and the record, in one transaction.
    * - `POST /rpc/checkpoint/mirror` — the push's outcome, after the checkpoint was answered.
+   * - `POST /rpc/checkpoint/switch` — the workspace's own mirror switch (`on`/`off`/`null`).
    * - `GET /rpc/checkpoint/record?commit=<id>` — the recorded checkpoint of one commit, for the
    *   review's source selection (0248). A read only: no transition and no write.
    */
@@ -845,6 +887,12 @@ export class Workspace {
         return failure("method_not_allowed", "Only POST is allowed here.");
       }
       return await this.#checkpointMirror(request);
+    }
+    if (segments.length === 3 && action === "switch") {
+      if (request.method !== "POST") {
+        return failure("method_not_allowed", "Only POST is allowed here.");
+      }
+      return await this.#checkpointMirrorSwitch(request);
     }
     if (segments.length === 4 && segments[3] === "pack" && action !== undefined) {
       if (request.method !== "POST") {
@@ -960,6 +1008,12 @@ export class Workspace {
    * target: the checkpoint is already the machine's answer, and the ack must not wait for
    * Artifacts. The token is in this answer and nowhere else; nothing here writes, logs, or emits
    * it.
+   *
+   * **The switch is asked, not remembered.** It is read on every prepare, because a workspace can
+   * turn its mirror off after the object was constructed; a run whose switch is off is answered
+   * with no target and never asked about at all, so nothing is attempted, no repository is
+   * looked for, and nothing about the run's state changes — a `pending` mirror stays `pending`
+   * and is picked up when the switch is back on.
    */
   async #prepareAnswer(
     workspaceId: string,
@@ -968,7 +1022,7 @@ export class Workspace {
     mirror: CheckpointRecord["mirror"],
   ): Promise<CheckpointPrepareAnswer> {
     const repos = this.#mirror;
-    if (repos === undefined || mirror.status !== "pending") {
+    if (repos === undefined || mirror.status !== "pending" || !this.#mirrorSwitch()) {
       const answer: CheckpointPrepareAnswer = { checkpoint, watermark };
       return v.parse(CheckpointPrepareAnswerSchema, answer);
     }
@@ -987,6 +1041,105 @@ export class Workspace {
       watermark,
       mirror: issued.target,
     });
+  }
+
+  /**
+   * Whether the mirror may be attempted, right now.
+   *
+   * @returns True only when the workspace's stored override, or its absence and the deployment's
+   * default, says on.
+   *
+   * @remarks
+   * The one call into the kill switch (`artifacts/kill-switch.ts`); nothing else in this object
+   * compares the switch's spelling. The override lives in the object's own `workspace_meta`, so a
+   * workspace can stop its mirror without a redeploy, and a workspace whose row cannot be read
+   * keeps the deployment's default — a broken switch is never the reason a checkpoint fails.
+   */
+  #mirrorSwitch(): boolean {
+    let stored: string | undefined;
+    try {
+      stored = this.#meta(MIRROR_OVERRIDE_KEY);
+    } catch (error) {
+      // An unreadable row is a defect of the storage, not of the checkpoint: the default decides.
+      console.error(
+        "workspace: the mirror override could not be read",
+        error instanceof Error ? error.name : "unknown",
+      );
+      stored = undefined;
+    }
+    return mirrorEnabled(mirrorWithOverride(this.#switch, stored));
+  }
+
+  /**
+   * Set (or clear) the workspace's own mirror switch.
+   *
+   * @param request - The RPC body: `workspaceId` and `mirror`, `"on"`, `"off"`, or `null` to
+   * remove the override and follow the deployment again.
+   * @returns `{ ok: true, mirror }` with the switch in force after the write.
+   *
+   * @remarks
+   * The override is the workspace half of the kill switch (U-02). Writing it never touches a
+   * checkpoint: existing runs keep the mirror state they already have, so turning the mirror off
+   * loses no data and turning it back on lets a `pending` run prepare a target again.
+   */
+  async #checkpointMirrorSwitch(request: Request): Promise<Response> {
+    const body = await bodyOf(request);
+    if (!body.ok) return body.response;
+    const parsed = v.safeParse(MirrorSwitchSchema, body.value);
+    if (!parsed.success) return failure("invalid_request", "Invalid mirror switch input.");
+    const input = parsed.output;
+    this.#claimWorkspace(input.workspaceId);
+    if (input.mirror === null) {
+      this.#exec("DELETE FROM workspace_meta WHERE key = ?", MIRROR_OVERRIDE_KEY);
+    } else {
+      this.#setMeta(MIRROR_OVERRIDE_KEY, input.mirror);
+    }
+    return json({ ok: true, mirror: this.#mirrorSwitch() });
+  }
+
+  /**
+   * Observe one decided mirror.
+   *
+   * @param workspaceId - The workspace the mirror belongs to; it names the observed repository.
+   * @param status - The state the Worker recorded.
+   * @param failure - The failure a `failed` state carries.
+   * @param startedAt - When the push was attempted, in milliseconds, for the duration; undefined
+   * when nothing was attempted.
+   * @param requestId - The correlation id of the reporting request.
+   *
+   * @remarks
+   * One entry per decided mirror, on the `do` hop, carrying the state, the failure code, the
+   * repository's name, and the push's duration — never the remote and never a token (0249). The
+   * sink is the edge's; when the object was built without one the line is only on the console, so
+   * a deployment that has not wired the sink still sees the outcome. An observation never changes
+   * the answer: a sink that throws is logged and swallowed, exactly like the Session's.
+   */
+  #observeMirror(
+    workspaceId: string,
+    status: MirrorStatus,
+    failure: MirrorFailure | undefined,
+    startedAt: number | undefined,
+    requestId: string | null,
+  ): void {
+    const now = this.#clock();
+    const entry = mirrorObservationEntry({
+      repo: artifactsRepoName(workspaceId),
+      status,
+      failure,
+      durationMs: startedAt === undefined ? undefined : Math.max(0, now - startedAt),
+      requestId,
+      now,
+    });
+    const observe = this.#observe;
+    if (observe === undefined) return;
+    try {
+      observe(entry);
+    } catch (error) {
+      console.error(
+        "workspace: the mirror observation was not written",
+        error instanceof Error ? error.name : "unknown",
+      );
+    }
   }
 
   /** The pack limit the mirror's initial state reads; the contract's 64 MiB when unbound. */
@@ -1182,6 +1335,8 @@ export class Workspace {
    * move. The record, never the token, is what is stored.
    */
   async #checkpointMirror(request: Request): Promise<Response> {
+    const startedAt = this.#clock();
+    const requestId = request.headers.get("x-request-id");
     const body = await bodyOf(request);
     if (!body.ok) return body.response;
     const parsed = v.safeParse(CheckpointMirrorSchema, body.value);
@@ -1199,11 +1354,16 @@ export class Workspace {
       if (mirror === undefined) {
         return failure("unavailable", "The Artifacts mirror is not configured.");
       }
-      const held = await mirror.holds({
-        repo: artifactsRepoName(input.workspaceId),
-        ref: mirrorRef(input.runId),
-        commit: record.commit,
-      });
+      const held = await mirror.confirm(
+        {
+          repo: artifactsRepoName(input.workspaceId),
+          ref: mirrorRef(input.runId),
+          commit: record.commit,
+        },
+        // The RPC's record keeps the binding's own failure word for a repository that is not
+        // there (`repo_unavailable`), while the absent `ref` below is the push not landing.
+        { absentRepository: "failure" },
+      );
       if (held.ok) {
         // A re-check that finds the commit settles the mirror even from `failed`: the push
         // landed and its confirmation was lost, which is one move in the transition table and
@@ -1216,9 +1376,11 @@ export class Workspace {
             JSON.stringify(updated),
             input.runId,
           );
+          this.#observeMirror(input.workspaceId, "mirrored", undefined, startedAt, requestId);
           return json({ ok: true, checkpoint: updated });
         }
-        // Already terminal: the recorded state is the answer.
+        // Already terminal: the recorded state is the answer, and the mirror was observed when it
+        // was recorded, so a repeated report does not count twice.
         return json({ ok: true, checkpoint: record });
       }
       // The refusal keeps why: the binding's own failure code, or the closed word for a push
@@ -1236,6 +1398,7 @@ export class Workspace {
           JSON.stringify(checkpointRecordOf({ ...record, mirror: failed })),
           input.runId,
         );
+        this.#observeMirror(input.workspaceId, "failed", refusal, startedAt, requestId);
       }
       throw new CheckpointRefusedError(
         "conflict",
@@ -1267,6 +1430,9 @@ export class Workspace {
       JSON.stringify(updated),
       input.runId,
     );
+    if (next.status !== "pending") {
+      this.#observeMirror(input.workspaceId, next.status, next.failure, startedAt, requestId);
+    }
     return json({ ok: true, checkpoint: updated });
   }
 
@@ -1778,17 +1944,22 @@ function outcomeResponse(entry: JournalOutcomeEntry): Response {
  * defaulted; the file faces fail closed with 503 until 0148 supplies the registry entry.
  */
 /**
- * The mirror's kill switch as the deploy sets it.
+ * The switch's settings with the workspace's stored override applied.
  *
- * @param bindings - The Worker environment the object was constructed with.
- * @returns True only for `"on"`; anything else (absent, empty, a typo) is off.
+ * @param deployment - The settings the object was constructed with (the deployment's default).
+ * @param stored - The stored override row's text, or undefined when the workspace has none.
+ * @returns The deployment's default with the override when the row names one.
  *
  * @remarks
- * Fail closed: a switch that cannot be read is off, because the mirror is an optional
- * convenience and a run whose mirror is off is still checkpointed.
+ * A stored value this build does not know is no override at all ({@link mirrorOverrideFrom}), so a
+ * row written by a newer build cannot freeze a workspace on a switch this one cannot read.
  */
-function mirrorSwitchFrom(bindings: WorkspaceBindings): boolean {
-  return bindings.ARTIFACTS_MIRROR === "on";
+function mirrorWithOverride(
+  deployment: MirrorSwitchSettings,
+  stored: string | undefined,
+): MirrorSwitchSettings {
+  const override = mirrorOverrideFrom(stored);
+  return override === undefined ? deployment : { ...deployment, override };
 }
 
 function machineFilesFrom(bindings: WorkspaceBindings): MachineFiles | undefined {

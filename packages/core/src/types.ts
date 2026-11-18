@@ -114,6 +114,7 @@ export const EVENT_NAMES = [
   "automation.fired",
   "automation.skipped",
   "automation.finished",
+  "artifacts.mirror",
 ] as const;
 /** One event name. */
 export type EventName = (typeof EVENT_NAMES)[number];

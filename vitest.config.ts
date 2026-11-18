@@ -82,6 +82,10 @@ const alias: readonly SourceAlias[] = [
     find: /^@hns\/server\/graphql$/,
     replacement: source("./packages/server/src/graphql/index.ts"),
   },
+  {
+    find: /^@hns\/server\/obs$/,
+    replacement: source("./packages/server/src/obs/index.ts"),
+  },
 ];
 
 // Two projects per package: the in-process tests a commit runs, and the

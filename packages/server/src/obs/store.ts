@@ -11,6 +11,7 @@ import {
   type ObsLogEntry,
   type ObsMetrics,
 } from "@hns/core";
+import { mirrorMetricsOf, mirrorRowsOf } from "../artifacts/observability.ts";
 
 /** How often the append path runs the retention delete; the cap delete runs only when exceeded. */
 export const OBS_PRUNE_EVERY = 256;
@@ -274,6 +275,22 @@ export function createObsStore(storage: ObsStorage, options: ObsStoreOptions = {
           )
           .toArray()
           .map((row) => v.parse(EventCountSchema, row)),
+        // The mirror is reduced from its own entries (0249): one page of them, read back through
+        // the same entry shape every other number is read with, so a token cannot be counted.
+        mirror: mirrorMetricsOf(
+          mirrorRowsOf(
+            sql
+              .exec(
+                "SELECT " +
+                  COLUMNS +
+                  " FROM obs_events WHERE event = 'artifacts.mirror' AND at >= ? ORDER BY id DESC",
+                since,
+              )
+              .toArray()
+              .map((row) => toEntry(v.parse(RowSchema, row))),
+          ),
+          windowMs,
+        ),
         stored,
         retentionDays,
         maxEvents,
