@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import { relay } from "./packages/web/vite.relay.ts";
 import { doctest } from "vite-plugin-doctest";
+import webNode from "./vitest.web-node.config.ts";
 
 // One runner for every layer (docs/testing.md). A project per package keeps
 // `npm test -w @hns/store` scoped to that package instead of the whole repo.
@@ -173,6 +174,9 @@ export default defineConfig({
         },
       },
       { extends: true, test: { name: "tools", include: ["tools/**/*.test.ts"] } },
+      // The office preview's real-machine test runs under node conditions and needs the pack;
+      // it is loaded only when named, so a full run never builds one (its file says how).
+      webNode,
     ],
   },
 });

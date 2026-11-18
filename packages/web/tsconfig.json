@@ -23,6 +23,7 @@
     "test/**/*.tsx",
     "vite.config.ts",
     "vite.proxy.ts",
-    "vite.relay.ts"
+    "vite.relay.ts",
+    "../../vitest.web-node.config.ts"
   ]
 }

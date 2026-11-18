@@ -73,10 +73,14 @@
       },
       "packages/web": {
         "entry": [
-          "src/**/*.test.{ts,tsx}"
+          "src/**/*.test.{ts,tsx}",
+          "src/office/*.{ts,tsx}"
         ],
         "ignoreDependencies": [
           "jsdom"
+        ],
+        "ignoreBinaries": [
+          "bwrap"
         ]
       }
     },
