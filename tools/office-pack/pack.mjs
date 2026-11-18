@@ -50,7 +50,6 @@ const fail = (message) => {
 
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
-/** One entry the pack carries: a regular file with its digest, or a symlink with its target. */
 /** Whether path is a symlink (lstat, not stat: a broken link is still a link the pack holds). */
 const isSymlink = (path) => {
   try {
@@ -430,7 +429,13 @@ const fonts = () => {
   if (missing.length > 0) process.exit(2);
 };
 
-/** A scratch directory under the caller's temp, made on demand (the checks write nothing else). */
+/**
+ * The one scratch directory the checks run in, made on first use.
+ *
+ * Fixed rather than numbered per run (0235 NB2): a directory per invocation left one behind every
+ * time, and nothing outside it is ever written. Its content is a fontconfig cache and nothing a
+ * later run depends on.
+ */
 const tempdir = (name) => {
   const path = join(tmpdir(), "hns-office-pack-" + name);
   mkdirSync(path, { recursive: true });
@@ -509,13 +514,21 @@ const manifest = () => {
   const mesa = option("mesa");
   const vulkanLoader = option("vulkan-loader");
 
+  // `files` is byte payload only, because that is what the contract says it is: relative path ->
+  // "sha256:<hex>" (EngineManifestSchema). A symlink holds no bytes, so it does not belong there —
+  // listing one would make the machine reject a legitimate pack the moment it validates the
+  // manifest (0235 review). The links live in build.symlinks, which the schema does not know, the
+  // same place runtime.bindPaths puts what the contract has no shape for.
   const files = {};
+  const symlinks = [];
   for (const entry of payload(pack)) {
     // The manifest is what carries the list; About.txt is read by a person, not loaded.
     if (entry.path === "manifest.json" || entry.path === "About.txt") continue;
-    files[entry.path] = entry.symlink
-      ? { kind: "symlink", target: entry.target, sha256: "sha256:" + sha256(join(pack, entry.path)) }
-      : "sha256:" + sha256(join(pack, entry.path));
+    if (entry.symlink === true) {
+      symlinks.push({ path: entry.path, target: entry.target, sha256: "sha256:" + sha256(join(pack, entry.path)) });
+    } else {
+      files[entry.path] = "sha256:" + sha256(join(pack, entry.path));
+    }
   }
   const libraries = readFileSync(report, "utf8")
     .split("\n")
@@ -548,6 +561,9 @@ const manifest = () => {
         VK_ICD_FILENAMES: "share/vulkan/icd.d/lvp_icd.x86_64.json",
         VK_DRIVER_FILES: "share/vulkan/icd.d/lvp_icd.x86_64.json",
       },
+      // Every symlink the pack holds, with the target it has and the digest behind it. Not in
+      // `files` (see above). verify.sh reads both lists.
+      symlinks,
       runtime: {
         // The parts of the pack that are NOT in the pack, named by absolute path and digest instead of
         // searched for at run time (0236 ro-binds each one; 0194 already binds stores that way).
@@ -620,41 +636,46 @@ const verify = () => {
     problems.push("license.spdx is " + value.license.spdx + ", expected " + SPDX);
   }
 
+  // `files` says which bytes the pack holds: each entry is a file at its digest. `build.symlinks`
+  // says which links it holds: each points where it claims, stays inside the pack, and leads to the
+  // bytes recorded. A link holds no bytes, so it is not in `files` (see manifest()).
   const files = value.files ?? {};
-  for (const [path, entry] of Object.entries(files)) {
+  for (const [path, digest] of Object.entries(files)) {
     const target = join(pack, path);
-    const listed = typeof entry === "string" ? { sha256: entry } : entry;
-    if (!existsSync(target) && !isSymlink(target)) {
+    if (!existsSync(target)) {
       problems.push(path + " is in the manifest but not in the pack");
-      continue;
-    }
-    if (listed.kind === "symlink") {
-      if (!isSymlink(target)) {
-        problems.push(path + " is listed as a symlink but is not one");
-        continue;
-      }
-      const actual = readlinkSync(target);
-      if (actual !== listed.target) problems.push(path + " points at " + actual + ", the manifest says " + listed.target);
-      else if (!resolvesInside(pack, target)) problems.push(path + " points outside the pack (" + actual + ")");
-      // The target's digest is what the link means: a link that still points inside the pack but at
-      // rewritten bytes is a different file, and the machine would copy those to /nix/store.
-      else if (typeof listed.sha256 === "string" && "sha256:" + sha256(target) !== listed.sha256) {
-        problems.push(path + " resolves to " + ("sha256:" + sha256(target)) + ", the manifest says " + listed.sha256);
-      }
       continue;
     }
     if (isSymlink(target)) {
       problems.push(path + " is listed as a file but is a symlink");
       continue;
     }
-    const digest = typeof listed.sha256 === "string" ? listed.sha256 : "";
     const actual = "sha256:" + sha256(target);
-    if (!OFFICE_DIGEST.test(digest)) problems.push(path + " has no sha256 in the manifest");
+    if (typeof digest !== "string" || !OFFICE_DIGEST.test(digest)) problems.push(path + " has no sha256 in the manifest");
     else if (actual !== digest) problems.push(path + " is " + actual + ", the manifest says " + digest);
   }
+  for (const link of value.build?.symlinks ?? []) {
+    const path = typeof link.path === "string" ? link.path : "";
+    const target = join(pack, path);
+    if (path === "" || !isSymlink(target)) {
+      problems.push(path + " is listed as a symlink but is not one");
+      continue;
+    }
+    const actual = readlinkSync(target);
+    if (!existsSync(target)) problems.push(path + " points at nothing (" + actual + ")");
+    else if (actual !== link.target) problems.push(path + " points at " + actual + ", the manifest says " + String(link.target));
+    else if (!resolvesInside(pack, target)) problems.push(path + " points outside the pack (" + actual + ")");
+    // The target's digest is what the link means: a link that still points inside the pack but at
+    // rewritten bytes is a different file, and the machine would copy those to /nix/store.
+    else if (typeof link.sha256 !== "string" || !OFFICE_DIGEST.test(link.sha256)) problems.push(path + " has no sha256 in the manifest");
+    else if ("sha256:" + sha256(target) !== link.sha256) problems.push(path + " resolves to " + ("sha256:" + sha256(target)) + ", the manifest says " + link.sha256);
+  }
+  // Every payload the pack holds is accounted for in one list or the other; anything else is a file
+  // the distribution carries without the manifest saying so.
+  const links = new Set((value.build?.symlinks ?? []).map((link) => link.path));
   for (const path of walk(pack)) {
     if (path === "manifest.json" || path === "About.txt") continue;
-    if (!(path in files)) problems.push(path + " is in the pack but not in the manifest");
+    if (!(path in files) && !links.has(path)) problems.push(path + " is in the pack but not in the manifest");
   }
 
   if (problems.length > 0) {

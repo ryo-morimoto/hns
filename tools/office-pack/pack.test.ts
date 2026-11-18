@@ -40,6 +40,10 @@ test("the manifest build.sh writes has the §11 shape", () => {
     expect(OFFICE_OPERATIONS).toContain(operation);
   }
   expect(pack).toContain('license: { spdx: SPDX, notice: "NOTICE", source: "SOURCE.md" }');
+  // files is byte payload that EngineManifestSchema validates: values are digests, never objects.
+  // Links are their own list, under build, where the schema does not look.
+  expect(/files\[entry\.path\] = "sha256:" \+ sha256/.test(pack)).toBe(true);
+  expect(pack).toContain("symlinks.push({ path: entry.path, target: entry.target");
   expect(pack).toContain('const SPDX = "AGPL-3.0-only";');
   expect(pack).toContain("runtime: {");
   // The runtime's out-of-pack dependencies are declared with a path and a digest, never searched.
@@ -88,10 +92,11 @@ test("build.sh checks the digest before unpacking, and says which fault it saw",
 test("verify.sh checks every manifested file, extra files, and the licence pieces", () => {
   const pack = read("pack.mjs");
   const verify = /const verify = \(\) => \{[\s\S]*?\n\};/.exec(pack)?.[0] ?? "";
-  expect(verify).toContain("for (const [path, entry] of Object.entries(files))");
+  expect(verify).toContain("for (const [path, digest] of Object.entries(files))");
   expect(verify).toContain("is in the pack but not in the manifest");
-  // A symlink is payload too: its target is compared, and it must resolve inside the pack.
-  expect(verify).toContain('listed.kind === "symlink"');
+  // A link holds no bytes, so it is not in files: the links are checked from build.symlinks, where
+  // the target is compared, the resolution must stay inside the pack, and the bytes are pinned.
+  expect(verify).toContain("for (const link of value.build?.symlinks ?? [])");
   expect(verify).toContain("resolvesInside(pack, target)");
   expect(verify).toContain('["LICENSE", "NOTICE", "SOURCE.md", "About.txt"]');
   expect(verify).toContain("GNU AFFERO GENERAL PUBLIC LICENSE");
@@ -232,9 +237,6 @@ describe("a hand-made pack", () => {
   // A bind is a claim the machine acts on, so every part of it is checked: the path is absolute,
   // the digest is a digest, and when the file is here it is the file named. A path this host cannot
   // resolve yet is the one case that is allowed through — that is what the bind is for.
-  // A bind is a claim the machine acts on, so every part of it is checked: the path is absolute,
-  // the digest is a digest, and when the file is here it is the file named. A path this host cannot
-  // resolve yet is the one case that is allowed through — that is what the bind is for.
   test("a bind must carry a well-formed digest, and a wrong digest is refused", () => {
     const driver = join(root, "driver.so");
     writeFileSync(driver, "driver");
@@ -273,61 +275,56 @@ describe("a hand-made pack", () => {
   });
   // The store/ tree is symlinks, and a symlink is payload: verify reads the link it finds, not the
   // file the manifest once recorded. Re-pointing one at a host file is a different pack.
-  test("verify refuses a retargeted symlink and one that leaves the pack", () => {
+  // The links are checked from build.symlinks, and all four ways a link can lie are caught: its
+  // target moved, the manifest moved with it to match, the bytes behind it changed, and a link the
+  // manifest never listed.
+  // The links are checked from build.symlinks, and every way a link can lie is caught: its target
+  // moved, the manifest moved with it to match, the bytes behind it changed, and a link the
+  // manifest never listed.
+  test("verify reads build.symlinks: target, containment, content, and extras", () => {
     layout([]);
+    const manifestPath = join(pack, "manifest.json");
+    const base = JSON.parse(readFileSync(manifestPath, "utf8"));
     writeFileSync(join(pack, "lib/libx.so.1"), "library");
     mkdirSync(join(pack, "store/x/lib"), { recursive: true });
     const link = join(pack, "store/x/lib/libx.so.1");
     const target = "../../../lib/libx.so.1";
     const digest = "sha256:" + createHash("sha256").update("library").digest("hex");
     symlinkSync(target, link);
-    const files = {
-      ...digestsOf(
-        new Map([
-          ...content,
-          [
-            "share/vulkan/icd.d/lvp_icd.x86_64.json",
-            readFileSync(join(pack, "share/vulkan/icd.d/lvp_icd.x86_64.json"), "utf8"),
-          ],
-        ]),
-      ),
-      "lib/libx.so.1": digest,
-      "store/x/lib/libx.so.1": { kind: "symlink", target, sha256: digest },
-    };
-    writeFileSync(join(pack, "manifest.json"), JSON.stringify({ ...manifest, files }));
+    const files = { ...base.files, "lib/libx.so.1": digest };
+    const entry = { path: "store/x/lib/libx.so.1", target, sha256: digest };
+    const write = (symlinks: unknown[]) =>
+      writeFileSync(
+        manifestPath,
+        JSON.stringify({ ...base, files, build: { ...base.build, symlinks } }),
+      );
+    write([entry]);
     execFileSync(here("verify.sh"), [pack]);
-    // Re-pointed at a host file: the link is not the one the manifest recorded.
+    // 1. re-pointed at a host file: not the link the manifest recorded.
     rmSync(link);
     symlinkSync("/etc/passwd", link);
     expect(spawnSync(here("verify.sh"), [pack], { encoding: "utf8" }).stderr).toContain(
       "points at /etc/passwd",
     );
-    // The manifest agreeing with a link that leaves the pack is not enough either.
-    writeFileSync(
-      join(pack, "manifest.json"),
-      JSON.stringify({
-        ...manifest,
-        files: {
-          ...files,
-          "store/x/lib/libx.so.1": { kind: "symlink", target: "/etc/passwd", sha256: digest },
-        },
-      }),
-    );
+    // 2. the manifest rewritten to agree with a link that leaves the pack: still refused.
+    write([{ ...entry, target: "/etc/passwd" }]);
     expect(spawnSync(here("verify.sh"), [pack], { encoding: "utf8" }).stderr).toContain(
       "points outside the pack",
     );
-    // And an unchanged link with changed content is a different file.
+    // 3. the same link, but the bytes behind it changed.
     rmSync(link);
     symlinkSync(target, link);
-    writeFileSync(
-      join(pack, "manifest.json"),
-      JSON.stringify({
-        ...manifest,
-        files: { ...files, "store/x/lib/libx.so.1": { kind: "symlink", target, sha256: digest } },
-      }),
-    );
+    write([entry]);
     writeFileSync(join(pack, "lib/libx.so.1"), "library!");
-    expect(spawnSync(here("verify.sh"), [pack], { encoding: "utf8" }).status).toBe(1);
+    expect(spawnSync(here("verify.sh"), [pack], { encoding: "utf8" }).stderr).toContain(
+      "resolves to sha256:",
+    );
+    writeFileSync(join(pack, "lib/libx.so.1"), "library");
+    // 4. a link the manifest never listed is a file the distribution carries unaccounted for.
+    write([]);
+    expect(spawnSync(here("verify.sh"), [pack], { encoding: "utf8" }).stderr).toContain(
+      "store/x/lib/libx.so.1 is in the pack but not in the manifest",
+    );
   });
   // A check that leaves files behind in whatever directory it runs from is a check that changes the
   // thing it inspects (0235 NB6): fonts and verify run in their own temp directory and write nothing

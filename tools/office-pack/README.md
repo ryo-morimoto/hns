@@ -37,13 +37,13 @@ office-pack/
   bin/ibisOffice                          release のバイナリ（無改変）
   lib/                                    エンジン + X11 + lavapipe + Vulkan loader（平坦）
   lib/store/<store-path>/...              /nix/store の絶対パスで見せるための同じバイト列
-  store/<store-name>/...                  上のミラーへの相対 symlink（sandbox の bind 元。manifest にも載る）
+  store/<store-name>/...                  上のミラーへの相対 symlink（sandbox の bind 元。manifest の build.symlinks）
   fonts/                                  IPAexGothic / Noto Sans JP (Regular, Bold) / DejaVu Sans
   fonts.conf                              FONTCONFIG_PATH からの相対ディレクトリだけを指す
   share/vulkan/icd.d/lvp_icd.x86_64.json   Mesa が書いた ICD（driver は絶対 store パス）
   LICENSE / NOTICE / SOURCE.md / About.txt AGPL の 4 点
   legal/                                  フォントのライセンス
-  manifest.json                           docs/office.md 11 章 + build（環境・bindPaths・入力）
+  manifest.json                           docs/office.md 11 章（files は sha256 文字列だけ）+ build（symlink・環境・bindPaths・入力）
 ```
 
 `DejaVu Sans` は見た目の選択ではない。エンジンは UI の既定フォント（`.SystemUIFont`）を DejaVu 等で解決し、
@@ -82,18 +82,18 @@ loader はそれを `LD_LIBRARY_PATH` より先に見るので、sandbox では�
 
 ## 失敗時の見え方
 
-| 状態                                             | 起きること                                                                                           | 分かる場所                          |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| バイナリが 1 バイト違う                          | 起動しない（`symbol lookup error`）。`verify.sh` が落ち、manifest の sha256 と実ファイルを並べて出す | `verify.sh`（C2）                   |
-| pack に manifest が知らないファイルがある        | `verify.sh` が「manifest に無い」と言う                                                              | `verify.sh`                         |
-| `store/` の symlink を別のファイルに張り替えた   | `verify.sh` が「points at <新しいターゲット>」と言う（中身だけ変えた場合も別の行で落ちる）           | `verify.sh`（NB2）                  |
-| `bindPaths` の sha256 が不正／実ファイルと不一致 | `render` が「has no sha256」／「is not the file the manifest names」で能力なしにする                 | `pack.mjs render`（B1）             |
-| 取得に失敗した／取得したが digest が違う         | 別々のメッセージで停止（`could not download <url>`／`sha256 is X, expected Y; refusing to unpack`）  | `build.sh`（NB4）                   |
-| LICENSE / NOTICE / SOURCE.md / About.txt が無い  | `verify.sh` が落ちる（配布物として不完全）                                                           | `verify.sh`（C5）                   |
-| CJK フォントが無い                               | **PDF は出る**（Noto か代替で描く）。エンジンは何も言わない                                          | `pack.mjs fonts` の `missing`（C3） |
-| フォントが 1 つも無い                            | エンジンが `.SystemUIFont` を解決できず panic（exit 101）                                            | プロセスの exit code                |
-| lavapipe が無い                                  | **PDF は出る・PNG は `no HeadlessRenderer configured` で exit 1**                                    | `pack.mjs render` の `reason`（C4） |
-| Vulkan loader が古い（1.4.341）                  | PDF は出る・PNG だけ落ちる（1.4.363 で直る。測った結果を build.sh に固定）                           | 同上                                |
+| 状態                                                          | 起きること                                                                                           | 分かる場所                          |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| バイナリが 1 バイト違う                                       | 起動しない（`symbol lookup error`）。`verify.sh` が落ち、manifest の sha256 と実ファイルを並べて出す | `verify.sh`（C2）                   |
+| pack に manifest が知らないファイルがある                     | `verify.sh` が「manifest に無い」と言う                                                              | `verify.sh`                         |
+| `store/` の symlink を張り替えた（manifest ごと書き換えても） | `verify.sh` が「points at …」／「points outside the pack」と言う（中身だけ変えた場合も落ちる）       | `verify.sh`（`build.symlinks`）     |
+| `bindPaths` の sha256 が不正／実ファイルと不一致              | `render` が「has no sha256」／「is not the file the manifest names」で能力なしにする                 | `pack.mjs render`（B1）             |
+| 取得に失敗した／取得したが digest が違う                      | 別々のメッセージで停止（`could not download <url>`／`sha256 is X, expected Y; refusing to unpack`）  | `build.sh`（NB4）                   |
+| LICENSE / NOTICE / SOURCE.md / About.txt が無い               | `verify.sh` が落ちる（配布物として不完全）                                                           | `verify.sh`（C5）                   |
+| CJK フォントが無い                                            | **PDF は出る**（Noto か代替で描く）。エンジンは何も言わない                                          | `pack.mjs fonts` の `missing`（C3） |
+| フォントが 1 つも無い                                         | エンジンが `.SystemUIFont` を解決できず panic（exit 101）                                            | プロセスの exit code                |
+| lavapipe が無い                                               | **PDF は出る・PNG は `no HeadlessRenderer configured` で exit 1**                                    | `pack.mjs render` の `reason`（C4） |
+| Vulkan loader が古い（1.4.341）                               | PDF は出る・PNG だけ落ちる（1.4.363 で直る。測った結果を build.sh に固定）                           | 同上                                |
 
 `officeEngine` は上の表の右端を返す（黙って `unsupported` に丸めない）。
 

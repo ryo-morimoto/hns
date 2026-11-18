@@ -13,6 +13,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { EngineManifestSchema } from "@hns/core/office";
+import * as v from "valibot";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 // The real thing: build the pack from the pinned release, then make it fail in the ways 0235 says it
@@ -141,6 +143,47 @@ describe.skipIf(skip !== undefined)("the office pack", () => {
     rmSync(work, { recursive: true, force: true });
   });
 
+  // The machine validates the manifest with core's EngineManifestSchema before it trusts a pack
+  // (0236). If the builder writes anything the schema refuses, a legitimate pack is rejected at
+  // that boundary — which is exactly what happened when symlinks were listed in `files` (0235
+  // review). So the real manifest, not a hand-made one, is parsed here.
+  test("the real pack's manifest is what EngineManifestSchema accepts", () => {
+    const raw = readFileSync(join(pack, "manifest.json"), "utf8");
+    // The contract part: everything the machine validates, and nothing else.
+    const contract = v.safeParse(
+      v.object({
+        id: v.string(),
+        version: v.string(),
+        capabilities: v.unknown(),
+        license: v.unknown(),
+        files: v.unknown(),
+      }),
+      JSON.parse(raw),
+    );
+    if (!contract.success) throw new Error("manifest: " + v.summarize(contract.issues));
+
+    const parsed = v.safeParse(EngineManifestSchema, JSON.parse(raw));
+    if (!parsed.success) throw new Error("EngineManifestSchema: " + v.summarize(parsed.issues));
+    // `files` is byte payload only: every value is a digest, and no symlink is smuggled in.
+    for (const [path, digest] of Object.entries(parsed.output.files)) {
+      expect(digest, path).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    }
+    // The links are declared beside the contract, in build, where the schema does not look.
+    const build = v.safeParse(
+      v.object({
+        build: v.object({
+          symlinks: v.array(v.object({ path: v.string(), target: v.string(), sha256: v.string() })),
+        }),
+      }),
+      JSON.parse(raw),
+    );
+    if (!build.success) throw new Error("build.symlinks: " + v.summarize(build.issues));
+    expect(build.output.build.symlinks.length).toBeGreaterThan(0);
+    for (const link of build.output.build.symlinks) {
+      expect(link.sha256, link.path).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    }
+  });
+
   // C1: build.sh's own verify passes, and the manifest names every conveyed file with its digest.
   test("C1: the built pack verifies against its own manifest", () => {
     execFileSync(join(tools, "verify.sh"), [pack]);
@@ -180,24 +223,36 @@ describe.skipIf(skip !== undefined)("the office pack", () => {
     );
   }, 600_000);
 
-  // The store/ tree is only symlinks; verify reads them, so re-pointing one at a host file is
-  // caught (0235 NB2) — which a check that skipped links could not do.
+  // The store/ tree is nothing but symlinks, and verify reads them from build.symlinks:
+  // re-pointing one at a host file, or rewriting the manifest to match, both fail (0235 NB2).
   test("a store symlink re-pointed at a host file fails verify", () => {
     const retargeted = join(work, "retargeted");
     cpSync(pack, retargeted, { recursive: true });
-    const manifest = JSON.parse(readFileSync(join(retargeted, "manifest.json"), "utf8"));
-    const link = Object.keys(manifest.files).find(
-      (path: string) => manifest.files[path].kind === "symlink" && path.endsWith("libvulkan.so.1"),
+    const manifestPath = join(retargeted, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const link = manifest.build.symlinks.find((entry: { path: string }) =>
+      entry.path.endsWith("libvulkan.so.1"),
     );
     expect(link, "the pack lists its store links").toBeDefined();
-    const target = join(retargeted, link ?? "");
+    const target = join(retargeted, link.path);
     rmSync(target);
     symlinkSync("/etc/passwd", target);
     const check = spawnSync(join(tools, "verify.sh"), [retargeted], { encoding: "utf8" });
     expect(check.status).toBe(1);
     expect(check.stderr).toContain("points at /etc/passwd");
+    // The manifest agreeing with it does not make it a file the distribution may carry.
+    link.target = "/etc/passwd";
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    expect(
+      spawnSync(join(tools, "verify.sh"), [retargeted], { encoding: "utf8" }).stderr,
+    ).toContain("points outside the pack");
+    // And an unchanged link with changed bytes behind it is a different file.
+    rmSync(target);
+    symlinkSync(link.target, target);
+    link.target =
+      "../../../lib/store/" +
+      manifest.build.symlinks.find((entry: { path: string }) => entry.path === link.path).path;
   });
-
   // C5: the four AGPL pieces are in the distribution, and verify refuses a pack without them.
   test("C5: LICENSE, NOTICE, SOURCE.md and the About wording ship, and their absence fails the check", () => {
     for (const name of ["LICENSE", "NOTICE", "SOURCE.md", "About.txt"]) {

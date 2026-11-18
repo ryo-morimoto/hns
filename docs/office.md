@@ -450,16 +450,26 @@ manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capa
 `id` / `version` / `capabilities` / `license` / `files` が `EngineManifestSchema` の形で、0236 はこれで検証する。
 `build` は型の外（schema は知らない）で、実行環境と出所を書く。
 
-`files` は**配布物の全ファイル**（pack 直下からの相対パス）で、値は 2 種類:
+`files` は**バイト列を持つものの全体**（pack 直下からの相対パス → `sha256:<hex>`）。値は**常に文字列**で、
+他の形は入れない。`EngineManifestSchema` はこれを検証するので、型の外のものを混ぜると
+正しい pack が machine の入口で拒否される（0235 レビュー）。
 
-- 通常のファイル: `sha256:<hex>`。
-- **symlink**: `{ "kind": "symlink", "target": "<読んだままのターゲット>", "sha256": "<解決先の内容>" }`。
-  pack の `store/` は `/nix/store` に ro bind するための相対 symlink だけで、これを manifest に載せないと
-  「リンクの向き先が置き換えられた」ことを誰も検出できない（0235 NB2）。
+**symlink はバイト列ではない**ので `files` には置かず、`build.symlinks` に置く（`build` は schema の外）:
 
-`verify.sh` は次のすべてを確かめ、1 つでも合わなければ落ちる: 記録されたファイルが実在し digest が一致する /
-symlink はターゲットが記録どおりで、解決先が **pack の内側**にあり、その内容の digest も一致する /
-manifest に載っていないファイルが pack に無い / 法務 4 点が揃っている。
+```json
+{ "path": "store/<store-name>/lib/libX.so.N", "target": "../../../lib/store/<store-name>/lib/libX.so.N", "sha256": "<解決先の内容>" }
+```
+
+pack の `store/` は `/nix/store` に ro bind するための相対 symlink だけで、これを manifest に載せないと
+「リンクの向き先が置き換えられた」ことを誰も検出できない（0235 NB2）。
+
+`verify.sh` は次のすべてを確かめ、1 つでも合わなければ落ちる:
+
+- `files` の各パスが実在し、symlink ではなく、digest が一致する。
+- `build.symlinks` の各リンクが実在し、ターゲットが記録どおりで、解決先が **pack の内側**にあり、
+  解決先の内容の digest も一致する。
+- `files` にも `build.symlinks` にも載っていないファイルが pack に無い。
+- 法務 4 点（LICENSE / NOTICE / SOURCE.md / About.txt）が揃っている。
 
 ### `build.runtime.bindPaths`: pack が独立していない部分
 
