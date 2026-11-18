@@ -4,6 +4,8 @@ import { OFFICE_ERROR_CODES, PREVIEW_STATUSES } from "@hns/core/office";
 import type { OfficePort } from "./office.ts";
 import type { DocumentPreviewView, OfficeEngineView, OfficeFailureView } from "../do/office-job.ts";
 import { VERSION_UNREADABLE, workspaceVersionOver } from "./office-version.ts";
+import { officeObjectName, officeWorkspaceOf } from "../office/route.ts";
+import { SESSION_NAME_HEADER } from "../edge/env.ts";
 import { officeFailureOf } from "../do/office-job.ts";
 /** What the office port needs: the environment, the request's signal, and the workspace lookup. */
 export interface OfficePortOptions {
@@ -73,12 +75,24 @@ export async function officePortOver(options: OfficePortOptions): Promise<Office
     if (workspace === undefined) return undefined;
     const session = options.env.SESSION;
     if (session === undefined) return undefined;
-    return session.get(session.idFromName(workspaceId));
+    // The object this resolves to is the one the preview URL names: both read the name from
+    // `officeObjectName`, so a row's url and the route that serves it address one object (B2).
+    return session.get(session.idFromName(officeObjectName(workspaceId)));
   }
 
-  /** One call to the object's office route, parsed at the boundary. */
+  /**
+   * One call to the object's office route, parsed at the boundary.
+   *
+   * @param stub - The Session object the workspace resolves to.
+   * @param name - That object's name, which the request is addressed with.
+   * @param path - The object's office route, query included.
+   * @param schema - The schema the answer is parsed with.
+   * @param init - The method and, for a request, the body.
+   * @returns The parsed answer, or undefined when the object did not answer one.
+   */
   async function ask<T>(
     stub: import("../edge/env.ts").DurableObjectStub,
+    name: string,
     path: string,
     schema: v.GenericSchema<unknown, T>,
     init: { readonly method: "GET" | "POST"; readonly body?: unknown },
@@ -91,6 +105,9 @@ export async function officePortOver(options: OfficePortOptions): Promise<Office
           headers: {
             "content-type": "application/json",
             "x-request-id": options.requestId,
+            // The object checks this against its own name and against the workspace the query
+            // names: a request must be addressed to it, not only say which workspace it wants.
+            [SESSION_NAME_HEADER]: name,
           },
           body: init.body === undefined ? null : JSON.stringify(init.body),
           signal: options.signal,
@@ -114,11 +131,18 @@ export async function officePortOver(options: OfficePortOptions): Promise<Office
     async preview(workspaceId, path, workspaceVersion) {
       const stub = await stubFor(workspaceId);
       if (stub === undefined) return undefined;
-      const query = new URLSearchParams({ path });
-      if (workspaceVersion !== undefined) query.set("v", workspaceVersion);
-      const answer = await ask(stub, "/rpc/office/preview?" + query.toString(), PreviewAnswer, {
-        method: "GET",
+      const query = new URLSearchParams({
+        workspaceId: officeWorkspaceOf(workspaceId),
+        path,
       });
+      if (workspaceVersion !== undefined) query.set("v", workspaceVersion);
+      const answer = await ask(
+        stub,
+        officeObjectName(officeWorkspaceOf(workspaceId)),
+        "/rpc/office/preview?" + query.toString(),
+        PreviewAnswer,
+        { method: "GET" },
+      );
       return answer === undefined ? undefined : previewOf(answer);
     },
     async request(workspaceId, path, workspaceVersion) {
@@ -126,10 +150,14 @@ export async function officePortOver(options: OfficePortOptions): Promise<Office
       if (stub === undefined) {
         return officeFailureOf("engine_unavailable", "This project has no session to ask.");
       }
-      const answer = await ask(stub, "/rpc/office/request", PreviewAnswer, {
-        method: "POST",
-        body: { path, version: workspaceVersion },
-      });
+      const answer = await ask(
+        stub,
+        officeObjectName(officeWorkspaceOf(workspaceId)),
+        "/rpc/office/request?" +
+          new URLSearchParams({ workspaceId: officeWorkspaceOf(workspaceId) }).toString(),
+        PreviewAnswer,
+        { method: "POST", body: { path, version: workspaceVersion } },
+      );
       if (answer === undefined) {
         return officeFailureOf("engine_unavailable", "The session did not answer.");
       }
@@ -143,7 +171,14 @@ export async function officePortOver(options: OfficePortOptions): Promise<Office
           reason: "This project has no session to ask.",
         };
       }
-      const answer = await ask(stub, "/rpc/office/engine", EngineAnswer, { method: "GET" });
+      const answer = await ask(
+        stub,
+        officeObjectName(officeWorkspaceOf(workspaceId)),
+        "/rpc/office/engine?" +
+          new URLSearchParams({ workspaceId: officeWorkspaceOf(workspaceId) }).toString(),
+        EngineAnswer,
+        { method: "GET" },
+      );
       if (answer === undefined) {
         return officeFailureOf("engine_unavailable", "The session did not answer.");
       }

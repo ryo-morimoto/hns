@@ -180,7 +180,7 @@ export interface OfficePreviewOptions {
    * Unsettled when the Session has no machine to ask: a request then writes `disabled` (there is
    * no engine in this deployment), and the alarm has nothing to run.
    */
-  readonly machine:
+  readonly machine?:
     | {
         readonly probe: OfficeEngineProbe;
         readonly job: (job: OfficeJob) => Promise<OfficeJobAnswer>;
@@ -243,26 +243,11 @@ function jobLimits(): OfficeJob["limits"] {
   };
 }
 
-/**
- * The route a preview's bytes are read at (§6).
- *
- * @param row - The row whose preview it is.
- * @returns \`/api/office/preview?workspaceId=…&path=…&v=…\`, the path as a query value.
- *
- * @remarks
- * The path travels in the query, so no \`/\`-encoding rule is invented for it, and the route's
- * authorisation is the session cookie's. The route reads the artifact by the row's own
- * \`paramsHash\`, so the URL does not restate the options, and a changed default cannot make the
- * URL name an entry the row did not produce.
- */
-export function previewUrl(row: OfficePreviewRow): string {
-  const query = new URLSearchParams({
-    workspaceId: row.workspaceId,
-    path: row.path,
-    v: row.version,
-  });
-  return "/api/office/preview?" + query.toString();
-}
+// The preview URL and the object name it resolves to live in `../office/route.ts`, the one
+// module that decides them (0237, B2); this file re-exports the URL so a caller of the face
+// reads it where the face is.
+import { previewUrl } from "../office/route.ts";
+export { previewUrl };
 
 /**
  * One row, as the GraphQL face answers it.
@@ -386,6 +371,34 @@ export interface OfficePreviewFace {
 }
 
 /**
+ * The next moment the object's alarm is needed for these rows (0237, C9 / NB2).
+ *
+ * @param remaining - The workspace's unfinished rows.
+ * @param at - The clock the pass ran at.
+ * @returns The earliest moment a row needs attention, clamped to `[at, at + TTL]`, or undefined
+ * when no row is left.
+ *
+ * @remarks
+ * A `queued` or `generating` row is due now (an attempt already owed it); a `stale` row is due
+ * after its retry pause. The result is **at least `at`** — an alarm in the past fires at once,
+ * which would spin — and **at most `at + {@link OFFICE_ROW_TTL_MS}`**, the bound the object
+ * promises, so no row waits longer than the TTL for its next look. The object arms the alarm at
+ * `min(wake, this)`, so the earlier of a session's own wake and this row's need wins.
+ */
+export function nextOfficeAlarm(
+  remaining: readonly OfficePreviewRow[],
+  at: number,
+): number | undefined {
+  let earliest: number | undefined;
+  for (const row of remaining) {
+    const candidate = row.updatedAt + (row.status === "stale" ? OFFICE_RETRY_MS : 0);
+    if (earliest === undefined || candidate < earliest) earliest = candidate;
+  }
+  if (earliest === undefined) return undefined;
+  return Math.min(Math.max(earliest, at), at + OFFICE_ROW_TTL_MS);
+}
+
+/**
  * Create the office preview face over one object's rows.
  *
  * @param options - The rows, the clock, the machine call, and the audit.
@@ -396,13 +409,7 @@ export function createOfficePreview(options: OfficePreviewOptions): OfficePrevie
 
   /** The next moment an unfinished row needs the alarm, from \`at\`. */
   function armAt(remaining: readonly OfficePreviewRow[], at: number): number | undefined {
-    let earliest: number | undefined;
-    for (const row of remaining) {
-      const candidate = row.updatedAt + (row.status === "stale" ? OFFICE_RETRY_MS : 0);
-      if (earliest === undefined || candidate < earliest) earliest = candidate;
-    }
-    if (earliest === undefined) return undefined;
-    return Math.min(Math.max(earliest, at), at + OFFICE_ROW_TTL_MS);
+    return nextOfficeAlarm(remaining, at);
   }
 
   /** Ask for one report, treating a timeout or a throw as no answer. */
@@ -571,8 +578,12 @@ export function createOfficePreview(options: OfficePreviewOptions): OfficePrevie
       }
 
       const status = requestPreviewStatus(refusal);
+      // The probe's answer decides the row even when one exists: a row that was queued when the
+      // pack was there is `disabled` the moment a probe says the pack is gone, and only a
+      // `queued` outcome lets the existing row stand (C5, NB1). Reusing a row in spite of what the
+      // engine now says would keep a `disabled` row's opposite alive.
       const write: OfficeRowWrite =
-        decision.kind === "reuse"
+        decision.kind === "reuse" && status === "queued"
           ? // The row already asked for this job and has not settled: keep where it is, so a
             // second request neither queues a second job nor restarts the one in flight (C2).
             { ...decision.row, now: at }

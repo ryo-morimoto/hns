@@ -49,9 +49,9 @@ export function officePathOf(workspaceId: string, path: string): OfficePathCheck
   if (path.includes("\\u0000") || path.includes("\\")) {
     return refuse("invalid_request", "not_authorized", "A path has no NUL and no backslash.");
   }
-  if (path.startsWith("/")) {
-    return refuse("not_found", "not_authorized", "A path is relative to the workspace.");
-  }
+  // An absolute path is not a separate branch: its first segment is empty, and the empty-segment
+  // rule below refuses it. One rule per property keeps a mutation in either from hiding the
+  // other (an absolute path that skipped this check would still be refused there).
   const segments = path.split("/");
   for (const segment of segments) {
     if (segment === "" || segment === ".") {

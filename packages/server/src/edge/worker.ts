@@ -4,6 +4,7 @@ import { createCheckpointFace } from "../checkpoint/face.ts";
 import { createFilesFace } from "../files/content.ts";
 import { createKeysFace } from "../machines/keys.ts";
 import { createOfficePreviewFace } from "../office/face.ts";
+import { officeObjectName } from "../office/route.ts";
 import { createConversationsFace, lookupConversation } from "../conversations/index.ts";
 import { createGraphQLFace } from "../graphql/index.ts";
 import { httpEntry } from "../obs/log.ts";
@@ -137,7 +138,7 @@ async function forwardOfficePreview(request: EdgeRequest): Promise<Response> {
       if (!(error instanceof StoreUnavailableError)) throw error;
       return undefined;
     }
-    return project === undefined ? undefined : sessionNameFor(project.id);
+    return project === undefined ? undefined : officeObjectName(project.id);
   });
 }
 

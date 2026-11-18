@@ -8,13 +8,17 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { DurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import * as v from "valibot";
 import type { AgentSession } from "@hns/agent/session";
-import type { JsonValue } from "@hns/core";
+import { ProjectIdSchema, type JsonValue } from "@hns/core";
 import { controlPlaneKeys } from "../../../machine/test/support/control-plane.ts";
 import type { ControlPlaneKeyPair } from "../../../machine/test/support/control-plane.ts";
 import { withAgent } from "../../../machine/test/support/machine.ts";
 import type { AgentFixture } from "../../../machine/test/support/machine.ts";
 import { Session } from "../../src/do/session.ts";
 import type { SessionEnv, SessionState } from "../../src/do/state.ts";
+import { SESSION_NAME_HEADER } from "../../src/edge/env.ts";
+import { createGraphQLFace } from "../../src/graphql/handler.ts";
+import { officePortOver } from "../../src/graphql/office-port.ts";
+import { envWith } from "../support/edge.ts";
 import { openSqliteState } from "../support/sqlite.ts";
 /**
  * The office face's real path (0237): the Session object calls a **real machine** over its signed
@@ -111,6 +115,24 @@ function keyPairOfSeed(): ControlPlaneKeyPair {
 
 /** The workspace the object serves: its own name, which is the project id (D080). */
 const WORKSPACE = "project-1";
+/** A second file with the first's bytes: a different (path, version) for the GraphQL leg. */
+const SECOND = "copy/proposal.docx";
+
+/**
+ * The project row the office port's workspace lookup answers with.
+ *
+ * @returns The project, with its root at the machine's ROOT (the port only needs the id here).
+ */
+function projectRow() {
+  return {
+    id: v.parse(ProjectIdSchema, WORKSPACE),
+    name: WORKSPACE,
+    workspace_root: "",
+    agent_cwd: "",
+    egress: "inherit" as const,
+    created_at: "2026-11-19T00:00:00.000Z",
+  };
+}
 /** The file the object previews, relative to ROOT. */
 const FILE = "proposal.docx";
 
@@ -190,7 +212,16 @@ async function openObject(agent: AgentFixture) {
   const session = new Session(state, env, async () => inertSession());
   /** One office RPC, as the GraphQL face's port calls it: a method, a route, and its own query. */
   const rpc = async (path: string, init: RequestInit = {}): Promise<Response> =>
-    await session.fetch(new Request("https://session.internal" + path, init));
+    await session.fetch(
+      new Request("https://session.internal" + path, {
+        ...init,
+        // SAFETY: the callers pass a plain header record or nothing; the object reads it as one.
+        headers: { ...(init.headers as Record<string, string>), [SESSION_NAME_HEADER]: WORKSPACE },
+      }),
+    );
+  // The object opens under blockConcurrencyWhile; a test object is built synchronously, so the
+  // first call waits for the open the way a route does.
+  await session.ready();
   return {
     session,
     rpc,
@@ -268,6 +299,89 @@ describe.skipIf(skipReason !== undefined)(
             const served = new Uint8Array(await streamed.arrayBuffer());
             expect(served.byteLength).toBe(ready.bytes);
             expect(served.subarray(0, 5)).toStrictEqual(new TextEncoder().encode("%PDF-"));
+
+            // The GraphQL leg (B1): the face's own port, addressed to the object by name through
+            // the SESSION binding, writes a row and the alarm runs it on the real machine. Every
+            // boundary is the product: createGraphQLFace -> officePortOver -> the object's
+            // /rpc/office/* -> the alarm -> the machine's signed op:"office".
+            const binding = {
+              idFromName: (name: string) => ({ toString: () => name }),
+              get: () => ({ fetch: (forwarded: Request) => object.session.fetch(forwarded) }),
+            };
+            const graphql = createGraphQLFace({
+              // The workspace lookup is D1 in production; this test names its one project.
+              office: await officePortOver({
+                // The Workspace object's read route answers the file's version (`/rpc/read`); this
+                // test answers that one query for the root the project names.
+                // SAFETY: a test namespace with exactly the two members a binding is used through
+                // (idFromName and get), where the binding type carries the whole object surface.
+                env: envWith({
+                  session: binding as never,
+                  // SAFETY: the Workspace object's one read route answers the version; this stub is
+                  // reached for exactly that call in this test.
+                  workspace: {
+                    idFromName: (name: string) => ({ toString: () => name }),
+                    get: () => ({
+                      fetch: async () =>
+                        new Response(JSON.stringify({ ok: true, version }), {
+                          headers: { "content-type": "application/json" },
+                        }),
+                    }),
+                  } as never,
+                }),
+                requestId: "office-graphql",
+                signal: new AbortController().signal,
+                project: async (id) => (id === WORKSPACE ? projectRow() : undefined),
+              }),
+            });
+            const ask = async (query: string) =>
+              await graphql({
+                request: new Request("https://hns.test/graphql", { method: "POST" }),
+                // SAFETY: the same two-member namespace, for the port and the face (above).
+                env: envWith({ session: binding as never }),
+                session: { subject: "owner", expiresAt: Date.now() + 60_000 },
+                requestId: "office-graphql",
+                signal: new AbortController().signal,
+                body: JSON.stringify({ query, variables: { path: SECOND } }),
+              });
+            // A second file with the same bytes is a different (path, version): its own row,
+            // its own job, and the alarm must run it through the GraphQL face.
+            await mkdir(join(agent.root, "copy"), { recursive: true });
+            await writeFile(join(agent.root, SECOND), await readFile(fixture));
+            const requested = v.parse(
+              v.object({
+                data: v.object({
+                  requestDocumentPreview: v.object({
+                    __typename: v.literal("DocumentPreview"),
+                    status: v.literal("QUEUED"),
+                  }),
+                }),
+              }),
+              await (
+                await ask(
+                  `mutation Request($path: String!) { requestDocumentPreview(path: $path, workspaceId: "${WORKSPACE}") { __typename ... on DocumentPreview { status } ... on OfficeFailure { code } } }`,
+                )
+              ).json(),
+            );
+            expect(requested.data.requestDocumentPreview.status).toBe("QUEUED");
+            await object.session.alarm();
+            const graphqlReady = v.parse(
+              v.object({
+                data: v.object({
+                  documentPreview: v.object({
+                    __typename: v.literal("DocumentPreview"),
+                    status: v.literal("READY"),
+                    url: v.string(),
+                  }),
+                }),
+              }),
+              await (
+                await ask(
+                  `query Read($path: String!) { documentPreview(path: $path, workspaceId: "${WORKSPACE}") { __typename ... on DocumentPreview { status url } ... on OfficeFailure { code } } }`,
+                )
+              ).json(),
+            );
+            expect(graphqlReady.data.documentPreview.status).toBe("READY");
           } finally {
             object.opened.close();
           }

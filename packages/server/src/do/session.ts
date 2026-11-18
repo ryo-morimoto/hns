@@ -215,6 +215,20 @@ export interface SessionDependencies {
    */
   readonly officeAgentUrl?: string | undefined;
   /**
+   * The office preview face the object serves (0237); defaults to the one it builds from its own
+   * SQLite and machine bindings.
+   *
+   * @remarks
+   * A seam, like {@link machineFetch}: a test that drives a preview request and the alarm through
+   * the object's public surface gives it a face whose machine is a stub, and the object's own
+   * routes, rows and alarm are what it then observes. **The production Worker passes neither this
+   * nor the other seams**, so nothing is substituted at the entry (`edge/worker.ts` exports its
+   * table, and `seams.test.ts` pins it).
+   *
+   * @internal
+   */
+  readonly office?: OfficePreviewFace | undefined;
+  /**
    * Opens the runtime the object serves from; defaults to `openDurableSession` (pi-durable on the
    * object's SQLite storage).
    *
@@ -366,6 +380,8 @@ export class Session {
   #officeMachine: { readonly machine: MachineFiles; readonly machineId: string } | undefined;
   /** The machine origin the office wire signs for; the environment's unless a test names one. */
   readonly #officeAgentUrl: string | undefined;
+  /** The office face a test supplied; production leaves it out and the object builds one. */
+  readonly #givenOffice: OfficePreviewFace | undefined;
   /** The token each run's relay was minted with, so a test can serve the route as its agent. */
   readonly #runTokens = new Map<string, string>();
   readonly #machineFetch: ToolPathOptions["fetch"] | undefined;
@@ -378,6 +394,23 @@ export class Session {
    */
   runToken(runId: string): string | null {
     return this.#runTokens.get(runId) ?? null;
+  }
+
+  /**
+   * Wait until the object finished opening.
+   *
+   * @returns A promise that settles with the open's outcome.
+   *
+   * @remarks
+   * Every route the object serves awaits this before it answers, and the runtime runs the open
+   * under `blockConcurrencyWhile`, so a request can never observe a half-open object. This is
+   * that same promise, for a test that drives the object's methods directly (a test object is
+   * constructed synchronously, so its open is still running when the test's first call is made).
+   *
+   * @internal
+   */
+  async ready(): Promise<void> {
+    await this.#ready;
   }
 
   /**
@@ -446,6 +479,7 @@ export class Session {
     this.#upgradeResponse = dependencies.upgradeResponse ?? defaultLiveUpgradeResponse;
     this.#machineFetch = dependencies.machineFetch;
     this.#officeAgentUrl = dependencies.officeAgentUrl;
+    this.#givenOffice = dependencies.office;
     this.#givenCost = dependencies.cost;
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
@@ -645,6 +679,10 @@ export class Session {
     const name = this.#state.id?.name ?? LEGACY_SESSION_NAME;
     this.#workspace = name;
     this.#officeMachine = this.#machineForOffice();
+    if (this.#givenOffice !== undefined) {
+      this.#office = this.#givenOffice;
+      return;
+    }
     const machine = this.#officeMachine;
     try {
       const rows = createOfficeRows(this.#state.storage);
@@ -951,7 +989,7 @@ export class Session {
       // relay (the machine and the control-plane key), and record (the audit). Otherwise it stays
       // closed: no run gets a granted path, and a send is answered without one.
       this.#tools = this.#openToolPath();
-      this.#openOffice();
+      await this.#openOffice();
       try {
         // The event table shares the Session's SQLite but not the harness prefix. A failed
         // open must not stop conversations: observation is a side effect, not a precondition.
@@ -1541,12 +1579,17 @@ export class Session {
       });
     const fail = (code: OfficeErrorCodeValue, message: string, status = 200) =>
       reply(officeFailureOf(code, message), status);
-    // The workspace is checked twice and both must agree with the object's own: the query names
-    // it (the port and the route both send it), and the edge's header names the object the read
-    // was addressed to. A request that named one workspace in one place and another in the other
-    // is refused, so nothing here can be tricked into reading another object's rows.
-    const workspace = url.searchParams.get("workspaceId") ?? "";
-    const addressed = request.headers.get(SESSION_NAME_HEADER) ?? workspace;
+    // **The request must be addressed to this object, and must name this object's workspace.**
+    // The edge and the GraphQL port both send the object's name in `x-hns-session-name`, and the
+    // query names the workspace the answer is about. Both are required and both must be this
+    // object's own: there is no fallback from one to the other, because a request that named only
+    // the query would pass for any object that read it, and a request that named only the header
+    // would not say which workspace it wants (B1, B3).
+    const workspace = url.searchParams.get("workspaceId");
+    const addressed = request.headers.get(SESSION_NAME_HEADER);
+    if (workspace === null || addressed === null) {
+      return fail("not_authorized", "The request does not address a workspace.", 404);
+    }
     if (workspace !== this.#workspace || addressed !== this.#workspace) {
       return fail("not_authorized", "Another workspace.", 404);
     }
@@ -1582,6 +1625,11 @@ export class Session {
    */
   async #armOffice(at: number | undefined): Promise<void> {
     if (at === undefined) return;
+    // **The alarm is the earliest of the session's wake and the office row's TTL** (C9, NB2): a
+    // queued row that would otherwise wait for an idle session's next wake is due now, and a
+    // session that is running keeps its own heartbeat because that is earlier. Arming through
+    // this one function is what makes `min(wake, office)` hold on the live path, not only in the
+    // alarm's own re-arm.
     const current = await this.#state.storage.getAlarm();
     if (current !== null && current <= at) return;
     await this.#state.storage.setAlarm(at);

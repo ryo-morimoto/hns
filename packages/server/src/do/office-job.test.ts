@@ -2,10 +2,15 @@ import { expect, test } from "vitest";
 import * as v from "valibot";
 import { OfficeJobSchema, officeParamsHash, officePathHash } from "@hns/core/office";
 import type { OfficeEngineReport, OfficeJob, OfficeResult } from "@hns/core/office";
-import { OFFICE_PROBE_TIMEOUT_MS, createOfficePreview, previewUrl } from "./office-job.ts";
-import { OFFICE_MAX_ATTEMPTS } from "./office-rows.ts";
+import {
+  OFFICE_PROBE_TIMEOUT_MS,
+  createOfficePreview,
+  nextOfficeAlarm,
+  previewUrl,
+} from "./office-job.ts";
+import { OFFICE_MAX_ATTEMPTS, OFFICE_ROW_TTL_MS, createOfficeRows } from "./office-rows.ts";
+import type { OfficePreviewRow } from "./office-rows.ts";
 import type { OfficeEngineProbeAnswer, OfficeJobAnswer } from "./office-job.ts";
-import { createOfficeRows } from "./office-rows.ts";
 import { officeRowDecision } from "./office-row-decision.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 /** The version of the file a test previews. */
@@ -362,6 +367,129 @@ test("the row decision reuses only an unfinished row of the same key", async () 
     expect(
       officeRowDecision({ ...queuedRow, status: "failed" }, WORKSPACE, PATH, VERSION).kind,
     ).toBe("write");
+  } finally {
+    opened.close();
+  }
+});
+// Catches: the alarm running the job without first writing `generating`, so a poll during a
+// sixty-second conversion reads a stale `queued` and a client cannot tell work is under way (C3).
+test("an alarm attempt writes generating before it asks the machine", async () => {
+  const opened = openSqliteState();
+  let rowDuringJob: string | undefined;
+  const rows = createOfficeRows(opened.state.storage);
+  const face = createOfficePreview({
+    rows,
+    now: () => 1_000,
+    machine: {
+      probe: async () => ({ kind: "report", report: AVAILABLE }),
+      // The row as the machine call finds it: the attempt must already have written generating.
+      job: async () => {
+        rowDuringJob = (await rows.get(WORKSPACE, "提案書.docx", VERSION))?.status;
+        return { kind: "unavailable", detail: "transport" };
+      },
+    },
+  });
+  try {
+    await face.request({ workspaceId: WORKSPACE, path: "提案書.docx", version: VERSION });
+    await face.run(WORKSPACE);
+    expect(rowDuringJob).toBe("generating");
+    // The attempt then settles the row: no answer is stale, not ready.
+    expect((await rows.get(WORKSPACE, "提案書.docx", VERSION))?.status).toBe("stale");
+  } finally {
+    opened.close();
+  }
+});
+
+// Catches: a request reusing a queued row after the engine went away, leaving a job that can
+// never run (C5 / NB1). The probe decides the row, not the row that happened to be there.
+test("a request whose probe now says there is no engine replaces its queued row", async () => {
+  const opened = openSqliteState();
+  const rows = createOfficeRows(opened.state.storage);
+  let available = true;
+  const face = createOfficePreview({
+    rows,
+    now: () => 1_000,
+    machine: {
+      probe: async () =>
+        available
+          ? { kind: "report", report: AVAILABLE }
+          : { kind: "report", report: { available: false, reason: "no pack" } },
+      job: async () => ({ kind: "unavailable", detail: "unused" }),
+    },
+  });
+  try {
+    const first = await face.request({
+      workspaceId: WORKSPACE,
+      path: "提案書.docx",
+      version: VERSION,
+    });
+    expect(first.row.status).toBe("queued");
+    available = false;
+    const second = await face.request({
+      workspaceId: WORKSPACE,
+      path: "提案書.docx",
+      version: VERSION,
+    });
+    expect(second.row.status).toBe("disabled");
+    expect(second.nextAlarmAt).toBeUndefined();
+  } finally {
+    opened.close();
+  }
+});
+
+// Catches: the alarm arming in the past for a row whose retry already fell due (an alarm that
+// fires at once, a spin) or later than the TTL the object promises (C9 / NB2).
+test("the next alarm is the due moment, clamped to now and to the row TTL", () => {
+  // The bound reads only the state and the moment; a row is that pair for this question.
+  const row = (status: "queued" | "generating" | "stale", updatedAt: number): OfficePreviewRow => ({
+    workspaceId: WORKSPACE,
+    path: PATH,
+    version: VERSION,
+    format: "docx",
+    operation: "preview",
+    status,
+    code: null,
+    message: null,
+    pages: null,
+    bytes: null,
+    engine: null,
+    updatedAt,
+    paramsHash: "",
+    pathHash: "",
+    attempts: 0,
+    jobId: null,
+  });
+  // A stale row is due after its retry pause; a queued one is due now.
+  expect(nextOfficeAlarm([row("stale", 1_000)], 1_000)).toBe(1_000 + 30_000);
+  expect(nextOfficeAlarm([row("queued", 1_000)], 1_000)).toBe(1_000);
+  expect(nextOfficeAlarm([row("generating", 1_000)], 5_000)).toBe(5_000);
+  // A due moment already passed is clamped to now (never an alarm in the past).
+  expect(nextOfficeAlarm([row("stale", 0)], 10_000_000)).toBe(10_000_000);
+  // A row whose due moment is more than the TTL away is clamped to the TTL (the longest a row
+  // waits), and one inside it keeps its own moment.
+  expect(nextOfficeAlarm([row("stale", 200_000)], 0)).toBe(OFFICE_ROW_TTL_MS);
+  expect(nextOfficeAlarm([row("stale", 20_000)], 0)).toBe(50_000);
+  // The earliest of several rows wins, and no unfinished row leaves nothing to arm.
+  expect(nextOfficeAlarm([row("stale", 0), row("queued", 0), row("generating", 0)], 1_000)).toBe(
+    1_000,
+  );
+  expect(nextOfficeAlarm([], 1_000)).toBeUndefined();
+});
+
+// Catches: a Session with no machine at all (no office bindings) answering `queued` for a job
+// that can never run: the deployment has no engine, so the row says `disabled` (C5).
+test("a session with no machine writes a disabled row and arms nothing", async () => {
+  const opened = openSqliteState();
+  try {
+    const rows = createOfficeRows(opened.state.storage);
+    const face = createOfficePreview({ rows, now: () => 1_000 });
+    const answer = await face.request({
+      workspaceId: WORKSPACE,
+      path: PATH,
+      version: VERSION,
+    });
+    expect(answer.row.status).toBe("disabled");
+    expect(answer.nextAlarmAt).toBeUndefined();
   } finally {
     opened.close();
   }
