@@ -1,9 +1,12 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { realpath, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import * as v from "valibot";
 import { MAX_CHECKPOINT_PACK_BYTES, MACHINE_RPC_PATH } from "@hns/core";
+import { MACHINE_ARTIFACT_PATH } from "@hns/core/office";
 import type { CheckpointPackUploadResult, JsonValue } from "@hns/core";
 import { Denied, FileFailure } from "@hns/workspace";
 import type { RootIdentity } from "@hns/workspace";
@@ -27,6 +30,9 @@ import { enrolledGrantKeys } from "./capability/keys.ts";
 import type { GrantKeys } from "./capability/keys.ts";
 import { runGrantedCall } from "./granted.ts";
 import { runOperation } from "./operations.ts";
+import { OfficeCache } from "./office/cache.ts";
+import { artifactKeyOf, serveArtifact, verifyArtifactTarget } from "./office/artifact.ts";
+import type { OfficeEngine } from "./office/job.ts";
 import { MachineRefusal, refusalStatus } from "./refusal.ts";
 import { RequestVerifier } from "./signature.ts";
 import type { ControlPlaneKeys } from "./control-plane.ts";
@@ -114,6 +120,36 @@ export interface MachineAgentOptions {
    * to a machine that was not configured for one.
    */
   readonly grants?: MachineGrants | undefined;
+  /**
+   * The office engine's installation: the pack, the cache, and the runs' directory.
+   *
+   * @remarks
+   * Unset means this machine runs no office job and serves no artifact: every `office` is answered
+   * `engine_unavailable` and `GET /artifact` answers as an unknown route. The agent builds the
+   * cache, sweeps it at start (the previous process's expired entries), and removes the runs'
+   * directory on close.
+   */
+  readonly office?: MachineOfficeOptions | undefined;
+}
+
+/**
+ * Where the office engine's pieces are, as a deployment names them.
+ *
+ * @remarks
+ * `packRoot` is the pack's directory (0235's `office-pack/`), outside ROOT. `cacheRoot` is where
+ * artifacts are kept, also outside ROOT. `workRoot` is where a run's temporary directory is made:
+ * unset means a fresh directory under the system temp dir, removed when the agent closes.
+ */
+export interface MachineOfficeOptions {
+  readonly packRoot?: string | undefined;
+  /** The cache's directory; defaults to `$XDG_CACHE_HOME/hns/office`, and `~/.cache/hns/office` without it. */
+  readonly cacheRoot?: string | undefined;
+  readonly workRoot?: string | undefined;
+  /** The bwrap executable a run uses; defaults to the host's. */
+  readonly bwrap?: string | undefined;
+  /** The cache's bounds, for a test that wants a small one. */
+  readonly cacheTtlMs?: number | undefined;
+  readonly cacheMaxBytes?: number | undefined;
 }
 
 /**
@@ -171,6 +207,10 @@ interface AgentContext {
   readonly machineId: string;
   /** The clock a grant's expiry is checked against. */
   readonly now: () => number;
+  /** The office engine, when this machine runs one; unset means no office and no artifact route. */
+  readonly office: OfficeEngine | undefined;
+  /** The runs' directory when the agent made one, so closing removes it. */
+  readonly officeWork: { readonly path: string; readonly owned: boolean } | undefined;
 }
 
 /**
@@ -239,6 +279,7 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     home: options.home,
     egress: options.egress,
   });
+  const office = await buildOffice(options.office);
   const context: AgentContext = {
     root: canonical.path,
     identity: canonical.identity,
@@ -257,6 +298,8 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     grants: options.grants,
     machineId: options.machineId,
     now: options.now ?? Date.now,
+    office: office.engine,
+    officeWork: office.work,
   };
   const server = createServer();
   server.on("request", (request: IncomingMessage, response: ServerResponse): void => {
@@ -281,6 +324,9 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
     },
     async close(): Promise<void> {
       server.closeAllConnections();
+      if (context.officeWork?.owned === true) {
+        await rm(context.officeWork.path, { recursive: true, force: true }).catch(() => undefined);
+      }
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error === undefined) resolve();
@@ -289,6 +335,55 @@ export async function startMachineAgent(options: MachineAgentOptions): Promise<M
       });
     },
   };
+}
+
+/**
+ * Build the office engine the agent runs jobs with, and sweep the cache it inherits.
+ *
+ * @param options - Where the pack, the cache, and the runs' directory are; unset means no office.
+ * @returns The executor and the runs' directory (and whether this agent made it).
+ * @throws {Error} When the cache or the runs' directory cannot be made: a machine that says it runs
+ * Office and cannot keep its output would answer every job with an I/O error.
+ *
+ * @remarks
+ * The sweep at start removes what the previous process left behind: entries past their seven days
+ * (docs/office.md §4), and a staging directory a crash left half-written. A failed deletion is
+ * reported to the log rather than stopping the agent, because a cache that cannot clean itself
+ * must still serve; the next sweep finds the same entry.
+ */
+async function buildOffice(options: MachineOfficeOptions | undefined): Promise<{
+  readonly engine: OfficeEngine | undefined;
+  readonly work: { readonly path: string; readonly owned: boolean } | undefined;
+}> {
+  if (options === undefined) return { engine: undefined, work: undefined };
+  const cacheRoot = options.cacheRoot ?? defaultCacheRoot();
+  await mkdirp(cacheRoot);
+  const cache = new OfficeCache({
+    root: cacheRoot,
+    ttlMs: options.cacheTtlMs,
+    maxBytes: options.cacheMaxBytes,
+  });
+  await cache.sweep().catch(() => ({ removed: 0, failures: [] }));
+  const work =
+    options.workRoot === undefined
+      ? { path: await mkdtemp(join(tmpdir(), "hns-office-")), owned: true }
+      : { path: options.workRoot, owned: false };
+  return {
+    engine: { cache, packRoot: options.packRoot, workRoot: work.path, bwrap: options.bwrap },
+    work,
+  };
+}
+
+/** The cache's default directory: `$XDG_CACHE_HOME/hns/office`, else `~/.cache/hns/office`. */
+function defaultCacheRoot(): string {
+  const xdg = process.env["XDG_CACHE_HOME"];
+  if (xdg !== undefined && xdg.startsWith("/")) return join(xdg, "hns", "office");
+  return join(homedir(), ".cache", "hns", "office");
+}
+
+/** Make a directory and its parents. */
+async function mkdirp(path: string): Promise<void> {
+  await mkdir(path, { recursive: true });
 }
 
 /**
@@ -354,6 +449,14 @@ async function handleRequest(
   response: ServerResponse,
   context: AgentContext,
 ): Promise<void> {
+  await handleRequestInner(request, response, context);
+}
+
+async function handleRequestInner(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: AgentContext,
+): Promise<void> {
   const started = Date.now();
   let fsPath = MACHINE_RPC_PATH;
   let op: OperationName | undefined;
@@ -363,6 +466,13 @@ async function handleRequest(
   // A granted call carries a signed grant, which is a capability: the same guard redacts it from the
   // request's log line once it is parsed, and the answer never carries it.
   let grantSignature: string | undefined;
+  // The artifact route is the one GET the agent answers, and it is answered before the POST-only
+  // check: the signature covers the whole request target (path and query), so the route reads it
+  // exactly as it arrived (docs/office.md §5).
+  if (request.method === "GET" && pathWithoutQuery(request.url) === MACHINE_ARTIFACT_PATH) {
+    await serveArtifactRequest(request, response, context, started);
+    return;
+  }
   if (request.method !== "POST") {
     sendRefusal(response, new MachineRefusal("method_not_allowed", "the agent answers POST only"), {
       allow: "POST",
@@ -390,7 +500,10 @@ async function handleRequest(
     return;
   }
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(deadlineRefusal()), context.limits.timeoutMs);
+  let timer: NodeJS.Timeout = setTimeout(
+    () => deadline.abort(deadlineRefusal()),
+    context.limits.timeoutMs,
+  );
   const expired = deadlineExceeded(deadline.signal);
   try {
     const body = await Promise.race([readBody(request, context.limits.maxRequestBytes), expired]);
@@ -423,6 +536,13 @@ async function handleRequest(
       return;
     }
     fsPath = logPathOf(operation);
+    // An office job gets the machine's office envelope instead of the 30 second one every other
+    // operation shares: a conversion is minutes of work, and the job's own budget is clamped below
+    // the envelope so the machine answers the timeout itself (docs/office.md §5).
+    if (operation.op === "office") {
+      clearTimeout(timer);
+      timer = setTimeout(() => deadline.abort(deadlineRefusal()), context.limits.office.timeoutMs);
+    }
     const result = await runOperation(
       operation,
       context.root,
@@ -430,6 +550,7 @@ async function handleRequest(
       deadline.signal,
       context.identity,
       context.exec,
+      context.office,
     );
     // SAFETY: every OperationResult member is a closed object of strings, numbers, and booleans,
     // which is what JsonValue is; the operations build them and no field is a Uint8Array.
@@ -450,6 +571,76 @@ async function handleRequest(
       fsPath,
       op,
     );
+  }
+}
+
+/**
+ * Serve one signed `GET /artifact`: verify the whole request target, then the bytes of its range.
+ *
+ * @param request - The incoming request, already holding a concurrency slot.
+ * @param response - The response to write.
+ * @param context - The root, the bounds, the verifier, and the office cache.
+ * @param started - Epoch milliseconds before the request was read.
+ *
+ * @remarks
+ * **The signature is checked over the request target as it arrived**, path and query together
+ * ({@link RequestVerifier} hashes what the client sent), and only then is the query compared with
+ * the one canonical spelling of itself: a query whose parameters were swapped, reordered, or
+ * re-encoded is refused `invalid_request`, and one with no valid signature is `unauthorized`
+ * (C13 / C14). The order matters, because "unsigned" must not be reported as "a bad key".
+ *
+ * The bytes come from the office cache's own key and nowhere else: ROOT is never read on this
+ * route, so a forged query cannot reach a workspace file (Recommendation A). The range is bounded
+ * by `Limits.maxArtifactBytes`, which is its own bound and not the JSON answer's.
+ */
+async function serveArtifactRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: AgentContext,
+  started: number,
+): Promise<void> {
+  if (!context.inFlight.enter()) {
+    sendRefusal(response, new MachineRefusal("busy", "too many requests are in flight"));
+    logRequest(request, response, context, started, MACHINE_ARTIFACT_PATH, undefined);
+    return;
+  }
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(deadlineRefusal()), context.limits.timeoutMs);
+  const expired = deadlineExceeded(deadline.signal);
+  try {
+    const office = context.office;
+    if (office === undefined) {
+      throw new MachineRefusal("not_found", "this machine serves no office artifacts");
+    }
+    const target = request.url ?? "";
+    const headers = parseSignedHeaders(request.headers);
+    await Promise.race([
+      context.verifier.verify({
+        method: request.method ?? "GET",
+        path: target,
+        headers,
+        body: new Uint8Array(0),
+      }),
+      expired,
+    ]);
+    const query = verifyArtifactTarget(target);
+    const key = await artifactKeyOf(query);
+    const served = await serveArtifact(office.cache, key, query, context.limits.maxArtifactBytes);
+    response.writeHead(200, {
+      "content-type": served.answer.contentType,
+      "content-length": served.answer.length,
+      "accept-ranges": "bytes",
+      "content-range": served.answer.contentRange,
+      connection: "keep-alive",
+    });
+    response.end(served.bytes);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    sendRefusal(response, asRefusal(error));
+  } finally {
+    clearTimeout(timer);
+    context.inFlight.leave();
+    logRequest(request, response, context, started, MACHINE_ARTIFACT_PATH, undefined);
   }
 }
 

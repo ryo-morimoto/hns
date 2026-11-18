@@ -4,7 +4,8 @@ import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import * as v from "valibot";
 import { decodeDeviceKey, deviceKeyFingerprint, encodeDeviceKey } from "@hns/core";
-import { startMachineAgent, type MachineAgent } from "./agent.ts";
+import { startMachineAgent } from "./agent.ts";
+import type { MachineAgent, MachineOfficeOptions } from "./agent.ts";
 import { GrantCounter } from "./capability/counter.ts";
 import type { ControlPlaneKeys } from "./control-plane.ts";
 
@@ -372,6 +373,7 @@ async function run(
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new CliRefusal("--port must be an integer between 0 and 65535.");
   }
+  const office = officeOptionsOf(process.env);
   let agent: MachineAgent;
   try {
     agent = await startMachineAgent({
@@ -379,6 +381,10 @@ async function run(
       machineId: enrollment.machineId,
       controlPlane,
       port,
+      // The office engine is off unless the deployment says where its pack is. Turning it on is
+      // one variable (`HNS_OFFICE_PACK`); the cache and the runs' directory have defaults outside
+      // ROOT, because a preview is not part of the workspace (INV-O3).
+      office,
       // No `keys`: the agent builds the grant lookup from the control-plane keys it was given
       // (`enrolledGrantKeys`), so one list is the machine's whole trust set.
       grants,
@@ -410,6 +416,29 @@ async function run(
       (enrollment.agentUrl === "" ? "<its tunnel URL>" : enrollment.agentUrl) +
       "\n",
   };
+}
+
+/**
+ * The office engine, as the environment names it, or undefined when it is off.
+ *
+ * @param env - The process environment.
+ * @returns The options `startMachineAgent` takes, with only the variables that are set.
+ *
+ * @remarks
+ * `HNS_OFFICE_PACK` is the pack's directory and is what turns Office on at all; the other two name
+ * the cache and the runs' directory, and neither has to be given. A pack path that is set but
+ * wrong is not refused here: the agent answers `officeEngine` with the reason, which is what an
+ * operator reads without restarting anything.
+ */
+function officeOptionsOf(env: NodeJS.ProcessEnv): MachineOfficeOptions | undefined {
+  const packRoot = env["HNS_OFFICE_PACK"];
+  if (packRoot === undefined || packRoot === "") return undefined;
+  const options: MachineOfficeOptions = { packRoot };
+  const cacheRoot = env["HNS_OFFICE_CACHE"];
+  if (cacheRoot !== undefined && cacheRoot !== "") return { ...options, cacheRoot };
+  const workRoot = env["HNS_OFFICE_WORK"];
+  if (workRoot !== undefined && workRoot !== "") return { ...options, workRoot };
+  return options;
 }
 
 /** The config directory an invocation uses: `--config-dir`, else `$HNS_CONFIG_DIR`, else the default. */

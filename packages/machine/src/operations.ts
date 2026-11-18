@@ -15,10 +15,13 @@ import {
   OFFICE_CACHE_UNAVAILABLE_REASON,
   fitsCheckpointPack,
   type MachineOfficeResult,
+  type MachineOfficeRequest,
   type MachineWriteRequest,
   type MachineWriteResult,
   type OfficeEngineReport,
 } from "@hns/core";
+import type { OfficeEngine } from "./office/job.ts";
+import { probeOfficeEngine, runOfficeJob } from "./office/job.ts";
 import { containInRoot } from "./containment.ts";
 import { runExec } from "./exec.ts";
 import type { MachineExec } from "./exec.ts";
@@ -118,6 +121,8 @@ async function withCheckpointLock<T>(key: string, work: () => Promise<T>): Promi
  * reads are aborted, and every other step checks the signal before and after.
  * @param identity - The root's dev / ino recorded at start; a replaced root
  * fails closed. The write op checks it, the reads rely on the canonical root.
+ * @param exec - The sandboxed executor; unset means there is no sandbox, and exec refuses.
+ * @param office - The office executor; unset means this build runs no office job.
  * @returns The operation's result, ready to serialize.
  * @throws {Denied} When the path cannot stay inside ROOT.
  * @throws {MachineRefusal} `not_found` for a missing parent, `too_large` for a
@@ -135,6 +140,7 @@ export async function runOperation(
   signal: AbortSignal,
   identity?: RootIdentity | undefined,
   exec?: MachineExec | undefined,
+  office?: OfficeEngine | undefined,
 ): Promise<OperationResult> {
   switch (operation.op) {
     case "health":
@@ -160,23 +166,57 @@ export async function runOperation(
         { maxOutputBytes: limits.maxResponseBytes, signal, root },
       );
     case "office":
-      // The job is accepted by the contract and refused here until 0236 runs it: an unsupported
-      // one is an answer, not a defect, and saying "not yet" is truer than pretending to run.
-      signal.throwIfAborted();
-      throw new MachineRefusal(
-        "invalid_request",
-        "op office is not implemented in this build; 0236 adds the executor and the cache",
-      );
+      return await officePath(operation, office, root, limits, signal);
     case "officeEngine":
-      // No pack has been read yet (0235 / 0236): the honest answer is "no engine", not an error.
+      // The probe reads the pack's manifest and takes no slot, so it answers while a job runs.
       signal.throwIfAborted();
-      return {
-        available: false as const,
-        reason: "no office pack is installed; 0235 adds the pack and 0236 reads its manifest",
-      };
+      return await probeOfficeEngine(office?.packRoot);
   }
   const unreachable: never = operation;
   return unreachable;
+}
+
+/**
+ * Run one office job, or answer that this build has no engine to run it with.
+ *
+ * @param operation - The job the server resolved.
+ * @param office - The executor, or undefined when the agent was started without one.
+ * @param root - The canonical ROOT; the job's input is resolved inside it.
+ * @param limits - The machine's bounds, whose `office` envelope the job runs under.
+ * @param signal - The request's deadline.
+ * @returns The job's `OfficeResult`.
+ * @throws {MachineRefusal} `busy` when another job holds the machine's single office slot; every
+ * other failure of a job is the job's own typed answer, not a refusal of the request.
+ *
+ * @remarks
+ * The answer's `workspaceId` is the job's own, and it is the machine's: the executor resolves the
+ * input inside this machine's ROOT and compares the file's digest with the version, so a job that
+ * names another workspace can only match by having the same content at the same path, which is
+ * the same artifact. Nothing about a workspace is looked up from the request.
+ */
+async function officePath(
+  operation: MachineOfficeRequest,
+  office: OfficeEngine | undefined,
+  root: string,
+  limits: Limits,
+  signal: AbortSignal,
+): Promise<MachineOfficeResult> {
+  signal.throwIfAborted();
+  if (office === undefined) {
+    return {
+      ok: false,
+      error: "engine_unavailable",
+      message: "the agent was started without an office engine",
+    };
+  }
+  return await runOfficeJob(
+    office,
+    operation.job,
+    root,
+    operation.job.input.workspaceId,
+    limits.office,
+    signal,
+  );
 }
 
 /**

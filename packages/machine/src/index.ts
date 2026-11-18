@@ -52,6 +52,48 @@ export type {
   MirrorPushOutcome,
   MirrorPushRequest,
 } from "@hns/workspace/mirror-push";
+// The office engine (0236): its prescan, its cache, and the pack it runs. A deployment names the
+// pack and the cache; a test drives the executor without an agent.
+export {
+  artifactKeyOf,
+  checkPackHost,
+  contentTypeOf,
+  engineArgv,
+  loadPack,
+  officeBusy,
+  OfficeCache,
+  OFFICE_CACHE_MAX_BYTES,
+  OFFICE_CACHE_TTL_MS,
+  packEnvironment,
+  packReport,
+  probeOfficeEngine,
+  readRange,
+  runEngine,
+  runOfficeJob,
+  scanOfficeInput,
+  serveArtifact,
+  sha256OfFile,
+  verifyArtifactTarget,
+} from "./office/index.ts";
+export type {
+  ArtifactResponse,
+  CacheEntryFacts,
+  CacheEntryMetadata,
+  EngineEnvironment,
+  EngineOutcome,
+  EngineRun,
+  OfficeEnvelope,
+  OfficePack,
+  OfficeScan,
+  OfficeScanInput,
+  OfficeScanVerdict,
+  PackBindPath,
+  PackBuild,
+  PackHost,
+  PackLoad,
+  PackProblem,
+} from "./office/index.ts";
+export type { MachineOfficeOptions } from "./agent.ts";
 export { MachineRefusal, refusalStatus } from "./refusal.ts";
 export type { RefusalCode } from "./refusal.ts";
 export {

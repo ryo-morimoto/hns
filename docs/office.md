@@ -355,21 +355,23 @@ type Mutation {
 
 ## 9. エラーと UI 文言
 
-| code                | 意味                     | UI                                                     |
-| ------------------- | ------------------------ | ------------------------------------------------------ |
-| unsupported_format  | 形式が対象外（odt 等）   | 「この形式はプレビューできません」                     |
-| unsupported_command | 編集・再計算の語彙に無い | 「この操作には対応していません」                       |
-| input_too_large     | 入力が上限超え           | 「ファイルが大きすぎます（上限 50 MB）」               |
-| too_many_cells      | セル数が上限超え         | 「ブックが大きすぎます（推定 X GB / 上限 2 GB）」      |
-| too_many_pixels     | 画像が上限超え           | 「画像が大きすぎます」                                 |
-| engine_unavailable  | pack が無い/壊れている   | 「Office プレビューは未設定です」＋導線                |
-| engine_timeout      | 時間切れ                 | 「時間内に変換できませんでした」＋再試行               |
-| engine_failed       | エンジンが失敗           | 「変換に失敗しました」＋原本は無傷                     |
-| engine_busy         | 他の変換が実行中         | 「他の変換が終わるのを待っています」＋少し待って再試行 |
-| output_too_large    | 出力が上限超え           | 「出力が大きすぎます」                                 |
-| source_changed      | 版が変わった             | 「ファイルが更新されました」＋再読み込み               |
-| not_authorized      | 権限が無い               | 既存の拒否表示                                         |
-| cancelled           | 利用者が中止             | 静かに戻す                                             |
+| code                    | 意味                         | UI                                                     |
+| ----------------------- | ---------------------------- | ------------------------------------------------------ |
+| unsupported_format      | 形式が対象外（odt 等）       | 「この形式はプレビューできません」                     |
+| unsupported_command     | 編集・再計算の語彙に無い     | 「この操作には対応していません」                       |
+| input_too_large         | 入力が上限超え               | 「ファイルが大きすぎます（上限 50 MB）」               |
+| input_too_large_archive | 展開後・エントリ数が上限超え | 「ファイルの中身が大きすぎます」＋原本は無傷           |
+| too_many_pages          | ページ数が上限超え           | 「ページが多すぎます」＋ページ指定が要る               |
+| too_many_cells          | セル数が上限超え             | 「ブックが大きすぎます（推定 X GB / 上限 2 GB）」      |
+| too_many_pixels         | 画像が上限超え               | 「画像が大きすぎます」                                 |
+| engine_unavailable      | pack が無い/壊れている       | 「Office プレビューは未設定です」＋導線                |
+| engine_timeout          | 時間切れ                     | 「時間内に変換できませんでした」＋再試行               |
+| engine_failed           | エンジンが失敗               | 「変換に失敗しました」＋原本は無傷                     |
+| engine_busy             | 他の変換が実行中             | 「他の変換が終わるのを待っています」＋少し待って再試行 |
+| output_too_large        | 出力が上限超え               | 「出力が大きすぎます」                                 |
+| source_changed          | 版が変わった                 | 「ファイルが更新されました」＋再読み込み               |
+| not_authorized          | 権限が無い                   | 既存の拒否表示                                         |
+| cancelled               | 利用者が中止                 | 静かに戻す                                             |
 
 **machine の拒否コード → OfficeErrorCode の写像**: `busy` → `engine_busy`、`too_large` → `input_too_large`、
 `deadline_exceeded` → `engine_timeout`、`path_denied`/`forbidden` → `not_authorized`、`invalid_request` → `unsupported_command`（形式不正）、
@@ -441,7 +443,12 @@ manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capa
         }
       ]
     },
-    "environment": { "LD_LIBRARY_PATH": "lib", "FONTCONFIG_FILE": "fonts.conf", "FONTCONFIG_PATH": "<pack root>", "VK_ICD_FILENAMES": "share/vulkan/icd.d/lvp_icd.x86_64.json" },
+    "environment": {
+      "LD_LIBRARY_PATH": "lib",
+      "FONTCONFIG_FILE": "fonts.conf",
+      "FONTCONFIG_PATH": "<pack root>",
+      "VK_ICD_FILENAMES": "share/vulkan/icd.d/lvp_icd.x86_64.json"
+    },
     "fonts": ["fonts/ipaexg.ttf", "fonts/NotoSansJP-Regular.otf", "fonts/DejaVuSans.ttf"]
   }
 }
@@ -457,7 +464,11 @@ manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capa
 **symlink はバイト列ではない**ので `files` には置かず、`build.symlinks` に置く（`build` は schema の外）:
 
 ```json
-{ "path": "store/<store-name>/lib/libX.so.N", "target": "../../../lib/store/<store-name>/lib/libX.so.N", "sha256": "<解決先の内容>" }
+{
+  "path": "store/<store-name>/lib/libX.so.N",
+  "target": "../../../lib/store/<store-name>/lib/libX.so.N",
+  "sha256": "<解決先の内容>"
+}
 ```
 
 pack の `store/` は `/nix/store` に ro bind するための相対 symlink だけで、これを manifest に載せないと

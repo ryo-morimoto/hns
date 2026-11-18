@@ -76,6 +76,10 @@ export const OFFICE_ERROR_CODES = [
   "unsupported_command",
   /** The input is larger than `limits.maxInputBytes`. */
   "input_too_large",
+  /** The input declares more entries, or expands to more bytes, than the machine will read. */
+  "input_too_large_archive",
+  /** The declared PDF carries more pages than a preview may hold. */
+  "too_many_pages",
   /** The workbook's cell count is larger than `limits.maxCells`. */
   "too_many_cells",
   /** The rendered image is larger than `limits.maxPixels`. */
@@ -609,6 +613,40 @@ export const MACHINE_ARTIFACT_PATH = "/artifact" as const;
  */
 export const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
 
+/**
+ * The most entries one input may hold (§10).
+ *
+ * @remarks
+ * A zip is a tree of entries as well as a size: a document of many tiny parts costs the engine far
+ * more than its bytes suggest, so the prescan counts before anything runs. The number is generous
+ * for a document (a real .docx, .xlsx or .pptx holds tens to thousands of entries; the spike's
+ * heaviest held a few thousand) and is not a limit a legitimate file meets.
+ */
+export const MAX_OFFICE_ENTRIES = 100_000;
+
+/**
+ * The most bytes one input may expand to (§10).
+ *
+ * @remarks
+ * The input bound (`maxInputBytes`) is what the workspace stores; this is what the engine
+ * unpacks. A few MB zip that expands to gigabytes is a decompression bomb, and the engine reads
+ * the expansion before any of its own bounds apply. The bound is ten times the input bound, which
+ * every real document is far inside: a 50 MiB .docx of embedded images is already an outlier, and
+ * Office files expand to a small multiple of their size.
+ */
+export const MAX_OFFICE_EXPANDED_BYTES = 512 * 1024 * 1024;
+
+/**
+ * The most pages a preview may hold when a job names no range, and no `--pages` exists on the
+ * engine's command line.
+ *
+ * @remarks
+ * The engine exports every page. A preview above {@link OFFICE_MAX_PDF_PAGES} is refused before it
+ * runs; a job that names fewer pages is refused `unsupported_command` because the v0.8.7 CLI
+ * cannot select pages (docs/office.md §2, §10).
+ */
+export const OFFICE_DEFAULT_PREVIEW_MAX_PAGES = OFFICE_MAX_PDF_PAGES;
+
 /** Hex characters in a cache path hash (§4). */
 export const OFFICE_PATH_HASH_HEX_LENGTH = 16;
 
@@ -1006,6 +1044,8 @@ export function previewStatusOfError(code: OfficeErrorCode): "unsupported" | "fa
       return "unsupported";
     case "unsupported_command":
     case "input_too_large":
+    case "input_too_large_archive":
+    case "too_many_pages":
     case "too_many_cells":
     case "too_many_pixels":
     case "engine_unavailable":
@@ -1298,6 +1338,27 @@ export const OfficeRequestSchema: v.GenericSchema<unknown, OfficeRequest> = v.st
   op: v.literal("office"),
   job: OfficeJobSchema,
 });
+
+/**
+ * One `GET /artifact` answer, as the machine gives it (§5).
+ *
+ * @remarks
+ * The bytes are not part of the JSON surface: this is the metadata both sides agree on for the
+ * range the machine answered. `contentRange` is the `Content-Range: bytes from-to/total` value, so
+ * a reader that asked for a range can place the bytes without a second request.
+ */
+export interface ArtifactAnswer {
+  /** Bytes in this answer. */
+  readonly length: number;
+  /** The whole artifact's size, in bytes. */
+  readonly total: number;
+  /** The first byte this answer carries, 0-based. */
+  readonly offset: number;
+  /** The artifact's own content type: `application/pdf` or `image/png`. */
+  readonly contentType: string;
+  /** `bytes <from>-<to>/<total>`. */
+  readonly contentRange: string;
+}
 
 /** The schema for {@link OfficeEngineRequest}: the machine's `op: "officeEngine"` body (§5). */
 export const OfficeEngineRequestSchema: v.GenericSchema<unknown, OfficeEngineRequest> =

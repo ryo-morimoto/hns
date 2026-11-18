@@ -18,8 +18,13 @@ export * from "./trail.ts";
 // the vocabulary is `@hns/core/office`, so a lane that only reads a job imports one subpath.
 export {
   MACHINE_REFUSAL_TO_OFFICE_ERROR,
+  MAX_ARTIFACT_BYTES,
+  MAX_OFFICE_ENTRIES,
+  MAX_OFFICE_EXPANDED_BYTES,
+  MIN_OFFICE_TIMEOUT_MS,
   OFFICE_ARTIFACT_FILE_OPERATIONS,
   OFFICE_CACHE_UNAVAILABLE_REASON,
+  OFFICE_DEADLINE_MARGIN_MS,
   OFFICE_ERROR_CODES,
   OfficeCacheKeySchema,
   OfficeEngineReportSchema,

@@ -12,6 +12,7 @@ import type {
   Limits,
   MachineAgent,
   MachineLogSink,
+  MachineOfficeOptions,
   ResponseBody,
 } from "../../src/index.ts";
 import { controlPlaneKeys, generateControlPlaneKey, signRequest } from "./control-plane.ts";
@@ -273,6 +274,17 @@ export interface AgentSetup {
   readonly onLog?: MachineLogSink | undefined;
   /** Where an accepted checkpoint pack goes; unset refuses every upload. */
   readonly onCheckpointPack?: ((upload: CheckpointPackUpload) => Promise<void>) | undefined;
+  /** The office engine's installation; unset means this agent runs no office job. */
+  readonly office?: MachineOfficeOptions | undefined;
+  /**
+   * The office cache's directory, when a scenario wants to look inside it; unset lets the agent
+   * choose its default (`$XDG_CACHE_HOME/hns/office`).
+   *
+   * @remarks
+   * It is folded into {@link office} rather than passed beside it, because the cache is the
+   * office engine's: an agent without an engine has no cache to name.
+   */
+  readonly cacheRoot?: string | undefined;
 }
 
 /**
@@ -295,6 +307,13 @@ export async function withAgent(
   // The sink is optional: only a scenario that receives a checkpoint pack passes one.
   const sink =
     setup.onCheckpointPack === undefined ? {} : { onCheckpointPack: setup.onCheckpointPack };
+  // The cache directory is named here so a scenario can look inside it: the default would be the
+  // developer's own ~/.cache, which a test must not read or write.
+  const cacheRoot = setup.cacheRoot ?? join(base, "office-cache");
+  const office =
+    setup.office === undefined
+      ? {}
+      : { office: { ...setup.office, cacheRoot: setup.office.cacheRoot ?? cacheRoot } };
   const agent = await startMachineAgent({
     root,
     machineId,
@@ -304,6 +323,7 @@ export async function withAgent(
     // Integration tests are otherwise silent; a scenario that proves the log passes a sink.
     onLog: setup.onLog ?? (() => undefined),
     ...sink,
+    ...office,
   });
   const signingKey = setup.signingKey ?? pair.privateKey;
   try {

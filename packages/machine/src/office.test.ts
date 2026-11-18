@@ -88,8 +88,9 @@ test("a write naming both a content and a source does not parse", () => {
 });
 
 // Catches: the office ops parsed as another op, or refused as unknown; and a `content` write's
-// route changed by the source branch. The answer to `office` is a refusal with a message that
-// says what is missing (0236), not a silent success.
+// route changed by the source branch. Without an executor the job is answered the job's own way —
+// `engine_unavailable`, which is the code the contract has for "this machine cannot do it" — and
+// the probe says the same thing about the pack, rather than either failing as a defect.
 test("the office ops parse and answer what this build can", async () => {
   await withRoot(async (root) => {
     const job = {
@@ -119,13 +120,12 @@ test("the office ops parse and answer what this build can", async () => {
     expect(parsedOffice.op).toBe("office");
     if (parsedOffice.op !== "office") throw new Error("expected an office job");
     const office = parsedOffice;
-    const refused = await runOperation(office, root, DEFAULT_LIMITS, controller.signal).then(
-      () => undefined,
-      (reason: Error) => reason,
-    );
-    expect(refused).toBeInstanceOf(MachineRefusal);
-    if (!(refused instanceof MachineRefusal)) throw new Error("expected a refusal");
-    expect(refused.code).toBe("invalid_request");
+    const jobAnswer = await runOperation(office, root, DEFAULT_LIMITS, controller.signal);
+    expect(jobAnswer).toStrictEqual({
+      ok: false,
+      error: "engine_unavailable",
+      message: "the agent was started without an office engine",
+    });
 
     const parsedProbe = parseOperation(new TextEncoder().encode('{"op":"officeEngine"}'));
     expect(parsedProbe.op).toBe("officeEngine");
@@ -133,7 +133,7 @@ test("the office ops parse and answer what this build can", async () => {
     const probe = parsedProbe;
     expect(await runOperation(probe, root, DEFAULT_LIMITS, controller.signal)).toStrictEqual({
       available: false,
-      reason: "no office pack is installed; 0235 adds the pack and 0236 reads its manifest",
+      reason: "no office pack is installed on this machine",
     });
 
     // The content write is unchanged: the same route still writes the bytes.
