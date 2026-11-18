@@ -1,6 +1,6 @@
 # 0234: Office の契約を core に固定する
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D102, D103, docs/office.md
@@ -20,20 +20,20 @@ machine の `op: "office"` / `op: "officeEngine"` の request/result、`MACHINE_
 
 ## Acceptance criteria
 
-- [ ] `packages/core/src/office.ts` を `@hns/core/office` として export する（package.json と tsdown の設定を含む）
-- [ ] `OfficeInput` に `workspaceId` を含み、`version` は `sha256:<hex>` として検証される
-- [ ] `packages/core/src/machine.ts` の request/result に `op: "office"` と `op: "officeEngine"` を足す（既存 op の受理は後方互換。バイナリ配信は HTTP route なので JSON の型は増やさない）
-- [ ] `docs/office.md` §2 の `OfficeCommand`（3 語彙）と `CellEdit` を型と fixture に含める
-- [ ] `MACHINE_ARTIFACT_PATH`・`artifactTarget()`（query の正規形）・`officeParamsHash()` を core に置く（server と machine が同じ関数を使う）
-- [ ] `op: "officeEngine"` の request/result を machine の型に足す
-- [ ] `MachineWriteRequest` に `source: { kind: "office-cache", workspaceId, pathHash, version, file }` の変種（`content` と排他）を足し、`contentHash` を必須にする
-- [ ] `OfficeArtifact` に `sha256` を含める
-- [ ] 型は `types.ts` ではなく `office.ts` が正本。schema は `v.GenericSchema<unknown, T>` で型に整合する
-- [ ] 閉じた union の `switch` が `never` で網羅される（テストで固定）
-- [ ] golden fixture（job 3 = preview/render/convert、result 4 = 3 + `officeEngine`、error 3、拒否 3、
+- [x] `packages/core/src/office.ts` を `@hns/core/office` として export する（package.json と tsdown の設定を含む）
+- [x] `OfficeInput` に `workspaceId` を含み、`version` は `sha256:<hex>` として検証される
+- [x] `packages/core/src/machine.ts` の request/result に `op: "office"` と `op: "officeEngine"` を足す（既存 op の受理は後方互換。バイナリ配信は HTTP route なので JSON の型は増やさない）
+- [x] `docs/office.md` §2 の `OfficeCommand`（3 語彙）と `CellEdit` を型と fixture に含める
+- [x] `MACHINE_ARTIFACT_PATH`・`artifactTarget()`（query の正規形）・`officeParamsHash()` を core に置く（server と machine が同じ関数を使う）
+- [x] `op: "officeEngine"` の request/result を machine の型に足す
+- [x] `MachineWriteRequest` に `source: { kind: "office-cache", workspaceId, pathHash, version, file }` の変種（`content` と排他）を足し、`contentHash` を必須にする
+- [x] `OfficeArtifact` に `sha256` を含める
+- [x] 型は `types.ts` ではなく `office.ts` が正本。schema は `v.GenericSchema<unknown, T>` で型に整合する
+- [x] 閉じた union の `switch` が `never` で網羅される（テストで固定）
+- [x] golden fixture（job 3 = preview/render/convert、result 4 = 3 + `officeEngine`、error 3、拒否 3、
       `OfficeCommand` 3 種と `CellEdit`、write 変種（source + contentHash）、`artifact.sha256`）を `packages/core/test/fixtures/office/` に置き、通る
-- [ ] `docs/office.md` の §2・§9・§10・§11 と一致する
-- [ ] `npm test -w @hns/core` が通る
+- [x] `docs/office.md` の §2・§9・§10・§11 と一致する
+- [x] `npm test -w @hns/core` が通る
 
 ## テスト条件
 
@@ -149,3 +149,18 @@ unit のみ（core）。fixture は `packages/core/test/fixtures/office/`（既�
 - 設計レビュー: issue-reviewer / **PASS with comments**（2026-11-17、5 ラウンド。blocking 0）
 - blocking: なし（R1〜R10 の整合修正を反映済み）
 - 次アクション: 0234 → 0235 → 0236 の順で実装レーンへ（0240 / 0242 は設計レビューで agreed に）
+
+## Result
+
+- verdict: **PASS**（reviewer-0234。初回 FAIL 2（convert の cache キーが定数 / source の経路テスト無し）→ 修正 → PASS。**その後、レビュー担当が打った mutation のうち 3 件が生存**したので、テストを足して塞いだ）
+- HEAD: 256fe6a（main に ff 統合）。gate は exit 0（1832 tests / 1833、main で 161.2s）。
+- **`@hns/core/office` の subpath**（exports と tsdown の entry、vitest の alias）。**`office.ts` が型の正本**で、schema は `v.GenericSchema<unknown, T>`、**core の dist に `node:` も `@hns/*` も無い**。
+- **`OfficeInput.workspaceId` 必須**、**`version` は `sha256:<hex>`**、**未知の `operation` / `error.code` を拒否**、**`limits` の 0 と負値を拒否**。
+- **machine の wire**: `op: "office"` / `op: "officeEngine"` を追加。**既存 op の受理は不変**（`OPERATION_NAMES` の差分は末尾 2 つ、`OperationSchema` は core の strict schema そのもの）、**JSON の封筒は増えていない**。
+- **成果物のキャッシュキーは 5 つ組** `(workspaceId, pathHash, version, operation, paramsHash)`。**パスは `officeCachePath` だけ**が組み立て、**`officeParamsHash` にパス系を入れない**。**`OfficeCacheKey.operation` は `preview | render` の型**（実行時だけでなく型で「成果物を作る 2 つだけ」を表す）。
+- **`MachineWriteRequest` は content / source の排他 union** で、**`source` は `{kind:"office-cache"} & OfficeCacheKey`**。machine は source を **`invalid_request` で fail closed**（parse → runOperation の経路テストで ROOT に書かないことを固定）。**`contentHash` は両 variant で必須**、**`artifact.sha256` は必須**。
+- **fixture は 25 ファイルの手書き JSON**（成功 16 / 拒否 7 / key 差分 2）。**generator が無い**。**fixture と実装を同時に壊しても検出**する。
+- **本番の部品同士**: `@hns/core/office meets @hns/workspace` が **workspace の実 `versionOf`** と core の schema を突き合わせる（core の test だけ `@hns/workspace` を devDependencies に、oxlint の除外は test のみ。**production の core は `@hns/*` 禁止のまま**）。
+- **レビューで見つかって直したもの**: ①**convert の paramsHash が定数**になり、**全ワークスペース・全ファイルの変換 PDF が同じ cache キー**（同一 version で上書き）→ 5 つ組に ②**source 分岐の経路テストが無い**（拒否を外しても落ちない）③**M4 / M5 / M10 が生存**（paramsHash の入力・pathHash の比較・回答封筒の語彙）→ テストを追加。
+- **まだ起動しない（後続レーン）**: `op:"office"` の実行は **0236**（今は `invalid_request` で「この build には無い」）、`GET /artifact` の署名は 0236、**cache の読み書きと source → ROOT の rename は 0241**、job の組み立ては 0237 / 0240、web の preview は 0238。
+- **残件**: `OfficePageListSchema` の `minLength(1)`（空配列を拒否する）が §2 に無い（空を許すか拒否するかを決める）/ `OFFICE_CACHE_UNAVAILABLE_REASON` と `officeErrorOfRefusal` の例外 1 行は **0241 で消す**（docs §9 に明記）。
