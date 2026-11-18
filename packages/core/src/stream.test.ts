@@ -5,12 +5,14 @@ import {
   EMPTY_LIVE_CURSOR,
   LIVE_DELTA_INTERVAL_MS,
   LIVE_DELTA_MAX_BYTES,
+  LIVE_SEND_MAX_BYTES,
   LiveDeltaBatcher,
   LiveFrameSchema,
   liveCursorOf,
   liveCursorValue,
   parseLiveClientMessage,
   parseLiveFrame,
+  sendResultOf,
   type LiveEntry,
 } from "./stream.ts";
 
@@ -63,6 +65,77 @@ test("client messages are a closed union", () => {
   expect(parseLiveClientMessage({ type: "ping" })).toStrictEqual({ type: "ping" });
   expect(parseLiveClientMessage({ type: "resync" })).toStrictEqual({ type: "resync" });
   expect(() => parseLiveClientMessage({ type: "subscribe" })).toThrow(v.ValiError);
+});
+
+test("a send carries its conversation, its client id, and its text", () => {
+  const send = {
+    type: "send",
+    conversationId: "7",
+    clientMessageId: "6f1c",
+    text: "hi",
+  } as const;
+  expect(parseLiveClientMessage(send)).toStrictEqual(send);
+  expect(parseLiveClientMessage({ type: "abort", conversationId: "7" })).toStrictEqual({
+    type: "abort",
+    conversationId: "7",
+  });
+});
+
+// Catches: an empty send, a send with no client id, or a send whose conversation is unnamed
+// reaching the object as a turn it can neither deduplicate nor address.
+test("a send without a conversation, client id, or text is refused", () => {
+  const base = { type: "send", conversationId: "7", clientMessageId: "id", text: "hi" } as const;
+  for (const missing of ["conversationId", "clientMessageId", "text"] as const) {
+    const { [missing]: _dropped, ...rest } = base;
+    expect(() => parseLiveClientMessage(rest)).toThrow(v.ValiError);
+  }
+  expect(() => parseLiveClientMessage({ ...base, text: "" })).toThrow(v.ValiError);
+  expect(() => parseLiveClientMessage({ ...base, clientMessageId: "" })).toThrow(v.ValiError);
+});
+
+// Catches: a text measured in characters instead of bytes, so a 64Ki-character Japanese turn
+// (three bytes each) passes the schema and the object is handed a body it refuses later.
+test("the send text is bounded in UTF-8 bytes", () => {
+  const send = (text: string) => ({
+    type: "send",
+    conversationId: "7",
+    clientMessageId: "id",
+    text,
+  });
+  expect(parseLiveClientMessage(send("a".repeat(LIVE_SEND_MAX_BYTES)))).toBeTruthy();
+  expect(() => parseLiveClientMessage(send("a".repeat(LIVE_SEND_MAX_BYTES + 1)))).toThrow(
+    v.ValiError,
+  );
+  // 21846 code points of 3 bytes are exactly 65538 bytes: one past the ceiling.
+  expect(() => parseLiveClientMessage(send("あ".repeat(21_846)))).toThrow(v.ValiError);
+  expect(parseLiveClientMessage(send("あ".repeat(21_845)))["type"]).toBe("send");
+});
+
+// Catches: a view frame coming from the client, or an answer being parsed as a view frame.
+test("views and send answers are different unions", () => {
+  expect(() => parseLiveFrame({ type: "accepted", clientMessageId: "a", messageId: "1" })).toThrow(
+    v.ValiError,
+  );
+  expect(() => parseLiveClientMessage({ type: "snapshot", protocol: 1 })).toThrow(v.ValiError);
+});
+
+// Catches: a view frame being taken for an answer (or an answer for a view frame) on the one
+// socket that carries both, and a malformed answer being read as a refusal of every send.
+test("a send answer is recognised by the schema, not by its reader", () => {
+  const accepted = { type: "accepted", clientMessageId: "a", messageId: "3" } as const;
+  const rejected = {
+    type: "rejected",
+    clientMessageId: "b",
+    code: "invalid_text",
+    message: "empty",
+  } as const;
+  expect(sendResultOf(accepted)).toStrictEqual(accepted);
+  expect(sendResultOf(rejected)).toStrictEqual(rejected);
+  expect(sendResultOf({ ...accepted, clientMessageId: "" })).toBeNull();
+  expect(sendResultOf({ ...rejected, code: "mystery" })).toBeNull();
+  expect(sendResultOf({ type: "snapshot", protocol: 1 })).toBeNull();
+  expect(sendResultOf("accepted")).toBeNull();
+  expect(sendResultOf(null)).toBeNull();
 });
 
 test("cursors are decimal entry ids", () => {

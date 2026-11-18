@@ -4,8 +4,10 @@ import {
   isoTimestamp,
   parseLiveFrame,
   ProjectIdSchema,
+  sendResultOf,
   type Conversation,
   type LiveFrame,
+  type LiveSendResult,
 } from "@hns/core";
 import type { EntryRecord, SessionEnd, Wake } from "@earendil-works/pi-durable";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
@@ -81,6 +83,22 @@ export function fakeSocket(): FakeSocket {
 /** Parse the frames a socket received, through the same parser the client uses. */
 export function framesOf(socket: FakeSocket): LiveFrame[] {
   return socket.sent.map((text) => parseLiveFrame(JSON.parse(text)));
+}
+
+/**
+ * Parse everything a socket received: view frames **and** answers to a send.
+ *
+ * @remarks
+ * A connection writes both kinds to the same socket, so a test that reads only `framesOf`
+ * would drop every `accepted` / `rejected`. Each text frame is routed by its `type`, the same
+ * way the web client routes one.
+ */
+export function parseFrames(socket: FakeSocket): readonly (LiveFrame | LiveSendResult)[] {
+  return socket.sent.map((text) => {
+    const value: unknown = JSON.parse(text);
+    // The protocol's own schemas decide: an answer parses as one, anything else as a view frame.
+    return sendResultOf(value) ?? parseLiveFrame(value);
+  });
 }
 
 /** A socket host that records accepts and tags. */

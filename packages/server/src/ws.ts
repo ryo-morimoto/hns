@@ -10,10 +10,14 @@ import {
   liveCursorValue,
   ok,
   parseLiveClientMessage,
+  type LiveAcceptedFrame,
   type LiveClientMessage,
   type LiveEntry,
   type LiveErrorCode,
   type LiveFrame,
+  type LiveRejectedFrame,
+  type LiveSendRejectionCode,
+  type LiveSendResult,
   type Result,
 } from "@hns/core";
 import * as v from "valibot";
@@ -156,26 +160,192 @@ function wireEntry(entry: EntryRecord): LiveEntry {
   return { id: String(entry.id), kind: entry.kind, text: entryText(entry) };
 }
 
+/**
+ * What one live connection needs from the Session for the chat's commands.
+ *
+ * @remarks
+ * The socket is only a transport here: the send RPC and the abort RPC are the object's, and this
+ * type is how the connection reaches them. `send` takes the client's own name for the turn and
+ * uses it as the turn's request id, so the object sees the same id on a resend and the
+ * conversation deduplicates it instead of running it twice.
+ */
+export interface LiveSendPort {
+  /** Put one turn into a conversation; the code `null` means accepted. */
+  send(
+    conversationId: string,
+    text: string,
+    clientMessageId: string,
+  ): Promise<
+    | { readonly ok: true; readonly messageId: string }
+    | { readonly ok: false; readonly code: LiveSendRejectionCode; readonly message: string }
+  >;
+  /** Stop the conversation's run; `null` means accepted. */
+  abort(
+    conversationId: string,
+  ): Promise<
+    | { readonly ok: true }
+    | { readonly ok: false; readonly code: LiveSendRejectionCode; readonly message: string }
+  >;
+}
+
 /** One live connection: snapshot first, then appends and coalesced draft deltas. */
 export class LiveConnection {
   readonly #socket: LiveSocket;
   readonly #conversationId: string;
   readonly #now: () => number;
+  readonly #chat: LiveSendPort | undefined;
   readonly #batcher = new LiveDeltaBatcher();
   #latest: AgentLiveView | undefined;
   #lastEntryId = 0;
   #draft = "";
   #timer: ReturnType<typeof setTimeout> | undefined;
   #closed = false;
+  /** The sends this connection has not answered yet, by client id: a resend waits on the first. */
+  readonly #inFlight = new Map<string, Promise<void>>();
 
   constructor(
     socket: LiveSocket,
     conversationId: string,
-    options: { readonly now?: (() => number) | undefined } = {},
+    options: {
+      readonly now?: (() => number) | undefined;
+      readonly chat?: LiveSendPort | undefined;
+    } = {},
   ) {
     this.#socket = socket;
     this.#conversationId = conversationId;
     this.#now = options.now ?? Date.now;
+    this.#chat = options.chat;
+  }
+
+  /**
+   * Handle one client message; unknown or malformed input gets an error frame.
+   *
+   * @remarks
+   * A `send` or `abort` is answered asynchronously: the object's RPC runs the turn, and the
+   * answer (`accepted` / `rejected`) is written to this socket when it returns. A `send` whose
+   * client id is already waiting is not repeated on this connection; the first one's answer is
+   * this one's answer, because they name the same turn.
+   */
+  handleMessage(message: string | ArrayBuffer): void {
+    if (this.#closed) return;
+    let value: unknown;
+    try {
+      value = JSON.parse(
+        message instanceof ArrayBuffer ? new TextDecoder().decode(message) : message,
+      );
+    } catch {
+      this.#error("invalid_request", "The message is not JSON.");
+      return;
+    }
+    let parsed: LiveClientMessage;
+    try {
+      parsed = parseLiveClientMessage(value);
+    } catch {
+      this.#error("invalid_request", "The message is not a live client message.");
+      return;
+    }
+    switch (parsed.type) {
+      case "ping":
+        this.#send({ type: "pong", protocol: LIVE_PROTOCOL_VERSION });
+        return;
+      case "resync":
+        if (this.#latest === undefined) {
+          this.#error("unavailable", "The live view is not ready.");
+          return;
+        }
+        this.#snapshot(this.#latest);
+        return;
+      case "send":
+        this.#chatSend(parsed.conversationId, parsed.clientMessageId, parsed.text);
+        return;
+      case "abort":
+        this.#chatAbort(parsed.conversationId);
+        return;
+      default: {
+        const unhandled: never = parsed;
+        throw new Error("unhandled live message: " + JSON.stringify(unhandled));
+      }
+    }
+  }
+
+  /**
+   * The sends this connection has not answered yet.
+   *
+   * @internal
+   * @remarks
+   * A close waits on it, so an answer that is already decided reaches the socket before the
+   * socket is gone; anything still running when the close happens stays unanswered, which is
+   * what makes the client resend it.
+   */
+  get pending(): readonly Promise<void>[] {
+    return [...this.#inFlight.values()];
+  }
+
+  /** Run one send and answer it; a resend of a pending send waits on the same answer. */
+  #chatSend(conversationId: string, clientMessageId: string, text: string): void {
+    const waiting = this.#inFlight.get(clientMessageId);
+    if (waiting !== undefined) {
+      void waiting;
+      return;
+    }
+    const chat = this.#chat;
+    if (chat === undefined) {
+      this.#reject(clientMessageId, "unavailable", "The chat is not open on this connection.");
+      return;
+    }
+    const answer = chat.send(conversationId, text, clientMessageId).then(
+      (result) => {
+        this.#inFlight.delete(clientMessageId);
+        if (result.ok) {
+          this.#send({
+            type: "accepted",
+            clientMessageId,
+            messageId: result.messageId,
+          } satisfies LiveAcceptedFrame);
+          return;
+        }
+        this.#reject(clientMessageId, result.code, result.message);
+      },
+      () => {
+        this.#inFlight.delete(clientMessageId);
+        this.#reject(clientMessageId, "unavailable", "The turn could not be recorded.");
+      },
+    );
+    this.#inFlight.set(clientMessageId, answer);
+  }
+
+  /**
+   * Run one abort.
+   *
+   * @remarks
+   * An abort has no answer of its own: what it changed reaches the client as the view the
+   * object publishes, which is the one path every other change takes. A refused abort is a
+   * typed error frame, because there is no message to put it beside.
+   */
+  #chatAbort(conversationId: string): void {
+    const chat = this.#chat;
+    if (chat === undefined) {
+      this.#error("unavailable", "The chat is not open on this connection.");
+      return;
+    }
+    void chat.abort(conversationId).then(
+      (result) => {
+        if (result.ok) return;
+        // An absent conversation is the one refusal that has a live error code of its own; a
+        // failed stop is `unavailable`, because a run that could not be stopped may still run.
+        this.#error(
+          result.code === "unknown_conversation" ? "not_found" : "unavailable",
+          result.message,
+        );
+      },
+      () => {
+        this.#error("unavailable", "The run could not be stopped.");
+      },
+    );
+  }
+
+  #reject(clientMessageId: string, code: LiveSendRejectionCode, message: string): void {
+    this.#send({ type: "rejected", clientMessageId, code, message } satisfies LiveRejectedFrame);
   }
 
   /** The conversation this connection follows. */
@@ -223,43 +393,6 @@ export class LiveConnection {
       this.#saveAttachment();
     }
     this.#applyDraft(view.draft);
-  }
-
-  /** Handle one client message; unknown or malformed input gets an error frame. */
-  handleMessage(message: string | ArrayBuffer): void {
-    if (this.#closed) return;
-    let value: unknown;
-    try {
-      value = JSON.parse(
-        message instanceof ArrayBuffer ? new TextDecoder().decode(message) : message,
-      );
-    } catch {
-      this.#error("invalid_request", "The message is not JSON.");
-      return;
-    }
-    let parsed: LiveClientMessage;
-    try {
-      parsed = parseLiveClientMessage(value);
-    } catch {
-      this.#error("invalid_request", "The message is not a live client message.");
-      return;
-    }
-    switch (parsed.type) {
-      case "ping":
-        this.#send({ type: "pong", protocol: LIVE_PROTOCOL_VERSION });
-        return;
-      case "resync":
-        if (this.#latest === undefined) {
-          this.#error("unavailable", "The live view is not ready.");
-          return;
-        }
-        this.#snapshot(this.#latest);
-        return;
-      default: {
-        const unhandled: never = parsed;
-        throw new Error("unhandled live message: " + JSON.stringify(unhandled));
-      }
-    }
   }
 
   /** Stop timers and future sends. */
@@ -348,7 +481,7 @@ export class LiveConnection {
     });
   }
 
-  #send(frame: LiveFrame): void {
+  #send(frame: LiveFrame | LiveSendResult): void {
     if (this.#closed) return;
     try {
       this.#socket.send(JSON.stringify(frame));
@@ -387,6 +520,8 @@ export async function openLiveSocket(options: {
   readonly host: LiveSocketHost;
   readonly pair: LiveSocketPairFactory;
   readonly session: AgentSession;
+  /** The chat commands; absent means `send` and `abort` are answered `unavailable`. */
+  readonly chat?: LiveSendPort | undefined;
   readonly now?: (() => number) | undefined;
   readonly upgradeResponse?: LiveUpgradeResponseFactory | undefined;
 }): Promise<LiveUpgradeResult> {
@@ -432,7 +567,10 @@ export async function openLiveSocket(options: {
     await watch.stop();
     return err(problem("unavailable", "The socket could not be accepted.", path));
   }
-  const connection = new LiveConnection(server, conversationId, { now: options.now });
+  const connection = new LiveConnection(server, conversationId, {
+    now: options.now,
+    chat: options.chat,
+  });
   connection.start(watch.initial);
   watch.start((view) => {
     connection.advance(view);

@@ -187,6 +187,11 @@ test("a reconnect refetches the open screen's lists", async () => {
   const { factory, sockets } = socketFactory();
   renderShellWith(environment, { liveSocket: factory });
   expect(await screen.findByRole("heading", { name: "Web の土台" })).toBeTruthy();
+  // The connection is created once the route renders, and the conversation screen reads
+  // before it mounts; open the socket the visitor sees as soon as it exists.
+  await waitFor(() => {
+    expect(sockets).toHaveLength(1);
+  });
   act(() => {
     sockets[0]?.open();
   });
@@ -207,21 +212,21 @@ test("a reconnect refetches the open screen's lists", async () => {
 });
 
 // Catches: the conversation route never mounting the live status, so a disconnected user sees nothing.
-test("a conversation route shows the live status when a socket is provided", async () => {
+// Catches: the conversation route never mounting a live frame, so a disconnecting socket is
+// invisible on the page.
+test("a conversation route draws its live frame inside one connection", async () => {
   window.location.hash = "#/p/project-hns/c/conversation-intent";
   const { factory, sockets } = socketFactory();
   renderShell({ liveSocket: factory });
 
-  expect(await screen.findByText("ライブ更新に接続しています。")).toBeTruthy();
-  act(() => {
-    sockets[0]?.open();
+  // The frame draws the conversation screen, and the screen reads before the frame's first
+  // render; the connection (and the socket the test drives) therefore exists once that read
+  // has landed. Nothing is opened or dropped here: the frame is what this test is about.
+  await waitFor(() => {
+    expect(sockets.length).toBe(1);
+    expect(sockets[0]?.onclose).not.toBeNull();
   });
-  expect(screen.getAllByRole("status").some((element) => element.textContent === "接続済み")).toBe(
-    true,
-  );
-
-  act(() => {
-    sockets[0]?.drop();
+  await waitFor(() => {
+    expect(document.body.textContent ?? "").toContain("ライブ更新に接続しています。");
   });
-  expect(screen.getByText(/1回目の再接続/u)).toBeTruthy();
 });

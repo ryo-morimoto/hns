@@ -1,7 +1,10 @@
 import { useEffect, useRef, type ReactElement } from "react";
 import { useRelayEnvironment } from "react-relay";
+import type { Environment as RelayEnvironment } from "relay-runtime";
+
+import type { LiveSendResult } from "@hns/core";
 import { explainConnection, type LiveConversationState } from "../live/state.ts";
-import type { LiveSocketFactory } from "../live/client.ts";
+import type { LiveClient, LiveSocketFactory } from "../live/client.ts";
 import { applyLiveFrameToStore, forgetLiveTitle } from "../live/store.ts";
 import { useLiveConnection } from "../live/useLiveConnection.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
@@ -24,6 +27,10 @@ function LiveConnectionView({ state }: { readonly state: LiveConversationState }
  * @param projectId - The project that owns the conversation; the edge addresses its Session object.
  * @param socket - Test seam; production uses the browser's WebSocket.
  * @param onReconnect - Called when a dropped connection is healthy again.
+ * @param onReady - Called with the client once the connection exists, so the screen can send.
+ * @param onSendResult - Called with every answer to a send the screen made.
+ * @param children - Rendered instead of the bare status, with the live state, when a screen
+ * needs more than the status line; the client arrives through `onReady`, not through this.
  *
  * @remarks
  * This is the component the conversation screen mounts. It deliberately owns the socket: a
@@ -37,21 +44,49 @@ export function LiveConnection({
   projectId,
   socket,
   onReconnect,
+  onReady,
+  onSendResult,
+  onState,
+  children,
+  environment: given,
 }: {
   readonly conversationId: string;
   readonly projectId?: string | undefined;
   readonly socket?: LiveSocketFactory | undefined;
   readonly onReconnect?: (() => void) | undefined;
+  readonly onReady?: ((client: LiveClient) => void) | undefined;
+  readonly onSendResult?: ((result: LiveSendResult) => void) | undefined;
+  readonly children?:
+    | ((connection: { readonly state: LiveConversationState }) => ReactElement)
+    | undefined;
+  /** Receives the live state on every change, for a screen that renders more than the status. */
+  readonly onState?: ((state: LiveConversationState) => void) | undefined;
+  /** The environment whose store the frames patch; defaults to the one this render is under. */
+  readonly environment?: RelayEnvironment | undefined;
 }): ReactElement {
-  const environment = useRelayEnvironment();
-  const state = useLiveConnection(conversationId, {
+  const ambient = useRelayEnvironment();
+  const environment = given ?? ambient;
+  const connection = useLiveConnection(conversationId, {
     projectId,
     socket,
+    onSendResult,
     onFrame: (frame) => {
       applyLiveFrameToStore(environment, frame);
     },
   });
-  const previous = useRef(state.status);
+  const previous = useRef(connection.state.status);
+  const ready = onReady;
+  const client = connection.client;
+
+  useEffect(() => {
+    if (client === null) return;
+    ready?.(client);
+  }, [client, ready]);
+
+  const report = onState;
+  useEffect(() => {
+    report?.(connection.state);
+  }, [report, connection.state]);
 
   useEffect(() => {
     return () => {
@@ -60,10 +95,14 @@ export function LiveConnection({
   }, [environment, conversationId]);
 
   useEffect(() => {
-    const reconnected = previous.current === "reconnecting" && state.status === "online";
-    previous.current = state.status;
+    const reconnected = previous.current === "reconnecting" && connection.state.status === "online";
+    previous.current = connection.state.status;
     if (reconnected) onReconnect?.();
-  }, [state.status, onReconnect]);
+  }, [connection.state.status, onReconnect]);
 
-  return <LiveConnectionView state={state} />;
+  return children === undefined ? (
+    <LiveConnectionView state={connection.state} />
+  ) : (
+    children({ state: connection.state })
+  );
 }

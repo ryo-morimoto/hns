@@ -8,7 +8,7 @@ import {
   type AgentSession,
   type SessionOptions,
 } from "@hns/agent/session";
-import { isoTimestamp } from "@hns/core";
+import { isoTimestamp, type LiveSendRejectionCode } from "@hns/core";
 import { migrateStore } from "@hns/store";
 import { openConversationIndex } from "@hns/store/conversation-index";
 import { createCostGate, type CostGate } from "../cost/index.ts";
@@ -25,6 +25,7 @@ import {
   readLiveAttachment,
   type LiveSocket,
   type LiveSocketHost,
+  type LiveSendPort,
   type LiveSocketPairFactory,
   type LiveUpgradeResponseFactory,
 } from "../ws.ts";
@@ -66,6 +67,44 @@ import { SessionIndex } from "./session-index.ts";
 import { handleSessionRpc } from "./session-rpc.ts";
 import { incompleteToolPathMessage, toolPathMode } from "./tool-path-mode.ts";
 import type { SessionEnv, SessionState } from "./state.ts";
+
+/**
+ * The turn route's success answer, as the chat port reads it.
+ *
+ * @remarks
+ * The route answers `{ ok: true, submissionId, status, text }`; the port needs the id, which is
+ * what the client shows beside its own `clientMessageId`.
+ */
+const TurnAnswerSchema = v.object({
+  ok: v.literal(true),
+  submissionId: v.string(),
+});
+
+/** The body the chat port posts to its own turn route; `null` is the abort route's. */
+type ChatRequestBody = { readonly text: string; readonly requestId: string } | null;
+
+/** What the object's own RPC answered: the status, and the parsed body (null when none). */
+interface ChatRpcAnswer {
+  readonly status: number;
+  readonly answer: unknown;
+}
+
+/**
+ * The refusal a send or an abort was answered with.
+ *
+ * @param message - What the person is told.
+ * @param status - The object's own status for the route.
+ * @returns The refusal, in the vocabulary the client branches on: a conversation the object does
+ * not hold is `unknown_conversation`, and anything else is a transient `unavailable`.
+ */
+function refusalOf(
+  message: string,
+  status: number,
+): { readonly ok: false; readonly code: LiveSendRejectionCode; readonly message: string } {
+  return status === 404
+    ? { ok: false, code: "unknown_conversation", message }
+    : { ok: false, code: "unavailable", message };
+}
 
 /** The host callbacks the Session gives the runtime. */
 interface SessionHooks {
@@ -1022,6 +1061,7 @@ export class Session {
       host,
       pair: this.#pair,
       session,
+      chat: this.#chatPort(),
       now: this.#now,
       upgradeResponse: this.#upgradeResponse,
     });
@@ -1031,6 +1071,67 @@ export class Session {
       watch: opened.value.watch,
     });
     return opened.value.response;
+  }
+
+  /**
+   * The chat commands a live connection answers with.
+   *
+   * @returns The port over this object's own RPC, so a socket send is the same path a Worker
+   * `sendMessage` takes (the turn route) and the same abort the object's abort route runs.
+   *
+   * @remarks
+   * The port re-enters {@link Session.fetch} instead of calling the runtime directly: the turn
+   * route is the one place that admits a turn through the cost gate, the policy, and the grant
+   * path, and a socket send that skipped it would be a second, quietly different way to start a
+   * run. The request is the object's own internal one, with a correlation id, so the hop is
+   * recorded in the event log like any other.
+   *
+   * `clientMessageId` becomes the turn's request id. That is the whole of the deduplication on
+   * this object: the conversation refuses a second input with an id it already holds, so a resend
+   * after a dropped connection cannot run the turn twice.
+   */
+  #chatPort(): LiveSendPort {
+    const rpc = async (path: string, body: ChatRequestBody): Promise<ChatRpcAnswer> => {
+      const response = await this.fetch(
+        new Request("https://session.internal" + path, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            [REQUEST_ID_HEADER]: crypto.randomUUID(),
+          },
+          body: body === null ? null : JSON.stringify(body),
+        }),
+      );
+      // The body is the route's own, and it is unparsed here on purpose: the caller hands it to
+      // the schema of the answer it should be (`TurnAnswerSchema`), so nothing reads a shape
+      // before the schema has accepted one. A body that is not JSON is no answer at all.
+      return {
+        status: response.status,
+        answer: await response.json().catch(() => null),
+      };
+    };
+
+    return {
+      send: async (conversationId, text, clientMessageId) => {
+        const sent = await rpc(
+          "/rpc/conversations/" + encodeURIComponent(conversationId) + "/messages",
+          { text, requestId: clientMessageId },
+        );
+        const parsed = v.safeParse(TurnAnswerSchema, sent.answer);
+        if (sent.status === 200 && parsed.success) {
+          return { ok: true, messageId: parsed.output.submissionId };
+        }
+        return refusalOf("The turn could not be started.", sent.status);
+      },
+      abort: async (conversationId) => {
+        const sent = await rpc(
+          "/rpc/conversations/" + encodeURIComponent(conversationId) + "/abort",
+          null,
+        );
+        if (sent.status === 200) return { ok: true };
+        return refusalOf("The run could not be stopped.", sent.status);
+      },
+    };
   }
 
   /** The DO socket methods, bound to the state they came from. */

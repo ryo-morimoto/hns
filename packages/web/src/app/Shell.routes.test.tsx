@@ -25,12 +25,16 @@ test("an unknown hash normalizes to the first project", async () => {
   });
 });
 
+// Catches: a conversation route drawing only its chrome, with the conversation's own screen never
+// mounted under it.
 test("a conversation route renders the conversation", async () => {
   window.location.hash = "#/p/project-hns/c/conversation-intent";
   renderShell();
 
   expect(await screen.findByRole("heading", { name: "Web の土台" })).toBeTruthy();
-  expect(document.body.textContent ?? "").toMatch(/conversation-intent/u);
+  // The screen's composer is what proves the conversation itself is on the page. Its label is
+  // sr-only (the field is named visually by the section), so it is found by role, not by text.
+  expect(await screen.findByRole("textbox", { name: "メッセージ" })).toBeTruthy();
 });
 
 test("back returns to the previous route", async () => {

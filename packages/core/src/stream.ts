@@ -34,10 +34,56 @@ export const LIVE_ERROR_CODES = [
 /** One live failure code. */
 export type LiveErrorCode = (typeof LIVE_ERROR_CODES)[number];
 
-/** The closed vocabulary of client-to-server messages. */
-export const LIVE_CLIENT_MESSAGE_TYPES = ["ping", "resync"] as const;
+/**
+ * The closed vocabulary of client-to-server messages.
+ *
+ * @remarks
+ * `send` and `abort` are the chat's two commands (D077): a turn is put into a conversation over
+ * the socket, never over a REST POST. A conversation's view is still read by `snapshot`,
+ * `append`, and `delta`; those three stay server-to-client, so a client cannot forge what a
+ * screen shows.
+ */
+export const LIVE_CLIENT_MESSAGE_TYPES = ["ping", "resync", "send", "abort"] as const;
 /** One client-to-server message kind. */
 export type LiveClientMessageType = (typeof LIVE_CLIENT_MESSAGE_TYPES)[number];
+
+/**
+ * The closed vocabulary of the answers to a client `send`.
+ *
+ * @remarks
+ * A send is answered once, on the connection that carried it: `accepted` when the turn was
+ * recorded, `rejected` when it was refused for a reason the client can show. A connection that
+ * ends before either is not an answer, so the client sends the same `clientMessageId` again;
+ * that is how a send survives a drop (D077). An answer is not a conversation frame: it names
+ * the send by `clientMessageId`, and it may be addressed to a connection that is not following
+ * the conversation it names.
+ */
+export const LIVE_SEND_RESULT_TYPES = ["accepted", "rejected"] as const;
+/** One answer to a send. */
+export type LiveSendResultType = (typeof LIVE_SEND_RESULT_TYPES)[number];
+
+/**
+ * The closed vocabulary of send refusals.
+ *
+ * @remarks
+ * The client branches on these to decide what to say; `unavailable` is retryable later, and the
+ * rest need the person to change the text or the conversation. `invalid_text` is an empty or
+ * oversized text; `unknown_conversation` is a conversation this Session object does not hold,
+ * and it never says whether the id ever existed.
+ */
+export const LIVE_SEND_REJECTIONS = [
+  "invalid_text",
+  "unknown_conversation",
+  "unavailable",
+] as const;
+/** One send refusal. */
+export type LiveSendRejectionCode = (typeof LIVE_SEND_REJECTIONS)[number];
+
+/** The most UTF-8 bytes one send's text may carry (D077). */
+export const LIVE_SEND_MAX_BYTES = 64 * 1024;
+
+/** The most UTF-8 bytes one conversation id may occupy. */
+export const LIVE_CONVERSATION_ID_MAX_BYTES = 128;
 
 /** The cursor before any durable entry; entry ids start at 1. */
 export const EMPTY_LIVE_CURSOR = "0";
@@ -119,7 +165,7 @@ export interface LiveErrorFrame {
   readonly message: string;
 }
 
-/** One server-to-client frame. The union is closed. */
+/** One server-to-client frame of a conversation's view. The union is closed. */
 export type LiveFrame =
   | LiveSnapshotFrame
   | LiveAppendFrame
@@ -127,8 +173,50 @@ export type LiveFrame =
   | LivePongFrame
   | LiveErrorFrame;
 
-/** One client-to-server message. */
-export type LiveClientMessage = { readonly type: "ping" } | { readonly type: "resync" };
+/**
+ * The answer to one `send`: the turn was recorded.
+ *
+ * @remarks
+ * The turn is not answered yet; this says only that the conversation accepted the input, so the
+ * client stops resending it. `messageId` is the accepted input's id in pi-durable.
+ */
+export interface LiveAcceptedFrame {
+  readonly type: "accepted";
+  readonly clientMessageId: string;
+  readonly messageId: string;
+}
+
+/**
+ * The answer to one `send`: the turn was refused.
+ *
+ * @remarks
+ * The refusal is a value, not a dropped send: the client shows `message` and may keep the text.
+ * A refused send is **not** resent by the client; only a connection that ended before an answer
+ * leaves the send outstanding.
+ */
+export interface LiveRejectedFrame {
+  readonly type: "rejected";
+  readonly clientMessageId: string;
+  /** The closed refusal vocabulary a send can be answered with. */
+  readonly code: LiveSendRejectionCode;
+  readonly message: string;
+}
+
+/** One answer to a send. The union is closed. */
+export type LiveSendResult = LiveAcceptedFrame | LiveRejectedFrame;
+
+/** One client-to-server message: the closed union the connection accepts. */
+export type LiveClientMessage =
+  | { readonly type: "ping" }
+  | { readonly type: "resync" }
+  | {
+      readonly type: "send";
+      readonly conversationId: string;
+      /** The client's name for this turn; the same id again is the same send. */
+      readonly clientMessageId: string;
+      readonly text: string;
+    }
+  | { readonly type: "abort"; readonly conversationId: string };
 
 const IdSchema = v.pipe(
   v.string(),
@@ -202,11 +290,46 @@ export const LiveFrameSchema = v.variant("type", [
   ErrorSchema,
 ]);
 
+const ClientMessageIdSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(128));
+
+const SendSchema = v.object({
+  type: v.literal("send"),
+  conversationId: v.pipe(v.string(), v.minLength(1), v.maxLength(LIVE_CONVERSATION_ID_MAX_BYTES)),
+  clientMessageId: ClientMessageIdSchema,
+  // The byte ceiling, not the character count: a text of 64Ki characters can be 192KiB.
+  text: v.pipe(
+    v.string(),
+    v.minLength(1),
+    v.check((text) => utf8Bytes(text) <= LIVE_SEND_MAX_BYTES, "text exceeds the send limit"),
+  ),
+});
+
 /** The runtime shape of a client message. */
 export const LiveClientMessageSchema = v.variant("type", [
   v.object({ type: v.literal("ping") }),
   v.object({ type: v.literal("resync") }),
+  SendSchema,
+  v.object({
+    type: v.literal("abort"),
+    conversationId: v.pipe(v.string(), v.minLength(1), v.maxLength(LIVE_CONVERSATION_ID_MAX_BYTES)),
+  }),
 ]);
+
+const AcceptedSchema = v.object({
+  type: v.literal("accepted"),
+  clientMessageId: ClientMessageIdSchema,
+  messageId: v.pipe(v.string(), v.minLength(1)),
+});
+
+const RejectedSchema = v.object({
+  type: v.literal("rejected"),
+  clientMessageId: ClientMessageIdSchema,
+  code: v.picklist(LIVE_SEND_REJECTIONS),
+  message: v.string(),
+});
+
+/** The runtime shape of an answer to a send. */
+export const LiveSendResultSchema = v.variant("type", [AcceptedSchema, RejectedSchema]);
 
 /**
  * Parse one live frame received from the network.
@@ -228,6 +351,24 @@ export function parseLiveFrame(value: unknown): LiveFrame {
  */
 export function parseLiveClientMessage(value: unknown): LiveClientMessage {
   return v.parse(LiveClientMessageSchema, value);
+}
+
+/**
+ * Take an answer out of a message the network carried.
+ *
+ * @param value - Untrusted JSON.
+ * @returns The answer, narrowed to {@link LiveSendResult}, or null when the message is not one.
+ *
+ * @remarks
+ * A socket carries two kinds of message: a conversation's view frames and the answers to a
+ * send. `type` is what tells them apart, and it is the **schema's** answer rather than the
+ * reader's: a value that is an answer of this protocol is parsed as one, and anything else is
+ * left for the view frame's parser to accept or refuse. Nothing outside the closed vocabulary
+ * gets a second meaning.
+ */
+export function sendResultOf(value: unknown): LiveSendResult | null {
+  const parsed = v.safeParse(LiveSendResultSchema, value);
+  return parsed.success ? parsed.output : null;
 }
 
 /**
@@ -274,6 +415,11 @@ function textBytes(text: string): number {
   let bytes = 0;
   for (const char of text) bytes += codePointBytes(char);
   return bytes;
+}
+
+/** The UTF-8 byte length of a string, as the send schema names its bound. */
+function utf8Bytes(text: string): number {
+  return textBytes(text);
 }
 
 /**

@@ -11,6 +11,7 @@ import type { SidebarConversations$key } from "../__generated__/SidebarConversat
 import type { SidebarProjects$key } from "../__generated__/SidebarProjects.graphql";
 import type { SidebarTasks$key } from "../__generated__/SidebarTasks.graphql";
 import { Button } from "../components/Button.tsx";
+import { ConversationScreen } from "../screens/conversation/ConversationScreen.tsx";
 import { projectIdFrom } from "../routes/ids.ts";
 import { formatHash } from "../routes/route.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
@@ -372,6 +373,15 @@ interface ConversationViewProps {
   readonly onReconnect: () => void;
 }
 
+/**
+ * The conversation route.
+ *
+ * @remarks
+ * Two things happen here that the route owns rather than the screen: the title in the chrome
+ * (the shell has to show it before the screen's own read finishes, and it tracks the socket's
+ * rename), and the live connection's report upward so a reconnect refetches the lists. The
+ * transcript, the composer, and the commands are the screen's.
+ */
 function ConversationView({
   project,
   conversationId,
@@ -379,24 +389,34 @@ function ConversationView({
   liveSocket,
   onReconnect,
 }: ConversationViewProps): ReactElement {
+  // The screen is drawn by the frame below, through the one connection the route owns: the
+  // screen's own status line and progress are the same facts the frame's connection carries.
+  const screen = <ConversationScreen conversationId={conversationId} projectId={project.id} />;
+  if (liveSocket === undefined || !subscribesToLive("conversation")) {
+    return (
+      <section className="hns-view" aria-labelledby="conversation-title">
+        <h1 id="conversation-title" className="hns-sr-only">
+          {title ?? "会話"}
+        </h1>
+        {screen}
+      </section>
+    );
+  }
   return (
-    <section className="hns-view" aria-labelledby="conversation-title">
-      <h1 id="conversation-title">{title ?? "会話"}</h1>
-      <p className="hns-view__meta">
-        {project.name} · {conversationId}
-      </p>
-      {liveSocket === undefined || !subscribesToLive("conversation") ? null : (
-        <LiveConnection
-          conversationId={conversationId}
-          projectId={project.id}
-          socket={liveSocket}
-          onReconnect={onReconnect}
-        />
+    <LiveConnection
+      conversationId={conversationId}
+      projectId={project.id}
+      socket={liveSocket}
+      onReconnect={onReconnect}
+    >
+      {() => (
+        <section className="hns-view" aria-labelledby="conversation-title">
+          <h1 id="conversation-title" className="hns-sr-only">
+            {title ?? "会話"}
+          </h1>
+          {screen}
+        </section>
       )}
-      <a className="hns-view__link" href={formatHash({ kind: "workspace", projectId: project.id })}>
-        ワークスペースへ戻る
-      </a>
-      <p className="hns-view__note">Conversation の中身はこれから作る。</p>
-    </section>
+    </LiveConnection>
   );
 }

@@ -96,6 +96,20 @@ function projectOf(call: GraphQLCall): string | undefined {
   return decoded.ok ? decoded.value.id : undefined;
 }
 
+/**
+ * One fixture conversation by its raw id.
+ *
+ * @param id - The id a route or URL names.
+ * @returns The row, or undefined when the fixture has no such conversation.
+ *
+ * @remarks
+ * The shell tests answer `/api/conversations/:id/state` from this, so a conversation route in
+ * any shell test opens the same conversation the sidebar lists.
+ */
+export function conversationFixture(id: string): Conversation | undefined {
+  return conversations.find((conversation) => conversation.id === id);
+}
+
 /** The fixture responder the shell tests use; it answers the two compiled operations. */
 export const workspaceFixture: Responder = (call) => {
   if (call.operation === "ShellProjectsQuery") {

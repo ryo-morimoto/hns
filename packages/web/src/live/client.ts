@@ -1,4 +1,14 @@
-import { EMPTY_LIVE_CURSOR, parseLiveFrame, type LiveFrame } from "@hns/core";
+/* oxlint-disable anti-slop/no-unknown-parameters --
+   This module is the socket's wire boundary: parseInbound and applySendResult take the JSON a
+   frame carried and hand it to the core parsers, which is where the shape is decided.
+*/
+import {
+  EMPTY_LIVE_CURSOR,
+  parseLiveFrame,
+  sendResultOf,
+  type LiveFrame,
+  type LiveSendResult,
+} from "@hns/core";
 import { applyLiveFrame, initialLiveState, type LiveConversationState } from "./state.ts";
 
 /** What the server sends on a text frame; the live protocol has no binary frame. */
@@ -25,6 +35,26 @@ type LiveReconnectSchedule = (run: () => void, ms: number) => () => void;
 /** The delays before each reconnect attempt, then give up. */
 export const LIVE_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 5_000, 10_000] as const;
 
+/** One send the client has not seen an answer to. */
+interface PendingSend {
+  /** The client's own name for the turn; the same id is the same turn. */
+  readonly clientMessageId: string;
+  readonly conversationId: string;
+  readonly text: string;
+}
+
+/**
+ * Whether a send can be put on the socket now.
+ *
+ * @returns Null when the socket can carry it, or why it cannot.
+ *
+ * @remarks
+ * `offline` is final: the client stopped reconnecting, so the send has no way out until the page
+ * is reloaded. `disconnected` is temporary: the send stays queued and goes out on the next
+ * connection. Both leave the send **unanswered**, which is what the composer shows.
+ */
+type SendBlocker = "offline" | "disconnected" | null;
+
 /** A live conversation controller; it is not tied to React so it can be unit-tested. */
 export interface LiveClient {
   /** The latest state; a new object after every change. */
@@ -35,6 +65,37 @@ export interface LiveClient {
   retry(): void;
   /** Observe state changes; returns the unsubscribe function. */
   subscribe(listener: (state: LiveConversationState) => void): () => void;
+  /**
+   * Put one turn into the conversation.
+   *
+   * @param clientMessageId - The client's own name for the turn; sending the same id twice is
+   * the same turn, and only the first is written to the socket.
+   * @param text - The turn's text, already trimmed and non-empty.
+   * @param conversationId - The conversation to send to; defaults to the subscribed one.
+   * @returns Whether it went out, or why it did not.
+   *
+   * @remarks
+   * An unanswered send is kept and written again on the next connection, so a send made just
+   * before a drop is not lost. It is dropped from the queue by its answer (`accepted` or
+   * `rejected`) or, when the client gives up reconnecting, by {@link LiveClient.abandonSend},
+   * which is what lets the composer say the send failed instead of waiting forever.
+   */
+  send(clientMessageId: string, text: string, conversationId?: string): SendBlocker;
+  /**
+   * Forget an unanswered send.
+   *
+   * @param clientMessageId - The send the composer gave up on.
+   *
+   * @remarks
+   * The caller has shown the failure and put the text back, so a later connection must not send
+   * it behind the person's back. An answer that arrives after this is still delivered; the
+   * client cannot un-send.
+   */
+  abandonSend(clientMessageId: string): void;
+  /** Ask the conversation to stop its run; false when the socket cannot carry it now. */
+  abort(conversationId?: string): boolean;
+  /** Called once per send answer; returns the unsubscribe function. */
+  onSendResult(listener: (result: LiveSendResult) => void): () => void;
 }
 
 /** Options for {@link createLiveClient}. */
@@ -137,10 +198,53 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
   let cancelRetry: (() => void) | undefined;
   let closed = false;
   const listeners = new Set<(next: LiveConversationState) => void>();
+  const sendListeners = new Set<(result: LiveSendResult) => void>();
+  /** The sends written to the socket and not answered yet, by client id, in send order. */
+  const unanswered = new Map<string, PendingSend>();
 
   const publish = (next: LiveConversationState): void => {
     state = next;
     for (const listener of listeners) listener(state);
+  };
+
+  const write = (message: unknown): void => {
+    socket?.send(JSON.stringify(message));
+  };
+
+  /** Write every unanswered send again; called on each fresh connection. */
+  const resendUnanswered = (): void => {
+    for (const pending of unanswered.values()) {
+      write({
+        type: "send",
+        conversationId: pending.conversationId,
+        clientMessageId: pending.clientMessageId,
+        text: pending.text,
+      });
+    }
+  };
+
+  /**
+   * Apply a send answer, or pass a view frame on.
+   *
+   * @returns True when the frame was a send answer.
+   */
+  const applySendResult = (frame: LiveSendResult): boolean => {
+    const pending = unanswered.get(frame.clientMessageId);
+    if (pending === undefined) return true;
+    unanswered.delete(frame.clientMessageId);
+    for (const listener of sendListeners) listener(frame);
+    return true;
+  };
+
+  /** Parse one inbound message: a send answer when the schema says so, else a view frame. */
+  const parseInbound = (value: unknown): LiveFrame | LiveSendResult => {
+    return sendResultOf(value) ?? parseLiveFrame(value);
+  };
+
+  /** Whether a send may go out now, or why not. */
+  const blocker = (): SendBlocker => {
+    if (state.status === "offline") return "offline";
+    return socket === undefined || state.status !== "online" ? "disconnected" : null;
   };
 
   const connect = (): void => {
@@ -155,6 +259,9 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
       cancelRetry?.();
       cancelRetry = undefined;
       publish({ ...state, status: "online", attempt: 0, error: null });
+      // The socket is the last word on what happened while it was down: a send written before
+      // the drop may never have reached the object, so it is written again under the same id.
+      resendUnanswered();
     };
     nextSocket.onmessage = (event) => {
       if (socket !== nextSocket) return;
@@ -165,15 +272,19 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
         publish({ ...state, error: "ライブ更新の形式が不正です。" });
         return;
       }
-      let frame: LiveFrame;
+      let inbound: LiveFrame | LiveSendResult;
       try {
-        frame = parseLiveFrame(value);
+        inbound = parseInbound(value);
       } catch {
         publish({ ...state, error: "ライブ更新の形式が不正です。" });
         return;
       }
-      options.onFrame?.(frame);
-      publish(applyLiveFrame(state, frame));
+      if (inbound.type === "accepted" || inbound.type === "rejected") {
+        applySendResult(inbound);
+        return;
+      }
+      options.onFrame?.(inbound);
+      publish(applyLiveFrame(state, inbound));
     };
     nextSocket.onclose = () => {
       if (socket !== nextSocket) return;
@@ -226,6 +337,35 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
+      };
+    },
+    send(clientMessageId: string, text: string, conversationId?: string): SendBlocker {
+      // A turn already written under this id is not written again: it is the same turn, and a
+      // second body with it would be a second turn if the first had been answered between.
+      if (unanswered.has(clientMessageId)) return blocker();
+      const pending: PendingSend = {
+        clientMessageId,
+        conversationId: conversationId ?? options.conversationId,
+        text,
+      };
+      const why = blocker();
+      unanswered.set(clientMessageId, pending);
+      // Queued even when it cannot go out now: the next connection writes it.
+      if (why === null) write({ type: "send", ...pending });
+      return why;
+    },
+    abandonSend(clientMessageId: string) {
+      unanswered.delete(clientMessageId);
+    },
+    abort(conversationId?: string) {
+      if (socket === undefined || state.status !== "online") return false;
+      write({ type: "abort", conversationId: conversationId ?? options.conversationId });
+      return true;
+    },
+    onSendResult(listener: (result: LiveSendResult) => void) {
+      sendListeners.add(listener);
+      return () => {
+        sendListeners.delete(listener);
       };
     },
   };
