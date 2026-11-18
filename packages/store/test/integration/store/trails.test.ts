@@ -423,3 +423,189 @@ test("the store opens at the migration that created the Trail tables", async () 
     await sql.close();
   }
 });
+
+/**
+ * The review reads and writes of the Trail repository (0232) against the real D1.
+ *
+ * @remarks
+ * The repository writes and reads the four tables the review face shows (sessions, findings,
+ * decisions, gates) and the two questions the gates ask (the head Change and the base commit).
+ * No fake stands in for either side: the SQL is the production SQL, the rows are migration
+ * 0010's, and every list goes through the row's schema.
+ */
+
+// Catches: a decided approval that does not name a head, or one for a commit the Trail does not
+// have — the stale-approval hole C2 closes.
+test("a decision is stored with its head, and an approval of an unknown head is refused", async () => {
+  await withStore(async (store) => {
+    const trail = await createTrailId(store, { title: "reviewed" });
+    const change = await store.trails.addChange(trail, {
+      workspaceId: "ws-1",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+    });
+    if (change.refused) throw new Error("the change was refused");
+    const unknown = await store.trails.addDecision(trail, {
+      action: "approve",
+      actor: "u",
+      note: "",
+      headCommit: "c".repeat(40),
+    });
+    expect(unknown).toStrictEqual({ kind: "invalid_head", refused: true });
+    expect(await store.trails.listDecisions(trail)).toStrictEqual([]);
+
+    const approved = await store.trails.addDecision(trail, {
+      action: "approve",
+      actor: "u",
+      note: "looks right",
+      headCommit: "b".repeat(40),
+    });
+    expect(approved.refused).toBe(false);
+    if (approved.refused) throw new Error("the decision was refused");
+    expect(approved).toMatchObject({
+      action: "approve",
+      head_commit: "b".repeat(40),
+      change_id: null,
+      note: "looks right",
+      refused: false,
+    });
+    // Newest first, so a later decision is the first one read.
+    await store.trails.addDecision(trail, {
+      action: "request_changes",
+      actor: "u",
+      note: "",
+      headCommit: "b".repeat(40),
+    });
+    const decisions = await store.trails.listDecisions(trail);
+    expect(decisions.map((value) => (value.refused ? "refused" : value.action))).toStrictEqual([
+      "request_changes",
+      "approve",
+    ]);
+  });
+});
+
+// Catches: a revise that records the decision and drops the points it said it addressed, and a
+// finding from another Trail resolved by this one's decision.
+test("a revise resolves the findings it names, in the same batch", async () => {
+  await withStore(async (store) => {
+    const trail = await createTrailId(store, { title: "revised" });
+    const other = await createTrailId(store, { title: "somebody else" });
+    const raised = await store.trails.addFinding(trail, {
+      severity: "high",
+      source: "agent",
+      summary: "loops",
+      file: "src/app.ts",
+      hunk: "@@ -1,1 +1,2 @@",
+    });
+    if (raised.refused) throw new Error("the finding was refused");
+    expect(raised).toMatchObject({ status: "open", resolved_at: null, resolved_by: null });
+    const elsewhere = await store.trails.addFinding(other, {
+      severity: "low",
+      source: "human",
+      summary: "not this trail",
+    });
+    if (elsewhere.refused) throw new Error("the finding was refused");
+
+    const foreign = await store.trails.addDecision(trail, {
+      action: "request_changes",
+      actor: "u",
+      note: "",
+      resolveFindingIds: [elsewhere.id],
+    });
+    expect(foreign).toStrictEqual({ kind: "not_found", refused: true });
+
+    const revised = await store.trails.addDecision(trail, {
+      action: "request_changes",
+      actor: "reviewer",
+      note: "",
+      resolveFindingIds: [raised.id],
+    });
+    expect(revised.refused).toBe(false);
+    const findings = await store.trails.listFindings(trail);
+    expect(findings.map((value) => (value.refused ? "refused" : value.status))).toStrictEqual([
+      "resolved",
+    ]);
+    const first = findings[0];
+    if (first === undefined || first.refused) throw new Error("no finding");
+    expect(first.resolved_by).toBe("reviewer");
+    expect(first.resolved_at).not.toBe(null);
+    // The other Trail's finding is untouched by this Trail's decision.
+    const untouched = await store.trails.listFindings(other);
+    expect(untouched.map((value) => (value.refused ? "refused" : value.status))).toStrictEqual([
+      "open",
+    ]);
+  });
+});
+
+// Catches: the head and base the gate compares not being the Change's own (a gate about a change
+// nobody made), and a Trail with no Change answering something other than "none".
+test("the repository answers the head Change and the base commit", async () => {
+  await withStore(async (store) => {
+    const trail = await createTrailId(store, { title: "heads" });
+    expect(await store.trails.headChange(trail)).toBeUndefined();
+    expect(await store.trails.baseCommit(trail)).toBeUndefined();
+    const first = await store.trails.addChange(trail, {
+      workspaceId: "ws-1",
+      baseCommit: "1".repeat(40),
+      headCommit: "2".repeat(40),
+    });
+    const second = await store.trails.addChange(trail, {
+      workspaceId: "ws-1",
+      baseCommit: "2".repeat(40),
+      headCommit: "3".repeat(40),
+    });
+    if (first.refused || second.refused) throw new Error("a change was refused");
+    const head = await store.trails.headChange(trail);
+    expect(head?.head_commit).toBe("3".repeat(40));
+    expect(await store.trails.baseCommit(trail)).toBe("1".repeat(40));
+  });
+});
+
+// Catches: a row of a review table this build cannot parse being dropped from a list instead of
+// refusing it (which would hide the corruption) or thrown (which would fail the request as 500).
+test("a review row this build cannot parse refuses its list, it does not throw", async () => {
+  await withStore(async (store) => {
+    const trail = await createTrailId(store, { title: "corrupt finding" });
+    await harness.exec(
+      "DROP TABLE trail_findings; " +
+        "CREATE TABLE trail_findings (id TEXT PRIMARY KEY, trail_id TEXT NOT NULL, change_id TEXT, " +
+        "severity TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, file TEXT, hunk TEXT, " +
+        "summary TEXT NOT NULL, created_at TEXT NOT NULL, resolved_at TEXT, resolved_by TEXT);",
+    );
+    await harness.exec(
+      "INSERT INTO trail_findings (id, trail_id, change_id, severity, source, status, file, hunk, " +
+        "summary, created_at, resolved_at, resolved_by) VALUES ('f1', '" +
+        trail +
+        "', NULL, 'critical', 'agent', 'open', NULL, NULL, 'x', " +
+        "'2026-01-01T00:00:00.000Z', NULL, NULL);",
+    );
+    expect(await store.trails.listFindings(trail)).toStrictEqual([
+      { kind: "corrupt_row", refused: true },
+    ]);
+    // The other lists of the same Trail still read.
+    expect(await store.trails.listDecisions(trail)).toStrictEqual([]);
+  });
+});
+
+// Catches: a session link stored with a conversation id that is not a conversation id, which a
+// screen would then follow to a conversation that cannot exist.
+test("session links are stored and read back with their conversation id", async () => {
+  await withStore(async (store) => {
+    const trail = await createTrailId(store, { title: "linked" });
+    await harness.exec(
+      "INSERT INTO trail_sessions (id, trail_id, conversation_id, session_id, run_id, linked_at) " +
+        "VALUES ('s1', '" +
+        trail +
+        "', " +
+        "NULL, 'session-1', NULL, '2026-01-01T00:00:00.000Z'), " +
+        "('s2', '" +
+        trail +
+        "', NULL, 'session-2', 'run-1', '2026-01-02T00:00:00.000Z');",
+    );
+    const sessions = await store.trails.listSessions(trail);
+    expect(sessions.map((value) => (value.refused ? "refused" : value.session_id))).toStrictEqual([
+      "session-1",
+      "session-2",
+    ]);
+  });
+});

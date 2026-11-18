@@ -101,6 +101,28 @@ test("the published SDL carries no Task and names every Trail type", () => {
     "TrailPayload",
     "CreateTrailInput",
     "UpdateTrailInput",
+    // The review face (0232).
+    "TrailGates",
+    "TrailGateLine",
+    "ReviewDiff",
+    "ReviewFile",
+    "ReviewHunk",
+    "ReviewLine",
+    "ReviewLineKind",
+    "ReviewChangeKind",
+    "TrailChangeDiffResult",
+    "DecideTrailInput",
+    "DecideTrailPayload",
+    "DecideTrailResult",
+    "RaiseFindingInput",
+    "RaiseFindingPayload",
+    "RaiseFindingResult",
+    "ReviewHunkInput",
+    "ReviewHunkPayload",
+    "ReviewHunkResult",
+    "TrailDecisionActionInput",
+    "TrailFindingSeverityInput",
+    "TrailFindingSourceInput",
   ]) {
     expect(names, name).toContain(name);
   }
@@ -116,7 +138,21 @@ test("the default schema carries trails and trail(id), and no tasks", () => {
   const mutation = schema.getMutationType()?.getFields() ?? {};
   expect(mutation["createTrail"]).toBeDefined();
   expect(mutation["updateTrail"]).toBeDefined();
+  // The review face writes (0232).
+  for (const name of ["decideTrail", "raiseFinding", "keepHunk", "undoHunk", "applyHunk"]) {
+    expect(mutation[name], name).toBeDefined();
+  }
   expect(validateSchema(schema)).toStrictEqual([]);
+});
+
+// Catches: a Trail whose review lists are not served, or a Change without the diff a screen reads.
+test("the Trail carries its review lists and a Change carries its diff", () => {
+  const schema = buildGraphQLSchema();
+  for (const name of ["sessions", "findings", "decisions", "gates", "gatesRecorded"]) {
+    expect(typeText(schema, "Trail", name), name).not.toBe("");
+  }
+  expect(typeText(schema, "Trail", "gates")).toBe("TrailGates!");
+  expect(typeText(schema, "TrailChange", "diff")).toBe("TrailChangeDiffResult!");
 });
 
 // Catches: a list field the entity generator cannot express (the issue's first risk), or a

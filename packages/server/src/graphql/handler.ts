@@ -15,6 +15,7 @@ import { DEFAULT_LIMITS, type EdgeLimits } from "../edge/limits.ts";
 import {
   createContext,
   type GraphQLReads,
+  type GraphQLReviewWrites,
   type GraphQLWrites,
   type MessagePort,
 } from "./context.ts";
@@ -58,6 +59,12 @@ export interface GraphQLFaceDependencies {
   readonly reads?: Partial<GraphQLReads> | undefined;
   /** Replace one or more writes; production writes D1. */
   readonly writes?: Partial<GraphQLWrites> | undefined;
+  /**
+   * Replace the review face's file writes (0232); production is the checkpoint packs and the
+   * Workspace's versioned write, which answers `unavailable` while the Worker has no writable
+   * workspace. A test replaces it to observe what the mutation hands the port.
+   */
+  readonly review?: Partial<GraphQLReviewWrites> | undefined;
   /** Replace the send port; production forwards a turn to the conversation's Session object. */
   readonly messages?: MessagePort | undefined;
   /** Replace the policy face; production builds it over the control database. */
@@ -233,6 +240,7 @@ export function createGraphQLFace(
       session: request.session,
       reads: dependencies.reads,
       writes: dependencies.writes,
+      review: dependencies.review,
       messages: dependencies.messages,
       policy: dependencies.policy,
       maxRows: rows.maxRowsPerRequest,

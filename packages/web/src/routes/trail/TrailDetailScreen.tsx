@@ -27,7 +27,7 @@ export function TrailDetailScreen({ trailId }: { readonly trailId: string }): Re
 }
 
 /** The screen's shape while the read is in flight. */
-export function TrailDetailFallback(): ReactElement {
+function TrailDetailFallback(): ReactElement {
   return (
     <section className="hns-review" aria-label="読み込み中" aria-busy="true">
       <Skeleton width={220} height={20} />

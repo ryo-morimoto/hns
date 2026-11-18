@@ -47,7 +47,7 @@ export interface ReviewDecision {
 }
 
 /** One gate line as `Trail.gates` computes it. */
-export interface ReviewGateLine {
+interface ReviewGateLine {
   readonly gate: GateKindName;
   readonly status: GateStatusName;
   readonly detail: string;
@@ -82,7 +82,7 @@ export const SEVERITY_LABELS: Readonly<Record<FindingSeverityName, string>> = {
  * hold the merge first, and the rest are one toggle away. `high` is the blocking severity the gate
  * uses (C3); the server sends every finding, and the screen chooses what to show.
  */
-export function isBlocking(finding: ReviewFinding): boolean {
+function isBlocking(finding: ReviewFinding): boolean {
   return finding.status === "OPEN" && finding.severity === "HIGH";
 }
 

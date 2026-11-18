@@ -313,23 +313,6 @@ export type ReviewDiffReadResult =
       readonly message: string;
     };
 
-/**
- * What one hunk action (`keepHunk` / `undoHunk` / `applyHunk`) needs: the diff pair it acts on.
- *
- * @remarks
- * A hunk action is a **versioned write** (C1, D104: the UI is not the authority), so the server
- * needs the bytes on both sides and the version the caller saw. This port is the server's side of
- * the Workspace's versioned write: production reads the pair out of the checkpoint packs and
- * refuses to guess a version; a test replaces it with a real file and the real
- * `applyVersionedWrite`.
- */
-export interface ReviewFilePair {
-  /** The bytes on the head side, or undefined when the path is not there (a deleted file). */
-  readonly head: Uint8Array | undefined;
-  /** The bytes on the base side, or undefined when the path is not there (an added file). */
-  readonly base: Uint8Array | undefined;
-}
-
 /** What a hunk action asks for. */
 export interface ReviewHunkWrite {
   /** The Change the hunk belongs to (base..head), decoded from its global id. */

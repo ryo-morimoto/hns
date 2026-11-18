@@ -3,31 +3,50 @@ import type { JsonValue } from "@hns/core";
 import type { Environment } from "relay-runtime";
 import { createEnvironment } from "../../src/relay/environment.ts";
 
-/** A GraphQL variable value as the request carries it. */
-type VariableValue = string | number | boolean | null;
+/** A GraphQL variable value as the request carries it: a scalar, an input object, or a list. */
+type VariableValue = string | number | boolean | null | InputObject | readonly VariableValue[];
+
+/** A GraphQL input object: field names to values. */
+type InputObject = { readonly [name: string]: VariableValue };
 
 /** One request the app made, as the fixture responder sees it. */
 export interface GraphQLCall {
   readonly operation: string;
   readonly variables: { readonly [name: string]: VariableValue };
+  /** The document the request sent, as the browser serialized it. */
+  readonly query: string;
 }
 
 /** Answers one request with GraphQL `data`, or undefined to fail the request. */
 export type Responder = (call: GraphQLCall) => JsonValue | undefined;
 
-const VariablesSchema = v.record(
+/**
+ * One variable's value: a scalar, a list, or an input object (a mutation's `input` is one).
+ *
+ * @remarks
+ * A GraphQL variable is any JSON value; the earlier schema allowed only scalars, which refused
+ * every mutation that passes an input object — a 400 a test then read as a network failure.
+ */
+const VariableValueSchema: v.GenericSchema<unknown, VariableValue> = v.union([
   v.string(),
-  v.union([v.string(), v.number(), v.boolean(), v.null()]),
-);
+  v.number(),
+  v.boolean(),
+  v.null(),
+  v.lazy(() => v.array(VariableValueSchema)),
+  v.lazy(() => VariablesSchema),
+]);
+
+const VariablesSchema: v.GenericSchema<unknown, { readonly [name: string]: VariableValue }> =
+  v.record(v.string(), VariableValueSchema);
 
 const BodySchema = v.object({
   query: v.string(),
   variables: v.optional(VariablesSchema, {}),
 });
 
-const OPERATION = /\bquery\s+([A-Za-z0-9_]+)/u;
+const OPERATION = /\b(?:query|mutation|subscription)\s+([A-Za-z0-9_]+)/u;
 
-/** The operation name from a compiled query text; the compiler emits exactly one per request. */
+/** The operation name from a compiled document; the compiler emits exactly one per request. */
 function operationOf(query: string): string | undefined {
   return OPERATION.exec(query)?.[1];
 }
@@ -59,7 +78,11 @@ export function createTestEnvironment(respond: Responder): TestEnvironment {
       if (operation === undefined) {
         return Promise.resolve(new Response("no operation", { status: 400 }));
       }
-      const call: GraphQLCall = { operation, variables: parsed.output.variables };
+      const call: GraphQLCall = {
+        operation,
+        variables: parsed.output.variables,
+        query: parsed.output.query,
+      };
       calls.push(call);
       const payload = respond(call);
       if (payload === undefined) {
