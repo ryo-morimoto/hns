@@ -6,6 +6,8 @@ import type {
   MachineRegistryRefusal,
   Project,
   ProjectId,
+  ReviewMirrorFallback,
+  ReviewReadSource,
 } from "@hns/core";
 import type {
   ConversationCursor,
@@ -25,7 +27,7 @@ import type {
   TrailUpdate,
   TrailWriteRefusal,
 } from "@hns/store";
-import { reviewDiff } from "../review/service.ts";
+import { selectedReviewDiff } from "../review/selected.ts";
 import type { ReviewDiff } from "../review/service.ts";
 import { R2ReviewSource } from "../review/r2.ts";
 import { writeHunk } from "../review/write.ts";
@@ -164,17 +166,20 @@ export interface GraphQLReads {
    */
   readonly trailBase: (trailId: string) => Promise<string | undefined>;
   /**
-   * The diff between two commits, as the checkpoint diff reads it (C1).
+   * The diff between two commits, and where it was read from (C1 / 0248).
    *
-   * @returns The diff, or a typed failure the review face shows.
+   * @returns The diff with its source and any mirror fallback, or a typed failure the review face
+   * shows.
    *
    * @remarks
    * The diff engine (`review/service.ts`) is the one the editor has (0009 / 0011), and it reads a
-   * `ReviewSource`: production is the R2 checkpoint packs (D106), a test is the fake source. A
-   * `source` of undefined is a deployment without the `OBJECTS` binding, which fails closed as
-   * `unavailable` — never as an empty diff.
+   * `ReviewSource`. **Which source is the server's decision** (`review/selected.ts`): Artifacts
+   * first, then the R2 checkpoint packs (D106), and the machine as the fallback no route can read
+   * yet. The port answers the source it read, so the screen shows the server's choice instead of
+   * making one; the workspace of the Change is part of the question because the Artifacts
+   * repository is the workspace's.
    */
-  readonly reviewDiff: (base: string, head: string) => Promise<ReviewDiffReadResult>;
+  readonly reviewDiff: (change: ReviewDiffRead) => Promise<ReviewDiffWithSourceReadResult>;
   /**
    * One page of the D1 conversation index, scoped to the project.
    *
@@ -298,15 +303,36 @@ export interface GraphQLWrites {
 }
 
 /**
- * The answer of one diff read on the GraphQL face.
+ * What a diff read asks for: the Change's own pair, and the workspace whose mirror is read.
  *
  * @remarks
- * A failure is a value, not an exception (the diff engine's own contract): the review face shows
- * `review_not_ready` for a commit whose checkpoint pack has not been stored yet, which a person
- * reads as "wait", and `unavailable` for the rest.
+ * The pair is the Change's (`base_commit` / `head_commit`), never a client's. `workspaceId` names
+ * the workspace the Change's commits were checked in, which is what names the Artifacts repository
+ * (D106: one repository per workspace); a Change that names none is read from the checkpoint store
+ * only, which is the same answer as a workspace with no mirror.
  */
-export type ReviewDiffReadResult =
-  | { readonly ok: true; readonly diff: ReviewDiff }
+export interface ReviewDiffRead {
+  readonly workspaceId: string | undefined;
+  readonly base: string;
+  readonly head: string;
+}
+
+/**
+ * The answer of one diff read, with the store it came from (0248).
+ *
+ * @remarks
+ * `source` is the store that produced the diff and `mirror` the commits Artifacts did not hold, so
+ * a screen can say "read from the checkpoint store because the mirror failed" instead of guessing.
+ * `fallback` is the server's own sentence for that, so every client shows the same words.
+ */
+export type ReviewDiffWithSourceReadResult =
+  | {
+      readonly ok: true;
+      readonly diff: ReviewDiff;
+      readonly source: ReviewReadSource;
+      readonly mirror: readonly ReviewMirrorFallback[];
+      readonly fallback: string | null;
+    }
   | {
       readonly ok: false;
       readonly code: "invalid_request" | "not_found" | "too_large" | "unauthorized" | "unavailable";
@@ -601,7 +627,7 @@ function defaultReads(
       storeCall(env, requestId, "read", (store) => store.trails.headChange(trailId)),
     trailBase: (trailId) =>
       storeCall(env, requestId, "read", (store) => store.trails.baseCommit(trailId)),
-    reviewDiff: (base, head) => diffRead(env, requestId, base, head),
+    reviewDiff: (read) => diffRead(env, requestId, read),
     conversations: (projectId, query) =>
       storeCall(env, requestId, "read", (store) =>
         store.conversations.page(pageQuery(projectId, query)),
@@ -668,37 +694,54 @@ function defaultWrites(env: WorkerEnv, requestId: string): GraphQLWrites {
 }
 
 /**
- * The production diff read: the R2 checkpoint packs, through the review engine (C1).
+ * The production diff read: the first source that can read the Change (C1 / 0248).
  *
  * @internal
- * @param env - The Worker environment; `OBJECTS` is where the packs live (D106).
- * @returns The diff, or a typed failure.
+ * @param env - The Worker environment; `OBJECTS` is the checkpoint store and `ARTIFACTS` the
+ * mirror's namespace (D106).
+ * @param requestId - The request's correlation id, for the log lines and the record read.
+ * @param read - The Change's workspace and commit pair.
+ * @returns The diff with the store it was read from, or a typed failure.
  *
  * @remarks
- * A deployment without the `OBJECTS` binding fails closed with `unavailable`: the review source
- * is the packs, and there is no second place a commit could be read from that the face may reach.
- * The engine's failure codes are the core `ReviewFailure` vocabulary; `not_found` is surfaced as
- * it is, because for a checkpoint that means "the pack for this commit has not been stored yet".
+ * **The order — Artifacts, R2, machine — is decided here and nowhere else** (`review/selected.ts`).
+ * The screen is handed the answer, never a binding: which store read the bytes is the server's
+ * decision, and the source it names is what the screen shows. A deployment without `OBJECTS` and
+ * without `ARTIFACTS` fails closed with `unavailable`; the mirror state beside a diff read from
+ * R2 is the Workspace object's record, so a skipped or failed mirror is said out loud rather than
+ * silently replaced.
  */
 async function diffRead(
   env: WorkerEnv,
   requestId: string,
-  base: string,
-  head: string,
-): Promise<ReviewDiffReadResult> {
-  const bucket = env.OBJECTS;
-  if (bucket === undefined) {
-    console.error("graphql: no OBJECTS binding for a review diff", requestId);
-    return {
-      ok: false,
-      code: "unavailable",
-      message: "This deployment has no checkpoint store to read a diff from.",
-    };
+  read: ReviewDiffRead,
+): Promise<ReviewDiffWithSourceReadResult> {
+  const workspace =
+    env.WORKSPACE === undefined || read.workspaceId === undefined
+      ? undefined
+      : env.WORKSPACE.get(env.WORKSPACE.idFromName(read.workspaceId));
+  const result = await selectedReviewDiff(
+    {
+      objects: env.OBJECTS,
+      artifacts: env.ARTIFACTS,
+      workspaceId: read.workspaceId,
+      workspace,
+      requestId,
+    },
+    read.base,
+    read.head,
+  );
+  if (!result.ok) {
+    console.error("graphql: a review diff could not be read", requestId, result.failure);
+    return { ok: false, code: result.failure, message: result.message };
   }
-  const result = await reviewDiff(new R2ReviewSource(bucket), base, head);
-  if (result.ok) return { ok: true, diff: result.diff };
-  console.error("graphql: a review diff could not be read", requestId, result.failure);
-  return { ok: false, code: result.failure, message: result.message };
+  return {
+    ok: true,
+    diff: result.value.diff,
+    source: result.value.source,
+    mirror: result.value.mirror,
+    fallback: result.value.fallback,
+  };
 }
 
 /**

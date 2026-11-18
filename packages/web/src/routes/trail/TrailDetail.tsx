@@ -38,6 +38,24 @@ const LINE_CLASS = {
 type HunkAction = "keep" | "undo" | "apply";
 
 /**
+ * The stores a diff may have been read from, as a person reads them (0248).
+ *
+ * @remarks
+ * The value is the server's (`ReviewDiff.source`); this map only names it. `%future added value`
+ * is a source a newer server knows and this build does not, which is shown as itself rather
+ * than thrown on: a label is not a read.
+ */
+const REVIEW_SOURCE_LABELS: Readonly<Record<ReviewSourceName, string>> = {
+  ARTIFACTS: "Artifacts から読みました",
+  R2: "R2 の checkpoint から読みました",
+  MACHINE: "machine から読みました",
+  "%future added value": "不明な source から読みました",
+};
+
+/** The source names the schema publishes on `ReviewDiff.source`. */
+type ReviewSourceName = "ARTIFACTS" | "R2" | "MACHINE" | "%future added value";
+
+/**
  * The review face (0232): one Trail, read in the order a person decides in.
  *
  * @remarks
@@ -404,6 +422,20 @@ function ChangeDiff({
         </p>
       ) : (
         <>
+          {/*
+            C1 / C2 (0248): the store the server read, and — when the mirror was skipped or
+            failed — the server's own sentence for why the diff came from elsewhere instead.
+            The screen shows both and chooses neither: no client-side fallback, and no silent
+            switch of source. `data-review-source` is what a test (and a person) reads it by.
+          */}
+          <p className="hns-diff__source" data-review-source={diff.source.toLowerCase()}>
+            {REVIEW_SOURCE_LABELS[diff.source]}
+          </p>
+          {diff.fallback === null || diff.fallback === undefined ? null : (
+            <p className="hns-diff__fallback" role="status">
+              {diff.fallback}
+            </p>
+          )}
           <p className="hns-diff__totals">
             {diff.files.length} files +{diff.added} -{diff.removed}
           </p>

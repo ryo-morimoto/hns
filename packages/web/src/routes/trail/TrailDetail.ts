@@ -109,6 +109,17 @@ export const TrailDetailChangeDiffFragment = graphql`
         headCommit
         added
         removed
+        # Where the server read the bytes (0248). Both are the server's answer: the screen never
+        # chooses a source, it only says which one answered and why the mirror was not used.
+        source
+        fallback
+        mirror {
+          side
+          commit
+          status
+          failure
+          source
+        }
         files {
           path
           change

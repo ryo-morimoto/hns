@@ -122,10 +122,10 @@ async function post(
   const face = createGraphQLFace({
     reads: {
       project: (projectId) => store.projects.get(projectId),
-      reviewDiff: async (base, head) => {
-        const result = await reviewDiff(source, base, head);
+      reviewDiff: async (change) => {
+        const result = await reviewDiff(source, change.base, change.head);
         return result.ok
-          ? { ok: true, diff: result.diff }
+          ? { ok: true, diff: result.diff, source: "r2", mirror: [], fallback: null }
           : { ok: false, code: result.failure, message: result.message };
       },
     },

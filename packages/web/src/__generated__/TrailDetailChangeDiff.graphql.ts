@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<4e99d683b67776fa754d85a13b05c0ba>>
+ * @generated SignedSource<<1cb32e401b56b99b2814f5febf55a86d>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -12,6 +12,9 @@ import { ReaderFragment } from 'relay-runtime';
 export type QueryFailureCode = "INVALID_REQUEST" | "LIMIT_EXCEEDED" | "NOT_FOUND" | "UNAVAILABLE" | "%future added value";
 export type ReviewChangeKind = "ADDED" | "DELETED" | "MODIFIED" | "%future added value";
 export type ReviewLineKind = "ADD" | "CONTEXT" | "DEL" | "%future added value";
+export type ReviewMirrorSide = "BASE" | "HEAD" | "%future added value";
+export type ReviewMirrorStatus = "FAILED" | "MIRRORED" | "PENDING" | "SKIPPED" | "%future added value";
+export type ReviewReadSource = "ARTIFACTS" | "MACHINE" | "R2" | "%future added value";
 export type TrailChangeState = "ABANDONED" | "IN_REVIEW" | "MERGED" | "OPEN" | "%future added value";
 import { FragmentRefs } from "relay-runtime";
 export type TrailDetailChangeDiff$data = {
@@ -24,6 +27,7 @@ export type TrailDetailChangeDiff$data = {
     readonly __typename: "ReviewDiff";
     readonly added: number;
     readonly baseCommit: string;
+    readonly fallback: string | null | undefined;
     readonly files: ReadonlyArray<{
       readonly added: number;
       readonly change: ReviewChangeKind;
@@ -40,7 +44,15 @@ export type TrailDetailChangeDiff$data = {
       readonly removed: number;
     }>;
     readonly headCommit: string;
+    readonly mirror: ReadonlyArray<{
+      readonly commit: string;
+      readonly failure: string | null | undefined;
+      readonly side: ReviewMirrorSide;
+      readonly source: ReviewReadSource;
+      readonly status: ReviewMirrorStatus;
+    }>;
     readonly removed: number;
+    readonly source: ReviewReadSource;
   } | {
     // This will never be '%other', but we need some
     // value in case none of the concrete values match.
@@ -83,6 +95,13 @@ v3 = {
   "args": null,
   "kind": "ScalarField",
   "name": "removed",
+  "storageKey": null
+},
+v4 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "source",
   "storageKey": null
 };
 return {
@@ -129,6 +148,54 @@ return {
             (v1/*: any*/),
             (v2/*: any*/),
             (v3/*: any*/),
+            (v4/*: any*/),
+            {
+              "alias": null,
+              "args": null,
+              "kind": "ScalarField",
+              "name": "fallback",
+              "storageKey": null
+            },
+            {
+              "alias": null,
+              "args": null,
+              "concreteType": "ReviewMirror",
+              "kind": "LinkedField",
+              "name": "mirror",
+              "plural": true,
+              "selections": [
+                {
+                  "alias": null,
+                  "args": null,
+                  "kind": "ScalarField",
+                  "name": "side",
+                  "storageKey": null
+                },
+                {
+                  "alias": null,
+                  "args": null,
+                  "kind": "ScalarField",
+                  "name": "commit",
+                  "storageKey": null
+                },
+                {
+                  "alias": null,
+                  "args": null,
+                  "kind": "ScalarField",
+                  "name": "status",
+                  "storageKey": null
+                },
+                {
+                  "alias": null,
+                  "args": null,
+                  "kind": "ScalarField",
+                  "name": "failure",
+                  "storageKey": null
+                },
+                (v4/*: any*/)
+              ],
+              "storageKey": null
+            },
             {
               "alias": null,
               "args": null,
@@ -247,6 +314,6 @@ return {
 };
 })();
 
-(node as any).hash = "9a19b4b3bbff306508da85aa7e0e3fbf";
+(node as any).hash = "2a4f4b30d68cb04cd747fcc633b88d8e";
 
 export default node;

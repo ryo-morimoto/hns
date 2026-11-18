@@ -94,6 +94,11 @@ test("ids are exposed as ID and the brand is not part of the contract", () => {
     "MachineStatus",
     "Project",
     "ProjectEgress",
+    // The review's source and mirror fallbacks (0248).
+    "ReviewMirror",
+    "ReviewMirrorSide",
+    "ReviewMirrorStatus",
+    "ReviewReadSource",
     "Trail",
     "TrailChange",
     "TrailChangeState",

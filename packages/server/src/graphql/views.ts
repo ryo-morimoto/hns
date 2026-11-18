@@ -3,6 +3,8 @@ import type {
   Conversation,
   Machine,
   Project,
+  ReviewMirrorFallback,
+  ReviewReadSource,
   Trail,
   TrailChange,
   TrailDecision,
@@ -382,6 +384,57 @@ export interface ReviewHunkView {
 export interface ReviewLineView {
   readonly kind: "context" | "add" | "del";
   readonly text: string;
+}
+
+/**
+ * A `ReviewDiff` with the store it was read from (0248): what a Change's `diff` serves.
+ *
+ * @remarks
+ * **The source is the server's answer, not the screen's question** (0248). `source` names the store
+ * that produced the whole diff; `mirror` names each commit Artifacts did not hold, with the stored
+ * mirror status that explains it and the store that was read instead; `fallback` is the server's
+ * own sentence for that, so a screen shows the same words a person would read anywhere. `mirror`
+ * is empty exactly when both sides came from Artifacts.
+ */
+export interface ReviewDiffWithSourceView extends ReviewDiffView {
+  readonly source: ReviewReadSource;
+  readonly mirror: readonly ReviewMirrorView[];
+  readonly fallback: string | null;
+}
+
+/** One `ReviewMirror` member: a commit of the pair Artifacts did not hold. */
+export interface ReviewMirrorView {
+  readonly side: ReviewMirrorFallback["side"];
+  readonly commit: string;
+  readonly status: ReviewMirrorFallback["status"];
+  readonly failure: string | null;
+  readonly source: ReviewReadSource;
+}
+
+/**
+ * Map the selected read to the GraphQL shape: the diff, its source, and the fallbacks.
+ *
+ * @param read - The port's successful answer.
+ * @returns The `ReviewDiff` fields plus `source`, `mirror`, and `fallback`.
+ */
+export function reviewDiffWithSourceView(read: {
+  readonly diff: ReviewDiff;
+  readonly source: ReviewReadSource;
+  readonly mirror: readonly ReviewMirrorFallback[];
+  readonly fallback: string | null;
+}): ReviewDiffWithSourceView & { readonly __typename: "ReviewDiff" } {
+  return {
+    ...reviewDiffView(read.diff),
+    source: read.source,
+    mirror: read.mirror.map((fallback) => ({
+      side: fallback.side,
+      commit: fallback.commit,
+      status: fallback.status,
+      failure: fallback.failure ?? null,
+      source: fallback.source,
+    })),
+    fallback: read.fallback,
+  };
 }
 
 /** Map the diff engine's answer to the GraphQL shape. */

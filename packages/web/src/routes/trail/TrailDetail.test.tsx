@@ -22,6 +22,16 @@ interface WireLine {
   readonly text: string;
 }
 
+/** One commit of the pair that Artifacts did not hold, as the wire carries it (0248). */
+interface WireMirror {
+  readonly __typename: "ReviewMirror";
+  readonly side: "BASE" | "HEAD";
+  readonly commit: string;
+  readonly status: "MIRRORED" | "SKIPPED" | "FAILED" | "PENDING";
+  readonly failure: string | null;
+  readonly source: "ARTIFACTS" | "R2" | "MACHINE";
+}
+
 /** The diff as the wire carries it. */
 interface WireDiff {
   readonly __typename: "ReviewDiff";
@@ -29,6 +39,12 @@ interface WireDiff {
   readonly headCommit: string;
   readonly added: number;
   readonly removed: number;
+  /** The store the server read (0248); the screen shows it and never chooses one. */
+  readonly source: "ARTIFACTS" | "R2" | "MACHINE";
+  /** One entry per commit Artifacts did not hold; empty when the mirror answered both sides. */
+  readonly mirror: readonly WireMirror[];
+  /** The server's sentence for the mirror fallback, or null when there is none. */
+  readonly fallback: string | null;
   readonly files: readonly {
     readonly __typename: "ReviewFile";
     readonly path: string;
@@ -112,6 +128,9 @@ const DIFF: WireDiff = {
   headCommit: HEAD,
   added: 2,
   removed: 1,
+  source: "ARTIFACTS",
+  mirror: [],
+  fallback: null,
   files: [
     {
       __typename: "ReviewFile",
@@ -525,4 +544,71 @@ test("with no change, approve is disabled and the screen says nothing names a he
   await screen.findByRole("heading", { name: "The review face" });
   expect(screen.getByRole("button", { name: "承認" }).hasAttribute("disabled")).toBe(true);
   expect(screen.getByText("承認する変更がありません。")).toBeTruthy();
+});
+/**
+ * C1 / 0248: the server read the diff from Artifacts, so the screen says so and nothing more.
+ *
+ * @remarks
+ * Catches a screen that shows a diff without saying where it came from: the whole point of 0248
+ * is that a reviewer can tell a read the machine was not needed for from one that fell back.
+ */
+test("C1: a diff read from Artifacts says so, and claims no fallback", async () => {
+  renderTrail(trailRecord());
+  await screen.findByRole("heading", { name: "The review face" });
+  const source = document.querySelector("[data-review-source]");
+  expect(source?.getAttribute("data-review-source")).toBe("artifacts");
+  expect(source?.textContent).toBe("Artifacts から読みました");
+  // No fallback: the mirror answered, so the screen must not say it did not.
+  expect(document.querySelector(".hns-diff__fallback")).toBeNull();
+});
+
+/**
+ * C2 / 0248: a run whose mirror was skipped says "read it from R2", not nothing.
+ *
+ * @remarks
+ * Catches a silent fallback: a diff read from R2 for a skipped mirror, drawn exactly like one
+ * read from Artifacts. The sentence is the server's (`fallback`), so the screen cannot invent
+ * its own wording, and the store it names is the store the server says it read.
+ */
+test("C2: a skipped mirror is shown with the server's fallback sentence", async () => {
+  const skipped: WireDiff = {
+    ...DIFF,
+    source: "R2",
+    mirror: [
+      {
+        __typename: "ReviewMirror",
+        side: "HEAD",
+        commit: HEAD,
+        status: "SKIPPED",
+        failure: null,
+        source: "R2",
+      },
+    ],
+    fallback:
+      "head " +
+      HEAD.slice(0, 12) +
+      " は Artifacts の上限を超えてミラーを skip したため、R2 の checkpoint を読みました。",
+  };
+  renderTrail(
+    trailRecord({
+      changes: [
+        {
+          __typename: "TrailChange",
+          id: toGlobalId("TrailChange", "change-1"),
+          baseCommit: BASE,
+          headCommit: HEAD,
+          state: "OPEN",
+          diff: skipped,
+        },
+      ],
+    }),
+  );
+  await screen.findByRole("heading", { name: "The review face" });
+  const source = document.querySelector("[data-review-source]");
+  expect(source?.getAttribute("data-review-source")).toBe("r2");
+  const fallback = document.querySelector(".hns-diff__fallback");
+  expect(fallback?.textContent).toBe(skipped.fallback);
+  expect(fallback?.getAttribute("role")).toBe("status");
+  // The diff is still drawn from the fallback source: a fallback is not a failure.
+  expect(document.querySelector('[data-path="src/app.ts"]')).not.toBeNull();
 });

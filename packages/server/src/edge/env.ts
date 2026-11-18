@@ -1,5 +1,6 @@
 import type { D1Binding } from "@hns/store";
 import type { ArtifactsBinding } from "../artifacts/repos.ts";
+import type { ArtifactsReviewBinding } from "../review/artifacts.ts";
 
 /**
  * The header the edge states, on an internal RPC, the object name it addressed.
@@ -137,7 +138,7 @@ export interface WorkerEnv {
    * short-lived push token a checkpoint's prepare answer carries (0246). Optional, like every
    * binding: absent means no mirror target is issued, and the checkpoint path is unaffected.
    */
-  readonly ARTIFACTS?: ArtifactsBinding | undefined;
+  readonly ARTIFACTS?: (ArtifactsBinding & ArtifactsReviewBinding) | undefined;
   /**
    * The Artifacts mirror's kill switch: `"on"` mirrors, anything else does not.
    *

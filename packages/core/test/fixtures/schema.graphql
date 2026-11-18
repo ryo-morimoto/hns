@@ -45,6 +45,32 @@ enum ProjectEgress {
   ALLOWLIST
 }
 
+type ReviewMirror {
+  commit: String!
+  failure: String
+  side: ReviewMirrorSide!
+  source: ReviewReadSource!
+  status: ReviewMirrorStatus!
+}
+
+enum ReviewMirrorSide {
+  BASE
+  HEAD
+}
+
+enum ReviewMirrorStatus {
+  MIRRORED
+  SKIPPED
+  FAILED
+  PENDING
+}
+
+enum ReviewReadSource {
+  ARTIFACTS
+  R2
+  MACHINE
+}
+
 type Trail {
   acceptance: String!
   createdAt: String!

@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<4d8328f0e2b4cbab93bae26e438ab35e>>
+ * @generated SignedSource<<741667b36ba189b811812c30a7c2c1e0>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -128,6 +128,13 @@ v10 = {
   "storageKey": null
 },
 v11 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "source",
+  "storageKey": null
+},
+v12 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
@@ -273,6 +280,48 @@ return {
                               (v8/*: any*/),
                               (v9/*: any*/),
                               (v10/*: any*/),
+                              (v11/*: any*/),
+                              {
+                                "alias": null,
+                                "args": null,
+                                "kind": "ScalarField",
+                                "name": "fallback",
+                                "storageKey": null
+                              },
+                              {
+                                "alias": null,
+                                "args": null,
+                                "concreteType": "ReviewMirror",
+                                "kind": "LinkedField",
+                                "name": "mirror",
+                                "plural": true,
+                                "selections": [
+                                  {
+                                    "alias": null,
+                                    "args": null,
+                                    "kind": "ScalarField",
+                                    "name": "side",
+                                    "storageKey": null
+                                  },
+                                  {
+                                    "alias": null,
+                                    "args": null,
+                                    "kind": "ScalarField",
+                                    "name": "commit",
+                                    "storageKey": null
+                                  },
+                                  (v12/*: any*/),
+                                  {
+                                    "alias": null,
+                                    "args": null,
+                                    "kind": "ScalarField",
+                                    "name": "failure",
+                                    "storageKey": null
+                                  },
+                                  (v11/*: any*/)
+                                ],
+                                "storageKey": null
+                              },
                               {
                                 "alias": null,
                                 "args": null,
@@ -378,14 +427,8 @@ return {
                         "name": "severity",
                         "storageKey": null
                       },
-                      {
-                        "alias": null,
-                        "args": null,
-                        "kind": "ScalarField",
-                        "name": "source",
-                        "storageKey": null
-                      },
                       (v11/*: any*/),
+                      (v12/*: any*/),
                       {
                         "alias": null,
                         "args": null,
@@ -481,7 +524,7 @@ return {
                             "name": "gate",
                             "storageKey": null
                           },
-                          (v11/*: any*/),
+                          (v12/*: any*/),
                           {
                             "alias": null,
                             "args": null,
@@ -528,12 +571,12 @@ return {
     ]
   },
   "params": {
-    "cacheID": "34aea962c6a6f8b0fc28fb1a566141cd",
+    "cacheID": "18dcd0d587e3273756f9649b1988526d",
     "id": null,
     "metadata": {},
     "name": "TrailDetailQuery",
     "operationKind": "query",
-    "text": "query TrailDetailQuery(\n  $id: ID!\n) {\n  trail(id: $id) {\n    __typename\n    ... on TrailPayload {\n      trail {\n        ...TrailDetailReview\n        id\n      }\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n}\n\nfragment TrailDetailChangeDiff on TrailChange {\n  id\n  baseCommit\n  headCommit\n  state\n  diff {\n    __typename\n    ... on ReviewDiff {\n      baseCommit\n      headCommit\n      added\n      removed\n      files {\n        path\n        change\n        added\n        removed\n        previewable\n        hunks {\n          baseStart\n          headStart\n          lines {\n            kind\n            text\n          }\n        }\n      }\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n}\n\nfragment TrailDetailReview on Trail {\n  id\n  title\n  description\n  acceptance\n  state\n  priority\n  kind\n  updatedAt\n  changes {\n    id\n    baseCommit\n    headCommit\n    state\n    ...TrailDetailChangeDiff\n  }\n  findings {\n    id\n    severity\n    source\n    status\n    file\n    hunk\n    summary\n  }\n  decisions {\n    id\n    action\n    actor\n    headCommit\n    note\n    at\n  }\n  gates {\n    line\n    lines {\n      gate\n      status\n      detail\n    }\n  }\n  sessions {\n    id\n    conversationId\n  }\n}\n"
+    "text": "query TrailDetailQuery(\n  $id: ID!\n) {\n  trail(id: $id) {\n    __typename\n    ... on TrailPayload {\n      trail {\n        ...TrailDetailReview\n        id\n      }\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n}\n\nfragment TrailDetailChangeDiff on TrailChange {\n  id\n  baseCommit\n  headCommit\n  state\n  diff {\n    __typename\n    ... on ReviewDiff {\n      baseCommit\n      headCommit\n      added\n      removed\n      source\n      fallback\n      mirror {\n        side\n        commit\n        status\n        failure\n        source\n      }\n      files {\n        path\n        change\n        added\n        removed\n        previewable\n        hunks {\n          baseStart\n          headStart\n          lines {\n            kind\n            text\n          }\n        }\n      }\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n}\n\nfragment TrailDetailReview on Trail {\n  id\n  title\n  description\n  acceptance\n  state\n  priority\n  kind\n  updatedAt\n  changes {\n    id\n    baseCommit\n    headCommit\n    state\n    ...TrailDetailChangeDiff\n  }\n  findings {\n    id\n    severity\n    source\n    status\n    file\n    hunk\n    summary\n  }\n  decisions {\n    id\n    action\n    actor\n    headCommit\n    note\n    at\n  }\n  gates {\n    line\n    lines {\n      gate\n      status\n      detail\n    }\n  }\n  sessions {\n    id\n    conversationId\n  }\n}\n"
   }
 };
 })();

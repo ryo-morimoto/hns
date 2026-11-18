@@ -18,9 +18,9 @@ import {
   indexStateView,
   machineView,
   projectView,
-  reviewDiffView,
+  reviewDiffWithSourceView,
   trailView,
-  type ReviewDiffView,
+  type ReviewDiffWithSourceView,
   type TrailChangeView,
   type ConversationView,
   type IndexStateView,
@@ -464,13 +464,17 @@ export async function resolveChangeDiff(
   parent: TrailChangeView,
   _args: Record<string, never>,
   context: GraphQLContext,
-): Promise<ReviewDiffView | QueryFailureView> {
+): Promise<ReviewDiffWithSourceView | QueryFailureView> {
   if (!context.budget.spend(1)) {
     throw new QueryReadError("limit_exceeded", "This request reads more rows than it may.");
   }
-  const result = await context.reads.reviewDiff(parent.baseCommit, parent.headCommit);
+  const result = await context.reads.reviewDiff({
+    workspaceId: parent.workspaceId,
+    base: parent.baseCommit,
+    head: parent.headCommit,
+  });
   if (!result.ok) return queryFailure(diffFailureCode(result.code), result.message);
-  return reviewDiffView(result.diff);
+  return reviewDiffWithSourceView(result);
 }
 
 /**

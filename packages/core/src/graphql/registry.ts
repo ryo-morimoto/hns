@@ -19,6 +19,12 @@ import type {
   TrailSession,
   TrailState,
 } from "../trail.ts";
+import type {
+  REVIEW_MIRROR_STATES,
+  ReviewMirrorFallback,
+  ReviewMirrorSide,
+  ReviewReadSource,
+} from "../review.ts";
 import type { Conversation, Project, ProjectEgress } from "../types.ts";
 
 /**
@@ -48,6 +54,8 @@ export interface EntityRegistry {
   readonly TrailDecision: TrailDecision;
   /** What a gate said about a Trail or a Change at a moment. */
   readonly TrailGate: TrailGate;
+  /** One commit of a Change and the store its bytes were read from (0248). */
+  readonly ReviewMirror: ReviewMirrorFallback;
 }
 
 /**
@@ -77,4 +85,10 @@ export interface EnumRegistry {
   readonly TrailDecisionAction: TrailDecisionAction;
   readonly TrailGateKind: TrailGateKind;
   readonly TrailGateStatus: TrailGateStatus;
+  /** Which store a review diff was read from (0248): `artifacts`, `r2`, or `machine`. */
+  readonly ReviewReadSource: ReviewReadSource;
+  /** The stored Artifacts mirror state of one commit (0248). */
+  readonly ReviewMirrorStatus: (typeof REVIEW_MIRROR_STATES)[number];
+  /** Which commit of a Change a mirror state is about (0248). */
+  readonly ReviewMirrorSide: ReviewMirrorSide;
 }

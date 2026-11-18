@@ -113,6 +113,58 @@ interface ReviewFileFields {
 export interface ReviewFile extends ReviewFileFields {}
 
 /**
+ * Where a review's diff was read from.
+ *
+ * @remarks
+ * **The server decides this; the screen only shows it** (0248). A Change's commits are in the
+ * workspace's Artifacts repository once the mirror has pushed them (D106), and in the R2
+ * checkpoint packs whether or not it has. The review reads Artifacts first, then R2, and this
+ * says which one answered, so a screen can tell "read without the machine" from "read from the
+ * checkpoint store". It is **not** `@hns/workspace/mirror`'s `ReviewSource`: that one names
+ * the plan a mirror state implies (`artifacts` / `machine`), and `r2` is a place a read
+ * really happens that the plan has no word for.
+ */
+export const REVIEW_READ_SOURCES = ["artifacts", "r2", "machine"] as const;
+
+/** One place a review's diff was read from. */
+export type ReviewReadSource = (typeof REVIEW_READ_SOURCES)[number];
+
+/**
+ * What the commit pair's Artifacts mirror says, as the review can tell the screen.
+ *
+ * @remarks
+ * A Change is read from two commits and each has its own mirror state (a checkpoint per Run), so
+ * the diff carries up to two. The reasons are the checkpoint contract's `MirrorFailure`, kept as
+ * words here: this module is a model of what a reviewer reads and does not import the commit
+ * protocol. `skipped` is the run over Artifacts' limits, `failed` a push that did not land, and
+ * `pending` one that has not landed yet; all three are read from R2 or the machine, and the
+ * screen says so.
+ */
+export const REVIEW_MIRROR_STATES = ["mirrored", "skipped", "failed", "pending"] as const;
+
+/** One side of a diff and what its Artifacts mirror says. */
+export const REVIEW_MIRROR_SIDES = ["base", "head"] as const;
+
+/** Which commit of the pair a mirror state is about. */
+export type ReviewMirrorSide = (typeof REVIEW_MIRROR_SIDES)[number];
+
+/**
+ * One side of the pair that is not in Artifacts, so the review read it elsewhere.
+ *
+ * @remarks
+ * `commit` is the commit id the state is about; `status` is the stored mirror status; `failure`
+ * is present only when the status is `failed`. `source` is where this side was read instead, so
+ * "the mirror failed and the diff came from R2" is one answer and not two.
+ */
+export interface ReviewMirrorFallback {
+  readonly side: ReviewMirrorSide;
+  readonly commit: string;
+  readonly status: (typeof REVIEW_MIRROR_STATES)[number];
+  readonly failure?: string | undefined;
+  readonly source: ReviewReadSource;
+}
+
+/**
  * The review failure as it arrives, parsed at the boundary.
  *
  * @remarks

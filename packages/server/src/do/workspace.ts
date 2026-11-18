@@ -5,6 +5,7 @@ import {
   MAX_CHECKPOINT_PACK_BYTES,
   CheckpointPrepareAnswerSchema,
   CheckpointPrepareResultSchema,
+  CheckpointRecordSchema,
   MACHINE_WRITE_UNKNOWN_REASONS,
   MIRROR_FAILURES,
   MIRROR_STATUSES,
@@ -44,6 +45,9 @@ const DEFAULT_LEASE_TTL_MS = 60_000;
 
 const LEASE_ACTIONS = ["acquire", "renew", "release"] as const;
 type LeaseAction = (typeof LEASE_ACTIONS)[number];
+
+/** A git commit id: 40 lowercase hex characters, the only shape a checkpoint's commit has. */
+const COMMIT_ID = /^[0-9a-f]{40}$/u;
 
 /** The closed failure codes of the Workspace RPC; lease refusals are rows of the same table. */
 type WorkspaceRpcCode = FailureCodeOf<"workspace-rpc">;
@@ -568,7 +572,7 @@ export class Workspace {
       return await this.#watermark(request);
     }
     if (face === "checkpoint") {
-      return await this.#checkpointRoute(request, segments);
+      return await this.#checkpointRoute(request, url, segments);
     }
     if (face === "lease") {
       const action = segments[2];
@@ -819,8 +823,14 @@ export class Workspace {
    *   cannot be handed to another.
    * - `POST /rpc/checkpoint/complete` — the watermark and the record, in one transaction.
    * - `POST /rpc/checkpoint/mirror` — the push's outcome, after the checkpoint was answered.
+   * - `GET /rpc/checkpoint/record?commit=<id>` — the recorded checkpoint of one commit, for the
+   *   review's source selection (0248). A read only: no transition and no write.
    */
-  async #checkpointRoute(request: Request, segments: readonly string[]): Promise<Response> {
+  async #checkpointRoute(
+    request: Request,
+    url: URL,
+    segments: readonly string[],
+  ): Promise<Response> {
     const action = segments[2];
     if (segments.length === 3 && (action === "prepare" || action === "complete")) {
       if (request.method !== "POST") {
@@ -841,6 +851,15 @@ export class Workspace {
         return failure("method_not_allowed", "Only POST is allowed here.");
       }
       return await this.#checkpointPack(request, action);
+    }
+    // The checkpoint's record, for the review: the Worker reads the recorded mirror state so a
+    // diff can say which store it came from (0248). It is a read of what this object already
+    // wrote, never a new decision about a checkpoint.
+    if (segments.length === 3 && action === "record") {
+      if (request.method !== "GET") {
+        return failure("method_not_allowed", "Only GET is allowed here.");
+      }
+      return await this.#checkpointRecord(url);
     }
     return failure("not_found", "No Workspace RPC route matches this path.");
   }
@@ -1291,6 +1310,36 @@ export class Workspace {
     if (row === undefined) return undefined;
     const parsed = v.safeParse(MachineKeyRowSchema, row);
     return parsed.success ? parsed.output.public_key : undefined;
+  }
+
+  /**
+   * The recorded checkpoint of one commit, for the review's source selection (0248).
+   *
+   * @param url - The read RPC's `commit` parameter.
+   * @returns `{ ok: true, checkpoint }` with the stored record, or `not_found` when no completed
+   * checkpoint of this object names that commit.
+   *
+   * @remarks
+   * **A read, and only a read.** The review asks "what does the mirror state of this commit say?"
+   * so a diff can name the store it was read from; a question that moved a mirror state would let
+   * a page change what a push reports. A Run that prepared but did not complete has no record and
+   * is not this route's answer; the commit is the key because a Change names commits, not Runs.
+   */
+  async #checkpointRecord(url: URL): Promise<Response> {
+    const commit = url.searchParams.get("commit") ?? "";
+    if (!COMMIT_ID.test(commit)) {
+      return failure("invalid_request", "The commit is not a commit id.");
+    }
+    const rows = this.#all("SELECT record FROM checkpoint_run WHERE record IS NOT NULL");
+    for (const row of rows) {
+      const parsed = v.safeParse(v.object({ record: v.string() }), row);
+      if (!parsed.success) continue;
+      const record = v.safeParse(CheckpointRecordSchema, JSON.parse(parsed.output.record));
+      if (record.success && record.output.commit === commit) {
+        return json({ ok: true, checkpoint: record.output });
+      }
+    }
+    return failure("not_found", "No completed checkpoint of this workspace names that commit.");
   }
 
   /** The stored checkpoint row, or undefined when the Run has not prepared. */

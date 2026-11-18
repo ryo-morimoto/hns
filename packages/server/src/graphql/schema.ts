@@ -422,8 +422,24 @@ function reviewFileType(hunk: GraphQLObjectType): GraphQLObjectType {
  * The diff engine's shape (`review/service.ts`) narrowed to fields: the two commits, the totals,
  * and one entry per changed path. This is the type the review face renders, and the one the
  * mutation payloads (`keepHunk`, `undoHunk`, `applyHunk`) answer with after a versioned write.
+ *
+ * **The source travels with the diff** (0248). `source` is the store the server read (`artifacts`,
+ * `r2`, or `machine`), `mirror` says which commits Artifacts did not hold and why, and
+ * `fallback` is the server's sentence for that. A hunk write's answer carries them too, from the
+ * same field resolution, so a screen that re-reads after a write keeps saying where the bytes
+ * came from.
+ *
+ * @param standIns - The schema's stand-in map, where the model's `ReviewMirror` and the
+ * `ReviewReadSource` enum are registered.
  */
-function reviewDiffType(): GraphQLObjectType {
+function reviewDiffType(standIns: Map<string, GraphQLNamedType>): GraphQLObjectType {
+  const mirror = standIns.get("ReviewMirror");
+  if (!(mirror instanceof GraphQLObjectType)) {
+    // The model registers `ReviewMirror` (0248), so a build without it is a model the server
+    // does not agree with, not a fallback to invent.
+    throw new Error("the model has no GraphQL type ReviewMirror");
+  }
+  const source = registeredEnum(standIns, "ReviewReadSource");
   return new GraphQLObjectType({
     name: "ReviewDiff",
     fields: {
@@ -436,6 +452,9 @@ function reviewDiffType(): GraphQLObjectType {
           new GraphQLList(new GraphQLNonNull(reviewFileType(reviewHunkType(reviewLineType())))),
         ),
       },
+      source: { type: new GraphQLNonNull(source) },
+      mirror: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(mirror))) },
+      fallback: { type: GraphQLString },
     },
   });
 }
@@ -473,10 +492,17 @@ function trailOverride(
  * @internal
  * @returns The type; a schema holds one object per name, so this is called once per build.
  */
-function reviewDiffOverride(standIns: Map<string, GraphQLNamedType>): GraphQLObjectType {
+function reviewDiffOverride(
+  objects: ReadonlyMap<string, GraphQLObjectType>,
+  standIns: Map<string, GraphQLNamedType>,
+): GraphQLObjectType {
   const existing = standIns.get("ReviewDiff");
   if (existing instanceof GraphQLObjectType) return existing;
-  const diff = reviewDiffType();
+  // The model's `ReviewMirror` is the type a diff's fallbacks are; the stand-in map holds the
+  // server's own types, so it is recorded here from the schema's objects for the field to name.
+  if (!standIns.has("ReviewMirror"))
+    standIns.set("ReviewMirror", objectType(objects, "ReviewMirror"));
+  const diff = reviewDiffType(standIns);
   standIns.set("ReviewDiff", diff);
   return diff;
 }
@@ -548,9 +574,15 @@ function buildQuery(
   // stand-ins); the factory signature only promises `ReadonlyMap`, and this is the map it was
   // given. The alternative — a mutable map in the contract — would let any root rewrite another's.
   const standIns: Map<string, GraphQLNamedType> = overrides as Map<string, GraphQLNamedType>;
-  // The model's gate enums are recorded first: the Trail's computed gates name them, and a schema
-  // holds one instance per name.
-  for (const name of ["TrailGateKind", "TrailGateStatus"]) {
+  // The model's enums the server's own types name are recorded first: the Trail's computed gates
+  // and the review diff's source and mirror name them, and a schema holds one instance per name.
+  for (const name of [
+    "TrailGateKind",
+    "TrailGateStatus",
+    "ReviewReadSource",
+    "ReviewMirrorStatus",
+    "ReviewMirrorSide",
+  ]) {
     const type = buildTypes().find(
       (candidate): candidate is GraphQLEnumType =>
         candidate instanceof GraphQLEnumType && candidate.name === name,
@@ -561,7 +593,7 @@ function buildQuery(
   // The diff a Change's review renders is a payload the mutations answer with, so the type is
   // made here (the Query root runs first) and the modules read it back from the same map. The
   // Trail's `changes` field names it, so it is recorded before the Trail is built.
-  reviewDiffOverride(standIns);
+  reviewDiffOverride(objects, standIns);
   const trail = trailOverride(objects, overrides);
   standIns.set("Trail", trail);
   const trailList = listPayload("TrailList", "trails", trail);

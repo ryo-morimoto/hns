@@ -1757,3 +1757,29 @@ test("an absent ref is a failed push and a broken binding keeps its own reason",
     h.close();
   }
 });
+
+// 0248: Catches a review's record read answered by anything but the stored record — a write,
+// a guess, or a mirror state the record does not have.
+test("the checkpoint record route answers the stored record of a commit, and only that", async () => {
+  const h = await harnessWithMirror();
+  try {
+    const record = await checkpointOnce(h);
+    const found = await h.workspace.fetch(get("/rpc/checkpoint/record?commit=" + record.commit));
+    expect(found.status, await found.clone().text()).toBe(200);
+    const answer = v.parse(
+      v.object({ ok: v.literal(true), checkpoint: CheckpointRecordSchema }),
+      await found.json(),
+    );
+    expect(answer.checkpoint).toStrictEqual(record);
+    expect(answer.checkpoint.mirror.status).toBe("pending");
+    // A commit this workspace did not checkpoint, and a value that is not one, are typed answers.
+    const missing = await h.workspace.fetch(get("/rpc/checkpoint/record?commit=" + "9".repeat(40)));
+    expect(missing.status).toBe(404);
+    const malformed = await h.workspace.fetch(get("/rpc/checkpoint/record?commit=refs/heads/main"));
+    expect(malformed.status).toBe(400);
+    // A read: asking for the record does not change it.
+    expect(checkpointRecordOfRun(h, "run-1")).toContain(record.commit);
+  } finally {
+    h.close();
+  }
+});

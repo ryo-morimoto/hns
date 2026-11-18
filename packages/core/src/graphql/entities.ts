@@ -20,6 +20,8 @@ import type {
   TrailGate,
   TrailSession,
 } from "../trail.ts";
+import { REVIEW_MIRROR_SIDES, REVIEW_MIRROR_STATES, REVIEW_READ_SOURCES } from "../review.ts";
+import type { ReviewMirrorFallback } from "../review.ts";
 import { PROJECT_EGRESS_POLICIES } from "../types.ts";
 import type { Conversation, Project } from "../types.ts";
 import { defineEntity, enumOf } from "./spec.ts";
@@ -225,6 +227,26 @@ export const TrailGateEntity = defineEntity<TrailGate>({
   },
 });
 
+/**
+ * The `ReviewMirror` GraphQL type (0248): one commit of a Change and what its Artifacts mirror says.
+ *
+ * @remarks
+ * The server's answer beside a diff: "this side did not come from Artifacts, because the mirror
+ * was skipped / failed / still pending, so it was read from `source`". The screen shows it and
+ * never chooses a source itself; `source` is where the server actually read, so no client has to
+ * guess which store answered.
+ */
+export const ReviewMirrorEntity = defineEntity<ReviewMirrorFallback>({
+  name: "ReviewMirror",
+  fields: {
+    side: { name: "side", kind: "enum", typeName: "ReviewMirrorSide", nonNull: true },
+    commit: { name: "commit", kind: "scalar", type: "String", nonNull: true },
+    status: { name: "status", kind: "enum", typeName: "ReviewMirrorStatus", nonNull: true },
+    failure: { name: "failure", kind: "scalar", type: "String", nonNull: false },
+    source: { name: "source", kind: "enum", typeName: "ReviewReadSource", nonNull: true },
+  },
+});
+
 /** The `TrailState` GraphQL enum: the closed vocabulary the transition table moves. */
 export const TrailStateEnum = enumOf("TrailState", TRAIL_STATES);
 /** The `TrailKind` GraphQL enum: what sort of intent a Trail anchors. */
@@ -245,6 +267,12 @@ export const TrailDecisionActionEnum = enumOf("TrailDecisionAction", TRAIL_DECIS
 export const TrailGateKindEnum = enumOf("TrailGateKind", TRAIL_GATE_KINDS);
 /** The `TrailGateStatus` GraphQL enum; `ask` is the default a Trail's gates start at. */
 export const TrailGateStatusEnum = enumOf("TrailGateStatus", TRAIL_GATE_STATUSES);
+/** The `ReviewReadSource` GraphQL enum (0248): which store a diff was read from. */
+export const ReviewReadSourceEnum = enumOf("ReviewReadSource", REVIEW_READ_SOURCES);
+/** The `ReviewMirrorStatus` GraphQL enum (0248): the stored Artifacts mirror state. */
+export const ReviewMirrorStatusEnum = enumOf("ReviewMirrorStatus", REVIEW_MIRROR_STATES);
+/** The `ReviewMirrorSide` GraphQL enum (0248): which commit of a Change a mirror state is about. */
+export const ReviewMirrorSideEnum = enumOf("ReviewMirrorSide", REVIEW_MIRROR_SIDES);
 
 /** The model entities the SDL exposes, in declaration order. */
 export const ENTITIES = [
@@ -257,6 +285,7 @@ export const ENTITIES = [
   TrailFindingEntity,
   TrailDecisionEntity,
   TrailGateEntity,
+  ReviewMirrorEntity,
 ] as const;
 
 /**
@@ -279,6 +308,9 @@ export const ENUMS = [
   TrailDecisionActionEnum,
   TrailGateKindEnum,
   TrailGateStatusEnum,
+  ReviewReadSourceEnum,
+  ReviewMirrorStatusEnum,
+  ReviewMirrorSideEnum,
 ] as const;
 
 /**
