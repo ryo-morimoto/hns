@@ -3,6 +3,7 @@ import { ToolTask } from "@earendil-works/pi-durable";
 import { defineExtension, defineTool, hook } from "@earendil-works/pi-durable";
 import type {
   Extension,
+  HookApi,
   JsonObject,
   ToolExecutionResult,
   ToolHooks,
@@ -306,7 +307,11 @@ interface ToolHookOptions {
  *   pi-durable keeps the tool's result when a hook throws, so the failure has to be the result itself.
  */
 function toolHooks(options: ToolHookOptions): ToolHooks {
-  const { identityOf, sinks, env, memory, grants, served } = options;
+  const { identityOf, sinks, env, memory, served } = options;
+  // The granted path is chosen per call from the hook's own identity: the tool task carries the
+  // conversation it runs in, and the run's grant goes to that conversation, never to the workspace.
+  const grantsOf = (api: HookApi): WorkspaceGrants | undefined =>
+    options.grants?.(runIdentityOf(sinks.auditIdentity, api));
   const specFor = (callId: string, identity: ToolIdentity, context: Context): ToolCallSpec => ({
     identity,
     callId,
@@ -341,7 +346,7 @@ function toolHooks(options: ToolHookOptions): ToolHooks {
         return { block: refusalWording(admission.decision) };
       }
       const admitted = admission.admitted;
-      const path = grants?.(sinks.auditIdentity);
+      const path = grantsOf(_api);
       if (path === undefined) {
         memory.set(call.id, {
           call: admitted.call,
@@ -788,6 +793,37 @@ function refusalWording(decision: PolicyDecision): string {
     unsupported: "the arguments are not a call this tool declares",
   };
   return wording[decision.code];
+}
+
+/**
+ * The identity a hook's call runs under, with the run named by the tool task's conversation.
+ *
+ * @param identity - The wiring's identity: the workspace, the session, and the caller's defaults.
+ * @param api - The executing tool's API, which names the tool task's conversation.
+ * @returns The identity with `conversationId` set to the conversation the call runs in.
+ *
+ * @remarks
+ * A run is a conversation's turn: the registry is shared by every conversation of the Session, so
+ * the wiring's identity cannot carry a run of its own. The tool task does, at the moment its hook
+ * runs, and that is the one the granted path issues for and the transport relays as.
+ */
+function runIdentityOf(
+  identity: AuditIdentity | undefined,
+  api: HookApi,
+): AuditIdentity | undefined {
+  if (identity === undefined) return undefined;
+  const conversationId = conversationIdOf(api);
+  return conversationId === undefined ? identity : { ...identity, conversationId };
+}
+
+/**
+ * The conversation a tool task runs in.
+ *
+ * @param api - The executing tool's API: the tool task's own conversation is its `conversationId`.
+ * @returns The conversation id, or undefined for a task that names none.
+ */
+function conversationIdOf(api: HookApi): string | undefined {
+  return String(api.conversationId);
 }
 
 /**

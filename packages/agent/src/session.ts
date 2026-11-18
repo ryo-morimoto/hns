@@ -64,11 +64,7 @@ function withAudit(
   for (const extension of reader.snapshot().installed()) {
     // The hooks ask for the granted path of the conversation they run in: a conversation is a run,
     // and its grants are the ones it may spend. Without a chooser an extension keeps Phase 0.
-    const grantsFor =
-      grantPath === undefined
-        ? undefined
-        : (identity: AuditIdentity | undefined) =>
-            identity === undefined ? undefined : grantPath(identity.sessionId);
+    const grantsFor = grantPath === undefined ? undefined : grantPathFor(grantPath);
     registry.install(
       withAuditSink(
         extension,
@@ -80,6 +76,26 @@ function withAudit(
     );
   }
   return registry;
+}
+
+/**
+ * The chooser an extension's hooks get: which run's granted path a call's identity asks for.
+ *
+ * @param grantPath - The Session's factory: one run's granted path.
+ * @returns The chooser: the call's conversation (its run), or none when the identity names no run.
+ *
+ * @remarks
+ * The run of a tool call is the conversation it runs in, never the workspace the audit row is
+ * recorded under: a grant is bound to the run, and the run's abort revokes it. An identity without a
+ * conversation (a wiring that has no run) takes no granted path.
+ */
+export function grantPathFor(
+  grantPath: (runId: string) => RuntimeGrantPath | undefined,
+): (identity: AuditIdentity | undefined) => RuntimeGrantPath | undefined {
+  return (identity) =>
+    identity === undefined || identity.conversationId === undefined
+      ? undefined
+      : grantPath(identity.conversationId);
 }
 
 /** The maximum conversations a single list returns. */

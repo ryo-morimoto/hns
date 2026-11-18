@@ -511,6 +511,8 @@ export interface GrantRecorder {
   revoke(grantId: string, at: IsoTimestamp): Promise<boolean>;
   /** The live grants bound to one run. */
   boundTo(runId: string): Promise<readonly GrantRecord[]>;
+  /** The newest grant bound to one run, live or revoked. */
+  lastFor(runId: string): Promise<GrantRecord | undefined>;
   /**
    * Record that a revocation could not be made.
    *
@@ -583,6 +585,8 @@ export interface GrantPlane {
   one(input: PlaneRequest): Promise<GrantIssue>;
   /** The grants bound to a run that are still live. */
   boundTo(runId: string): Promise<readonly GrantRecord[]>;
+  /** The newest grant bound to one run, live or revoked: a run whose grant was revoked is over. */
+  lastFor(runId: string): Promise<GrantRecord | undefined>;
   /**
    * Revoke every live grant bound to one run.
    *
@@ -669,6 +673,9 @@ export function createGrantPlane(options: GrantPlaneOptions): GrantPlane {
     },
     async boundTo(runId) {
       return await recorder.boundTo(runId);
+    },
+    async lastFor(runId) {
+      return await recorder.lastFor(runId);
     },
     async revokeRun(runId) {
       const at = isoTimestamp(new Date(now()).toISOString());

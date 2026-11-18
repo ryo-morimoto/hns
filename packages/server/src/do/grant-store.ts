@@ -96,6 +96,9 @@ export function createSqliteGrantRecorder(options: SqliteGrantRecorderOptions): 
     async boundTo(runId) {
       return await options.ledger.boundTo(runId);
     },
+    async lastFor(runId) {
+      return await options.ledger.lastFor(runId);
+    },
   };
 }
 

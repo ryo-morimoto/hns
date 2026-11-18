@@ -263,6 +263,7 @@ test("the grant route refuses a caller that is not the Worker, and a requester t
       };
     },
     boundTo: async () => [],
+    lastFor: async () => undefined,
     revokeRun: async () => ({ revoked: [], failed: [] }),
   };
   const body = JSON.stringify({

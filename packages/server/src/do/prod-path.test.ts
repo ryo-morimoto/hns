@@ -11,6 +11,7 @@ import { openStore } from "../../../store/src/index.ts";
 import { createD1Harness, type D1Harness } from "../../../store/test/integration/harness.ts";
 import { createPolicyService } from "../policy/service.ts";
 import { Session } from "./session.ts";
+import type { GrantedCallRequest, ToolRelayOutcome } from "./session-tools.ts";
 import type { SessionEnv, SessionState } from "./state.ts";
 import { openSqliteState } from "../../test/support/sqlite.ts";
 
@@ -83,8 +84,14 @@ interface Fixture {
   readonly machineRequests: { readonly url: string; readonly body: unknown }[];
   /** The granted path the object built for a run, as the runtime received it. */
   readonly pathOf: (runId: string) => RunPath | undefined;
-  /** The grants the object's ledger recorded. */
-  readonly ledger: () => readonly { readonly grantId: string }[];
+  /** The grants the object's ledger recorded, with the run each was bound to. */
+  readonly ledger: () => readonly {
+    readonly grantId: string;
+    readonly runId: string | null;
+    readonly revokedAt: string | null;
+  }[];
+  /** Ask the object's path to relay one call, as its own route does after the token check. */
+  readonly relayPath: (runId: string, body: GrantedCallRequest) => Promise<ToolRelayOutcome>;
   readonly close: () => void;
 }
 
@@ -168,7 +175,8 @@ async function openObject(onMachine: () => Response): Promise<Fixture> {
         watchConversation: async () => {
           throw new Error("unused");
         },
-        abort: async () => false,
+        // The run's abort ends it: the object then revokes what the conversation held.
+        abort: async () => true,
         pendingIndex: async () => ({ entries: [], remaining: 0, legacy: 0 }),
         markIndexed: async () => undefined,
         indexRows: async () => [],
@@ -185,9 +193,12 @@ async function openObject(onMachine: () => Response): Promise<Fixture> {
     machineRequests,
     pathOf: (runId) => grantPathOf?.(runId),
     ledger: () =>
-      opened
-        .rows("SELECT grant_id FROM session_grants")
-        .map((row) => ({ grantId: String(row["grant_id"] ?? "") })),
+      opened.rows("SELECT grant_id, run_id, revoked_at FROM session_grants").map((row) => ({
+        grantId: String(row["grant_id"] ?? ""),
+        runId: row["run_id"] === null ? null : String(row["run_id"]),
+        revokedAt: row["revoked_at"] === null ? null : String(row["revoked_at"]),
+      })),
+    relayPath: (runId, body) => session.relayForTest(runId, body),
     close: () => {
       opened.close();
     },
@@ -235,6 +246,17 @@ function machineDenial(): Response {
   );
 }
 
+/** The answer the object's relay route gives the agent: a machine's decision. */
+const RelayAnswerSchema = v.union([
+  v.object({ ok: v.literal(false), code: v.string(), message: v.string() }),
+  v.object({ decision: v.object({ outcome: v.literal("deny"), code: v.string() }) }),
+  v.object({
+    decision: v.object({ outcome: v.literal("allow") }),
+    grantId: v.string(),
+    result: v.unknown(),
+  }),
+]);
+
 /** The body the object relays to a machine, as its schema reads it. */
 const MachineBodySchema = v.object({
   op: v.literal("tool"),
@@ -245,11 +267,10 @@ const MachineBodySchema = v.object({
 });
 
 /** The call the object relays, as the agent builds it for a read. */
-async function readCall(): Promise<{ readonly manifest: Awaited<ReturnType<typeof manifestFor>> }> {
+async function readCall(): Promise<Awaited<ReturnType<typeof manifestFor>>> {
   const tool = WORKSPACE_TOOLS.find((candidate) => candidate.toolId === "read_file");
   if (tool === undefined) throw new Error("no read_file tool");
-  const manifest = await manifestFor(tool);
-  return { manifest };
+  return await manifestFor(tool);
 }
 
 // The object's own transport reaches its own route, which reads what it wrote and relays it: the
@@ -258,13 +279,14 @@ test("B1: the object's transport and its route agree on one granted call", async
   const fixture = await openObject(machineDenial);
   try {
     expect((await fixture.session.fetch(await send())).status).toBe(200);
+    fixture.session.enterRun("run-1");
     const path = fixture.pathOf("run-1");
     if (path === undefined) throw new Error("the run has no granted path");
-    const manifest = (await readCall()).manifest;
+    const contract = await readCall();
     const issued = await path.source.issue({
       toolId: "read_file",
-      toolVersion: manifest.manifest.version,
-      manifestHash: manifest.manifestHash,
+      toolVersion: contract.manifest.version,
+      manifestHash: contract.manifestHash,
       maxBytes: 4096,
     });
     if (!issued.ok) throw new Error("the object refused the grant");
@@ -273,10 +295,10 @@ test("B1: the object's transport and its route agree on one granted call", async
         v: 1,
         callId: "tool:1:prod",
         toolId: "read_file",
-        toolVersion: manifest.manifest.version,
+        toolVersion: contract.manifest.version,
         args: { path: "a.txt" },
       },
-      contract: manifest,
+      contract,
       bytes: 4096,
       grant: issued.grant,
     });
@@ -304,6 +326,7 @@ test("B1: a body the route cannot read as a call is refused, and nothing is rela
   try {
     await fixture.session.fetch(await send());
     // The run's path (and so its relay token) is minted when a tool call asks for it.
+    fixture.session.enterRun("run-1");
     fixture.pathOf("run-1");
     const token = fixture.session.runToken("run-1");
     const headers = new Headers({ "content-type": "application/json" });
@@ -327,10 +350,68 @@ test("B1: a body the route cannot read as a call is refused, and nothing is rela
   }
 });
 
+// The grant a run is issued is bound to its conversation, so the run's abort revokes it: the call
+// after the abort is refused `grant_revoked`, and nothing runs (NB2).
+test("NB2: a run's abort revokes its grant by its conversation", async () => {
+  const fixture = await openObject(machineDenial);
+  try {
+    fixture.session.enterRun("run-1");
+    await fixture.session.fetch(await send());
+    const contract = await readCall();
+    // One granted call through the object's relay: the grant it issues for the run is the run's.
+    const first = await fixture.relayPath("run-1", {
+      call: {
+        v: 1,
+        callId: "tool:1:before-abort",
+        toolId: "read_file",
+        toolVersion: contract.manifest.version,
+        args: { path: "a.txt" },
+      },
+      manifest: contract.manifest,
+      bytes: 4096,
+    });
+    if (!first.ok) throw new Error("the object should answer a decision: " + first.code);
+    // The grant is bound to the run: the object's ledger has it under the conversation's id.
+    const bound = await fixture.ledger();
+    expect(bound).toContainEqual(expect.objectContaining({ runId: "run-1" }));
+    const grantId = bound.find((record) => record.runId === "run-1")?.grantId ?? "";
+    // The run's abort revokes what it held, before the abort answers. (It also forgets the run's
+    // relay token: the run is over, and nothing may relay as it again.)
+    const aborted = await fixture.session.fetch(
+      new Request("https://session/rpc/conversations/run-1/abort", { method: "POST" }),
+    );
+    expect(aborted.status).toBe(200);
+    const afterAbort = await fixture.ledger();
+    expect(afterAbort).toContainEqual(
+      expect.objectContaining({ grantId, revokedAt: expect.any(String) }),
+    );
+    // The object's relay of the run's revoked grant is refused before any machine is asked, well
+    // inside the grant's TTL: the run's end, not the expiry, is what stopped it.
+    const relayed = await fixture.relayPath("run-1", {
+      call: {
+        v: 1,
+        callId: "tool:2:after-abort",
+        toolId: "read_file",
+        toolVersion: contract.manifest.version,
+        args: { path: "a.txt" },
+      },
+      manifest: contract.manifest,
+      bytes: 4096,
+    });
+    if (!relayed.ok) throw new Error("the relay failed: " + relayed.code + " " + relayed.message);
+    expect(relayed.answer.decision).toMatchObject({ outcome: "deny", code: "grant_revoked" });
+    // Only the call before the abort reached the machine: the revoked grant never did.
+    expect(fixture.machineRequests).toHaveLength(1);
+  } finally {
+    fixture.close();
+  }
+});
+
 // A run keeps one granted path (and so one grant cache) across its turns (NB1).
 test("NB1: a run has one granted path across its turns", async () => {
   const fixture = await openObject(machineDenial);
   try {
+    fixture.session.enterRun("run-1");
     await fixture.session.fetch(await send());
     const first = fixture.pathOf("run-1");
     expect(first).toBeDefined();

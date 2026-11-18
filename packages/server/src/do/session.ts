@@ -56,6 +56,7 @@ import {
   type GrantIssuer,
   type ToolPath,
   type ToolPathOptions,
+  type ToolRelayOutcome,
 } from "./session-tools.ts";
 import { GrantedAnswerSchema } from "@hns/workspace/protocol";
 import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
@@ -170,6 +171,9 @@ async function openDurableSession(
   });
   const { models, model } = modelsFor(env);
   const ids = auditEventIds(state.id?.name ?? LEGACY_SESSION_NAME);
+  // Nothing here knows a conversation yet: the identity is the wiring's, and each call's run is the
+  // tool task's conversation, which the agent's hooks read from their own context (`runIdentityOf`).
+  const currentConversation = (): string | undefined => undefined;
   const common: SessionOptions = {
     storage,
     models,
@@ -182,12 +186,17 @@ async function openDurableSession(
     onAudit: auditSink(audit),
     auditIdentity: {
       workspaceId: state.id?.name ?? LEGACY_SESSION_NAME,
+      // The row's session is the object (the workspace); the run is the conversation, and it is
+      // what a granted call is issued and relayed as, so a revoke by the run finds its grants.
       sessionId: state.id?.name ?? LEGACY_SESSION_NAME,
       eventId: () => ids.next(),
+      conversationId: currentConversation(),
     },
   };
   // The granted path is per run; the object builds each run's transport, so the agent's tool code
   // holds only the issuer and the relay, never a key or a machine's URL.
+  // The factory is the object's own: it answers the run the runtime asks for (the tool task's
+  // conversation), and a fake runtime names its run through `enterRun` before asking.
   return openSession(grantPathOf === undefined ? common : { ...common, grantPath: grantPathOf });
 }
 
@@ -219,6 +228,8 @@ export class Session {
   #tools: ToolPath | undefined;
   /** The token each run's relay was minted with, so a test can serve the route as its agent. */
   readonly #runTokens = new Map<string, string>();
+  /** The run a test's runtime names for the next `grantPath` call; see `enterRun`. */
+  #testRun: string | undefined;
   readonly #machineFetch: ToolPathOptions["fetch"] | undefined;
   /** The runs' relays, by conversation: one token and one transport per run. */
   readonly #transports = new Map<string, ToolRunTransport>();
@@ -229,6 +240,39 @@ export class Session {
    */
   runToken(runId: string): string | null {
     return this.#runTokens.get(runId) ?? null;
+  }
+
+  /**
+   * Name the run whose granted path the runtime asks for next (a test seam).
+   *
+   * @param conversationId - The run (a conversation); undefined clears it.
+   *
+   * @internal
+   * @remarks
+   * The production runtime reads the run from the tool task it is executing (`runIdentityOf`); a
+   * fake runtime has no tool task, so it names the run here before it asks. It is the same kind of
+   * seam as `machineFetch`: a test drives the object's path machinery without an agent harness.
+   */
+  enterRun(conversationId: string | undefined): void {
+    this.#testRun = conversationId;
+  }
+
+  /**
+   * Relay one granted call through the object's own path, as its route does after the token check.
+   *
+   * @param runId - The run (a conversation) that asks.
+   * @param request - The call, its manifest, and the bytes.
+   * @returns The machine's answer, or the relay's failure.
+   *
+   * @internal
+   * @remarks
+   * The route forgets a run's relay token when the run ends, so a test that asks what the object
+   * decides *after* a run's abort cannot use the token route; it asks the same path method here.
+   */
+  async relayForTest(runId: string, request: GrantedCallRequest): Promise<ToolRelayOutcome> {
+    const tools = this.#tools;
+    if (tools === undefined) return { ok: false, code: "unavailable", message: "no granted path" };
+    return await tools.relay(runId, request);
   }
   /**
    * The runs' granted paths: one per run, so its grant cache covers the whole run's tool calls.
@@ -371,7 +415,7 @@ export class Session {
    * @remarks
    * A granted call needs all of: an issuer (the plane and its signer), a machine to relay to, the
    * control-plane key the relay is signed with, and the machine's id the grant names. Missing any of
-   * them the path is **off**: sends carry no policy snapshot, the agent keeps the Phase 0 tools, and
+   * them the path is **off**: no run is given a granted path, every send is answered without one, and
    * the relay route answers `unavailable` — the kill switch of this feature is the deployment's
    * bindings, not a flag that a half-configured object could turn on.
    *
@@ -406,7 +450,8 @@ export class Session {
       revoked: async (grantId) => {
         return this.#revokedGrants.has(grantId);
       },
-      grantOf: async (runId) => (await grants.boundTo(runId)).at(0),
+      // The run's grant whether it stands or was revoked: a run whose grant was revoked is over.
+      grantOf: async (runId) => await grants.lastFor(runId),
       now: this.#now,
       eventId: () => ids.next(),
     };
@@ -477,6 +522,7 @@ export class Session {
     const origin = this.#objectUrl();
     const transports = this.#transports;
     const grantPaths = this.#grantPaths;
+    const runTokens = this.#runTokens;
     // The object's own route, reached in this isolate: the granted path never goes through the
     // deployment's network for it.
     const objectFetch = (request: Request): Promise<Response> => this.fetch(request);
@@ -497,6 +543,7 @@ export class Session {
         tools.state.forget(runId);
         transports.delete(runId);
         grantPaths.delete(runId);
+        runTokens.delete(runId);
       },
     };
     transports.set(runId, transport);
@@ -644,7 +691,7 @@ export class Session {
       this.#grants = await this.#openGrantPlane();
       // The granted tool path is on only when this object can do its whole job: issue (the plane),
       // relay (the machine and the control-plane key), and record (the audit). Otherwise it stays
-      // closed, and a send carries no snapshot, which keeps the agent on the Phase 0 tools.
+      // closed: no run gets a granted path, and a send is answered without one.
       this.#tools = this.#openToolPath();
       try {
         // The event table shares the Session's SQLite but not the harness prefix. A failed

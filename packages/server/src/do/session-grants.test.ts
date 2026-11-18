@@ -483,6 +483,9 @@ test("a revocation that fails is recorded as grant.revoke_failed", async () => {
         (record) => record.requestedBy.runId === runId && record.revokedAt === undefined,
       );
     },
+    async lastFor(runId) {
+      return stored.findLast((record) => record.requestedBy.runId === runId);
+    },
     async recordRevokeFailure(attempt) {
       recorded.push(
         "grant.revoke_failed:" +
@@ -552,6 +555,9 @@ test("the plane records every attempt and revokes a run's grants when the run en
       return stored.filter(
         (record) => record.requestedBy.runId === runId && record.revokedAt === undefined,
       );
+    },
+    async lastFor(runId) {
+      return stored.findLast((record) => record.requestedBy.runId === runId);
     },
     async recordRevokeFailure() {},
   };

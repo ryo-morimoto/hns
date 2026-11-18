@@ -80,10 +80,10 @@ export interface SessionRpcDependencies {
    * and the relay a run's granted call goes through.
    *
    * @remarks
-   * Absent means the granted path is off: a send carries no snapshot (and the agent runs the tools
-   * in this object, Phase 0), and the relay route answers `unavailable` rather than run a call
-   * nobody decided. Present, the send requires a snapshot — a turn whose policy could not be read
-   * cannot run granted tools, and failing the send is the fail-closed answer.
+   * Absent means the granted path is off: the relay route answers `unavailable` rather than run a
+   * call nobody decided, and the object has no revision to issue a grant under. Present, a send
+   * **with** a snapshot is admitted under it (a missing or older revision is refused, see
+   * `admitTurn`); a send **without** one is answered as usual and admits nothing new.
    */
   readonly tools?: ToolPath | undefined;
 }
@@ -585,9 +585,10 @@ export async function handleSessionRpc(
           );
         }
       }
-      // A send with **no** snapshot is a Phase 0 turn: the agent runs the tools here, nothing is
-      // granted, and the turn is not refused. The object's granted path being open is not a reason
-      // to require the Worker to carry the policy on every face (D091, §10).
+      // A send with **no** snapshot is answered as usual (200) and the object keeps the last
+      // admitted revision: the turn is not refused. What it does not do is admit a *new* revision,
+      // and a run whose send carried no snapshot has no grant path of its own until one does. The
+      // route is therefore never 400 for a missing snapshot — that would stop every conversation.
       const cost = dependencies.cost;
       if (cost !== undefined) {
         try {

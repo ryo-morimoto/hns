@@ -119,6 +119,17 @@ export interface GrantLedger {
   /** One grant, or `undefined` when this object issued none by that id. */
   get(grantId: string): Promise<GrantRecord | undefined>;
   /**
+   * The newest grant the run was bound to, live or revoked.
+   *
+   * @param runId - The run (a conversation id).
+   * @returns The newest record, or `undefined` when the run was never granted anything.
+   *
+   * @remarks
+   * `boundTo` answers only the live ones; a run whose grant was revoked must still be visible, so
+   * the granted path can refuse it as `grant_revoked` instead of issuing a replacement.
+   */
+  lastFor(runId: string): Promise<GrantRecord | undefined>;
+  /**
    * The grants bound to a run that are still live.
    *
    * @remarks
@@ -309,6 +320,12 @@ export function createSqliteGrantLedger(storage: GrantLedgerStorage): GrantLedge
     },
     async get(grantId) {
       const row = storage.sql.exec(SELECT + " WHERE grant_id = ?", grantId).toArray()[0];
+      return row === undefined ? undefined : toRecord(row);
+    },
+    async lastFor(runId) {
+      const row = storage.sql
+        .exec(SELECT + " WHERE run_id = ? ORDER BY issued_at DESC, grant_id DESC LIMIT 1", runId)
+        .toArray()[0];
       return row === undefined ? undefined : toRecord(row);
     },
     async boundTo(runId) {

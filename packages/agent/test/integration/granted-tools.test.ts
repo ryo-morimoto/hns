@@ -14,10 +14,11 @@ import type { AuditEvent, SignedGrant, ToolCall } from "@hns/core/capability";
 import type { GrantedAnswer } from "@hns/workspace/protocol";
 import { Workspace } from "@hns/workspace";
 import { sessionGrantPath } from "../../src/runtime.ts";
+import { grantPathFor } from "../../src/session.ts";
 import type { GrantAnswer, ToolContract } from "../../src/runtime.ts";
 import type { GrantSource, ToolTransport } from "../../src/runtime.ts";
 import { workspaceTools } from "../../src/tools.ts";
-import type { WorkspaceGrants } from "../../src/tools.ts";
+import type { GrantPathOf, WorkspaceGrants } from "../../src/tools.ts";
 
 /**
  * The granted path through the tool hooks (0226 C1, C6): the agent asks for a grant, relays the
@@ -125,7 +126,12 @@ async function withGranted(
     readonly audits: AuditEvent[];
     readonly root: string;
   }) => Promise<void>,
-  grants: WorkspaceGrants,
+  grants: GrantPathOf | WorkspaceGrants,
+  /**
+   * What the hook's chooser was asked, when the test wants to see the run: the path is asked for
+   * the call's own run (the conversation), and the test records it.
+   */
+  choose?: (runId: string) => WorkspaceGrants,
 ): Promise<void> {
   const base = await mkdtemp(join(tmpdir(), "hns-granted-"));
   const root = join(base, "root");
@@ -156,7 +162,13 @@ async function withGranted(
           return "e" + String(eventId);
         },
       },
-      grants: () => grants,
+      // SAFETY: the parameter is either a fixed path (the caller's) or a chooser; the branch is
+      // exactly that, and a fixed path answers every identity.
+      grants:
+        choose === undefined
+          ? () => grants as WorkspaceGrants
+          : (identity) =>
+              identity?.conversationId === undefined ? undefined : choose(identity.conversationId),
     }),
   );
   const harness = await Harness.open(
@@ -218,6 +230,42 @@ async function withGranted(
     await rm(base, { recursive: true, force: true });
   }
 }
+
+// NB2: a call's granted path is asked for as the run (the conversation) the call runs in, never
+// the workspace the audit rows are recorded under.
+test("NB2: the run a tool call is granted for is its conversation, not the workspace", () => {
+  const asked: string[] = [];
+  const chooser = grantPathFor((runId) => {
+    asked.push(runId);
+    return undefined;
+  });
+  // The audit identity names the workspace as the session and the tool task's conversation as the
+  // run; the granted path is asked for the run.
+  chooser({ workspaceId: "w1", sessionId: "w1", conversationId: "7", eventId: () => "e" });
+  expect(asked).toStrictEqual(["7"]);
+  // A wiring with no conversation takes no granted path: nothing is asked for.
+  expect(chooser({ workspaceId: "w1", sessionId: "w1", eventId: () => "e" })).toBeUndefined();
+  expect(asked).toStrictEqual(["7"]);
+});
+
+// NB2: through a real harness, the run a call is granted for is the tool task's conversation.
+test("NB2: a granted call's run is the conversation the tool task runs in", async () => {
+  const path = grantedPath({});
+  const runs: string[] = [];
+  await withGranted(
+    async ({ call }) => {
+      await call("read_file", { path: "a.txt" });
+      expect(runs).toHaveLength(1);
+      // The harness names its conversation by a decimal id; the workspace is "w1".
+      expect(runs[0]).toMatch(/^[0-9]+$/u);
+    },
+    path.grants,
+    (runId) => {
+      runs.push(runId);
+      return path.grants;
+    },
+  );
+});
 
 // C1: a call goes to the relay with the grant the issuer signed, and the model reads the machine's
 // result.

@@ -490,10 +490,11 @@ async function relayOne(input: RelayInput): Promise<ToolRelayOutcome> {
     startedAt: options.now(),
   };
   const manifests = await options.manifests();
-  // A run whose last grant was revoked gets no replacement: its run ended, and a fresh capability
-  // would be the same run running on after its end.
-  const last = await options.grantOf(input.runId);
-  if (last !== undefined && (await options.revoked(last.grantId))) {
+  // A run whose grant was revoked is over: it gets no replacement and relays nothing. Relaying here
+  // is what keeps the run's end immediate — the window between a revocation and the grant's own
+  // expiry (at most 60 seconds) is closed by this check, not by the clock.
+  const bound = await options.grantOf(input.runId);
+  if (bound !== undefined && (await options.revoked(bound.grantId))) {
     const decision = deny("grant_revoked", "the grant was revoked by its issuer");
     await appendAudit(options, audited, "tool.call", undefined);
     await appendAudit(options, audited, "tool.result", decision);

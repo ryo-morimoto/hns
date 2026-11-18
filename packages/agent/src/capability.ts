@@ -660,10 +660,29 @@ async function canonicalForWrite(
  */
 export type AuditSink = (event: AuditEvent) => Promise<void>;
 
-/** Where audit events say they came from. */
+/** Where audit events say they came from, and which run the row's call belongs to. */
 export interface AuditIdentity {
+  /** The workspace (and its Session object). */
   readonly workspaceId: string;
+  /**
+   * The session the audit rows are recorded under (the Session object's name).
+   *
+   * @remarks
+   * This is the **workspace's** Session, not the conversation: it has been the row's `sessionId`
+   * since the audit chain landed. The conversation is {@link conversationId}.
+   */
   readonly sessionId: string;
+  /**
+   * The conversation whose run the call runs in; it is the run a grant is bound to.
+   *
+   * @remarks
+   * A tool call always belongs to one conversation, and a run is that conversation's turn. The
+   * granted path asks for the run's grant and relays its call **as this id**, and the Session
+   * object revokes that run's grants when the run's abort reaches it. A wiring that has no
+   * conversation (a caller that audits without one) leaves it out, and its calls take no granted
+   * path.
+   */
+  readonly conversationId?: string | undefined;
   /** The event id for one event; the caller mints it (a UUID in the app, a counter in a test). */
   readonly eventId: () => string;
 }
