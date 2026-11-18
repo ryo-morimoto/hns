@@ -117,6 +117,15 @@ export interface SessionDependencies {
    * machine's process without touching the Worker's network.
    */
   readonly machineFetch?: ToolPathOptions["fetch"] | undefined;
+  /**
+   * Opens the Session runtime; defaults to the production one (`openDurableSession`).
+   *
+   * @remarks
+   * A seam, like the socket pair: `GET /rpc/state` reads the conversation's metadata from the
+   * runtime, and a test that proves the route with a **real** `@hns/agent` session (rather than a
+   * fake that answers whatever the test wants) needs the production object around it.
+   */
+  readonly open?: SessionRuntimeFactory | undefined;
 }
 
 /**
@@ -295,7 +304,7 @@ export class Session {
   ) {
     this.#state = state;
     this.#env = env;
-    this.#open = open;
+    this.#open = dependencies.open ?? open;
     this.#pair = dependencies.webSocketPair ?? defaultWebSocketPair;
     this.#now = dependencies.now ?? Date.now;
     this.#upgradeResponse = dependencies.upgradeResponse ?? defaultLiveUpgradeResponse;

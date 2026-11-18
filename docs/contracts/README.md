@@ -11,6 +11,7 @@
 | GraphQL（面・失敗・上限） | [graphql.md](graphql.md) | `@hns/core/graphql`、`server/src/graphql` | — |
 | 認証（入口・セッション・署名） | [auth.md](auth.md) | `server/src/edge`、`@hns/core` の codecs | INV-01 |
 | machine（署名・ROOT 封じ込め・操作） | [machine.md](machine.md) | `@hns/core` の machine、`@hns/machine`、`do/machine` | INV-01 / 02 / 03 |
+| 会話の単体取得と state（0119、REST。規則は GraphQL と隣の節） | [graphql.md](graphql.md) | `server/src/conversations`、`do/session-rpc` の `/rpc/state`、`edge/handler.ts` | INV-01 |
 
 ## 規則
 

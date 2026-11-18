@@ -14,6 +14,21 @@ export class StoreUnavailableError extends Error {
 const STORES = new WeakMap<D1Binding, Promise<Store>>();
 
 /**
+ * Give one binding its own open store, not this isolate's shared one.
+ *
+ * @param db - The control database binding.
+ *
+ * @remarks
+ * The memo above is keyed by the binding, and two tests that stand up separate databases with
+ * the same adapter would otherwise share the first one opened. A test that wants the real open
+ * (migrations, the default project) calls this; production never does.
+ * @internal
+ */
+export function forgetStore(db: D1Binding): void {
+  STORES.delete(db);
+}
+
+/**
  * The D1 store for this isolate, opened once.
  *
  * @param env - The Worker environment carrying the `DB` binding.

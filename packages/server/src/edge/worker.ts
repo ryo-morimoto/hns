@@ -3,6 +3,7 @@ import * as v from "valibot";
 import { createCheckpointFace } from "../checkpoint/face.ts";
 import { createFilesFace } from "../files/content.ts";
 import { createKeysFace } from "../machines/keys.ts";
+import { createConversationsFace, lookupConversation } from "../conversations/index.ts";
 import { createGraphQLFace } from "../graphql/index.ts";
 import { httpEntry } from "../obs/log.ts";
 import { ProjectParamSchema } from "../project-id.ts";
@@ -171,6 +172,7 @@ const dependencies: HandlerDependencies = {
   files: createFilesFace(),
   checkpoints: createCheckpointFace(),
   machineKeys: createKeysFace(),
+  conversations: createConversationsFace(lookupConversation),
   onResponse: recordResponse,
 };
 

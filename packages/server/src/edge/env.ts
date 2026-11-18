@@ -2,6 +2,16 @@ import type { D1Binding } from "@hns/store";
 import type { ArtifactsBinding } from "../artifacts/repos.ts";
 
 /**
+ * The header the edge states, on an internal RPC, the object name it addressed.
+ *
+ * @remarks
+ * A Durable Object binding's request keeps the Worker's URL, so the object cannot read its own
+ * name from it. A route that reads D1 under that name (`GET /rpc/state`, 0119) is told; the header
+ * is set by the Worker only, and the object serves it no public request (D059).
+ */
+export const SESSION_NAME_HEADER = "x-hns-session-name";
+
+/**
  * The subset of the Cloudflare bindings the edge uses.
  *
  * @remarks

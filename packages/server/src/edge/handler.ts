@@ -79,6 +79,15 @@ export interface HandlerDependencies {
    */
   readonly checkpoints?: ((request: CheckpointRequest) => Promise<Response>) | undefined;
   /**
+   * The conversations face (0119): one conversation's metadata, from the D1 index.
+   *
+   * @remarks
+   * Optional, like every face, so a deployment that does not wire it answers 503 instead of
+   * crashing. The face reads the row; it does not ask the Session object, because the row is what
+   * names a conversation (D078) and a read of the object first could disagree with it.
+   */
+  readonly conversations?: ((request: EdgeRequest) => Promise<Response>) | undefined;
+  /**
    * The machines face (0148): the control-plane public keys a machine enrolls with.
    *
    * @remarks
@@ -98,6 +107,9 @@ const FILES_PATH = /^\/api\/workspaces\/([^/]+)\/files$/u;
 
 /** The checkpoint face: `/api/workspaces/<workspaceId>/checkpoints/...`. */
 const CHECKPOINTS_PATH = /^\/api\/workspaces\/([^/]+)\/checkpoints(?:\/|$)/u;
+
+/** The conversations face: `/api/conversations/<id>` and its sub-paths (0119). */
+const CONVERSATIONS_PATH = /^\/api\/conversations(?:\/|$)/u;
 
 /** The cache policy for Vite's content-hashed files under `/assets`. */
 const ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
@@ -367,6 +379,23 @@ async function route(
       return problem("unavailable", "The machines face is not configured.", path);
     }
     return dependencies.machineKeys({ request, env, session, requestId, signal });
+  }
+  if (CONVERSATIONS_PATH.test(path)) {
+    // Authenticated before the method and before the face, as every REST face is (D059): an
+    // anonymous caller learns nothing about the path's shape, only that a session is required.
+    const session = await authenticate(request, env);
+    if (session === null) {
+      return problem("unauthorized", "A valid session cookie is required.", path);
+    }
+    if (request.method !== "GET") {
+      const response = problem("method_not_allowed", "Only GET is allowed on this path.", path);
+      response.headers.set("allow", "GET");
+      return response;
+    }
+    if (dependencies.conversations === undefined) {
+      return problem("unavailable", "The conversations face is not configured.", path);
+    }
+    return dependencies.conversations({ request, env, session, requestId, signal });
   }
   if (path === "/api/events" || path === "/api/metrics") {
     if (request.method !== "GET") return methodNotAllowed("GET", path);

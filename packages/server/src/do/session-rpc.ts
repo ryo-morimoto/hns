@@ -18,7 +18,7 @@ import { REQUEST_ID_HEADER } from "../edge/correlation.ts";
 import { DEFAULT_LIMITS } from "../edge/limits.ts";
 import { failureStatus, type FailureCodeOf } from "../failures/status.ts";
 import { AUDIT_MAX_LIMIT, denialOf, type AuditRow, type PolicyAudit } from "./audit.ts";
-import type { JsonValue } from "@hns/core";
+import type { Conversation, JsonValue } from "@hns/core";
 import { TOOL_RUN_ROUTE, TOOL_RUN_TOKEN_HEADER } from "@hns/workspace/protocol";
 import type { GrantedAnswer } from "@hns/workspace/protocol";
 import type { GrantPlane } from "./session-grants.ts";
@@ -363,6 +363,88 @@ async function handleAuditRpc(
 }
 
 /**
+ * One conversation's state as `/api/state` carries it.
+ *
+ * @remarks
+ * The object answers only what it owns; the conversation's project, timestamps, and D1 ordering
+ * stay in the row (the edge adds `archived` and the timestamps from D1), so the two sources say
+ * overlapping things about different fields and never disagree about one.
+ */
+interface ConversationStateSummary {
+  /** The conversation id, as the D1 index names it. */
+  readonly id: string;
+  readonly title: string;
+  /** Hidden from default lists, still readable (the edge adds `archived` from D1). */
+  readonly archived: boolean;
+  /** Soft-deleted; the edge answers an unknown id the same way. */
+  readonly deleted: boolean;
+}
+
+/** What `GET /rpc/state` answers beside the summary. */
+interface ConversationState {
+  readonly ok: true;
+  readonly conversation: ConversationStateSummary;
+}
+
+/**
+ * `GET /rpc/state`: this object's state for one of its conversations (0119).
+ *
+ * @param request - The internal request the Worker forwarded.
+ * @param url - Its URL; `conversation` names the conversation.
+ * @param session - The open Session runtime.
+ * @returns `{ok:true, conversation}`, or the typed failure.
+ *
+ * @remarks
+ * The object is addressed by the conversation's own name (0270n), so the object it reached is the
+ * one that would hold this conversation — unless the name is a project's (the legacy object named
+ * `default` holds every conversation, and the object named after a project holds that project's).
+ * The route therefore answers about the object's **own** metadata: a conversation this object does
+ * not hold is `not_found` here, and the same conversation in another object is that object's to
+ * report. Reading D1 instead would make the answer the row's, and a row the index has not caught
+ * up with (or a row no object ever held) would be reported as a state that exists.
+ *
+ * The object never reads the control database (D049): its metadata is the truth, and D1 is the
+ * copy the index writes from it.
+ */
+async function handleStateRpc(
+  request: Request,
+  url: URL,
+  session: AgentSession,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return failure("method_not_allowed", "Only GET is allowed here.");
+  }
+  const id = url.searchParams.get("conversation");
+  if (id === null || id.length === 0) {
+    return failure("invalid_request", "conversation is required.");
+  }
+  // An id that is not one this runtime knows is absent, not a defect: `getConversation` refuses a
+  // malformed id by throwing, and the route answers the same `404` as for one it simply does not hold.
+  let conversation: Conversation | undefined;
+  try {
+    conversation = await session.getConversation(id);
+  } catch (error) {
+    if (error instanceof InvalidConversationIdError) {
+      return failure("not_found", "No conversation has this id.");
+    }
+    throw error;
+  }
+  if (conversation === undefined) {
+    return failure("not_found", "No conversation has this id.");
+  }
+  const state: ConversationState = {
+    ok: true,
+    conversation: {
+      id: conversation.id,
+      title: conversation.title,
+      archived: conversation.archived,
+      deleted: conversation.deleted_at !== null,
+    },
+  };
+  return json(state);
+}
+
+/**
  * The send body's snapshot, as the state's parser takes it.
  *
  * @param policy - The body's `policy`, which is untrusted JSON.
@@ -486,6 +568,14 @@ export async function handleSessionRpc(
   if (segments[0] === "rpc" && segments[1] === "policy" && segments[2] === "audit") {
     try {
       return await handleAuditRpc(request, url, dependencies.audit);
+    } catch (error) {
+      if (error instanceof Error) console.error("session rpc failed", error.name);
+      return failure("internal", "Unexpected Session failure.");
+    }
+  }
+  if (segments[0] === "rpc" && segments[1] === "state" && segments.length === 2) {
+    try {
+      return await handleStateRpc(request, url, session);
     } catch (error) {
       if (error instanceof Error) console.error("session rpc failed", error.name);
       return failure("internal", "Unexpected Session failure.");
