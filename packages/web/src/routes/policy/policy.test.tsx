@@ -771,6 +771,42 @@ test("C7: a proposal and an approval are reachable with the keyboard alone", asy
   view.unmount();
 });
 
+// Catches: a refused proposal treated as stored, which clears the fields, reads the lists again
+// and tells the person nothing about why the face refused it.
+test("a refused proposal says why and keeps what was typed", async () => {
+  const user = userEvent.setup();
+  const h = harness((call) =>
+    call.operationName === "PolicyScreenProposeMutation"
+      ? { proposePolicy: failureWire("UNSUPPORTED", "a glob root cannot be compared") }
+      : data(revisionsWire([revisionWire(1, { active: true })]), proposalsWire([])),
+  );
+  renderScreen(h.environment);
+  await screen.findByTestId("policy-pending-empty");
+  const readRoots = screen.getByLabelText("read roots（カンマまたは改行区切り）");
+  await user.type(readRoots, "docs/*");
+  const reason = screen.getByLabelText("理由");
+  await user.type(reason, "docs を読むため");
+  await user.click(screen.getByRole("button", { name: "提案する" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("a glob root cannot be compared");
+  expect(within(alert).getByText(/比較・適用できません/u)).toBeTruthy();
+  expect(readRoots).toHaveProperty("value", "docs/*");
+  expect(reason).toHaveProperty("value", "docs を読むため");
+  expect(countOf(h.calls, "PolicyScreenQuery")).toBe(1);
+});
+
+/**
+ * C7: the whole journey with a keyboard.
+ *
+ * @remarks
+ * A person who cannot use a pointer proposes, then approves, by tabbing: the form's fields, its
+ * submit button, the decision's reason, and the two decision buttons are reached through the tab
+ * order, and the buttons are reached with Enter once focused. After the approval the card leaves
+ * the screen, and focus is on the screen's own region rather than on `<body>` — a keyboard user
+ * keeps their place instead of starting over at the top of the page.
+ */
+
 /* --------------------------------------------------------------------------------------------- */
 /* The real schema.                                                                               */
 /* --------------------------------------------------------------------------------------------- */
