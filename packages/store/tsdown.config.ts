@@ -1,7 +1,9 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/conversation-index/index.ts"],
+  // The edge's Trail lookup is its own entry (0272n): the Worker imports it by name, so the
+  // package must build it, not only its index.
+  entry: ["src/index.ts", "src/conversation-index/index.ts", "src/edge/trail-lookup.ts"],
   format: ["esm"],
   platform: "node",
   root: "src",
