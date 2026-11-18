@@ -1,6 +1,6 @@
 # 0194: machine の sandbox・hide・env 純度（0147 から分割）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D095
@@ -14,12 +14,12 @@ touches: packages/machine/, packages/machine/test/security/
 
 ## Acceptance criteria
 
-- [ ] `exec` は bwrap 経由。sandbox が無ければ exec を出さない（fail closed）
-- [ ] `~/.config/hns` と `.git` の書き込みを拒否し、`~/.config/hns` は読み取りも hide で隠す（0052 を起動時に配線）
-- [ ] hide した `~/.config/hns` からデバイス鍵・cloudflared token が読めないことを実機で確認（bwrap 無しは SKIP）
-- [ ] machine の env / process に provider 鍵・provider URL が無いことをテストする（harness 側は 0151）
-- [ ] ROOT の同一性（`.hns/root.json`）を起動時に確認し、違えば拒否する
-- [ ] `npm run check` が通り、独立レビューが PASS する
+- [x] `exec` は bwrap 経由。sandbox が無ければ exec を出さない（fail closed）
+- [x] `~/.config/hns` と `.git` の書き込みを拒否し、`~/.config/hns` は読み取りも hide で隠す（0052 を起動時に配線）
+- [x] hide した `~/.config/hns` からデバイス鍵・cloudflared token が読めないことを実機で確認（bwrap 無しは SKIP）
+- [x] machine の env / process に provider 鍵・provider URL が無いことをテストする（harness 側は 0151）
+- [x] ROOT の同一性（`.hns/root.json`）を起動時に確認し、違えば拒否する
+- [x] `npm run check` が通り、独立レビューが PASS する
 
 ## テスト条件
 
@@ -149,3 +149,13 @@ touches: packages/machine/, packages/machine/test/security/
 ## Log
 
 - 2026-11-11: 作成。0147 から環境依存の受入条件を分割。
+
+## Result
+
+- verdict: **PASS**（reviewer-0194。初回 BLOCKED 5（テストと docs の穴）→ 修正 → PASS）
+- HEAD: 2d47749（main に ff 統合）。gate は exit 0（1390 tests / 1391、main で 67.3s）。
+- 確認: `exec` は **bwrap の後ろだけ**（`detectSandbox()` を通らなければ 403 `forbidden`。host shell に落ちない）。mount 順を argv で固定（`--ro-bind / /` → `--tmpfs ROOT` → `--dir` → `--bind project` → `--ro-bind project/.git` → hide → `/tmp` → dev/proc）し、**project を含むいちばん外側を tmpfs してから空の dir で作り直す**ことで**祖先の兄弟も見えない**（実測: 深い project で `ROOT/a/other` と `ROOT/top.txt` は不可視、project は書込可、`.git` は EROFS）。hide は machine の固定リスト（home 配下 + `ROOT/.hns`、呼び出し側から足せない）で、**存在しないパスは mount しない**（すると bwrap 全体が起動しない）。env は allowlist のみ（PATH / HOME=ROOT / LANG / TERM / TMPDIR / `GIT_CONFIG_*`=/dev/null / `GIT_OPTIONAL_LOCKS`）。mutation 4 種は製品の経路で壊す。
+- **限界（実装で閉じられない）**: hide が効くのは**起動時に存在したパスだけ**（無いパスへの tmpfs は bwrap が落ち、`--ro-bind-try` は何もせず成功に見える）。TSDoc / README / contracts の 3 箇所に実装どおり記載。
+- **seccomp**: フィルタは実装・単体テスト済みで、**製品の exec には未接続**（`--seccomp` は継承 fd のみで、この exec 層は stdio しか渡さない）。README / TSDoc / contracts に明記。
+- **実装した ≠ 起動する**: `op: exec` はテストから実 bwrap で動くが、**machine を起動する CLI も Worker 側の exec 呼び出しも無い**ので今日は起動しない。follow-up: machine の CLI（enrollment と起動）/ Worker の exec 呼び出し / seccomp を fd で渡せる exec / `--new-session` が workspace 側にも入る挙動差（D095 の範囲外）。
+- 実装中に実測で見つけた 6 件（hide が root 外で消える / tmpfs の親子順 / root が /tmp 下の分岐 / 無い hide パスで bwrap 起動不能 / `--seccomp` は fd のみ / `.git` の ro-bind 順序で write が通る）。
