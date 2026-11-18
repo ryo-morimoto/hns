@@ -12,14 +12,14 @@ import type { PolicyScreenProposeMutation } from "../../__generated__/PolicyScre
  */
 
 /** The `policyRevisions` member a successful list read answers with. */
-export type PolicyRevisionListRecord = Extract<
+type PolicyRevisionListRecord = Extract<
   PolicyScreenQuery["response"]["policyRevisions"],
   { readonly __typename: "PolicyRevisionList" }
 >;
 /** One revision of the workspace's policy, with its document. */
 export type PolicyRevisionRecord = PolicyRevisionListRecord["revisions"][number];
 /** The `policyProposals` member a successful list read answers with. */
-export type PolicyProposalListRecord = Extract<
+type PolicyProposalListRecord = Extract<
   PolicyScreenQuery["response"]["policyProposals"],
   { readonly __typename: "PolicyProposalList" }
 >;

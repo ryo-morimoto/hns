@@ -807,6 +807,54 @@ test("a refused proposal says why and keeps what was typed", async () => {
  * keeps their place instead of starting over at the top of the page.
  */
 
+/**
+ * A stale answer stays on screen after the read that follows it.
+ *
+ * @remarks
+ * The screen reads both lists again when a decision lands, stale or not (C3). That read arrives
+ * after the refusal is on screen; a banner that unmounted with it is one the person may never
+ * have read. The first request after the decision answers the list as it is now — the proposal
+ * the person saw is gone, another one is pending — and the refusal is still there, naming itself.
+ */
+test("a stale answer survives the read that follows it", async () => {
+  let listReads = 0;
+  const OTHER = toGlobalId("PolicyProposal", "proposal-2");
+  const h = harness((call) => {
+    if (call.operationName === "PolicyScreenDecideMutation") {
+      return { decidePolicy: failureWire("APPROVAL_STALE", "The proposal moved.") };
+    }
+    listReads += 1;
+    return listReads === 1
+      ? data(
+          revisionsWire([revisionWire(1, { active: true })]),
+          proposalsWire([proposalWire(PROPOSAL_ONE)]),
+        )
+      : data(
+          revisionsWire([revisionWire(1, { active: true })]),
+          proposalsWire([proposalWire(OTHER)]),
+        );
+  });
+  renderScreen(h.environment);
+  await screen.findByRole("article");
+
+  await decide("承認", "ok");
+
+  const alert = await screen.findByRole("alert");
+  expect(within(alert).getByText("提案が古い")).toBeTruthy();
+  // The read the decision asked for has landed: the proposal the person acted on is gone and
+  // another one is pending, and the banner is still up.
+  await waitFor(() => expect(listReads).toBe(2));
+  expect(screen.getByText("docs を読む")).toBeTruthy();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(screen.getByRole("alert")).toBe(alert);
+  expect(within(alert).getByText("提案が古い")).toBeTruthy();
+  expect(countOf(h.calls, "PolicyScreenDecideMutation")).toBe(1);
+
+  // Only the person dismisses it.
+  await userEvent.setup().click(within(alert).getByRole("button", { name: "閉じる" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBe(null));
+});
+
 /* --------------------------------------------------------------------------------------------- */
 /* The real schema.                                                                               */
 /* --------------------------------------------------------------------------------------------- */

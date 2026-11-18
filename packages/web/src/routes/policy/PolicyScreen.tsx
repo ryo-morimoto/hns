@@ -153,6 +153,10 @@ function PolicyReader({
   onReread,
 }: ReaderProps): ReactElement {
   const [report, setReport] = useState<DecisionOutcome | null>(null);
+  // The read that follows a decision is a new request, so it may be answered after the report is
+  // set; a refusal (a stale approval above all) keeps its place on screen until a person dismisses
+  // it, because a banner that disappears with the next read is one nobody got to read.
+  const kept = report !== null && report.kind === "refused" ? report : null;
   // Focus is put back once the panels below have settled: whether a decision leaves the
   // proposal card on screen depends on the read that follows it, which lands after this render.
   // The region that receives it is the shell's main one; a screen rendered without the shell
@@ -202,8 +206,11 @@ function PolicyReader({
           </p>
         )}
       </header>
-      {report === null ? null : (
-        <DecisionReport outcome={report} onDismiss={() => setReport(null)} />
+      {kept === null ? null : (
+        <DecisionReport outcome={kept} stale onDismiss={() => setReport(null)} />
+      )}
+      {report === null || kept !== null ? null : (
+        <DecisionReport outcome={report} stale={false} onDismiss={() => setReport(null)} />
       )}
       <ActivePanel revisions={revisions.revisions} active={active} />
       <ProposalForm workspaceId={workspaceId} active={active.document} onProposed={onReread} />
@@ -218,23 +225,32 @@ function PolicyReader({
   );
 }
 
-/** The decision's outcome, announced once and kept out of the panel it came from. */
+/**
+ * The decision's outcome, announced once and kept out of the panel it came from.
+ *
+ * @param props.outcome - What the face answered.
+ * @param props.stale - Whether this is a refusal: it stays until a person dismisses it, because
+ * the read that follows a decision may land after it and must not take it away.
+ * @param props.onDismiss - Dismiss the banner.
+ */
 function DecisionReport({
   outcome,
+  stale,
   onDismiss,
 }: {
   readonly outcome: DecisionOutcome;
+  readonly stale: boolean;
   readonly onDismiss: () => void;
 }): ReactElement {
   if (outcome.kind === "refused") {
-    const stale = outcome.code === "APPROVAL_STALE";
+    const isStale = outcome.code === "APPROVAL_STALE";
     return (
       <div className="hns-policy__report" data-tone="danger" role="alert">
         <p className="hns-policy__report-text">
-          <strong>{stale ? "提案が古い" : "決定できませんでした"}</strong>{" "}
+          <strong>{isStale ? "提案が古い" : "決定できませんでした"}</strong>{" "}
           {policyCodeMessage(outcome.code)} {outcome.message}
         </p>
-        {stale ? (
+        {isStale ? (
           <p className="hns-policy__note">
             読み込みの後に提案か active な revision
             が変わりました。黙って送り直すことはしません。一覧を読み直してから、もう一度判断してください。
