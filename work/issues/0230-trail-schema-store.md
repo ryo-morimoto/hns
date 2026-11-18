@@ -1,6 +1,6 @@
 # 0230: Trail のスキーマと store（0004）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D104 / work/research/trail-model-v1.md §6.1・§7
@@ -17,12 +17,12 @@ D104 で Trail を主単位にし、Task/カンバンを置き換えると決め
 
 ## Acceptance criteria
 
-- [ ] 0004 が空 DB と既存 DB の両方に適用でき、schema version が上がる
-- [ ] tasks が trails に backfill される（todo→draft, doing→active, done→merged, blocked→active + note）
-- [ ] Trail / TrailChange / TrailSession / TrailFinding / TrailDecision / TrailGate / TrailFeedback / TrailMetric / TrailEval / TrailNote の型と row schema がある
-- [ ] 不正な state / severity / gate は既定値に落とさず throw する
-- [ ] 状態遷移は core/trail.ts の表にあり、switch は全状態 + never
-- [ ] 既存の tasks 読み取りは壊れない（Task の削除は 0231）
+- [x] 0004 が空 DB と既存 DB の両方に適用でき、schema version が上がる
+- [x] tasks が trails に backfill される（todo→draft, doing→active, done→merged, blocked→active + note）
+- [x] Trail / TrailChange / TrailSession / TrailFinding / TrailDecision / TrailGate / TrailFeedback / TrailMetric / TrailEval / TrailNote の型と row schema がある
+- [x] 不正な state / severity / gate は既定値に落とさず throw する
+- [x] 状態遷移は core/trail.ts の表にあり、switch は全状態 + never
+- [x] 既存の tasks 読み取りは壊れない（Task の削除は 0231）
 
 ## テスト条件
 
@@ -57,3 +57,15 @@ D104 で Trail を主単位にし、Task/カンバンを置き換えると決め
 ## Log
 
 - 2026-11-17: 作成（D104）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0230。blocking 0 / 低 8。低 3 件は統合前に修正）
+- HEAD: f456066（main に ff 統合）。gate は exit 0（1674 tests / 1675、main で 154.5s）。
+- **migration**: issue の「0004」は古い表記で、実際は **0010**（0004〜0009 は適用済み。後の migration を足すたびに番号を書き換える運用をやめたため）。
+- **backfill**: todo→draft / doing→active / **done→closed** / blocked→active + `trail_notes` に 'blocked'。**`done → merged` は採らなかった**（task の done は「作業が終わった」で、Change を 1 つも持たない task に merged と言うのは**事実の捏造**）。`trail-model-v1` §7 と食い違う理由を migration の TSDoc に書いた。id は **`trail-<task id>`** で、0231 で Task を消した後も辿れる。
+- **遷移表**: 7×7 の全 from→to を固定。**未知の状態は parse で拒否**（ValiError）、**`corrupt_row` は拒否の値**で例外にしない。`draft` + 最初の Change → active は **1 つの D1 batch**。
+- **実経路**: 実 SQLite（miniflare D1）+ migration 0010 + repository + parser で create / get / list / update の往復。mutation 5 件（遷移表を緩める / 表を見ない / parse を通さない / Row→公開型の変換を外す / backfill の blocked を変える）を検出。
+- **レビューで直したもの**: ①テスト専用の `TRAIL_TRANSITIONS_FOR_TEST` が core の公開面に出ていた（**in-source テスト**にして dist から消えたことを確かめた）②存在しない関数を指す TSDoc ③「全メソッドが parseTrail を通る」という実装と違う記述。
+- **残件**: (1) **`listChanges` だけが `ValiError` を投げる**（他は `corrupt_row` を返す）。0231 の caller が来たときに揃える。(2) **手で編集した行は `head_commit = base_commit` を通る**（row schema は 2 列を比べない。`CHECK` と repository が通常の経路で拒否）。TSDoc に宣言された穴。(3) **誰も `store.trails` を呼んでいない**（0231 で GraphQL と Sidebar を足すまで起動しない）。
+- **同時に直したもの**: integration のプロジェクトを **1 ファイルずつ**実行するようにした（`428a604`）。cf dev を使う 5 suite が同じ machine-wide lock を奪い合い、フルチェックで 60s のタイムアウトを起こしていた。check は 109s → 154s になるが通る。
