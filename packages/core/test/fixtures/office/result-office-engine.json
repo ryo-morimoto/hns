@@ -1,0 +1,7 @@
+{
+  "available": true,
+  "id": "ibisoffice",
+  "version": "0.8.7",
+  "formats": ["docx", "xlsx", "pptx"],
+  "operations": ["preview", "render", "convert"]
+}

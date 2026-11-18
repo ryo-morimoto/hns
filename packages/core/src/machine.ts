@@ -1,6 +1,18 @@
 import * as v from "valibot";
 import { OperationIdSchema } from "./codecs.ts";
 import {
+  OFFICE_PATH_HASH_PATTERN,
+  OFFICE_PARAMS_HASH_PATTERN,
+  OFFICE_SHA256_PATTERN,
+  OfficeEngineReportSchema,
+  OfficeJobSchema,
+  OfficeResultSchema,
+  type OfficeEngineReport,
+  type OfficeJob,
+  type OfficeOperation,
+  type OfficeResult,
+} from "./office.ts";
+import {
   MUTATION_UNKNOWN_REASONS,
   type AbsentVersion,
   type MutationUnknownReason,
@@ -176,10 +188,15 @@ export function signatureMessage(input: RequestSignature): Uint8Array<ArrayBuffe
  * cannot climb out. The machine recomputes the version of the target and
  * compares it with `expectedVersion`; the Worker's recorded version is only a
  * fast path. `contentHash` is the hash the intent recorded, so the machine
- * refuses to write bytes the intent does not name. `content` is base64 because
- * the body is JSON.
+ * refuses to write bytes the intent does not name.
+ *
+ * **The bytes come from one of two sources and never both**, which is why this
+ * is a union of two members over a shared body rather than an optional field
+ * each. A `content` write carries base64 in the body because the body is JSON;
+ * a `source` write names an office cache entry, so a 31 MB converted PDF never
+ * crosses the Worker's body bound (0241; D103 §5).
  */
-export interface MachineWriteRequest {
+export type MachineWriteRequest = {
   readonly op: "write";
   /** The project directory below ROOT, as names separated by `/`. */
   readonly projectRoot: string;
@@ -189,22 +206,97 @@ export interface MachineWriteRequest {
   readonly expectedVersion: AbsentVersion;
   /** The attempt's id; echoed in the result so the Worker can tie the answer. */
   readonly operationId: string;
-  /** The bytes to write, base64. */
-  readonly content: string;
-  /** The intent's content hash, `sha256:<hex>`; the machine checks the bytes. */
+  /** The intent's content hash, `sha256:<hex>`; the machine checks the bytes it writes. */
   readonly contentHash: string;
-}
+} & (
+  | {
+      /** The bytes to write, base64; the body carries them. */
+      readonly content: string;
+      readonly source?: undefined;
+    }
+  | {
+      /** The office cache entry to copy; the body carries no bytes. */
+      readonly source: OfficeCacheSource;
+    }
+);
 
-/** The write request as it arrives, parsed at the boundary. */
-export const MachineWriteRequestSchema: v.GenericSchema<unknown, MachineWriteRequest> = v.object({
-  op: v.literal("write"),
-  projectRoot: v.string(),
-  path: v.string(),
-  expectedVersion: v.pipe(v.string(), v.minLength(1)),
-  operationId: OperationIdSchema,
-  content: v.string(),
-  contentHash: v.pipe(v.string(), v.regex(/^sha256:[0-9a-f]{64}$/u)),
+/** The schema for {@link OfficeCacheSource}: the parts, each in its own spelling (§4). */
+export const OfficeCacheSourceSchema: v.GenericSchema<unknown, OfficeCacheSource> = v.object({
+  kind: v.literal("office-cache"),
+  workspaceId: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  pathHash: v.pipe(v.string(), v.regex(OFFICE_PATH_HASH_PATTERN, "a path hash is 16 hex")),
+  version: v.pipe(v.string(), v.regex(OFFICE_SHA256_PATTERN, "a version is sha256:<64 hex>")),
+  operation: v.picklist(["preview", "render"]),
+  paramsHash: v.pipe(v.string(), v.regex(OFFICE_PARAMS_HASH_PATTERN, "a params hash is 16 hex")),
 });
+
+/**
+ * The write request as it arrives, parsed at the boundary.
+ *
+ * @remarks
+ * **The bytes come from exactly one of two places, and never both.** A `content` write carries the
+ * bytes in the body as base64; a `source` write names a file the machine already holds, in the
+ * office cache, and carries none. The two are one union so a request that names both does not
+ * parse, and a request that names neither does not either: a body that carried both would leave
+ * the machine choosing which bytes to write.
+ *
+ * `contentHash` is required on both: the machine checks the bytes it is about to write against
+ * the hash the intent recorded, for a cache's bytes as much as for a body's.
+ */
+export const MachineWriteRequestSchema: v.GenericSchema<unknown, MachineWriteRequest> = v.pipe(
+  v.union([
+    v.strictObject({
+      op: v.literal("write"),
+      projectRoot: v.string(),
+      path: v.string(),
+      expectedVersion: v.pipe(v.string(), v.minLength(1)),
+      operationId: OperationIdSchema,
+      contentHash: v.pipe(v.string(), v.regex(/^sha256:[0-9a-f]{64}$/u)),
+      content: v.string(),
+    }),
+    v.strictObject({
+      op: v.literal("write"),
+      projectRoot: v.string(),
+      path: v.string(),
+      expectedVersion: v.pipe(v.string(), v.minLength(1)),
+      operationId: OperationIdSchema,
+      contentHash: v.pipe(v.string(), v.regex(/^sha256:[0-9a-f]{64}$/u)),
+      source: OfficeCacheSourceSchema,
+    }),
+  ]),
+  v.check(
+    (request) => !("content" in request && "source" in request),
+    "a write carries a content or a source, not both",
+  ),
+);
+
+/**
+ * One read from the office cache, as a write names its bytes (0241; D103).
+ *
+ * @remarks
+ * **Structured, never a key string.** The cache directory is built from these parts by
+ * {@link officeArtifactFile} and the same resolution the artifact route uses, so a `source` can
+ * only name a file inside the cache's version directory: the file name is derived from
+ * `operation` and `paramsHash`, not taken from the request.
+ *
+ * `version` is the artifact's content hash. The machine reads the cache's bytes, checks their
+ * SHA-256 against `contentHash` (the write's own field), and renames only then: a file that was
+ * replaced between the `office` answer and the write is refused as `engine_failed` rather than
+ * copied (0241 C8).
+ */
+export interface OfficeCacheSource {
+  readonly kind: "office-cache";
+  /** The workspace the artifact belongs to. */
+  readonly workspaceId: string;
+  /** The cache's path hash: 16 lowercase hex (§4). */
+  readonly pathHash: string;
+  /** The artifact's version: `sha256:<hex>`, the content hash (§4). */
+  readonly version: string;
+  /** The operation that produced it; with `paramsHash` it names the file. */
+  readonly operation: OfficeOperation;
+  /** The cache's params hash: 16 lowercase hex (§4). */
+  readonly paramsHash: string;
+}
 
 /** The unknown reasons a machine may answer with, taken from the core model. */
 export const MACHINE_WRITE_UNKNOWN_REASONS = MUTATION_UNKNOWN_REASONS;
@@ -314,3 +406,67 @@ export const MachineReadResultSchema: v.GenericSchema<unknown, MachineReadResult
   version: v.string(),
   content: v.string(),
 });
+
+/**
+ * The office operations the machine's `/rpc` accepts, as request and result pairs (§5).
+ *
+ * @remarks
+ * Two ops are added beside the file operations, and **the ones already there are unchanged**: an
+ * older Worker that never sends `office` still gets exactly the answers it did. The pair is
+ * written here, next to the rest of the RPC contract, but the vocabulary is
+ * `@hns/core/office`'s: the request is a job and the result is `OfficeResult`, so all four
+ * lanes read one definition.
+ *
+ * **Neither request carries bytes and neither result does.** A preview may be 50 MiB and a JSON
+ * answer is bounded at 256 KiB, so the artifact travels on `GET /artifact`, a binary route signed
+ * over the whole request target (`MACHINE_ARTIFACT_PATH` and `artifactTarget` in
+ * `./office.ts`). Adding `office` here does not widen the JSON surface; it adds a route.
+ */
+export interface MachineOfficeRequest {
+  readonly op: "office";
+  /** The job: what to read, what to do, and the bounds to enforce. */
+  readonly job: OfficeJob;
+}
+
+/** The office job as it arrives, parsed at the boundary with the contract's own schema. */
+export const MachineOfficeRequestSchema: v.GenericSchema<unknown, MachineOfficeRequest> = v.object({
+  op: v.literal("office"),
+  job: OfficeJobSchema,
+});
+
+/**
+ * The engine probe (§5): no parameters, one report.
+ *
+ * @remarks
+ * Its own op because nothing else reads the pack's manifest, and it does not take the office's
+ * single slot: a probe while a job runs answers the capability rather than `engine_busy`.
+ */
+export interface MachineOfficeEngineRequest {
+  readonly op: "officeEngine";
+}
+
+/** The engine probe as it arrives, parsed at the boundary: no key but the op. */
+export const MachineOfficeEngineRequestSchema: v.GenericSchema<
+  unknown,
+  MachineOfficeEngineRequest
+> = v.strictObject({ op: v.literal("officeEngine") });
+
+/**
+ * What the office ops answer (§5).
+ *
+ * @remarks
+ * An office job answers `OfficeResult` and a probe answers `OfficeEngineReport`; both are the
+ * contract's types, re-exported as the machine's results so a caller of this module does not have
+ * to name two entry points for one answer. A refusal (bad signature, busy slot, deadline) is a
+ * {@link MachineRefusalCode} beside these, never inside them: the two are different kinds of
+ * answer, one expected and typed per job, one about the request itself.
+ */
+export type MachineOfficeResult = OfficeResult;
+
+/** The office job answer as it arrives, parsed at the boundary. */
+export const MachineOfficeResultSchema: v.GenericSchema<unknown, MachineOfficeResult> =
+  OfficeResultSchema;
+
+/** The engine report as it arrives, parsed at the boundary. */
+export const MachineOfficeEngineResultSchema: v.GenericSchema<unknown, OfficeEngineReport> =
+  OfficeEngineReportSchema;

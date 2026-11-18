@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "id": "office-1764",
+  "input": {
+    "path": "売上.xlsx",
+    "version": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "format": "xlsx"
+  },
+  "limits": {
+    "maxInputBytes": 52428800,
+    "maxCells": 300000,
+    "maxPixels": 24000000,
+    "timeoutMs": 60000,
+    "maxOutputBytes": 104857600
+  },
+  "operation": "recalc"
+}

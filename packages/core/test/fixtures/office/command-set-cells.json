@@ -1,0 +1,27 @@
+{
+  "op": "setCells",
+  "sheet": "売上",
+  "cells": [
+    {
+      "ref": "B12",
+      "value": {
+        "kind": "formula",
+        "formula": "=SUM(B2:B11)"
+      }
+    },
+    {
+      "ref": "C12",
+      "value": {
+        "kind": "number",
+        "value": 1250.5
+      }
+    },
+    {
+      "ref": "D12",
+      "value": {
+        "kind": "text",
+        "text": "計"
+      }
+    }
+  ]
+}

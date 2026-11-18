@@ -21,6 +21,7 @@
 ```ts
 OFFICE_FORMATS     = ["docx", "xlsx", "pptx", "pdf"]
 OFFICE_OPERATIONS  = ["preview", "render", "inspect", "edit", "convert", "recalc"]
+PREVIEW_STATUSES   = ["unsupported", "disabled", "queued", "generating", "ready", "failed", "stale"]
 
 OFFICE_ERROR_CODES = [
   "unsupported_format", "unsupported_command", "input_too_large", "too_many_cells", "too_many_pixels",
@@ -56,7 +57,46 @@ interface OfficeInput {
   readonly version: string;       // workspace の版。実体は "sha256:<hex>"（内容ハッシュ）
   readonly format: OfficeFormat;
 }
+
+// operation が判別子。op の違う option を混ぜた job（preview + commands）は schema が拒否する。
+type OfficeJob = {
+  readonly v: 1;             // 契約の版。破壊は v2
+  readonly id: OperationId; // [A-Za-z0-9_-]{1,64}。監査（§7）と冪等な再試行が同じ id を名乗る
+  readonly input: OfficeInput;
+  readonly limits: OfficeLimits;  // server がポリシーから解決して載せる（§10）
+} & (
+  | { readonly operation: "preview"; readonly pages?: readonly (number | { from: number; to: number })[] }
+  | { readonly operation: "render";  readonly pages?: readonly (number | { from: number; to: number })[]; readonly width?: number }
+  | { readonly operation: "inspect" }
+  | { readonly operation: "edit"; readonly commands: readonly OfficeCommand[] }
+  | { readonly operation: "convert"; readonly to: "pdf" }
+  | { readonly operation: "recalc" }
+);
+
+type OfficeResult =
+  | { readonly ok: true; readonly artifact: OfficeArtifact; readonly stats: OfficeStats }
+  | { readonly ok: false; readonly error: OfficeErrorCode; readonly message: string };
+
+interface OfficeArtifact {
+  readonly workspaceId: string;
+  readonly pathHash: string;   // §4 の 16 hex
+  readonly version: string;    // "sha256:<hex>"
+  readonly file: string;       // "<operation>-<paramsHash>.<pdf|png>"（拡張子は operation から導く）
+  readonly sha256: string;     // バイト列の "sha256:<hex>"。write の rename 前に照合する（§5）
+  readonly bytes: number;
+  readonly pages?: number;     // PNG には無い
+  readonly missingFonts: readonly string[];   // 空 = 全部見つかった
+  readonly engine: { readonly id: string; readonly version: string };
+}
+
+interface OfficeStats { readonly ms: number; readonly peakRssMb: number; readonly cached: boolean }
 ```
+
+**schema は型に整合する**（`v.GenericSchema<unknown, T>`）。型の正本は `types.ts` ではなく
+`packages/core/src/office.ts` で、`@hns/core/office` として公開する。未知の `operation` や
+`error.code` は schema が拒否する（既定値に落とさない）。golden fixture は
+`packages/core/test/fixtures/office/` に**手で書いた JSON** として置く（型から起こすと契約と実装の
+ずれを検出できない）。
 
 ## 3. 状態
 
@@ -100,6 +140,8 @@ queued ─▶ generating ─▶ ready
 `length ≤ 8 MiB` を上限とする（`Limits.maxArtifactBytes` として別項目にする）。
 
 既存の `POST /rpc` の op 集合に 2 つ足す（`office` と `officeEngine`。`packages/core/src/machine.ts` の request/result 型にも足す）。
+**既存 op の受理と応答は変えない**（op の追加は後方互換）。バイナリは `GET /artifact` という HTTP route が運ぶので、
+**JSON の型（封筒）は 1 つも増やさない**。
 
 ```ts
 { op: "office"; job: OfficeJob }    // → OfficeResult（convert も cache に作るところまで）
@@ -113,12 +155,14 @@ queued ─▶ generating ─▶ ready
 
 キャッシュの読み出しは JSON の op ではなく、`GET /artifact`（バイナリ）で行う。
 
-- `convert` は cache に PDF を作り、`artifact.key` と bytes を返す（ROOT には書かない）。
+- `convert` は cache に PDF を作り、`artifact`（ファイル名と bytes）を返す（ROOT には書かない）。
   成果物として残すのは**別の 1 手**: 既存の `write` op の変種（`content` の代わりに構造化 `source`）で
   ROOT に資産化する。journal・版・`file.write` 監査は既存の write 経路がそのまま記録する。
   結果は `applied` / `conflict` / `unknown`（`operationId` で冪等、応答断は `unknown`、照合は stat）。
-  - `source` は **構造化**する: `{ kind: "office-cache", workspaceId, pathHash, version, file }`（文字列 key は持たない）。
-    サーバーは `office` の結果（`artifact` の構造化フィールド）から組み立てる。
+  - `source` は **構造化**する: `{ kind: "office-cache", workspaceId, pathHash, version, operation, paramsHash }`
+    （文字列 key は持たない。`file` ではなく operation と paramsHash を渡し、machine が cache の内側で
+    `officeArtifactFile` から名前を導く）。サーバーは `office` の結果（`artifact` の構造化フィールド）から組み立てる。
+    `source` と `content` は**排他**で、どちらか一方だけを載せる（両方・どちらも無しは schema が拒否する）。
     解決は `GET /artifact` と同じ 1 関数で cache 内に封じ込める（レビュー P3）。
   - `contentHash` は必須。machine は cache のバイト列の sha256 を照合してから rename する。
   - `office` の結果の `artifact` に `sha256` を含める。
@@ -138,6 +182,8 @@ queued ─▶ generating ─▶ ready
   - **cache のキーだけで解決**し、ROOT を読まない。`length` は最大 8 MiB、超えたら `invalid_request`。
   - server はバッファせず `ReadableStream` に流す。
 - `artifact` は構造化する: `{ workspaceId, pathHash, version, file, sha256, bytes, pages, missingFonts, engine }`。
+  `file` は `<operation>-<paramsHash>.pdf` か `<operation>-<paramsHash>.png`（拡張子は operation から導き、request の文字列は使わない）。
+  `artifact.key` は持たない：key はこの構造化フィールド（`workspaceId` / `pathHash` / `version` / `file`）から組み立てる。
 - `op: "office"` の JSON 応答に文書の中身を載せない（上記のメタだけ）。
   **JSON 応答の上限は 256 KiB**（`GET /artifact` は別 route なのでこの上限の外）。
 - **実行予算**: machine は 1 リクエストに `Limits.timeoutMs`（既定 30 秒）の deadline を張る。
@@ -219,7 +265,10 @@ type Mutation { requestDocumentPreview(path: String!): DocumentPreviewResult! }
 その他 → `engine_failed`。**入力の形式不正（`..` 入りキー等）は `invalid_request`** として扱い、封じ込めの実拒否（`path_denied`）と混ぜない。
 
 **サイズ・形式の分類**: 形式が対象外なら `UNSUPPORTED`、大きさ・セル・画素の超過は `FAILED`（code 付き）。
-両者を UI で混ぜない（レビュー B7）。
+両者を UI で混ぜない（レビュー B7）。`previewStatusOfError(code)`（core）が `unsupported_format` だけを
+`unsupported` に、他のすべてを `failed` にする。写像の表は core の
+`MACHINE_REFUSAL_TO_OFFICE_ERROR` が 1 か所で持ち、`MACHINE_REFUSALS` の全コードが載っていることを
+テストで固定する（新しい拒否コードが黙って `engine_failed` に落ちない）。
 
 ## 10. 上限（既定）
 
@@ -233,11 +282,26 @@ type Mutation { requestDocumentPreview(path: String!): DocumentPreviewResult! }
 | プレビュー PDF | 50 MiB / 300 ページ | ブラウザに渡す上限 |
 | PNG | 10 ページ / 幅 1600 px | 目視 QA の用途 |
 
-上限は `OfficeLimits` として job に載る。ポリシーで変えられるが、**既定は core の 1 か所だけ**。
+```ts
+export const DEFAULT_OFFICE_LIMITS = {
+  maxInputBytes: 50 * 1024 * 1024,     // 52_428_800
+  maxCells: 300_000,
+  maxPixels: 24_000_000,
+  timeoutMs: 60_000,
+  maxOutputBytes: 100 * 1024 * 1024,   // 104_857_600
+} as const satisfies OfficeLimits;
+```
+
+上限は `OfficeLimits` として job に載る。ポリシーで変えられるが、**既定は core の 1 か所だけ**
+（`DEFAULT_OFFICE_LIMITS`）。server も machine も既定を再計算しない。どの値も **0 や負値は拒否**
+（`OfficeLimitsSchema` が正の整数だけを受ける。0 は「無制限」ではなく設定の誤り）。
+machine 側の office 予算は `MIN_OFFICE_TIMEOUT_MS`（60 秒）未満なら起動時に落とし、job は
+`OFFICE_DEADLINE_MARGIN_MS`（5 秒）を引いた値に clamp する。
 
 ## 11. pack の能力（manifest）
 
-`capabilities.operations` は **実際に出せる op だけ**を並べる。v0.8.7 の release バイナリは
+manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capabilities.operations` は
+**実際に出せる op だけ**を並べる。v0.8.7 の release バイナリは
 `preview` / `render` / `convert` のみ。`inspect` / `edit` / `recalc` は sidecar（0242）が入ってから宣言する。
 
 ```json

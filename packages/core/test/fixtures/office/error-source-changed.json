@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "error": "source_changed",
+  "message": "the input's version is no longer the workspace's"
+}

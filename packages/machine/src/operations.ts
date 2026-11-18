@@ -736,6 +736,29 @@ function refusalForFileSystem(failure: FileSystemFailure): MachineRefusal {
 }
 
 /**
+ * The bytes one write op is to apply, from the one of its two sources it names.
+ *
+ * @param operation - The parsed write, whose `content` or `source` says where the bytes are.
+ * @returns The bytes to write.
+ * @throws {MachineRefusal} `invalid_request` for a `source` write: the office cache's bytes are
+ * the machine's cache (0236) and copying them into ROOT is 0241's, and neither exists here. A
+ * cache write is refused rather than written from nothing.
+ *
+ * @remarks
+ * The union's two members are told apart by which key arrived; the build's cache (0236) and the
+ * copy from it (0241) are what will turn the `source` branch into a read and a rename.
+ */
+function writeBytes(operation: MachineWriteRequest): Buffer {
+  if ("source" in operation) {
+    throw new MachineRefusal(
+      "invalid_request",
+      "a source write needs the office cache, which this machine does not serve",
+    );
+  }
+  return Buffer.from(operation.content, "base64");
+}
+
+/**
  * Apply one versioned write below ROOT.
  *
  * @param operation - The parsed write: the project, the path, the bytes, and
@@ -765,7 +788,7 @@ async function writePath(
   signal: AbortSignal,
 ): Promise<MachineWriteResult> {
   signal.throwIfAborted();
-  const content = Buffer.from(operation.content, "base64");
+  const content = writeBytes(operation);
   try {
     const outcome = await withWriteLock(
       root + "\0" + operation.projectRoot + "\0" + operation.path,

@@ -151,6 +151,9 @@ export function fakeMachine(): FakeMachine {
         }
         const key =
           request.projectRoot === "" ? request.path : request.projectRoot + "/" + request.path;
+        // The fake holds text only: a `source` write names the office cache, which these tests'
+        // workspace does not have, so it is the same refusal the machine gives (0241).
+        if ("source" in request) return failure("denied", "invalid_request", "invalid_request");
         const content = Buffer.from(request.content, "base64").toString("utf8");
         if (versionOfText(content) !== request.contentHash) {
           return failure("denied", "invalid_request", "invalid_request");

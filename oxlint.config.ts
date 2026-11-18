@@ -30,7 +30,12 @@ export default defineConfig({
   // entries on its row; add a package or edge here and in that table together (0042).
   overrides: [
     {
+      // Core's own tests are the one place an @hns import is allowed: 0234's "the production parts
+      // against each other" test reads the workspace's version function, so the two packages'
+      // spellings of a content hash are compared rather than copied. Production code in core still
+      // takes the block below, which has no exception.
       files: ["packages/core/**/*.ts"],
+      excludeFiles: ["packages/core/**/*.test.ts"],
       rules: {
         "no-restricted-imports": [
           "error",

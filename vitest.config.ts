@@ -24,6 +24,12 @@ const alias: readonly SourceAlias[] = [
     find: /^@hns\/core\/capability$/,
     replacement: source("./packages/core/src/capability/index.ts"),
   },
+  {
+    // The office contract (0234): four lanes import it, and a test must read the source rather
+    // than whatever the last build left in dist/.
+    find: /^@hns\/core\/office$/,
+    replacement: source("./packages/core/src/office.ts"),
+  },
   { find: /^@hns\/record$/, replacement: source("./packages/record/src/index.ts") },
   { find: /^@hns\/store$/, replacement: source("./packages/store/src/index.ts") },
   {

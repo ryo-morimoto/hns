@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "id": "office-1751",
+  "input": {
+    "workspaceId": "ws-1",
+    "path": "提案書.docx",
+    "version": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "format": "docx"
+  },
+  "limits": {
+    "maxInputBytes": 52428800,
+    "maxCells": 300000,
+    "maxPixels": 24000000,
+    "timeoutMs": 60000,
+    "maxOutputBytes": 104857600
+  },
+  "operation": "render",
+  "pages": [1],
+  "width": 1600
+}

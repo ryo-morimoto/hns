@@ -1,0 +1,7 @@
+{
+  "ref": "B12",
+  "value": {
+    "kind": "formula",
+    "formula": "=SUM(B2:B11)"
+  }
+}
