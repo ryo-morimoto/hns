@@ -164,7 +164,7 @@ test("the mirror push is the machine's op request, with the token in the signed 
   expect(body.ref).toBe(target.ref);
   // The credential is the body's, never a header: the agent's log redacts the body's token, and
   // nothing here can put it somewhere else.
-  for (const [, value] of request.headers) expect(value).not.toContain(target.token);
+  request.headers.forEach((value) => expect(value).not.toContain(target.token));
 });
 
 // Catches: a machine that says "mirrored" being recorded as a success by the transport (the

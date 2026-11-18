@@ -41,6 +41,18 @@ export const OBS_DETAIL_KEYS = [
   "mirror",
   "failure",
   "repos",
+  // The office job's row (0237, docs/office.md §7): the job's id, its operation, the file's path
+  // and version, the input's hash, the engine's version, how long it took, and the outcome.
+  // **Nothing of the document**: the key list is what keeps a cell value or a paragraph's text
+  // out of a line. The values the contract's `OfficeAuditDetail` holds are strings, numbers, and
+  // one status, so every key here is a plain detail value.
+  "jobId",
+  "operation",
+  "version",
+  "inputHash",
+  "engineVersion",
+  "ms",
+  "outcome",
 ] as const;
 /** One allowed detail key. */
 export type ObsDetailKey = (typeof OBS_DETAIL_KEYS)[number];

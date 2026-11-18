@@ -39,6 +39,7 @@ import {
   resolveTrails,
 } from "./resolvers.ts";
 import { policyQueryFields } from "./policy/schema.ts";
+import { officeFields } from "./office.ts";
 import { QueryReadError } from "./failures.ts";
 import {
   trailChangeView,
@@ -657,6 +658,9 @@ function buildQuery(
       // The policy fields own their payload and failure types (`./policy/`), so this root only
       // names them; their union member is `PolicyFailure`, not the `QueryFailure` above.
       ...policyQueryFields(),
+      // The office face (0237) owns its union (`DocumentPreviewResult` / `OfficeEngine`), whose
+      // failure member is `OfficeFailure` with the contract's own codes.
+      ...officeFields().query,
     },
   });
 }

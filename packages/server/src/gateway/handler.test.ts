@@ -349,9 +349,9 @@ test("no response carries the provider key", async () => {
   for (const response of cases) {
     const text = await response.text();
     expect(text).not.toContain(KEY);
-    for (const [name, value] of response.headers) {
+    response.headers.forEach((value, name) => {
       expect(name + ": " + value).not.toContain(KEY);
-    }
+    });
   }
 });
 

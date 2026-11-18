@@ -5,6 +5,7 @@ import { requestGrantModule } from "./grants.ts";
 import { machinesModule } from "./machines.ts";
 import { trailModule } from "./trail.ts";
 import { reviewModule } from "./review.ts";
+import { officeModule } from "./office.ts";
 import { sendMessageModule } from "./send-message.ts";
 import { policyModule } from "../policy/schema.ts";
 
@@ -56,6 +57,9 @@ export const MUTATION_MODULES: readonly MutationModule[] = [
   // The review face (0232, D104): the decision, the finding, and the hunk actions. Its module is
   // last so the published SDL's Mutation grows at the end.
   reviewModule(),
+  // The office preview request (0237): one row and an alarm, never a job. It shares the office
+  // types the Query root declared, so the union has one instance in the schema.
+  officeModule(),
 ];
 
 /**

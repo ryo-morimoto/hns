@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { versionOf } from "@hns/workspace";
 import * as v from "valibot";
 import { describe, expect, expectTypeOf, test } from "vitest";
+import { OperationIdSchema } from "./codecs.ts";
 import { MACHINE_REFUSALS, MachineWriteRequestSchema } from "./machine.ts";
 import type { MachineWriteRequest, MachineWriteResult } from "./machine.ts";
 import {
@@ -41,10 +42,16 @@ import {
   officeCachePath,
   officeCanonicalize,
   officeErrorOfRefusal,
+  isPreviewTerminal,
+  officeAuditDetail,
+  officeFormatOfPath,
   officeParamsHash,
   officePathHash,
   parseArtifactQuery,
+  parsePreviewQuery,
+  PREVIEW_TERMINAL_STATUSES,
   previewStatusOfError,
+  requestPreviewStatus,
   sha256Hex,
 } from "./office.ts";
 import type {
@@ -754,4 +761,114 @@ test("the artifact's own fields build the target and the path the machine verifi
   expect(officeCachePath({ ...result.artifact.key, paramsHash: sameKey })).toMatch(
     /^ws-1\/[0-9a-f]{16}\/sha256:[0-9a-f]{64}\/preview-[0-9a-f]{16}\/pdf$/u,
   );
+});
+
+/** The version the row helpers' tests name: a content hash, in the one spelling. */
+const fixtureVersion = "sha256:" + "0".repeat(64);
+
+// Catches: `stale` folded into a terminal state, so an alarm that still owes a retry is treated as
+// finished and the row never settles (§3, C10).
+test("the terminal preview states are the four the request or the alarm writes", () => {
+  for (const status of PREVIEW_STATUSES) {
+    const terminal =
+      status === "ready" ||
+      status === "failed" ||
+      status === "unsupported" ||
+      status === "disabled";
+    expect(isPreviewTerminal(status)).toBe(terminal);
+  }
+  expect(PREVIEW_TERMINAL_STATUSES).toStrictEqual(["unsupported", "disabled", "ready", "failed"]);
+});
+
+// Catches: a machine that cannot be reached being recorded as `disabled` — the state that tells a
+// person to install a pack that may already be installed (§3, C10).
+test("an engine the machine reports absent is disabled, and a reachable one is queued", () => {
+  expect(requestPreviewStatus(undefined)).toBe("queued");
+  expect(requestPreviewStatus({ kind: "engine" })).toBe("disabled");
+  expect(requestPreviewStatus({ kind: "format" })).toBe("unsupported");
+});
+
+test("a path's format is its last segment's extension, in the contract's vocabulary", () => {
+  expect(officeFormatOfPath("提案書.docx")).toBe("docx");
+  expect(officeFormatOfPath("a/b/Book.XLSX")).toBe("xlsx");
+  expect(officeFormatOfPath("deck.pptx")).toBe("pptx");
+  expect(officeFormatOfPath("scan.pdf")).toBe("pdf");
+  expect(officeFormatOfPath("a.docx/notes")).toBeUndefined();
+  expect(officeFormatOfPath("README")).toBeUndefined();
+  expect(officeFormatOfPath("a.odt")).toBeUndefined();
+  expect(officeFormatOfPath("a.")).toBeUndefined();
+});
+
+// Catches: an audit row that carries the document (a path is not the document; a value would be).
+test("the audit detail carries the attempt and nothing of the document", async () => {
+  const detail = officeAuditDetail({
+    jobId: v.parse(OperationIdSchema, "office-1"),
+    operation: "preview",
+    path: "提案書.docx",
+    version: fixtureVersion,
+    inputHash: await sha256Hex("job"),
+    engineVersion: "0.8.7",
+    ms: 12,
+    outcome: "ready",
+  });
+  expect(Object.keys(detail).sort()).toStrictEqual([
+    "engineVersion",
+    "inputHash",
+    "jobId",
+    "ms",
+    "operation",
+    "outcome",
+    "path",
+    "version",
+  ]);
+  // No engine version means the key is absent, not an empty string the log would record.
+  expect(
+    Object.hasOwn(
+      officeAuditDetail({
+        jobId: v.parse(OperationIdSchema, "office-2"),
+        operation: "preview",
+        path: "a.docx",
+        version: fixtureVersion,
+        inputHash: "x",
+        ms: 1,
+        outcome: "stale",
+      }),
+      "engineVersion",
+    ),
+  ).toBe(false);
+});
+
+test("a preview read's query is the workspace, the path, and the version, and no other key", () => {
+  const query = parsePreviewQuery([
+    ["workspaceId", "ws-1"],
+    ["path", "提案書.docx"],
+    ["v", fixtureVersion],
+  ]);
+  expect(query).toStrictEqual({
+    workspaceId: "ws-1",
+    path: "提案書.docx",
+    version: fixtureVersion,
+  });
+  expect(() =>
+    parsePreviewQuery([
+      ["workspaceId", "ws-1"],
+      ["path", "a.docx"],
+      ["v", fixtureVersion],
+      ["url", "x"],
+    ]),
+  ).toThrow();
+  expect(() =>
+    parsePreviewQuery([
+      ["workspaceId", "ws-1"],
+      ["path", "a.docx"],
+      ["version", fixtureVersion],
+    ]),
+  ).toThrow();
+  expect(() =>
+    parsePreviewQuery([
+      ["workspaceId", "ws-1"],
+      ["path", "a.docx"],
+      ["v", "v1"],
+    ]),
+  ).toThrow();
 });

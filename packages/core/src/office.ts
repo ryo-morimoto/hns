@@ -1447,3 +1447,207 @@ const ArtifactQuerySchema: v.GenericSchema<unknown, ArtifactQuery> = v.object({
 
 /** The names of the routes the office contract owns; the machine serves them, the server signs them. */
 export const OFFICE_MACHINE_PATHS = [MACHINE_ARTIFACT_PATH] as const satisfies readonly string[];
+
+/**
+ * The statuses a preview row ends in: the request or the alarm writes them, and nothing reopens
+ * them (§3).
+ *
+ * @remarks
+ * A terminal row is **replaced** by the next request rather than updated, which is what lets a
+ * person ask again after an operator installs the pack: the row that said `disabled` is gone and
+ * a new `queued` one is in its place.
+ */
+export const PREVIEW_TERMINAL_STATUSES = ["unsupported", "disabled", "ready", "failed"] as const;
+
+/** One terminal preview state. */
+export type PreviewTerminalStatus = (typeof PREVIEW_TERMINAL_STATUSES)[number];
+
+/**
+ * Whether a row in this state is finished with (§3).
+ *
+ * @param status - A preview state.
+ * @returns `true` for `ready`, `failed`, `unsupported`, and `disabled`; `false` for `queued`,
+ * `generating`, and `stale`.
+ *
+ * @remarks
+ * `stale` is **not** terminal: only the alarm settles it, by asking again and then answering
+ * `ready` or `failed` (§3). A resolver reads this and returns the state; it never decides it.
+ */
+export function isPreviewTerminal(status: PreviewStatus): status is PreviewTerminalStatus {
+  return PREVIEW_TERMINAL_STATUSES.some((terminal) => terminal === status);
+}
+
+/**
+ * Why a request cannot run, when it cannot (§3).
+ *
+ * @remarks
+ * `format` is "the pack does not handle this kind of file" (`unsupported_format`);
+ * `engine` is "this machine has no pack to run" (a missing manifest, or no office at all).
+ * Neither is a failure of the job: an absent engine is a state of the deployment, not of the file.
+ */
+export type PreviewRequestRefusal = { readonly kind: "format" } | { readonly kind: "engine" };
+
+/**
+ * Which of the seven states a request writes before the alarm runs (§3).
+ *
+ * @param refusal - Why the request cannot run, or undefined when it can.
+ * @returns `unsupported` or `disabled` for a request that must not arm the alarm, and `queued`
+ * when the machine may still be asked.
+ *
+ * @remarks
+ * **The engine's absence is `disabled`, and the machine not answering is not.** A machine that
+ * cannot be reached says nothing about whether it has a pack; the contract keeps that a `queued`
+ * job the alarm later finds `stale` (and finally `failed` with `engine_unavailable`), because
+ * turning an outage into `disabled` would tell a person to configure what is already configured
+ * (§3, C10).
+ */
+export function requestPreviewStatus(refusal: PreviewRequestRefusal | undefined): PreviewStatus {
+  if (refusal === undefined) return "queued";
+  return refusal.kind === "engine" ? "disabled" : "unsupported";
+}
+
+/**
+ * The format a path names, from its extension, or undefined for one the contract does not serve.
+ *
+ * @param path - A workspace-relative path, as a person sees it (`提案書.docx`).
+ * @returns The {@link OfficeFormat} the extension names, in lowercase, or undefined.
+ *
+ * @remarks
+ * Only `docx`, `xlsx`, `pptx`, and `pdf` are named (§1). An `odt` is not an error of the path:
+ * the request answers it with an `unsupported` row rather than a row that never runs. The
+ * extension is read from the last `/`-separated segment, so a directory called `a.docx` does not
+ * decide the format of `a.docx/notes`.
+ */
+export function officeFormatOfPath(path: string): OfficeFormat | undefined {
+  const segment = path.slice(path.lastIndexOf("/") + 1);
+  const dot = segment.lastIndexOf(".");
+  if (dot === -1) return undefined;
+  const extension = segment.slice(dot + 1).toLowerCase();
+  return OFFICE_FORMATS.find((format) => format === extension);
+}
+
+/**
+ * The row the `office.job` audit event records (§7).
+ *
+ * @remarks
+ * **Nothing of the document is here.** The path and the version name which file, the input hash
+ * says which request, and the outcome says what happened; a cell's value, a paragraph's text, and
+ * a preview's bytes are never in an audit row. The row is built by {@link officeAuditDetail}, so
+ * the server's audit and its tests read one shape.
+ */
+export interface OfficeAuditDetail {
+  /** The job id the machine ran, or the attempt's id when no machine answer exists. */
+  readonly jobId: string;
+  /** The operation the attempt asked for. */
+  readonly operation: OfficeOperation;
+  /** The workspace-relative path the job read. */
+  readonly path: string;
+  /** The version it read: `sha256:<hex>`. */
+  readonly version: string;
+  /** SHA-256 of the job as JSON, so two requests that differed are two rows. */
+  readonly inputHash: string;
+  /** The engine's version; absent when no engine answered. */
+  readonly engineVersion?: string | undefined;
+  /** Wall-clock milliseconds the attempt took. */
+  readonly ms: number;
+  /** The state the attempt ended in: `ready`, `failed`, or `stale`. */
+  readonly outcome: PreviewStatus;
+}
+
+/** The audit line one office attempt writes, as JSON values (§7). */
+export interface OfficeAuditLine {
+  readonly jobId: string;
+  readonly operation: OfficeOperation;
+  readonly path: string;
+  readonly version: string;
+  readonly inputHash: string;
+  /** The engine's version; absent when no engine answered. */
+  readonly engineVersion?: string | undefined;
+  readonly ms: number;
+  readonly outcome: PreviewStatus;
+}
+
+/**
+ * The audit detail for one office attempt, as the event log carries it (§7).
+ *
+ * @param detail - The fields of {@link OfficeAuditDetail}.
+ * @returns The same fields as JSON values, with an absent engine version left out.
+ *
+ * @remarks
+ * This is the one place an {@link OfficeAuditDetail} becomes JSON, so a field added to the detail
+ * is added to the log by one edit, and a caller cannot widen the row past the type.
+ */
+export function officeAuditDetail(detail: OfficeAuditDetail): OfficeAuditLine {
+  // The engine's version is absent when no engine answered; adding the key only then keeps the
+  // line from carrying an empty string a reader would take for a version.
+  const engine = detail.engineVersion === undefined ? {} : { engineVersion: detail.engineVersion };
+  return {
+    jobId: detail.jobId,
+    operation: detail.operation,
+    path: detail.path,
+    version: detail.version,
+    inputHash: detail.inputHash,
+    ...engine,
+    ms: detail.ms,
+    outcome: detail.outcome,
+  };
+}
+
+/**
+ * The route a session reads a preview's bytes on (§6).
+ *
+ * @remarks
+ * Its query is `workspaceId`, `path`, and `v` (the version), read by {@link parsePreviewQuery};
+ * the path travels as a query value so no `/` encoding rule is invented for it. The route is
+ * authorised by the session cookie, and the bytes come from the machine's
+ * {@link MACHINE_ARTIFACT_PATH} over a range: no signed URL is ever made.
+ */
+export const OFFICE_PREVIEW_PATH = "/api/office/preview" as const;
+
+/** The one query a preview read names: the workspace, the file, and its version (§6). */
+export interface PreviewQuery {
+  readonly workspaceId: string;
+  readonly path: string;
+  readonly version: string;
+}
+
+/** The keys a preview read's query may name, and no others. */
+const PREVIEW_QUERY_KEYS: ReadonlySet<string> = new Set(["workspaceId", "path", "v"]);
+
+/**
+ * Parse one preview read's query (§6).
+ *
+ * @param entries - The decoded query pairs, as they appeared.
+ * @returns The workspace, the path, and the version.
+ * @throws Error when a key is missing, repeated, or outside its rule.
+ *
+ * @remarks
+ * Strict, like {@link parseArtifactQuery}: an unknown key, a repeat, or a malformed version is
+ * refused rather than ignored. The caller has already authorised the request; this only reads it.
+ */
+export function parsePreviewQuery(entries: readonly (readonly [string, string])[]): PreviewQuery {
+  const single: Record<string, string> = {};
+  for (const [key, value] of entries) {
+    if (key in single) throw new Error("the preview query repeats " + key);
+    if (!PREVIEW_QUERY_KEYS.has(key)) throw new Error("the preview query has no key " + key);
+    single[key] = value;
+  }
+  const required = (key: string): string => {
+    const value = single[key];
+    if (value === undefined) throw new Error("the preview query has no " + key);
+    return value;
+  };
+  const query = {
+    workspaceId: required("workspaceId"),
+    path: required("path"),
+    version: required("v"),
+  };
+  return v.parse(PreviewQuerySchema, query);
+}
+
+/** The schema for {@link PreviewQuery}: a workspace name, a path, and a content hash (§6). */
+const PreviewQuerySchema: v.GenericSchema<unknown, PreviewQuery> = v.object({
+  workspaceId: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  path: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)),
+  version: v.pipe(v.string(), v.regex(OFFICE_SHA256_PATTERN, "a version is sha256:<64 hex>")),
+});

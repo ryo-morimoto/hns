@@ -30,6 +30,7 @@ const SEAMS: Record<keyof SessionDependencies, true> = {
   now: true,
   upgradeResponse: true,
   machineFetch: true,
+  officeAgentUrl: true,
   open: true,
   cost: true,
 };

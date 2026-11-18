@@ -8,6 +8,7 @@ import {
   OBS_RETENTION_DAYS,
   parseObsLog,
   type EventLevel,
+  type EventName,
   type ObsLogEntry,
   type ObsMetrics,
 } from "@hns/core";
@@ -17,6 +18,25 @@ import { withRequestIdHeader } from "../edge/correlation.ts";
 
 /** How often the append path runs the retention delete; the cap delete runs only when exceeded. */
 export const OBS_PRUNE_EVERY = 256;
+
+/**
+ * The detail keys one `office.job` line may carry (0237 §7).
+ *
+ * @remarks
+ * The job's id, its operation, the file's version, the input's hash, the engine's version, how
+ * long it took, and the outcome. **Nothing of the document**: no bytes, no cell value, no
+ * paragraph, and no message the engine wrote about the content. The file's name is the line's own
+ * `path` column, so it is not repeated in the detail.
+ */
+export const OFFICE_JOB_DETAIL_KEYS = [
+  "jobId",
+  "operation",
+  "version",
+  "inputHash",
+  "engineVersion",
+  "ms",
+  "outcome",
+] as const;
 
 /** The values the Durable Object SQL binding accepts and returns. */
 type SqlValue = ArrayBuffer | string | number | null;
@@ -58,6 +78,27 @@ export interface ObsStoreOptions {
   readonly maxEvents?: number | undefined;
   /** Appends between retention deletes; defaults to OBS_PRUNE_EVERY. */
   readonly pruneEvery?: number | undefined;
+}
+
+/**
+ * Whether one event may carry this detail key (0237).
+ *
+ * @param event - The event's name.
+ * @param key - The detail key the line would carry.
+ * @returns False for `office.job` with a key outside its own allowlist (see
+ * {@link OFFICE_JOB_DETAIL_KEYS}), true otherwise.
+ *
+ * @remarks
+ * The log's detail is globally allowlisted so a line can never carry content; `office.job` adds
+ * a rule of its own because its row is the one a person's document is nearest to. `path` is
+ * allowed **as a key**: its value is the file's name, which the audit exists to record. The list
+ * is closed, so a line cannot carry a value the contract does not name.
+ */
+export function officeDetailAllowed(event: EventName, key: string): boolean {
+  if (event !== "office.job") return true;
+  // SAFETY: the constant is a readonly tuple of string literals; viewing it as strings is what
+  // compares it with a key the log's own allowlist already produced.
+  return (OFFICE_JOB_DETAIL_KEYS as readonly string[]).some((allowed) => allowed === key);
 }
 
 /**
@@ -171,6 +212,13 @@ export function createObsStore(storage: ObsStorage, options: ObsStoreOptions = {
   return {
     append(entry) {
       const clean = parseObsLog(entry);
+      // `office.job` carries its own keys, and the check runs **before** the row is written: a
+      // line that could carry a cell value is refused here rather than stored and pruned later.
+      for (const key of Object.keys(clean.detail ?? {})) {
+        if (!officeDetailAllowed(clean.event, key)) {
+          throw new Error("the " + clean.event + " event has no detail key " + key);
+        }
+      }
       sql.exec(
         "INSERT INTO obs_events (at, level, event, hop, request_id, path, status, duration_ms, detail) " +
           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

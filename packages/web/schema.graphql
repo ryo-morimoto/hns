@@ -297,6 +297,8 @@ type Query {
   machines(first: Int): MachineListResult!
   policyRevisions(workspaceId: ID!, first: Int): PolicyRevisionListResult!
   policyProposals(workspaceId: ID!, status: PolicyProposalStatus): PolicyProposalListResult!
+  documentPreview(path: String!, workspaceId: String): DocumentPreviewResult!
+  officeEngine(workspaceId: String): OfficeEngine!
 }
 
 union ProjectListResult = ProjectList | QueryFailure
@@ -422,6 +424,65 @@ type PolicyDiffAtom {
   value: String!
 }
 
+union DocumentPreviewResult = DocumentPreview | OfficeFailure
+
+type DocumentPreview {
+  path: String!
+  version: String!
+  status: PreviewStatus!
+  url: String
+  pages: Int
+  bytes: Int
+  missingFonts: [String!]!
+  engine: String
+  generatedAt: String
+  error: OfficeFailure
+}
+
+enum PreviewStatus {
+  UNSUPPORTED
+  DISABLED
+  QUEUED
+  GENERATING
+  READY
+  FAILED
+  STALE
+}
+
+type OfficeFailure {
+  code: OfficeErrorCode!
+  message: String!
+}
+
+enum OfficeErrorCode {
+  UNSUPPORTED_FORMAT
+  UNSUPPORTED_COMMAND
+  INPUT_TOO_LARGE
+  INPUT_TOO_LARGE_ARCHIVE
+  TOO_MANY_PAGES
+  TOO_MANY_CELLS
+  TOO_MANY_PIXELS
+  ENGINE_UNAVAILABLE
+  ENGINE_TIMEOUT
+  ENGINE_FAILED
+  ENGINE_BUSY
+  OUTPUT_TOO_LARGE
+  SOURCE_CHANGED
+  NOT_AUTHORIZED
+  CANCELLED
+}
+
+union OfficeEngine = OfficeEngineAvailable | OfficeEngineUnavailable | OfficeFailure
+
+type OfficeEngineAvailable {
+  id: String!
+  version: String!
+}
+
+type OfficeEngineUnavailable {
+  reason: String!
+}
+
 type Mutation {
   createProject(name: String!, workspaceRoot: String!): CreateProjectResult!
   proposePolicy(input: PolicyProposalInput!): ProposePolicyResult!
@@ -437,6 +498,7 @@ type Mutation {
   keepHunk(input: ReviewHunkInput!): ReviewHunkResult!
   undoHunk(input: ReviewHunkInput!): ReviewHunkResult!
   applyHunk(input: ReviewHunkInput!): ReviewHunkResult!
+  requestDocumentPreview(path: String!, workspaceId: String): DocumentPreviewResult!
 }
 
 union CreateProjectResult = CreateProjectPayload | MutationFailure

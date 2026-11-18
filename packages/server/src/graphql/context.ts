@@ -41,6 +41,10 @@ import { probeAll } from "../machines/probe.ts";
 import { policyFaceOver, type PolicyFace } from "./policy/face.ts";
 import { grantPortOver, type GrantPort } from "./grants.ts";
 import { conversationPortOver } from "./send-message-port.ts";
+import { NO_OFFICE_PORT } from "./office-port.ts";
+import type { OfficePort } from "./office.ts";
+export type { OfficePort };
+
 import { grantInternalToken } from "../do/grant-subject.ts";
 
 /** The send port a resolver calls (0270n); its production implementation is `send-message-port.ts`. */
@@ -423,6 +427,15 @@ export interface GraphQLContext {
    */
   readonly messages: MessagePort;
   /**
+   * The office face's rows and engine (0237).
+   *
+   * @remarks
+   * A port like the others: production forwards to the workspace's Session object (which owns the
+   * preview rows, the alarm that runs them, and the machine wire), and a resolver test replaces
+   * it. The two reads and the request are the whole office surface of the GraphQL endpoint.
+   */
+  readonly office: OfficePort;
+  /**
    * The policy service's operations, as the policy fields call them.
    *
    * @remarks
@@ -457,6 +470,15 @@ export interface GraphQLContextOptions {
   readonly policy: PolicyFace | undefined;
   /** Replace the grant port; production builds it over the request's D1 and the SESSION binding. */
   readonly grants?: GrantPort | undefined;
+  /**
+   * Replace the office port (0237); production forwards to the workspace's Session object.
+   *
+   * @remarks
+   * A test that asks `documentPreview` or `requestDocumentPreview` without a Durable Object
+   * replaces this one port; the resolvers' own checks (the workspace, the union, the failure)
+   * are what it then observes.
+   */
+  readonly office?: OfficePort | undefined;
   /**
    * Replace the send port; production builds it over the request's D1 and the SESSION binding.
    *
@@ -805,6 +827,10 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       store: () => storeWith(options.env, options.requestId),
       signal: options.signal ?? new AbortController().signal,
     });
+  // The office port is the request's own (0237). The production caller (`handler.ts`) passes
+  // `officePortOver`; a context built without one gets the port that refuses every call, so a
+  // deployment with no office answers the failure union rather than reaching for a binding.
+  const office: OfficePort = options.office ?? NO_OFFICE_PORT;
   const reviewOverrides = options.review ?? {};
   const review = defaultReview(options.env, options.requestId);
   const readOverrides = options.reads ?? {};
@@ -846,5 +872,6 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
     review: {
       hunk: reviewOverrides.hunk ?? review.hunk,
     },
+    office,
   };
 }

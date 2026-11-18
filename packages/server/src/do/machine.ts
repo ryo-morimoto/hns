@@ -8,6 +8,13 @@ import {
   SIGNED_HEADER_BY_FIELD,
   signatureMessage,
 } from "@hns/core";
+import { OfficeEngineReportSchema, OfficeResultSchema, artifactTarget } from "@hns/core/office";
+import type {
+  ArtifactTargetParams,
+  OfficeEngineReport,
+  OfficeJob,
+  OfficeResult,
+} from "@hns/core/office";
 import type {
   CheckpointPrepareResult,
   MachineReadResult,
@@ -260,7 +267,64 @@ export interface MachineFiles {
     request: { readonly runId: string; readonly commit: string; readonly target: MirrorTarget },
     call: MachineCall,
   ): Promise<MachineMirrorAnswer>;
+  /**
+   * Ask what office engine this machine has (0237).
+   *
+   * @remarks
+   * The machine's `officeEngine` op reads the pack's manifest: it does not take the office slot,
+   * so a probe answers while a job runs. A machine with no office answers `available: false`, and a
+   * machine that cannot be reached is `unavailable` — the two are **not** the same answer (C5,
+   * C10): only the first means "configure a pack".
+   *
+   * Optional, so a port with no office (a test, or a deployment without a pack) is still a valid
+   * one; the Workspace reads an absent member as "this machine has no office".
+   */
+  officeEngine?(call: MachineCall): Promise<MachineFilesAnswer<OfficeEngineReport>>;
+  /**
+   * Run one office job on the machine (`op: "office"`).
+   *
+   * @remarks
+   * The job's bytes never come back through this call: a success names its artifact, and the
+   * bytes are read over the signed {@link readArtifact}. A refusal the machine answers is a
+   * {@link MachineFilesAnswer} failure; a result that parses is the contract's {@link OfficeResult},
+   * whose own `ok: false` member is an expected failure of the job rather than of the call.
+   */
+  office?(job: OfficeJob, call: MachineCall): Promise<MachineFilesAnswer<OfficeResult>>;
+  /**
+   * Read one artifact range over the machine's signed `GET /artifact` (0237).
+   *
+   * @param request - The cache key's parts and the range.
+   * @param call - The machine, the correlation id, and the deadline.
+   * @param signal - Aborted when the reader stops reading (the browser disconnected).
+   * @returns The range's bytes as the machine served them, or why none arrived.
+   *
+   * @remarks
+   * **The signature covers the whole request target**, so the URL is built by the contract's one
+   * function ({@link artifactTarget}) from the parts, signed as those exact bytes, and the machine
+   * verifies the bytes it received against the same function. The response is **not** buffered
+   * here: the body is handed back as a stream, which is what lets a 31 MB preview cross the Worker
+   * without ever being held in it (C8).
+   */
+  readArtifact?(
+    request: ArtifactTargetParams,
+    call: MachineCall,
+    signal: AbortSignal,
+  ): Promise<ArtifactReadAnswer>;
 }
+
+/** One artifact read's answer: the machine's stream, or why none arrived. */
+export type ArtifactReadAnswer =
+  | {
+      readonly ok: true;
+      /** The answer's status: 200 for a whole read, 206 for a range. */
+      readonly status: number;
+      readonly body: ReadableStream<Uint8Array>;
+      /** The answer's `content-length`, when the machine stated one. */
+      readonly length: number | undefined;
+      /** The answer's `content-range`, when it stated one. */
+      readonly contentRange: string | undefined;
+    }
+  | { readonly ok: false; readonly detail: string };
 
 /**
  * What a Worker needs to sign a request to a machine.
@@ -327,6 +391,9 @@ function toBase64Url(bytes: ArrayBuffer): string {
  * @param body - The exact body bytes that will be sent.
  * @param requestId - The correlation id; it is forwarded, never signed.
  * @param now - The clock the timestamp comes from.
+ * @param method - The method the signature names; `POST` for the RPC, `GET` for `/artifact`.
+ * @param path - The request target the signature names: the RPC path, or the artifact's whole
+ * `/artifact?…` target, query included (0237).
  * @returns The headers of one signed request.
  * @throws Error when the control-plane key is not a 32-byte Ed25519 seed.
  *
@@ -342,6 +409,8 @@ async function signedHeaders(
   body: Uint8Array,
   requestId: string,
   now: number,
+  method: string = "POST",
+  path: string = MACHINE_RPC_PATH,
 ): Promise<Headers> {
   const timestamp = String(now);
   const nonce = crypto.randomUUID();
@@ -351,8 +420,8 @@ async function signedHeaders(
     seq: WORKER_SEQ,
     timestamp,
     nonce,
-    method: "POST",
-    path: MACHINE_RPC_PATH,
+    method,
+    path,
     bodyHash: await sha256Hex(body),
   };
   const key = await signingKey(target.controlPlaneKey);
@@ -391,7 +460,8 @@ export function createSignedMachineFiles(
   options: { readonly now?: (() => number) | undefined } = {},
 ): MachineFiles {
   const clock = options.now ?? (() => Date.now());
-  const url = target.agentUrl.replace(/\/+$/u, "") + MACHINE_RPC_PATH;
+  const agentUrl = target.agentUrl.replace(/\/+$/u, "");
+  const url = agentUrl + MACHINE_RPC_PATH;
 
   async function send(body: string, call: MachineCall): Promise<MachineFilesAnswer<unknown>> {
     const bytes = new TextEncoder().encode(body);
@@ -472,6 +542,74 @@ export function createSignedMachineFiles(
       } catch {
         return { ok: false, failure: "unavailable", detail: "unparseable checkpoint result" };
       }
+    },
+    async officeEngine(call) {
+      const answer = await send(JSON.stringify({ op: "officeEngine" }), call);
+      if (!answer.ok) return answer;
+      try {
+        return { ok: true, result: v.parse(OfficeEngineReportSchema, answer.result) };
+      } catch {
+        return { ok: false, failure: "unavailable", detail: "unparseable engine report" };
+      }
+    },
+    async office(job, call) {
+      const answer = await send(JSON.stringify({ op: "office", job }), call);
+      if (!answer.ok) return answer;
+      try {
+        return { ok: true, result: v.parse(OfficeResultSchema, answer.result) };
+      } catch {
+        return { ok: false, failure: "unavailable", detail: "unparseable office result" };
+      }
+    },
+    async readArtifact(request, call, signal) {
+      // The target is the canonical one and nothing else: the machine refuses any other spelling
+      // of the same query, so building it here from the parts is what makes the signature mean
+      // the read (docs/office.md §5).
+      const path = artifactTarget(request);
+      const body = new Uint8Array(0);
+      let headers: Headers;
+      try {
+        headers = await signedHeaders(
+          target,
+          call.machineId,
+          body,
+          call.requestId,
+          clock(),
+          "GET",
+          path,
+        );
+      } catch (error) {
+        return {
+          ok: false,
+          detail: error instanceof Error ? error.name + ": " + error.message : "signing",
+        };
+      }
+      let response: Response;
+      try {
+        response = await fetch(agentUrl + path, {
+          method: "GET",
+          headers,
+          redirect: "manual",
+          signal,
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          detail: error instanceof Error ? error.name + ": " + error.message : "transport",
+        };
+      }
+      if (!response.ok || response.body === null) {
+        // A refusal is the machine's own word (a missing entry, a bad range); nothing is read.
+        return { ok: false, detail: String(response.status) };
+      }
+      const length = Number(response.headers.get("content-length") ?? "");
+      return {
+        ok: true,
+        status: response.status,
+        body: response.body,
+        length: Number.isFinite(length) && length >= 0 ? length : undefined,
+        contentRange: response.headers.get("content-range") ?? undefined,
+      };
     },
     async mirror(request, call) {
       // The same signed POST as every other operation, with the token in the body that is signed

@@ -8,7 +8,7 @@ import {
   type AgentSession,
   type SessionOptions,
 } from "@hns/agent/session";
-import { isoTimestamp, type LiveSendRejectionCode } from "@hns/core";
+import { isoTimestamp, obsPath, type LiveSendRejectionCode } from "@hns/core";
 import { migrateStore } from "@hns/store";
 import { openConversationIndex } from "@hns/store/conversation-index";
 import { createCostGate, type CostGate } from "../cost/index.ts";
@@ -60,7 +60,41 @@ import {
   type ToolRelayOutcome,
 } from "./session-tools.ts";
 import { GrantedAnswerSchema } from "@hns/workspace/protocol";
-import { createSignedMachineFiles, type MachineFiles } from "./machine.ts";
+import { createSignedMachineFiles, type MachineCall, type MachineFiles } from "./machine.ts";
+import { createOfficeRows } from "./office-rows.ts";
+import {
+  OFFICE_CALL_TIMEOUT_MS,
+  createOfficePreview,
+  documentPreviewView,
+  officeFailureOf,
+  probeOfficeEngine,
+} from "./office-job.ts";
+import type { OfficeEngineView } from "./office-job.ts";
+import { officePathOf } from "./office-path.ts";
+import { artifactStream } from "./office-artifact.ts";
+
+import type {
+  DocumentPreviewView,
+  OfficeEngineProbeAnswer,
+  OfficeFailureView,
+  OfficePreviewFace,
+} from "./office-job.ts";
+import {
+  OFFICE_PREVIEW_PATH,
+  officeArtifactContentType,
+  officeAuditDetail,
+  parsePreviewQuery,
+} from "@hns/core/office";
+import type { PreviewQuery } from "@hns/core/office";
+
+/** The internal routes the GraphQL face reaches the office rows on (0237). */
+const OFFICE_RPC_PREFIX = "/rpc/office/";
+
+/** The office error codes, as this module names one. */
+type OfficeErrorCodeValue = import("@hns/core/office").OfficeErrorCode;
+
+/** What one office RPC answers: the preview union, the engine union, or the engine's own union. */
+type OfficeRpcBody = DocumentPreviewView | OfficeEngineView | OfficeFailureView;
 import { grantInternalToken } from "./grant-subject.ts";
 import { modelsFor } from "./models.ts";
 import { SessionIndex } from "./session-index.ts";
@@ -163,6 +197,22 @@ export interface SessionDependencies {
    * machine's process without touching the Worker's network.
    */
   readonly machineFetch?: ToolPathOptions["fetch"] | undefined;
+  /**
+   * The machine's origin the office wire signs for; defaults to `HNS_AGENT_URL`.
+   *
+   * @remarks
+   * A seam, like {@link machineFetch}: a test that proves the office face end to end runs a **real**
+   * machine on a loopback port it does not know at construction (the port is chosen when the agent
+   * starts). When it is unset — **production always leaves it unset** — the office wire signs for
+   * `HNS_AGENT_URL`, and a deployment without that binding answers every preview request with
+   * the failure union's `engine_unavailable` (the object has no machine to ask).
+   *
+   * **The production Worker passes neither this nor `machineFetch`**, so nothing is substituted
+   * at the entry (`edge/worker.ts` exports its table, and `seams.test.ts` pins it).
+   *
+   * @internal
+   */
+  readonly officeAgentUrl?: string | undefined;
   /**
    * Opens the runtime the object serves from; defaults to `openDurableSession` (pi-durable on the
    * object's SQLite storage).
@@ -300,6 +350,21 @@ export class Session {
   #index: SessionIndex | undefined;
   #grants: GrantPlane | undefined;
   #tools: ToolPath | undefined;
+  /** The office preview rows and the alarm's work (0237); opened with the object. */
+  #office: OfficePreviewFace | undefined;
+  /** The workspace the office rows belong to: the object's name. */
+  #workspace = LEGACY_SESSION_NAME;
+  /**
+   * The machine's office wire, or undefined when this object has no machine to ask.
+   *
+   * @remarks
+   * Built once from the same three bindings the granted path uses (`HNS_AGENT_URL`,
+   * `HNS_CONTROL_PLANE_KEY`, and the machine id). A Session without them answers `disabled`
+   * for every preview request: it cannot reach a machine, so it cannot offer one.
+   */
+  #officeMachine: { readonly machine: MachineFiles; readonly machineId: string } | undefined;
+  /** The machine origin the office wire signs for; the environment's unless a test names one. */
+  readonly #officeAgentUrl: string | undefined;
   /** The token each run's relay was minted with, so a test can serve the route as its agent. */
   readonly #runTokens = new Map<string, string>();
   readonly #machineFetch: ToolPathOptions["fetch"] | undefined;
@@ -379,6 +444,7 @@ export class Session {
     this.#now = dependencies.now ?? Date.now;
     this.#upgradeResponse = dependencies.upgradeResponse ?? defaultLiveUpgradeResponse;
     this.#machineFetch = dependencies.machineFetch;
+    this.#officeAgentUrl = dependencies.officeAgentUrl;
     this.#givenCost = dependencies.cost;
     this.#ready = state.blockConcurrencyWhile(() => this.#initialize());
   }
@@ -540,6 +606,106 @@ export class Session {
       return createToolPath({ ...options, fetch: this.#machineFetch });
     }
     return createToolPath(options);
+  }
+
+  /**
+   * The machine's office wire, from the bindings the granted path also reads (0237).
+   *
+   * @returns The port and the machine id, or undefined when this object has no machine.
+   *
+   * @remarks
+   * The same three bindings as {@link #openToolPath}: the machine's origin, its id, and the
+   * control-plane seed that signs every request to it. They are read together deliberately — an
+   * object that can sign a grant but not read an artifact would offer a preview it cannot deliver
+   * — and an absent one keeps office off, as it keeps the granted path off.
+   */
+  #machineForOffice(): { readonly machine: MachineFiles; readonly machineId: string } | undefined {
+    const agentUrl = this.#officeAgentUrl ?? this.#env.HNS_AGENT_URL;
+    const machineId = this.#env.HNS_MACHINE_ID;
+    const seed = this.#env.HNS_CONTROL_PLANE_KEY;
+    if (agentUrl === undefined || machineId === undefined) return undefined;
+    if (seed === undefined || seed.length === 0) return undefined;
+    return {
+      machine: createSignedMachineFiles({ agentUrl, controlPlaneKey: seed }, { now: this.#now }),
+      machineId,
+    };
+  }
+
+  /**
+   * Open the office preview rows and the alarm's work for them (0237).
+   *
+   * @remarks
+   * Always open: the rows are an ordinary table in this object's SQLite, and an object with no
+   * machine still answers `documentPreview` (with whatever rows it has) and `requestDocumentPreview`
+   * (with `disabled`). A table that cannot be opened leaves office closed and is logged by name;
+   * conversations do not depend on it.
+   */
+  #openOffice(): void {
+    const name = this.#state.id?.name ?? LEGACY_SESSION_NAME;
+    this.#workspace = name;
+    this.#officeMachine = this.#machineForOffice();
+    const machine = this.#officeMachine;
+    try {
+      const rows = createOfficeRows(this.#state.storage);
+      this.#office = createOfficePreview({
+        rows,
+        now: this.#now,
+        machine:
+          machine === undefined
+            ? undefined
+            : {
+                probe: async (): Promise<OfficeEngineProbeAnswer> => {
+                  const answer = await machine.machine.officeEngine?.(this.#officeCall(machine));
+                  if (answer === undefined) return { kind: "unavailable" };
+                  if (!answer.ok) return { kind: "unavailable" };
+                  return { kind: "report", report: answer.result };
+                },
+                job: async (job) => {
+                  const answer = await machine.machine.office?.(job, this.#officeCall(machine));
+                  if (answer === undefined) {
+                    return { kind: "unavailable", detail: "the machine has no office" };
+                  }
+                  if (!answer.ok) return { kind: "unavailable", detail: answer.detail };
+                  return { kind: "result", result: answer.result };
+                },
+              },
+        record: async (record) => {
+          // The file's name is the line's `path`, the column an operator already reads: the
+          // detail keeps the attempt's facts and nothing of the document (C7).
+          this.#obs?.append({
+            v: 1,
+            at: isoTimestamp(new Date(this.#now()).toISOString()),
+            level: record.outcome === "ready" ? "info" : "warn",
+            event: "office.job",
+            hop: "do",
+            path: obsPath(record.path),
+            requestId: null,
+            detail: officeAuditDetail({
+              jobId: record.jobId,
+              operation: "preview",
+              path: record.path,
+              version: record.version,
+              inputHash: record.inputHash,
+              engineVersion: record.engineVersion,
+              ms: record.ms,
+              outcome: record.outcome,
+            }),
+          });
+        },
+      });
+    } catch (error) {
+      console.error("session office open failed", error instanceof Error ? error.name : "unknown");
+      this.#office = undefined;
+    }
+  }
+
+  /** One machine call's identity and deadline, for the office wire. */
+  #officeCall(machine: { readonly machineId: string }): MachineCall {
+    return {
+      machineId: machine.machineId,
+      requestId: crypto.randomUUID(),
+      signal: AbortSignal.timeout(OFFICE_CALL_TIMEOUT_MS),
+    };
   }
 
   /**
@@ -784,6 +950,7 @@ export class Session {
       // relay (the machine and the control-plane key), and record (the audit). Otherwise it stays
       // closed: no run gets a granted path, and a send is answered without one.
       this.#tools = this.#openToolPath();
+      this.#openOffice();
       try {
         // The event table shares the Session's SQLite but not the harness prefix. A failed
         // open must not stop conversations: observation is a side effect, not a precondition.
@@ -922,7 +1089,13 @@ export class Session {
     }
     let response: Response;
     let turnRequestId: string | undefined;
-    if (path === "/ws") {
+    if (path.startsWith(OFFICE_RPC_PREFIX)) {
+      response = await this.#officeRpc(path, request);
+    } else if (path === OFFICE_PREVIEW_PATH) {
+      // The preview's bytes (0237): the edge proved a session and forwarded the request; this
+      // object authorises the file against its own workspace and streams the artifact (C1, C8).
+      response = await this.previewStream(request);
+    } else if (path === "/ws") {
       response = await this.#openLive(request, session);
     } else if (path === "/rpc/events" || path === "/rpc/metrics") {
       const obs = this.#obs;
@@ -1245,6 +1418,241 @@ export class Session {
   }
 
   /**
+   * The preview row for one file, if this object may answer for it (0237, C1).
+   *
+   * @param path - The workspace-relative path the caller names.
+   * @param workspaceVersion - The version the file has now, or undefined when the caller has none.
+   * @returns The preview, or the failure that says why there is none.
+   *
+   * @remarks
+   * **The authorisation is this object's, and it is checked before any row is read.** A path that
+   * leaves the workspace is `not_authorized` and reads no row (C1); a path with no row for this
+   * version is `not_found`, because it means the preview was never asked for rather than that it
+   * is still running. A row is only answered for this object's own workspace: the row's key
+   * carries it and the caller cannot name another.
+   */
+  async documentPreview(
+    path: string,
+    workspaceVersion: string | undefined,
+  ): Promise<DocumentPreviewView | OfficeFailureView> {
+    const office = this.#office;
+    const authorized = officePathOf(this.#workspace, path);
+    if (!authorized.ok) return authorized.failure;
+    if (office === undefined) {
+      return officeFailureOf("engine_unavailable", "This session has no office previews.");
+    }
+    const row = await office.rowOf(this.#workspace, authorized.path, workspaceVersion);
+    if (row === undefined) {
+      // There is no row: the preview was never asked for. The contract has no code for "nothing
+      // has been asked" (its failures are failures of a job), so the read answers the state that
+      // means "no preview exists yet", which a person acts on by requesting one.
+      return officeFailureOf("engine_unavailable", "No preview has been requested for this file.");
+    }
+    return documentPreviewView(row);
+  }
+
+  /**
+   * Ask for one file's preview, and answer at once (0237, C3).
+   *
+   * @param path - The workspace-relative path the caller names.
+   * @param workspaceVersion - The version the file has now, or undefined when the caller has none.
+   * @returns The row the request wrote (or reused), or the failure that says why none was written.
+   *
+   * @remarks
+   * **The mutation does not run the job.** It asks the machine one short question and writes the
+   * row; the alarm runs the conversion. The edge answers a request in ten seconds and a
+   * conversion takes up to sixty, so running it here would be answered by the edge's deadline
+   * instead of this face. A path outside the workspace writes nothing (C1).
+   */
+  async requestDocumentPreview(
+    path: string,
+    workspaceVersion: string | undefined,
+  ): Promise<DocumentPreviewView | OfficeFailureView> {
+    const office = this.#office;
+    const authorized = officePathOf(this.#workspace, path);
+    if (!authorized.ok) return authorized.failure;
+    if (office === undefined) {
+      return officeFailureOf("engine_unavailable", "This session has no office previews.");
+    }
+    if (workspaceVersion === undefined) {
+      // Without the file's version there is no job to queue: a job names the bytes it reads, and
+      // `source_changed` would be the machine's answer to a version nobody stated (INV-O2).
+      return officeFailureOf("source_changed", "The file has no version to preview.");
+    }
+    const answer = await office.request({
+      workspaceId: this.#workspace,
+      path: authorized.path,
+      version: workspaceVersion,
+    });
+    await this.#armOffice(answer.nextAlarmAt);
+    return documentPreviewView(answer.row);
+  }
+
+  /**
+   * The office engine this session's machine reports (0237, C5).
+   *
+   * @returns What the machine said, or the failure when it could not be asked.
+   *
+   * @remarks
+   * A probe, not a job: it does not take the machine's office slot and does not change a row. Its
+   * deadline is the office face's short one, so the GraphQL answer stays inside the edge's budget.
+   */
+  async officeEngine(): Promise<OfficeEngineView | OfficeFailureView> {
+    const machine = this.#officeMachine;
+    if (machine === undefined) {
+      return {
+        __typename: "OfficeEngineUnavailable",
+        reason: "This session has no machine to ask.",
+      };
+    }
+    const report = await probeOfficeEngine(async () => {
+      const answer = await machine.machine.officeEngine?.(this.#officeCall(machine));
+      if (answer?.ok !== true) return undefined;
+      return answer.result;
+    });
+    if (report === undefined) {
+      return officeFailureOf("engine_unavailable", "The machine could not be asked.");
+    }
+    return report.available
+      ? { __typename: "OfficeEngineAvailable", id: report.id, version: report.version }
+      : { __typename: "OfficeEngineUnavailable", reason: report.reason };
+  }
+
+  /**
+   * Serve one office RPC the GraphQL face forwarded (0237).
+   *
+   * @param path - `/rpc/office/preview`, `/rpc/office/request`, or `/rpc/office/engine`.
+   * @param request - The forwarded request: its query for a read, its body for a request.
+   * @returns The answer the port parses, or a `not_found` problem for another path.
+   *
+   * @remarks
+   * The edge proved a session before the port called; this object still checks the workspace it is
+   * asked about against its own (the one its rows are keyed by), so a port that addressed the
+   * wrong object cannot read another workspace's row. Every route answers JSON that parses as the
+   * office unions; a refusal is the failure union's member, never a 500.
+   */
+  async #officeRpc(path: string, request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const reply = (body: OfficeRpcBody, status = 200): Response =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+      });
+    const fail = (code: OfficeErrorCodeValue, message: string, status = 200) =>
+      reply(officeFailureOf(code, message), status);
+    const workspace = url.searchParams.get("workspaceId") ?? "";
+    if (workspace !== this.#workspace) return fail("not_authorized", "Another workspace.", 404);
+    if (path === "/rpc/office/preview") {
+      const pathValue = url.searchParams.get("path") ?? "";
+      const version = url.searchParams.get("v") ?? undefined;
+      const answer = await this.documentPreview(pathValue, version);
+      return reply(answer);
+    }
+    if (path === "/rpc/office/request") {
+      const body = v.safeParse(
+        v.object({ path: v.string(), version: v.optional(v.string()) }),
+        await request.json().catch(() => undefined),
+      );
+      if (!body.success) return fail("source_changed", "The request names no file.", 400);
+      return reply(await this.requestDocumentPreview(body.output.path, body.output.version));
+    }
+    if (path === "/rpc/office/engine") {
+      return reply(await this.officeEngine());
+    }
+    return problem("not_found", "No office route matches this path.", path);
+  }
+
+  /**
+   * Arm the alarm for one office row's next due moment (0237, C9).
+   *
+   * @param at - The moment the office row needs it, or undefined for none.
+   *
+   * @remarks
+   * The alarm is the session's, so it is armed through the same storage a wake is: `min(wake,
+   * office)` means an idle session with a queued preview still wakes, and an active one keeps its
+   * heartbeat. Arming here never pushes the alarm later, and never clears one the session needs.
+   */
+  async #armOffice(at: number | undefined): Promise<void> {
+    if (at === undefined) return;
+    const current = await this.#state.storage.getAlarm();
+    if (current !== null && current <= at) return;
+    await this.#state.storage.setAlarm(at);
+  }
+
+  /**
+   * Serve one preview's bytes to a session (0237, C8).
+   *
+   * @param request - The `GET /api/office/preview` the edge forwarded.
+   * @returns The bytes streamed from the machine, or the refusal.
+   *
+   * @remarks
+   * **Session authorisation, then the row, then the machine.** The caller is already a session (the
+   * edge proved the cookie); this checks that the workspace is this object's, that the path stays
+   * inside it (C1), and that the version is one this object has a `ready` row for, and only then
+   * asks the machine for the artifact the row names.
+   *
+   * **The bytes are never collected here.** The machine's `GET /artifact` is read in ranges and
+   * each range is handed on as the stream's next chunk, so a 31 MB preview crosses the Worker in
+   * 8 MiB pieces and no signed URL is ever made (C8).
+   */
+  async previewStream(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    let query: PreviewQuery;
+    try {
+      query = parsePreviewQuery([...url.searchParams.entries()]);
+    } catch {
+      return problem(
+        "invalid_request",
+        "The preview query is not a preview read.",
+        OFFICE_PREVIEW_PATH,
+      );
+    }
+    if (query.workspaceId !== this.#workspace) {
+      return problem("not_found", "No preview exists.", OFFICE_PREVIEW_PATH);
+    }
+    const authorized = officePathOf(this.#workspace, query.path);
+    if (!authorized.ok) {
+      return problem("not_found", authorized.failure.message, OFFICE_PREVIEW_PATH);
+    }
+    const office = this.#office;
+    const machine = this.#officeMachine;
+    if (office === undefined || machine === undefined) {
+      return problem("unavailable", "This session has no office previews.", OFFICE_PREVIEW_PATH);
+    }
+    const row = await office.rowOf(this.#workspace, authorized.path, query.version);
+    if (row === undefined || row.status !== "ready" || row.bytes === null) {
+      return problem("not_found", "No preview exists for this version.", OFFICE_PREVIEW_PATH);
+    }
+    const stream = artifactStream({
+      machine: machine.machine,
+      call: this.#officeCall(machine),
+      key: {
+        workspaceId: row.workspaceId,
+        pathHash: row.pathHash,
+        version: row.version,
+        operation: "preview",
+        paramsHash: row.paramsHash,
+      },
+      path: row.path,
+      total: row.bytes,
+      signal: request.signal,
+    });
+    // The length is the row's, and the stream is the machine's: a read that fails part way ends
+    // the body with an error, which a client reads as a truncated transfer. The headers are
+    // written before the first range is read, so a later failure can never turn into a 200 that
+    // silently stopped (C8).
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": officeArtifactContentType("preview"),
+        "content-length": String(row.bytes),
+        "cache-control": "private, no-store",
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }
+
+  /**
    * Wake the Session and re-arm the next alarm.
    *
    * @remarks
@@ -1263,7 +1671,11 @@ export class Session {
     try {
       await armWake(this.#state.storage, { ...session.wake(), active: true }, Date.now());
       session.resume();
-      await armWake(this.#state.storage, session.wake(), Date.now());
+      // The office rows are due on the same alarm (0237, C3): one attempt each, which is what
+      // turns a queued row into ready / failed / stale. It runs after the resume, so a
+      // conversation's wake is never delayed by a conversion.
+      const office = await this.#office?.run(this.#workspace);
+      await armWake(this.#state.storage, session.wake(), Date.now(), office?.nextAlarmAt);
       // A wake is the retry point for a drain that could not reach D1 during its turn.
       await this.#drain("alarm");
     } catch (error) {

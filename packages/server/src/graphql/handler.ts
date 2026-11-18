@@ -20,6 +20,10 @@ import {
   type MessagePort,
 } from "./context.ts";
 import type { PolicyFace } from "./policy/face.ts";
+import type { OfficePort } from "./office.ts";
+import { officePortOver } from "./office-port.ts";
+import { ProjectIdSchema } from "@hns/core";
+import { projectFor } from "../edge/store.ts";
 import {
   assertWithinBytes,
   assertWithinLimits,
@@ -69,6 +73,15 @@ export interface GraphQLFaceDependencies {
   readonly messages?: MessagePort | undefined;
   /** Replace the policy face; production builds it over the control database. */
   readonly policy?: PolicyFace | undefined;
+  /**
+   * Replace the office port (0237); production forwards to each workspace's Session object.
+   *
+   * @remarks
+   * A resolver test that asks about previews passes one and observes the resolvers' own checks
+   * (the workspace, the union, the failure). Production leaves it undefined, and the face builds
+   * the port over the request's D1 (the project lookup) and the SESSION binding.
+   */
+  readonly office?: OfficePort | undefined;
   /** Replace the feature mutation modules; production uses the registered collection. */
   readonly mutations?: readonly MutationModule[] | undefined;
   /** The query limits; production uses {@link DEFAULT_GRAPHQL_LIMITS}. */
@@ -243,6 +256,22 @@ export function createGraphQLFace(
       review: dependencies.review,
       messages: dependencies.messages,
       policy: dependencies.policy,
+      // Production leaves `office` unset and the port is built here from the request's own D1
+      // (the project lookup) and the SESSION binding; a test passes one and this does not.
+      office:
+        dependencies.office ??
+        (await officePortOver({
+          env: request.env,
+          requestId: request.requestId,
+          signal: request.signal,
+          // The workspace row names the project's root (for the version read) and proves the id
+          // is a project this deployment has; an id that does not parse is no project.
+          project: async (workspaceId) => {
+            const id = v.safeParse(ProjectIdSchema, workspaceId);
+            if (!id.success) return undefined;
+            return await projectFor(request.env, id.output);
+          },
+        })),
       maxRows: rows.maxRowsPerRequest,
       maxRowsPerList: rows.maxRowsPerList,
       signal: request.signal,

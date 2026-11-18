@@ -115,6 +115,9 @@ export const EVENT_NAMES = [
   "automation.skipped",
   "automation.finished",
   "artifacts.mirror",
+  // An office job's attempt (0237): the job's id, operation, path, version, outcome, and time.
+  // The document is never in it, and neither are its bytes (docs/office.md §7).
+  "office.job",
 ] as const;
 /** One event name. */
 export type EventName = (typeof EVENT_NAMES)[number];
