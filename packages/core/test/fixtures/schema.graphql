@@ -45,18 +45,144 @@ enum ProjectEgress {
   ALLOWLIST
 }
 
-type Task {
+type Trail {
+  acceptance: String!
   createdAt: String!
+  createdBy: String!
+  description: String!
   id: ID!
+  kind: TrailKind!
+  priority: TrailPriority!
   projectId: ID!
-  status: TaskStatus!
+  state: TrailState!
   title: String!
   updatedAt: String!
 }
 
-enum TaskStatus {
-  TODO
-  DOING
-  DONE
-  BLOCKED
+type TrailChange {
+  baseCommit: String!
+  createdAt: String!
+  headCommit: String!
+  id: ID!
+  repoId: ID
+  runId: ID
+  state: TrailChangeState!
+  trailId: ID!
+  updatedAt: String!
+  workspaceId: ID!
+}
+
+enum TrailChangeState {
+  OPEN
+  IN_REVIEW
+  MERGED
+  ABANDONED
+}
+
+type TrailDecision {
+  action: TrailDecisionAction!
+  actor: String!
+  at: String!
+  changeId: ID
+  headCommit: String
+  id: ID!
+  note: String!
+  trailId: ID!
+}
+
+enum TrailDecisionAction {
+  APPROVE
+  REQUEST_CHANGES
+  REJECT
+}
+
+type TrailFinding {
+  changeId: ID
+  createdAt: String!
+  file: String
+  hunk: String
+  id: ID!
+  resolvedAt: String
+  resolvedBy: String
+  severity: TrailFindingSeverity!
+  source: TrailFindingSource!
+  status: TrailFindingStatus!
+  summary: String!
+  trailId: ID!
+}
+
+enum TrailFindingSeverity {
+  HIGH
+  MEDIUM
+  LOW
+  NONE
+}
+
+enum TrailFindingSource {
+  AGENT
+  TEST
+  HUMAN
+}
+
+enum TrailFindingStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+type TrailGate {
+  changeId: ID
+  detail: String
+  evaluatedAt: String!
+  gate: TrailGateKind!
+  id: ID!
+  status: TrailGateStatus!
+  trailId: ID!
+}
+
+enum TrailGateKind {
+  HUMAN_REVIEW
+  TESTS
+  FINDINGS
+  FRESHNESS
+}
+
+enum TrailGateStatus {
+  PENDING
+  PASS
+  FAIL
+  ASK
+}
+
+enum TrailKind {
+  FEATURE
+  FIX
+  CHORE
+  SPIKE
+}
+
+enum TrailPriority {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+type TrailSession {
+  conversationId: ID
+  id: ID!
+  linkedAt: String!
+  runId: ID
+  sessionId: String!
+  trailId: ID!
+}
+
+enum TrailState {
+  DRAFT
+  ACTIVE
+  IN_REVIEW
+  MERGED
+  OBSERVING
+  CLOSED
+  ABANDONED
 }

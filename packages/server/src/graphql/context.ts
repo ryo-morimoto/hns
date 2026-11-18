@@ -6,7 +6,7 @@ import type {
   MachineRegistryRefusal,
   Project,
   ProjectId,
-  Task,
+  TrailChange,
 } from "@hns/core";
 import type {
   ConversationCursor,
@@ -14,6 +14,10 @@ import type {
   ConversationPage,
   IndexStateRow,
   Store,
+  TrailCreateInput,
+  TrailRowValue,
+  TrailUpdate,
+  TrailWriteRefusal,
 } from "@hns/store";
 import type { WorkerEnv } from "../edge/env.ts";
 import { createRowBudget, type RowBudget } from "../edge/limits.ts";
@@ -79,7 +83,21 @@ export interface GraphQLReads {
    * face address a Durable Object that D1 does not know.
    */
   readonly project: (projectId: ProjectId) => Promise<Project | undefined>;
-  readonly tasks: (projectId: ProjectId) => Promise<readonly Task[]>;
+  /**
+   * The Trails of one project, or of every project when `projectId` is undefined, newest first.
+   *
+   * @remarks
+   * The store answers a list that may hold a `corrupt_row` refusal (a row this build cannot read
+   * is refused, not dropped), so the port keeps that union rather than pretending it is a clean
+   * list; the resolver turns it into a typed failure.
+   */
+  readonly trails: (
+    projectId?: ProjectId | undefined,
+  ) => Promise<readonly (TrailRowValue | TrailWriteRefusal)[]>;
+  /** The Trail with this id, or the store's `not_found` / `corrupt_row` refusal. */
+  readonly trail: (id: string) => Promise<TrailRowValue | TrailWriteRefusal>;
+  /** The Changes of a Trail, oldest first. */
+  readonly trailChanges: (trailId: string) => Promise<readonly TrailChange[]>;
   /**
    * One page of the D1 conversation index, scoped to the project.
    *
@@ -121,6 +139,12 @@ interface CreateProjectInput {
   readonly workspaceRoot: string;
 }
 
+/** What a resolver asks the store to create: the store's own input, named once. */
+type CreateTrailWrite = TrailCreateInput;
+
+/** What a resolver asks the store to change: the store's own patch, named once. */
+type UpdateTrailWrite = TrailUpdate;
+
 /**
  * The refusals an enrollment can answer with.
  *
@@ -159,6 +183,24 @@ export interface GraphQLWrites {
    * next signed request is refused.
    */
   readonly revokeMachine: (id: string, actor: string) => Promise<Machine | undefined>;
+  /**
+   * Create a Trail in a project (D104).
+   *
+   * @remarks
+   * The Trail starts `draft`: the store owns the state machine, so no resolver can create a Trail
+   * in a state the transition table would not have reached. A refusal is a value, not an
+   * exception.
+   */
+  readonly createTrail: (input: CreateTrailWrite) => Promise<TrailRowValue | TrailWriteRefusal>;
+  /**
+   * Change a Trail's title, description, acceptance, kind, or priority.
+   *
+   * @returns The updated Trail, the store's refusal, or undefined when no row has the id.
+   */
+  readonly updateTrail: (
+    id: string,
+    patch: UpdateTrailWrite,
+  ) => Promise<TrailRowValue | TrailWriteRefusal | undefined>;
 }
 
 /** What one request carries into its resolvers. */
@@ -371,7 +413,7 @@ async function machineListRead(
   }
 }
 
-/** The production reads: D1 for projects, tasks, and the conversation index. */
+/** The production reads: D1 for projects, trails, and the conversation index. */
 function defaultReads(
   env: WorkerEnv,
   requestId: string,
@@ -380,7 +422,11 @@ function defaultReads(
   return {
     projects: () => storeCall(env, requestId, "read", (store) => store.projects.list()),
     project: (projectId) => storeFailure(requestId, () => projectFor(env, projectId)),
-    tasks: (projectId) => storeCall(env, requestId, "read", (store) => store.tasks.list(projectId)),
+    trails: (projectId) =>
+      storeCall(env, requestId, "read", (store) => store.trails.list(projectId)),
+    trail: (id) => storeCall(env, requestId, "read", (store) => store.trails.get(id)),
+    trailChanges: (trailId) =>
+      storeCall(env, requestId, "read", (store) => store.trails.listChanges(trailId)),
     conversations: (projectId, query) =>
       storeCall(env, requestId, "read", (store) =>
         store.conversations.page(pageQuery(projectId, query)),
@@ -435,6 +481,10 @@ function defaultWrites(env: WorkerEnv, requestId: string): GraphQLWrites {
       storeCall(env, requestId, "write", (store) => store.machines.enroll(enrollment, actor)),
     revokeMachine: (id, actor) =>
       storeCall(env, requestId, "write", (store) => store.machines.revoke(id, actor)),
+    createTrail: (input) =>
+      storeCall(env, requestId, "write", (store) => store.trails.create(input)),
+    updateTrail: (id, patch) =>
+      storeCall(env, requestId, "write", (store) => store.trails.update(id, patch)),
   };
 }
 
@@ -483,7 +533,9 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
     reads: {
       projects: readOverrides.projects ?? reads.projects,
       project: readOverrides.project ?? reads.project,
-      tasks: readOverrides.tasks ?? reads.tasks,
+      trails: readOverrides.trails ?? reads.trails,
+      trail: readOverrides.trail ?? reads.trail,
+      trailChanges: readOverrides.trailChanges ?? reads.trailChanges,
       conversations: readOverrides.conversations ?? reads.conversations,
       indexState: readOverrides.indexState ?? reads.indexState,
       machines: readOverrides.machines ?? reads.machines,
@@ -492,6 +544,8 @@ export function createContext(options: GraphQLContextOptions): GraphQLContext {
       createProject: writeOverrides.createProject ?? writes.createProject,
       enrollMachine: writeOverrides.enrollMachine ?? writes.enrollMachine,
       revokeMachine: writeOverrides.revokeMachine ?? writes.revokeMachine,
+      createTrail: writeOverrides.createTrail ?? writes.createTrail,
+      updateTrail: writeOverrides.updateTrail ?? writes.updateTrail,
     },
   };
 }

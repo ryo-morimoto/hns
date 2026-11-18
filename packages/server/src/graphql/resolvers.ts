@@ -1,7 +1,7 @@
 import * as v from "valibot";
-import { ProjectIdSchema, type ProjectId } from "@hns/core";
+import { ProjectIdSchema, type ProjectId, type Trail } from "@hns/core";
 import { fromGlobalId, type GlobalIdResult } from "@hns/core/graphql";
-import type { ConversationCursor } from "@hns/store";
+import type { ConversationCursor, TrailRowValue, TrailWriteRefusal } from "@hns/store";
 import type { ConversationReadQuery, GraphQLContext } from "./context.ts";
 import { decodeCursor, encodeCursor } from "./cursor.ts";
 import { queryFailure, QueryReadError, type QueryFailureView } from "./failures.ts";
@@ -10,12 +10,12 @@ import {
   indexStateView,
   machineView,
   projectView,
-  taskView,
+  trailView,
   type ConversationView,
   type IndexStateView,
   type MachineView,
   type ProjectView,
-  type TaskView,
+  type TrailView,
 } from "./views.ts";
 
 /** The `first` argument every list field takes. */
@@ -50,9 +50,14 @@ interface IndexStateSuccess extends IndexStateView {
   readonly __typename: "IndexState";
 }
 
-interface TaskListSuccess {
-  readonly __typename: "TaskList";
-  readonly tasks: readonly TaskView[];
+interface TrailListSuccess {
+  readonly __typename: "TrailList";
+  readonly trails: readonly TrailView[];
+}
+
+interface TrailPayloadSuccess {
+  readonly __typename: "TrailPayload";
+  readonly trail: TrailView;
 }
 
 interface MachineListSuccess {
@@ -67,7 +72,9 @@ export type ConversationListResult = ConversationListSuccess | QueryFailureView;
 /** One result union member. */
 export type IndexStateResult = IndexStateSuccess | QueryFailureView;
 /** One result union member. */
-export type TaskListResult = TaskListSuccess | QueryFailureView;
+export type TrailListResult = TrailListSuccess | QueryFailureView;
+/** One result union member. */
+export type TrailResult = TrailPayloadSuccess | QueryFailureView;
 /** One result union member. */
 export type MachineListResult = MachineListSuccess | QueryFailureView;
 
@@ -137,6 +144,29 @@ function requiredProjectId(value: string | null | undefined): ProjectId {
     throw new QueryReadError("invalid_request", "projectId must name a Project.");
   }
   return v.parse(ProjectIdSchema, decoded.value.id);
+}
+
+/**
+ * Decode the required `Trail` global id.
+ *
+ * @internal
+ * @throws QueryReadError with `invalid_request` when the value is missing, is not a global id, or
+ * names a type other than `Trail`.
+ *
+ * @remarks
+ * The raw id is what the store holds (`trail-<task id>` for a backfilled Trail, which keeps a
+ * backfilled row reachable after the `tasks` table stops being read); the global id is what the
+ * wire carries. A raw id is refused rather than guessed.
+ */
+function requiredTrailId(value: string | null | undefined): string {
+  if (value === null || value === undefined || value.length === 0) {
+    throw new QueryReadError("invalid_request", "id is required.");
+  }
+  const decoded: GlobalIdResult = fromGlobalId(value);
+  if (!decoded.ok || decoded.value.type !== "Trail") {
+    throw new QueryReadError("invalid_request", "id must be a Trail global id.");
+  }
+  return decoded.value.id;
 }
 
 /**
@@ -254,27 +284,80 @@ export async function resolveProjects(
 }
 
 /**
- * Resolve `Query.tasks` from D1.
+ * Turn the store's Trail answer into the Trail, or the typed failure it stands for.
+ *
+ * @internal
+ * @remarks
+ * The store answers a Trail's absence and a row it cannot read as refusals, because its callers
+ * can act on both. A missing Trail is `not_found`; a corrupt row is `unavailable` — the caller
+ * can retry a broken read and cannot repair it, and the row is not the one they asked a missing
+ * id about.
+ */
+function trailOrFailure(value: TrailRowValue | TrailWriteRefusal): Trail {
+  if (!value.refused) return value;
+  throw value.kind === "not_found"
+    ? new QueryReadError("not_found", "No trail has this id.")
+    : new QueryReadError("unavailable", "The stored trail could not be read.");
+}
+
+/**
+ * Resolve `Query.trails`: the Trails of one project, or of every project.
  *
  * @param _source - Always undefined; Query fields have no parent value.
- * @param args - The project to scope to and the page size.
+ * @param args - The optional project to scope to and the page size.
  * @param context - The request's reads and budget.
- * @returns The list, or a union failure for an invalid argument or an unavailable database.
+ * @returns The list, or a union failure for an invalid argument or an unreadable row.
+ *
+ * @remarks
+ * Without `projectId` the list spans every project, which is what a client that shows one Sidebar
+ * for all workspaces reads. The store returns newest first; the page is the first `first` rows.
+ * A list that holds one unreadable row is refused whole (`unavailable`) rather than answered
+ * short: a Sidebar that silently hid a Trail would hide exactly the one that is broken.
  */
-export async function resolveTasks(
+export async function resolveTrails(
   _source: undefined,
   args: ProjectListArguments,
   context: GraphQLContext,
-): Promise<TaskListResult> {
+): Promise<TrailListResult> {
   const result = await guarded(async () => {
-    const projectId = requiredProjectId(args.projectId);
+    const projectId =
+      args.projectId === null || args.projectId === undefined
+        ? undefined
+        : requiredProjectId(args.projectId);
     const limit = pageSize(args.first, context.maxRowsPerList);
     spend(context, limit);
-    const tasks = (await context.reads.tasks(projectId)).slice(0, limit);
-    return tasks.map(taskView);
+    const rows = await context.reads.trails(projectId);
+    return rows.map(trailOrFailure).slice(0, limit).map(trailView);
   });
   if (!result.ok) return result.failure;
-  return { __typename: "TaskList", tasks: result.value };
+  return { __typename: "TrailList", trails: result.value };
+}
+
+/**
+ * Resolve `Query.trail`: one Trail by its global id.
+ *
+ * @param _source - Always undefined; Query fields have no parent value.
+ * @param args - The Trail's global id.
+ * @param context - The request's reads and budget.
+ * @returns The Trail, or a typed failure for a malformed id, a missing row, or an unreadable one.
+ *
+ * @remarks
+ * The argument is a global id of type `Trail`, so another type's id (or a raw one) is refused
+ * before the store is asked. A missing Trail is `not_found` and not an empty answer: the
+ * difference is what lets a screen say "deleted" rather than "loading".
+ */
+export async function resolveTrail(
+  _source: undefined,
+  args: { readonly id: string },
+  context: GraphQLContext,
+): Promise<TrailResult> {
+  const result = await guarded(async () => {
+    const id = requiredTrailId(args.id);
+    spend(context, 1);
+    return trailView(trailOrFailure(await context.reads.trail(id)));
+  });
+  if (!result.ok) return result.failure;
+  return { __typename: "TrailPayload", trail: result.value };
 }
 
 /**

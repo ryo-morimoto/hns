@@ -9,7 +9,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import type { ConversationLink, ProjectLink, TaskLink } from "./viewModel.ts";
+import type { ConversationLink, ProjectLink, TrailLink } from "./viewModel.ts";
 import { toGlobalId } from "@hns/core/graphql";
 import { useFragment, useLazyLoadQuery, useRelayEnvironment } from "react-relay";
 import { fetchQuery } from "relay-runtime";
@@ -17,7 +17,7 @@ import type { ShellProjectsQuery as ShellProjectsQueryType } from "../__generate
 import type { ShellWorkspaceQuery as ShellWorkspaceQueryType } from "../__generated__/ShellWorkspaceQuery.graphql";
 import type { SidebarConversations$key } from "../__generated__/SidebarConversations.graphql";
 import type { SidebarProjects$key } from "../__generated__/SidebarProjects.graphql";
-import type { SidebarTasks$key } from "../__generated__/SidebarTasks.graphql";
+import type { SidebarTrails$key } from "../__generated__/SidebarTrails.graphql";
 import { Button } from "../components/Button.tsx";
 import { PolicyScreen, PolicyScreenFallback } from "../routes/policy/PolicyScreen.tsx";
 import { ConversationScreen } from "../screens/conversation/ConversationScreen.tsx";
@@ -35,12 +35,12 @@ import {
   Sidebar,
   SidebarConversationsFragment,
   SidebarProjectsFragment,
-  SidebarTasksFragment,
+  SidebarTrailsFragment,
 } from "./Sidebar.tsx";
 import { THEME_LABELS, THEMES, useTheme } from "./theme.ts";
 import { TopBar } from "./TopBar.tsx";
 import { useMediaQuery } from "./useMediaQuery.ts";
-import { conversationLinkOf, projectLinkOf, taskLinkOf } from "./viewModel.ts";
+import { conversationLinkOf, projectLinkOf, trailLinkOf } from "./viewModel.ts";
 import { totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
 import { ShellProjectsQuery } from "./ShellProjects.ts";
 import { ShellWorkspaceQuery } from "./ShellWorkspace.ts";
@@ -126,8 +126,8 @@ function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellPro
     conversations !== undefined && conversations.__typename === "ConversationList"
       ? conversations
       : null;
-  const tasks = workspace.tasks;
-  const tasksRef = tasks !== undefined && tasks.__typename === "TaskList" ? tasks : null;
+  const trails = workspace.trails;
+  const trailsRef = trails !== undefined && trails.__typename === "TrailList" ? trails : null;
 
   return (
     <ShellFrame
@@ -138,8 +138,8 @@ function ShellData({ onOpenCommand, panel, summarySource, liveSocket }: ShellPro
       projectsFailed={projectsRef === null}
       conversationsRef={conversationsRef}
       conversationsFailed={hasProject && conversationsRef === null}
-      tasksRef={tasksRef}
-      tasksFailed={hasProject && tasksRef === null}
+      trailsRef={trailsRef}
+      trailsFailed={hasProject && trailsRef === null}
       liveSocket={liveSocket}
       onReconnect={onReconnect}
     />
@@ -151,8 +151,8 @@ interface ShellFrameProps extends ShellProps {
   readonly projectsFailed: boolean;
   readonly conversationsRef: SidebarConversations$key | null;
   readonly conversationsFailed: boolean;
-  readonly tasksRef: SidebarTasks$key | null;
-  readonly tasksFailed: boolean;
+  readonly trailsRef: SidebarTrails$key | null;
+  readonly trailsFailed: boolean;
   /** Refetch the open screen after the live connection recovers. */
   readonly onReconnect: () => void;
 }
@@ -166,8 +166,8 @@ function ShellFrame({
   projectsFailed,
   conversationsRef,
   conversationsFailed,
-  tasksRef,
-  tasksFailed,
+  trailsRef,
+  trailsFailed,
   liveSocket,
   onReconnect,
 }: ShellFrameProps): ReactElement {
@@ -186,7 +186,7 @@ function ShellFrame({
   const conversations = (
     useFragment(SidebarConversationsFragment, conversationsRef)?.conversations ?? []
   ).map(conversationLinkOf);
-  const tasks = (useFragment(SidebarTasksFragment, tasksRef)?.tasks ?? []).map(taskLinkOf);
+  const trails = (useFragment(SidebarTrailsFragment, trailsRef)?.trails ?? []).map(trailLinkOf);
 
   // A list read carries the title the server had when it began; the socket's snapshot is newer,
   // so it is put back after every render that could have normalized over it. Re-running is cheap:
@@ -233,7 +233,7 @@ function ShellFrame({
 
   const totals = totalsOf(summaries.data ?? []);
   const connection = projectsFailed ? "offline" : "online";
-  const failed = conversationsFailed || tasksFailed;
+  const failed = conversationsFailed || trailsFailed;
   const workspaceContext: ProjectWorkspace | null =
     project === undefined
       ? null
@@ -247,7 +247,7 @@ function ShellFrame({
     <Sidebar
       projectsRef={projectsRef}
       conversationsRef={conversationsRef}
-      tasksRef={tasksRef}
+      trailsRef={trailsRef}
       runs={[]}
       summaries={summaries.data ?? []}
       summariesPending={summarySource !== undefined && summaries.isPending}
@@ -309,7 +309,7 @@ function ShellFrame({
           ) : route.kind === "policy" ? (
             <PolicyView project={project} />
           ) : (
-            <WorkspaceView project={project} conversations={conversations} tasks={tasks} />
+            <WorkspaceView project={project} conversations={conversations} trails={trails} />
           )}
         </main>
 
@@ -371,16 +371,16 @@ function EmptyState({ title, body }: EmptyStateProps): ReactElement {
 interface WorkspaceViewProps {
   readonly project: ProjectLink;
   readonly conversations: readonly ConversationLink[];
-  readonly tasks: readonly TaskLink[];
+  readonly trails: readonly TrailLink[];
 }
 
-function WorkspaceView({ project, conversations, tasks }: WorkspaceViewProps): ReactElement {
+function WorkspaceView({ project, conversations, trails }: WorkspaceViewProps): ReactElement {
   const root = project.workspace_root === "" ? "machine ROOT" : project.workspace_root;
   return (
     <section className="hns-view" aria-labelledby="workspace-title">
       <h1 id="workspace-title">Workspace</h1>
       <p className="hns-view__meta">
-        {project.name} · 会話 {conversations.length} · タスク {tasks.length}
+        {project.name} · 会話 {conversations.length} · Trail {trails.length}
       </p>
       <p className="hns-view__root" data-project-root={project.workspace_root}>
         root: {root}

@@ -1,14 +1,31 @@
 import { MACHINE_STATUSES } from "../machine-types.ts";
 import type { Machine } from "../machine-types.ts";
-import { PROJECT_EGRESS_POLICIES, TASK_STATUSES } from "../types.ts";
-import type { Conversation, Project, Task } from "../types.ts";
+import {
+  TRAIL_CHANGE_STATES,
+  TRAIL_DECISION_ACTIONS,
+  TRAIL_FINDING_SEVERITIES,
+  TRAIL_FINDING_SOURCES,
+  TRAIL_FINDING_STATUSES,
+  TRAIL_GATE_KINDS,
+  TRAIL_GATE_STATUSES,
+  TRAIL_KINDS,
+  TRAIL_PRIORITIES,
+  TRAIL_STATES,
+} from "../trail.ts";
+import type {
+  Trail,
+  TrailChange,
+  TrailDecision,
+  TrailFinding,
+  TrailGate,
+  TrailSession,
+} from "../trail.ts";
+import { PROJECT_EGRESS_POLICIES } from "../types.ts";
+import type { Conversation, Project } from "../types.ts";
 import { defineEntity, enumOf } from "./spec.ts";
 
 // The SDL is generated from these specs; it is never edited by hand.
 // Model field -> GraphQL field is explicit: `project_id` -> `projectId`, `archived` -> `isArchived`.
-
-/** The `TaskStatus` GraphQL enum; values keep the model's declaration order. */
-export const TaskStatusEnum = enumOf("TaskStatus", TASK_STATUSES);
 
 /** The `ProjectEgress` GraphQL enum; values keep the model's declaration order. */
 export const ProjectEgressEnum = enumOf("ProjectEgress", PROJECT_EGRESS_POLICIES);
@@ -43,19 +60,6 @@ export const ConversationEntity = defineEntity<Conversation>({
     updated_at: { name: "updatedAt", kind: "scalar", type: "String", nonNull: false },
     archived: { name: "isArchived", kind: "scalar", type: "Boolean", nonNull: true },
     deleted_at: { name: "deletedAt", kind: "scalar", type: "String", nonNull: false },
-  },
-});
-
-/** The `Task` GraphQL type; `status` is the `TaskStatus` enum. */
-export const TaskEntity = defineEntity<Task>({
-  name: "Task",
-  fields: {
-    id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
-    project_id: { name: "projectId", kind: "scalar", type: "ID", nonNull: true },
-    title: { name: "title", kind: "scalar", type: "String", nonNull: true },
-    status: { name: "status", kind: "enum", typeName: "TaskStatus", nonNull: true },
-    created_at: { name: "createdAt", kind: "scalar", type: "String", nonNull: true },
-    updated_at: { name: "updatedAt", kind: "scalar", type: "String", nonNull: true },
   },
 });
 
@@ -105,10 +109,177 @@ export const MachineEntity = defineEntity<
   },
 });
 
+/**
+ * The `Trail` GraphQL type (D104): the intent, its state, and what hangs off it.
+ *
+ * @remarks
+ * `description` and `acceptance` are free text; `acceptance` says how a person would know the
+ * intent was met. `createdBy` is the session subject or agent that created it.
+ *
+ * The lists are the Trail's attachments and its movement, each in the order a reader wants:
+ * `changes` and `sessions` oldest first, and the append-only records (`findings`, `decisions`,
+ * `gates`) newest first. **The timeline is not stored**: a client composes it from these lists by
+ * their own recorded/occurred times (trail-model-v1 §6.2). `trail-model-v1` also names feedback,
+ * metrics, evals, and notes; those tables exist (0230) but no resolver reads them yet, so they are
+ * not on this type until a field can answer them.
+ */
+export const TrailEntity = defineEntity<Trail>({
+  name: "Trail",
+  fields: {
+    id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
+    project_id: { name: "projectId", kind: "scalar", type: "ID", nonNull: true },
+    title: { name: "title", kind: "scalar", type: "String", nonNull: true },
+    description: { name: "description", kind: "scalar", type: "String", nonNull: true },
+    acceptance: { name: "acceptance", kind: "scalar", type: "String", nonNull: true },
+    kind: { name: "kind", kind: "enum", typeName: "TrailKind", nonNull: true },
+    state: { name: "state", kind: "enum", typeName: "TrailState", nonNull: true },
+    priority: { name: "priority", kind: "enum", typeName: "TrailPriority", nonNull: true },
+    created_by: { name: "createdBy", kind: "scalar", type: "String", nonNull: true },
+    created_at: { name: "createdAt", kind: "scalar", type: "String", nonNull: true },
+    updated_at: { name: "updatedAt", kind: "scalar", type: "String", nonNull: true },
+  },
+});
+
+/**
+ * The `TrailChange` GraphQL type: the `base..head` pair a Trail moved the code to.
+ *
+ * @remarks
+ * A Change is the diff's address, not its contents: a client reads the commits for the diff.
+ * `repoId` and `runId` are nullable until a Trail spans more than one repository or a run
+ * produced the change.
+ */
+export const TrailChangeEntity = defineEntity<TrailChange>({
+  name: "TrailChange",
+  fields: {
+    id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
+    trail_id: { name: "trailId", kind: "scalar", type: "ID", nonNull: true },
+    workspace_id: { name: "workspaceId", kind: "scalar", type: "ID", nonNull: true },
+    repo_id: { name: "repoId", kind: "scalar", type: "ID", nonNull: false },
+    base_commit: { name: "baseCommit", kind: "scalar", type: "String", nonNull: true },
+    head_commit: { name: "headCommit", kind: "scalar", type: "String", nonNull: true },
+    run_id: { name: "runId", kind: "scalar", type: "ID", nonNull: false },
+    state: { name: "state", kind: "enum", typeName: "TrailChangeState", nonNull: true },
+    created_at: { name: "createdAt", kind: "scalar", type: "String", nonNull: true },
+    updated_at: { name: "updatedAt", kind: "scalar", type: "String", nonNull: true },
+  },
+});
+
+/** The `TrailSession` GraphQL type: a link from a Trail to a conversation, session, or run. */
+export const TrailSessionEntity = defineEntity<TrailSession>({
+  name: "TrailSession",
+  fields: {
+    id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
+    trail_id: { name: "trailId", kind: "scalar", type: "ID", nonNull: true },
+    conversation_id: { name: "conversationId", kind: "scalar", type: "ID", nonNull: false },
+    session_id: { name: "sessionId", kind: "scalar", type: "String", nonNull: true },
+    run_id: { name: "runId", kind: "scalar", type: "ID", nonNull: false },
+    linked_at: { name: "linkedAt", kind: "scalar", type: "String", nonNull: true },
+  },
+});
+
+/** The `TrailFinding` GraphQL type: a point raised by a review, a test, or a person. */
+export const TrailFindingEntity = defineEntity<TrailFinding>({
+  name: "TrailFinding",
+  fields: {
+    id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
+    trail_id: { name: "trailId", kind: "scalar", type: "ID", nonNull: true },
+    change_id: { name: "changeId", kind: "scalar", type: "ID", nonNull: false },
+    severity: { name: "severity", kind: "enum", typeName: "TrailFindingSeverity", nonNull: true },
+    source: { name: "source", kind: "enum", typeName: "TrailFindingSource", nonNull: true },
+    status: { name: "status", kind: "enum", typeName: "TrailFindingStatus", nonNull: true },
+    file: { name: "file", kind: "scalar", type: "String", nonNull: false },
+    hunk: { name: "hunk", kind: "scalar", type: "String", nonNull: false },
+    summary: { name: "summary", kind: "scalar", type: "String", nonNull: true },
+    created_at: { name: "createdAt", kind: "scalar", type: "String", nonNull: true },
+    resolved_at: { name: "resolvedAt", kind: "scalar", type: "String", nonNull: false },
+    resolved_by: { name: "resolvedBy", kind: "scalar", type: "String", nonNull: false },
+  },
+});
+
+/** The `TrailDecision` GraphQL type: an approval, a change request, or a rejection. */
+export const TrailDecisionEntity = defineEntity<TrailDecision>({
+  name: "TrailDecision",
+  fields: {
+    id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
+    trail_id: { name: "trailId", kind: "scalar", type: "ID", nonNull: true },
+    change_id: { name: "changeId", kind: "scalar", type: "ID", nonNull: false },
+    actor: { name: "actor", kind: "scalar", type: "String", nonNull: true },
+    action: { name: "action", kind: "enum", typeName: "TrailDecisionAction", nonNull: true },
+    head_commit: { name: "headCommit", kind: "scalar", type: "String", nonNull: false },
+    note: { name: "note", kind: "scalar", type: "String", nonNull: true },
+    at: { name: "at", kind: "scalar", type: "String", nonNull: true },
+  },
+});
+
+/** The `TrailGate` GraphQL type: what a gate said about a Trail or a Change at a moment. */
+export const TrailGateEntity = defineEntity<TrailGate>({
+  name: "TrailGate",
+  fields: {
+    id: { name: "id", kind: "scalar", type: "ID", nonNull: true },
+    trail_id: { name: "trailId", kind: "scalar", type: "ID", nonNull: true },
+    change_id: { name: "changeId", kind: "scalar", type: "ID", nonNull: false },
+    gate: { name: "gate", kind: "enum", typeName: "TrailGateKind", nonNull: true },
+    status: { name: "status", kind: "enum", typeName: "TrailGateStatus", nonNull: true },
+    detail: { name: "detail", kind: "scalar", type: "String", nonNull: false },
+    evaluated_at: { name: "evaluatedAt", kind: "scalar", type: "String", nonNull: true },
+  },
+});
+
+/** The `TrailState` GraphQL enum: the closed vocabulary the transition table moves. */
+export const TrailStateEnum = enumOf("TrailState", TRAIL_STATES);
+/** The `TrailKind` GraphQL enum: what sort of intent a Trail anchors. */
+export const TrailKindEnum = enumOf("TrailKind", TRAIL_KINDS);
+/** The `TrailPriority` GraphQL enum; values keep the model's order, highest first. */
+export const TrailPriorityEnum = enumOf("TrailPriority", TRAIL_PRIORITIES);
+/** The `TrailChangeState` GraphQL enum. */
+export const TrailChangeStateEnum = enumOf("TrailChangeState", TRAIL_CHANGE_STATES);
+/** The `TrailFindingSeverity` GraphQL enum. */
+export const TrailFindingSeverityEnum = enumOf("TrailFindingSeverity", TRAIL_FINDING_SEVERITIES);
+/** The `TrailFindingSource` GraphQL enum. */
+export const TrailFindingSourceEnum = enumOf("TrailFindingSource", TRAIL_FINDING_SOURCES);
+/** The `TrailFindingStatus` GraphQL enum. */
+export const TrailFindingStatusEnum = enumOf("TrailFindingStatus", TRAIL_FINDING_STATUSES);
+/** The `TrailDecisionAction` GraphQL enum. */
+export const TrailDecisionActionEnum = enumOf("TrailDecisionAction", TRAIL_DECISION_ACTIONS);
+/** The `TrailGateKind` GraphQL enum. */
+export const TrailGateKindEnum = enumOf("TrailGateKind", TRAIL_GATE_KINDS);
+/** The `TrailGateStatus` GraphQL enum; `ask` is the default a Trail's gates start at. */
+export const TrailGateStatusEnum = enumOf("TrailGateStatus", TRAIL_GATE_STATUSES);
+
 /** The model entities the SDL exposes, in declaration order. */
-export const ENTITIES = [ProjectEntity, ConversationEntity, TaskEntity, MachineEntity] as const;
-/** The model enums the SDL exposes, in declaration order. */
-export const ENUMS = [TaskStatusEnum, ProjectEgressEnum, MachineStatusEnum] as const;
+export const ENTITIES = [
+  ProjectEntity,
+  ConversationEntity,
+  MachineEntity,
+  TrailEntity,
+  TrailChangeEntity,
+  TrailSessionEntity,
+  TrailFindingEntity,
+  TrailDecisionEntity,
+  TrailGateEntity,
+] as const;
+
+/**
+ * The model enums the SDL exposes, in declaration order.
+ *
+ * @remarks
+ * `TrailState` is the one the client filters a Sidebar by; every other Trail enum is a row's own
+ * vocabulary, so none of them is a free string on the wire.
+ */
+export const ENUMS = [
+  ProjectEgressEnum,
+  MachineStatusEnum,
+  TrailStateEnum,
+  TrailKindEnum,
+  TrailPriorityEnum,
+  TrailChangeStateEnum,
+  TrailFindingSeverityEnum,
+  TrailFindingSourceEnum,
+  TrailFindingStatusEnum,
+  TrailDecisionActionEnum,
+  TrailGateKindEnum,
+  TrailGateStatusEnum,
+] as const;
 
 /**
  * Model types that the SDL does not carry yet, with the reason.

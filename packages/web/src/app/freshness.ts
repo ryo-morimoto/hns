@@ -61,7 +61,8 @@ export interface FreshnessPolicy {
  * - `projects`: no live channel carries a project's creation or rename (0159 subscribes per
  *   conversation), so a revisit is answered from the store inside the TTL and revalidated after
  *   it or when the tab regains focus.
- * - `workspace`: the conversation and task lists feed Needs you, so a stale copy misleads. No
+ * - `workspace`: the conversation and Trail lists feed the Sidebar's groups (Needs you is a
+ *   Trail state), so a stale copy misleads. No
  *   live channel carries the lists themselves (a list subscription needs a server and protocol
  *   change), so each mount reads the network while the store stays on screen. The open
  *   conversation's title is still live: its socket patches the list record. A reconnect
@@ -83,7 +84,7 @@ export const FRESHNESS: Record<FreshnessScreen, FreshnessPolicy> = {
     ttlMs: null,
     subscribes: false,
     reason:
-      "会話とタスクの一覧は Needs you の判断に使うので、古いまま出すと判断を誤る。一覧を運ぶライブ配信は無い（0159 は会話単位。一覧の購読は server / protocol の拡張が要る）ので、store を見せたまま開くたびに network で読み直し、切断中に増えた会話は再接続の refetch で拾う。",
+      "会話と Trail の一覧は Sidebar のグループ（Needs you は Trail の状態）の判断に使うので、古いまま出すと判断を誤る。一覧を運ぶライブ配信は無い（0159 は会話単位。一覧の購読は server / protocol の拡張が要る）ので、store を見せたまま開くたびに network で読み直し、切断中に増えた会話は再接続の refetch で拾う。",
   },
   conversation: {
     fetchPolicy: "network-only",

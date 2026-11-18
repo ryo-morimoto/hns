@@ -57,7 +57,7 @@ const responder: Responder = (call) => {
           },
         ],
       },
-      tasks: { __typename: "TaskList", tasks: [] },
+      trails: { __typename: "TrailList", trails: [] },
     };
   }
   return undefined;

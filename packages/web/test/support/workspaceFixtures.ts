@@ -4,7 +4,7 @@ import {
   type Conversation,
   type Project,
   type JsonValue,
-  type Task,
+  type Trail,
 } from "@hns/core";
 import { fromGlobalId, toGlobalId } from "@hns/core/graphql";
 import * as v from "valibot";
@@ -64,14 +64,65 @@ const conversations: readonly Conversation[] = [
   },
 ];
 
-const tasks: readonly Task[] = [
+/**
+ * The Trails the shell's fixtures list.
+ *
+ * @remarks
+ * One per Sidebar group, so a shell test sees all four lists populated: a review waits for a
+ * person, a draft is under way, a merged Trail is observed, and a closed one ended.
+ */
+const trails: readonly Trail[] = [
   {
-    id: "task-1",
+    id: "trail-review",
+    project_id: hns,
+    title: "レビューを待つ",
+    description: "",
+    acceptance: "",
+    kind: "feature",
+    state: "in_review",
+    priority: "high",
+    created_by: "owner",
+    created_at: "2026-11-07T00:30:00.000Z",
+    updated_at: "2026-11-07T00:30:00.000Z",
+  },
+  {
+    id: "trail-draft",
     project_id: hns,
     title: "Web の土台",
-    status: "doing",
+    description: "",
+    acceptance: "",
+    kind: "feature",
+    state: "draft",
+    priority: "normal",
+    created_by: "owner",
     created_at: "2026-11-07T00:00:00.000Z",
     updated_at: "2026-11-07T00:00:00.000Z",
+  },
+  {
+    id: "trail-observing",
+    project_id: hns,
+    title: "観測中の変更",
+    description: "",
+    acceptance: "",
+    kind: "fix",
+    state: "observing",
+    priority: "normal",
+    created_by: "owner",
+    created_at: "2026-11-06T00:00:00.000Z",
+    updated_at: "2026-11-06T00:00:00.000Z",
+  },
+  {
+    id: "trail-closed",
+    project_id: hns,
+    title: "終わった作業",
+    description: "",
+    acceptance: "",
+    kind: "chore",
+    state: "closed",
+    priority: "low",
+    created_by: "owner",
+    created_at: "2026-11-05T00:00:00.000Z",
+    updated_at: "2026-11-05T00:00:00.000Z",
   },
 ];
 
@@ -83,10 +134,12 @@ const projectPayload = (project: Project) => ({
   createdAt: project.created_at,
 });
 
-const taskPayload = (task: Task) => ({
-  id: toGlobalId("Task", task.id),
-  title: task.title,
-  status: task.status.toUpperCase(),
+const trailPayload = (trail: Trail) => ({
+  __typename: "Trail",
+  id: toGlobalId("Trail", trail.id),
+  projectId: toGlobalId("Project", trail.project_id),
+  title: trail.title,
+  state: trail.state.toUpperCase(),
 });
 
 /** The project a workspace call names, decoded from its global id. */
@@ -173,9 +226,11 @@ export const workspaceFixture: Responder = (call) => {
             : [],
         ),
       },
-      tasks: {
-        __typename: "TaskList",
-        tasks: tasks.flatMap((task) => (task.project_id === projectId ? [taskPayload(task)] : [])),
+      trails: {
+        __typename: "TrailList",
+        trails: trails.flatMap((trail) =>
+          trail.project_id === projectId ? [trailPayload(trail)] : [],
+        ),
       },
     };
   }

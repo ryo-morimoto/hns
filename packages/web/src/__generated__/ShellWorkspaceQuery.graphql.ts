@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<7c1b3d5274925c07a22895892520d4f0>>
+ * @generated SignedSource<<a6b3fd52bb88003aa980dfd11141aaaa>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -10,7 +10,7 @@
 
 import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
-export type QueryFailureCode = "INVALID_REQUEST" | "LIMIT_EXCEEDED" | "UNAVAILABLE" | "%future added value";
+export type QueryFailureCode = "INVALID_REQUEST" | "LIMIT_EXCEEDED" | "NOT_FOUND" | "UNAVAILABLE" | "%future added value";
 export type ShellWorkspaceQuery$variables = {
   hasProject: boolean;
   projectId: string;
@@ -28,13 +28,13 @@ export type ShellWorkspaceQuery$data = {
     // value in case none of the concrete values match.
     readonly __typename: "%other";
   };
-  readonly tasks?: {
+  readonly trails?: {
     readonly __typename: "QueryFailure";
     readonly code: QueryFailureCode;
     readonly message: string;
   } | {
-    readonly __typename: "TaskList";
-    readonly " $fragmentSpreads": FragmentRefs<"SidebarTasks">;
+    readonly __typename: "TrailList";
+    readonly " $fragmentSpreads": FragmentRefs<"SidebarTrails">;
   } | {
     // This will never be '%other', but we need some
     // value in case none of the concrete values match.
@@ -103,6 +103,13 @@ v6 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
+  "name": "projectId",
+  "storageKey": null
+},
+v7 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
   "name": "title",
   "storageKey": null
 };
@@ -151,7 +158,7 @@ return {
             "args": (v2/*: any*/),
             "concreteType": null,
             "kind": "LinkedField",
-            "name": "tasks",
+            "name": "trails",
             "plural": false,
             "selections": [
               (v3/*: any*/),
@@ -161,10 +168,10 @@ return {
                   {
                     "args": null,
                     "kind": "FragmentSpread",
-                    "name": "SidebarTasks"
+                    "name": "SidebarTrails"
                   }
                 ],
-                "type": "TaskList",
+                "type": "TrailList",
                 "abstractKey": null
               },
               (v4/*: any*/)
@@ -212,14 +219,8 @@ return {
                     "plural": true,
                     "selections": [
                       (v5/*: any*/),
-                      {
-                        "alias": null,
-                        "args": null,
-                        "kind": "ScalarField",
-                        "name": "projectId",
-                        "storageKey": null
-                      },
-                      (v6/*: any*/)
+                      (v6/*: any*/),
+                      (v7/*: any*/)
                     ],
                     "storageKey": null
                   }
@@ -236,7 +237,7 @@ return {
             "args": (v2/*: any*/),
             "concreteType": null,
             "kind": "LinkedField",
-            "name": "tasks",
+            "name": "trails",
             "plural": false,
             "selections": [
               (v3/*: any*/),
@@ -246,25 +247,26 @@ return {
                   {
                     "alias": null,
                     "args": null,
-                    "concreteType": "Task",
+                    "concreteType": "Trail",
                     "kind": "LinkedField",
-                    "name": "tasks",
+                    "name": "trails",
                     "plural": true,
                     "selections": [
                       (v5/*: any*/),
                       (v6/*: any*/),
+                      (v7/*: any*/),
                       {
                         "alias": null,
                         "args": null,
                         "kind": "ScalarField",
-                        "name": "status",
+                        "name": "state",
                         "storageKey": null
                       }
                     ],
                     "storageKey": null
                   }
                 ],
-                "type": "TaskList",
+                "type": "TrailList",
                 "abstractKey": null
               },
               (v4/*: any*/)
@@ -276,16 +278,16 @@ return {
     ]
   },
   "params": {
-    "cacheID": "f9de756bef1732dbc00118e009a58825",
+    "cacheID": "19c3c38f6c54f4fabd51f351655f4e6d",
     "id": null,
     "metadata": {},
     "name": "ShellWorkspaceQuery",
     "operationKind": "query",
-    "text": "query ShellWorkspaceQuery(\n  $projectId: ID!\n  $hasProject: Boolean!\n) {\n  conversations(projectId: $projectId) @include(if: $hasProject) {\n    __typename\n    ... on ConversationList {\n      ...SidebarConversations\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n  tasks(projectId: $projectId) @include(if: $hasProject) {\n    __typename\n    ... on TaskList {\n      ...SidebarTasks\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n}\n\nfragment SidebarConversations on ConversationList {\n  conversations {\n    id\n    projectId\n    title\n  }\n}\n\nfragment SidebarTasks on TaskList {\n  tasks {\n    id\n    title\n    status\n  }\n}\n"
+    "text": "query ShellWorkspaceQuery(\n  $projectId: ID!\n  $hasProject: Boolean!\n) {\n  conversations(projectId: $projectId) @include(if: $hasProject) {\n    __typename\n    ... on ConversationList {\n      ...SidebarConversations\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n  trails(projectId: $projectId) @include(if: $hasProject) {\n    __typename\n    ... on TrailList {\n      ...SidebarTrails\n    }\n    ... on QueryFailure {\n      code\n      message\n    }\n  }\n}\n\nfragment SidebarConversations on ConversationList {\n  conversations {\n    id\n    projectId\n    title\n  }\n}\n\nfragment SidebarTrails on TrailList {\n  trails {\n    id\n    projectId\n    title\n    state\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "263022c2b207250f1e4dc144d166bd41";
+(node as any).hash = "8e2de72f56b4eae8d39ee8bb94a17bb3";
 
 export default node;

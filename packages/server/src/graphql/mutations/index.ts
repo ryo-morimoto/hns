@@ -3,6 +3,7 @@ import type { GraphQLContext } from "../context.ts";
 import { createProjectModule } from "./create-project.ts";
 import { requestGrantModule } from "./grants.ts";
 import { machinesModule } from "./machines.ts";
+import { trailModule } from "./trail.ts";
 import { sendMessageModule } from "./send-message.ts";
 import { policyModule } from "../policy/schema.ts";
 
@@ -20,12 +21,16 @@ export interface MutationModule {
   /**
    * The fields this feature adds.
    *
-   * @param objects - The model's object types, so a payload can name `Project` or `Task`
+   * @param objects - The model's object types, so a payload can name `Project` or `Trail`
    * without a second definition of that name.
+   * @param overrides - The stand-in type a root defined in place of the model's (the Query root's
+   * `Trail`, with the lists it resolves from its id). A payload that names that type must use
+   * this instance; two types of one name are refused by GraphQL.
    * @returns The feature's field configs, keyed by GraphQL field name.
    */
   readonly fields: (
     objects: ReadonlyMap<string, GraphQLObjectType>,
+    overrides: ReadonlyMap<string, GraphQLObjectType>,
   ) => GraphQLFieldConfigMap<undefined, GraphQLContext>;
 }
 
@@ -43,8 +48,11 @@ export const MUTATION_MODULES: readonly MutationModule[] = [
   machinesModule(),
   requestGrantModule(),
   // The chat's send face (0270n): the turn that admits a policy snapshot and opens 0226's
-  // granted path. Its module is last so the published SDL's Mutation grows at the end.
+  // granted path.
   sendMessageModule(),
+  // The Trail write face (0231, D104): createTrail and updateTrail. Its module is last so the
+  // published SDL's Mutation grows at the end.
+  trailModule(),
 ];
 
 /**
@@ -52,6 +60,7 @@ export const MUTATION_MODULES: readonly MutationModule[] = [
  *
  * @param objects - The model object types the schema is built with.
  * @param modules - At least one feature module; an empty collection has no root.
+ * @param overrides - The stand-in types the Query root defined; passed to every module.
  * @returns The collected root, preserving module and field declaration order.
  * @throws Error when two modules define the same field name, or when a module defines no field.
  *
@@ -63,11 +72,12 @@ export const MUTATION_MODULES: readonly MutationModule[] = [
 export function buildMutationRoot(
   objects: ReadonlyMap<string, GraphQLObjectType>,
   modules: readonly MutationModule[],
+  overrides: ReadonlyMap<string, GraphQLObjectType> = new Map(),
 ): GraphQLObjectType {
   const fields: GraphQLFieldConfigMap<undefined, GraphQLContext> = {};
   const owners = new Map<string, string>();
   for (const module of modules) {
-    for (const [name, field] of Object.entries(module.fields(objects))) {
+    for (const [name, field] of Object.entries(module.fields(objects, overrides))) {
       const owner = owners.get(name);
       if (owner !== undefined) {
         throw new Error(

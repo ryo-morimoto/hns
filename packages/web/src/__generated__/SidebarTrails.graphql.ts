@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<c23b4c5d9c93be36ad821878153632df>>
+ * @generated SignedSource<<159cd7dda90ebf5d222b282ea63bcc98>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -9,33 +9,34 @@
 // @ts-nocheck
 
 import { ReaderFragment } from 'relay-runtime';
-export type TaskStatus = "BLOCKED" | "DOING" | "DONE" | "TODO" | "%future added value";
+export type TrailState = "ABANDONED" | "ACTIVE" | "CLOSED" | "DRAFT" | "IN_REVIEW" | "MERGED" | "OBSERVING" | "%future added value";
 import { FragmentRefs } from "relay-runtime";
-export type SidebarTasks$data = {
-  readonly tasks: ReadonlyArray<{
+export type SidebarTrails$data = {
+  readonly trails: ReadonlyArray<{
     readonly id: string;
-    readonly status: TaskStatus;
+    readonly projectId: string;
+    readonly state: TrailState;
     readonly title: string;
   }>;
-  readonly " $fragmentType": "SidebarTasks";
+  readonly " $fragmentType": "SidebarTrails";
 };
-export type SidebarTasks$key = {
-  readonly " $data"?: SidebarTasks$data;
-  readonly " $fragmentSpreads": FragmentRefs<"SidebarTasks">;
+export type SidebarTrails$key = {
+  readonly " $data"?: SidebarTrails$data;
+  readonly " $fragmentSpreads": FragmentRefs<"SidebarTrails">;
 };
 
 const node: ReaderFragment = {
   "argumentDefinitions": [],
   "kind": "Fragment",
   "metadata": null,
-  "name": "SidebarTasks",
+  "name": "SidebarTrails",
   "selections": [
     {
       "alias": null,
       "args": null,
-      "concreteType": "Task",
+      "concreteType": "Trail",
       "kind": "LinkedField",
-      "name": "tasks",
+      "name": "trails",
       "plural": true,
       "selections": [
         {
@@ -49,6 +50,13 @@ const node: ReaderFragment = {
           "alias": null,
           "args": null,
           "kind": "ScalarField",
+          "name": "projectId",
+          "storageKey": null
+        },
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
           "name": "title",
           "storageKey": null
         },
@@ -56,17 +64,17 @@ const node: ReaderFragment = {
           "alias": null,
           "args": null,
           "kind": "ScalarField",
-          "name": "status",
+          "name": "state",
           "storageKey": null
         }
       ],
       "storageKey": null
     }
   ],
-  "type": "TaskList",
+  "type": "TrailList",
   "abstractKey": null
 };
 
-(node as any).hash = "aeea115d3d1e7b26b4755bd1ef41602c";
+(node as any).hash = "cbef6597a91fd2b4dbf40522132e2e71";
 
 export default node;

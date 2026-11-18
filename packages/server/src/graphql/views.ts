@@ -1,5 +1,5 @@
 import { toGlobalId } from "@hns/core/graphql";
-import type { Conversation, Machine, Project, Task } from "@hns/core";
+import type { Conversation, Machine, Project, Trail, TrailChange } from "@hns/core";
 import type { IndexStateRow } from "@hns/store";
 
 /**
@@ -29,12 +29,41 @@ export interface ConversationView {
   readonly deletedAt: string | null;
 }
 
-/** The `Task` GraphQL shape; `status` stays a model value until the enum serializes it. */
-export interface TaskView {
+/**
+ * The `Trail` GraphQL shape (D104).
+ *
+ * @remarks
+ * Every enum field stays a model value until the enum serializes it, so a value this build does
+ * not know fails at the SDL boundary instead of being sent as a free string.
+ *
+ * The lists the `Trail` entity names (`changes`, `sessions`, `findings`, `decisions`, `gates`)
+ * are **not** fields of this shape: they are resolved per Trail, from the id the row already
+ * carries, so a list read of fifty Trails does not also read every attachment of each.
+ */
+export interface TrailView {
   readonly id: string;
   readonly projectId: string;
   readonly title: string;
-  readonly status: Task["status"];
+  readonly description: string;
+  readonly acceptance: string;
+  readonly kind: Trail["kind"];
+  readonly state: Trail["state"];
+  readonly priority: Trail["priority"];
+  readonly createdBy: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** The `TrailChange` GraphQL shape: the `base..head` pair, as ids the store holds. */
+export interface TrailChangeView {
+  readonly id: string;
+  readonly trailId: string;
+  readonly workspaceId: string;
+  readonly repoId: string | null;
+  readonly baseCommit: string;
+  readonly headCommit: string;
+  readonly runId: string | null;
+  readonly state: TrailChange["state"];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -158,14 +187,43 @@ export function machineRegistrationView(machine: Machine, viewer: string): Machi
   return { ...machineView(machine, viewer), publicKey: machine.publicKey };
 }
 
-/** Map a task to its GraphQL shape. */
-export function taskView(task: Task): TaskView {
+/** Map a Trail to its GraphQL shape: the row itself, with its project as a global id. */
+export function trailView(trail: Trail): TrailView {
   return {
-    id: toGlobalId("Task", task.id),
-    projectId: toGlobalId("Project", task.project_id),
-    title: task.title,
-    status: task.status,
-    createdAt: task.created_at,
-    updatedAt: task.updated_at,
+    id: toGlobalId("Trail", trail.id),
+    projectId: toGlobalId("Project", trail.project_id),
+    title: trail.title,
+    description: trail.description,
+    acceptance: trail.acceptance,
+    kind: trail.kind,
+    state: trail.state,
+    priority: trail.priority,
+    createdBy: trail.created_by,
+    createdAt: trail.created_at,
+    updatedAt: trail.updated_at,
+  };
+}
+
+/**
+ * Map a Change to its GraphQL shape.
+ *
+ * @remarks
+ * Only the Change's own id and its Trail are global ids. `workspaceId`, `repoId`, and `runId` are
+ * spelled as the SDL spells `ID` because they name a row, but they carry the stored value: a
+ * Change's `workspace_id` is the workspace id the run used (not a `Project` id), and wrapping it
+ * as one would let Relay merge it with the Project of the same value.
+ */
+export function trailChangeView(change: TrailChange): TrailChangeView {
+  return {
+    id: toGlobalId("TrailChange", change.id),
+    trailId: toGlobalId("Trail", change.trail_id),
+    workspaceId: change.workspace_id,
+    repoId: change.repo_id,
+    baseCommit: change.base_commit,
+    headCommit: change.head_commit,
+    runId: change.run_id,
+    state: change.state,
+    createdAt: change.created_at,
+    updatedAt: change.updated_at,
   };
 }

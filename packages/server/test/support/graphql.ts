@@ -4,8 +4,8 @@ import {
   ProjectIdSchema,
   type Conversation,
   type Project,
-  type Task,
-  type TaskStatus,
+  type Trail,
+  type TrailChange,
 } from "@hns/core";
 
 const AT = "2026-01-01T00:00:00.000Z";
@@ -45,18 +45,34 @@ export function conversation(
   };
 }
 
-/** A task in `projectId`. */
-export function task(
-  id: string,
-  projectId: string,
-  title: string = id,
-  status: TaskStatus = "todo",
-): Task {
+/** A Trail in `projectId`, in the state the store creates one. */
+export function trail(id: string, projectId: string, title: string = id): Trail {
   return {
     id,
     project_id: v.parse(ProjectIdSchema, projectId),
     title,
-    status,
+    description: "",
+    acceptance: "",
+    kind: "feature",
+    state: "draft",
+    priority: "normal",
+    created_by: "owner",
+    created_at: AT,
+    updated_at: AT,
+  };
+}
+
+/** A Change of `trailId`, with a base and a head that differ (T-2). */
+export function trailChange(id: string, trailId: string): TrailChange {
+  return {
+    id,
+    trail_id: trailId,
+    workspace_id: "project-hns",
+    repo_id: null,
+    base_commit: "1".repeat(40),
+    head_commit: "2".repeat(40),
+    run_id: null,
+    state: "open",
     created_at: AT,
     updated_at: AT,
   };

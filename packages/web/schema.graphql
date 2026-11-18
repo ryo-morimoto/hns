@@ -45,27 +45,155 @@ enum ProjectEgress {
   ALLOWLIST
 }
 
-type Task {
+type Trail {
+  acceptance: String!
   createdAt: String!
+  createdBy: String!
+  description: String!
   id: ID!
+  kind: TrailKind!
+  priority: TrailPriority!
   projectId: ID!
-  status: TaskStatus!
+  state: TrailState!
   title: String!
   updatedAt: String!
+  changes: [TrailChange!]!
 }
 
-enum TaskStatus {
-  TODO
-  DOING
-  DONE
-  BLOCKED
+type TrailChange {
+  baseCommit: String!
+  createdAt: String!
+  headCommit: String!
+  id: ID!
+  repoId: ID
+  runId: ID
+  state: TrailChangeState!
+  trailId: ID!
+  updatedAt: String!
+  workspaceId: ID!
+}
+
+enum TrailChangeState {
+  OPEN
+  IN_REVIEW
+  MERGED
+  ABANDONED
+}
+
+type TrailDecision {
+  action: TrailDecisionAction!
+  actor: String!
+  at: String!
+  changeId: ID
+  headCommit: String
+  id: ID!
+  note: String!
+  trailId: ID!
+}
+
+enum TrailDecisionAction {
+  APPROVE
+  REQUEST_CHANGES
+  REJECT
+}
+
+type TrailFinding {
+  changeId: ID
+  createdAt: String!
+  file: String
+  hunk: String
+  id: ID!
+  resolvedAt: String
+  resolvedBy: String
+  severity: TrailFindingSeverity!
+  source: TrailFindingSource!
+  status: TrailFindingStatus!
+  summary: String!
+  trailId: ID!
+}
+
+enum TrailFindingSeverity {
+  HIGH
+  MEDIUM
+  LOW
+  NONE
+}
+
+enum TrailFindingSource {
+  AGENT
+  TEST
+  HUMAN
+}
+
+enum TrailFindingStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+type TrailGate {
+  changeId: ID
+  detail: String
+  evaluatedAt: String!
+  gate: TrailGateKind!
+  id: ID!
+  status: TrailGateStatus!
+  trailId: ID!
+}
+
+enum TrailGateKind {
+  HUMAN_REVIEW
+  TESTS
+  FINDINGS
+  FRESHNESS
+}
+
+enum TrailGateStatus {
+  PENDING
+  PASS
+  FAIL
+  ASK
+}
+
+enum TrailKind {
+  FEATURE
+  FIX
+  CHORE
+  SPIKE
+}
+
+enum TrailPriority {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+type TrailSession {
+  conversationId: ID
+  id: ID!
+  linkedAt: String!
+  runId: ID
+  sessionId: String!
+  trailId: ID!
+}
+
+enum TrailState {
+  DRAFT
+  ACTIVE
+  IN_REVIEW
+  MERGED
+  OBSERVING
+  CLOSED
+  ABANDONED
 }
 
 type Query {
   projects(first: Int): ProjectListResult!
   conversations(projectId: ID!, first: Int, after: String, q: String): ConversationListResult!
   indexState(projectId: ID!): IndexStateResult!
-  tasks(projectId: ID!, first: Int): TaskListResult!
+  trails(projectId: ID, first: Int): TrailListResult!
+  trail(id: ID!): TrailResult!
   machines(first: Int): MachineListResult!
   policyRevisions(workspaceId: ID!, first: Int): PolicyRevisionListResult!
   policyProposals(workspaceId: ID!, status: PolicyProposalStatus): PolicyProposalListResult!
@@ -85,6 +213,7 @@ type QueryFailure {
 enum QueryFailureCode {
   INVALID_REQUEST
   LIMIT_EXCEEDED
+  NOT_FOUND
   UNAVAILABLE
 }
 
@@ -104,10 +233,16 @@ type IndexState {
   lastErrorAt: String
 }
 
-union TaskListResult = TaskList | QueryFailure
+union TrailListResult = TrailList | QueryFailure
 
-type TaskList {
-  tasks: [Task!]!
+type TrailList {
+  trails: [Trail!]!
+}
+
+union TrailResult = TrailPayload | QueryFailure
+
+type TrailPayload {
+  trail: Trail!
 }
 
 union MachineListResult = MachineList | QueryFailure
@@ -207,6 +342,8 @@ type Mutation {
   revokeMachine(id: String!): RevokeMachineResult!
   requestGrant(input: RequestGrantInput!): RequestGrantResult!
   sendMessage(input: SendMessageInput!): SendMessageResult!
+  createTrail(input: CreateTrailInput!): CreateTrailResult!
+  updateTrail(id: ID!, input: UpdateTrailInput!): UpdateTrailResult!
 }
 
 union CreateProjectResult = CreateProjectPayload | MutationFailure
@@ -346,4 +483,47 @@ type SendMessagePayload {
 input SendMessageInput {
   conversationId: String!
   text: String!
+}
+
+union CreateTrailResult = CreateTrailPayload | MutationFailure
+
+type CreateTrailPayload {
+  trail: Trail!
+}
+
+input CreateTrailInput {
+  projectId: ID!
+  title: String!
+  description: String
+  acceptance: String
+  kind: TrailKindInput
+  priority: TrailPriorityInput
+}
+
+enum TrailKindInput {
+  FEATURE
+  FIX
+  CHORE
+  SPIKE
+}
+
+enum TrailPriorityInput {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+union UpdateTrailResult = UpdateTrailPayload | MutationFailure
+
+type UpdateTrailPayload {
+  trail: Trail!
+}
+
+input UpdateTrailInput {
+  title: String
+  description: String
+  acceptance: String
+  kind: TrailKindInput
+  priority: TrailPriorityInput
 }

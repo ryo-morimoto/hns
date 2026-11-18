@@ -26,6 +26,20 @@ interface ObjectRef<N extends string> {
 }
 
 /**
+ * A reference to a list of a registered GraphQL object.
+ *
+ * @remarks
+ * The element is non-null unless a caller says otherwise: `[TrailChange!]` is the only list shape
+ * the model has needed so far, and a nullable element is spelled explicitly, not derived.
+ */
+interface ObjectListRef<N extends string> {
+  readonly kind: "objectList";
+  readonly typeName: N;
+  /** False when an element may be null (`[TrailChange]` rather than `[TrailChange!]`). */
+  readonly elementNonNull: boolean;
+}
+
+/**
  * Entity names whose model type is assignable to V, and V to it.
  *
  * @internal
@@ -57,7 +71,8 @@ type EnumNameFor<V> = {
  * @remarks
  * Branded strings become `ID`; strings that exactly match a registered enum become that enum;
  * other strings become `String` or `ID`; booleans become `Boolean`; numbers become `Int` or
- * `Float`; registered model objects become their object type.
+ * `Float`; registered model objects become their object type; an array of one registered model
+ * object becomes a non-null list of non-null elements.
  */
 type NonNullField<V> = [V] extends [Brand<string, string>]
   ? ScalarRef<"ID">
@@ -71,9 +86,26 @@ type NonNullField<V> = [V] extends [Brand<string, string>]
           : [EnumNameFor<V>] extends [never]
             ? ScalarRef<"String" | "ID">
             : EnumRef<EnumNameFor<V>>
-        : [V] extends [object]
-          ? ObjectRef<ObjectNameFor<V>>
-          : never;
+        : [V] extends [readonly (infer _Element)[]]
+          ? ListFieldFor<V>
+          : [V] extends [object]
+            ? ObjectRef<ObjectNameFor<V>>
+            : never;
+
+/**
+ * Map a non-null list of one registered model object to its GraphQL shape.
+ *
+ * @remarks
+ * The element must be exactly one registered entity (a branded string included): a list of
+ * strings or of a union is not a shape the model has a vocabulary for yet, so it does not
+ * compile until one is added here. Elements are non-null; a list of nullable elements would need
+ * a second spelling.
+ */
+type ListFieldFor<V> = V extends readonly (infer Element)[]
+  ? [Element] extends [object]
+    ? ObjectListRef<ObjectNameFor<Element>>
+    : never
+  : never;
 
 /** Whether the model type admits null or undefined. */
 type IsNullable<V> = null extends V ? true : undefined extends V ? true : false;
@@ -113,6 +145,13 @@ type SpecField =
       readonly kind: "object";
       readonly typeName: string;
       readonly nonNull: boolean;
+    }
+  | {
+      readonly name: string;
+      readonly kind: "objectList";
+      readonly typeName: string;
+      readonly nonNull: boolean;
+      readonly elementNonNull: boolean;
     };
 
 /**
@@ -128,12 +167,20 @@ export type FieldTable<T> = { readonly [K in keyof T]-?: FieldEntry<T[K]> };
 export interface RegisteredField {
   /** The GraphQL field name on the wire. */
   readonly name: string;
-  /** What `typeName` names: a scalar, an enum, or an object. */
-  readonly kind: "scalar" | "enum" | "object";
+  /** What `typeName` names: a scalar, an enum, an object, or a list of objects. */
+  readonly kind: "scalar" | "enum" | "object" | "objectList";
   /** Scalar name, enum name, or object type name, matching `kind`. */
   readonly typeName: string;
   /** False when the field may be null. */
   readonly nonNull: boolean;
+  /**
+   * For `objectList` only: false when an element may be null.
+   *
+   * @remarks
+   * Absent for every other kind rather than defaulted, so a reader of a scalar field cannot
+   * mistake a missing value for a nullable element.
+   */
+  readonly elementNonNull?: boolean;
 }
 
 /** A GraphQL object type contributed by the model. */
@@ -240,6 +287,15 @@ function toRegisteredField(entry: SpecField): RegisteredField {
   assertName("field", entry.name);
   if (entry.kind === "scalar") {
     return { name: entry.name, kind: "scalar", typeName: entry.type, nonNull: entry.nonNull };
+  }
+  if (entry.kind === "objectList") {
+    return {
+      name: entry.name,
+      kind: "objectList",
+      typeName: entry.typeName,
+      nonNull: entry.nonNull,
+      elementNonNull: entry.elementNonNull,
+    };
   }
   return { name: entry.name, kind: entry.kind, typeName: entry.typeName, nonNull: entry.nonNull };
 }

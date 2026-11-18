@@ -7,7 +7,7 @@ import { createEdge } from "../edge/handler.ts";
 import { QueryReadError } from "./failures.ts";
 import { envWith, sessionCookie, sessionWith } from "../../test/support/edge.ts";
 import { noteMutation } from "../../test/graphql/fixture-mutation.ts";
-import { conversation, project, task } from "../../test/support/graphql.ts";
+import { conversation, project, trail } from "../../test/support/graphql.ts";
 import type { WorkerEnv } from "../edge/env.ts";
 import type { GraphQLFaceDependencies } from "./handler.ts";
 import { createGraphQLFace } from "./handler.ts";
@@ -30,6 +30,16 @@ interface RequestBody {
   readonly query: string;
   readonly variables?: { readonly [name: string]: JsonValue };
   readonly operationName?: string;
+}
+
+/**
+ * A Trail as the store returns it: the row plus the `refused: false` discriminator.
+ *
+ * @param value - The model's Trail.
+ * @returns The value the read ports answer with.
+ */
+function stored<T extends object>(value: T): T & { readonly refused: false } {
+  return { ...value, refused: false };
 }
 
 /** Build an edge over the real GraphQL face, with reads and limits replaced per test. */
@@ -332,25 +342,64 @@ test("an unknown project has no index state", async () => {
   });
 });
 
-// Catches: tasks read across projects, or a task status serialized as a free string.
-test("tasks are served from the injected read with the enum name", async () => {
+// Catches: trails read across projects, or a Trail state serialized as a free string.
+test("trails are served from the injected read with the enum name", async () => {
   const send = edgeWith({
-    reads: { tasks: () => Promise.resolve([task("t1", "p1", "Do it", "doing")]) },
+    reads: { trails: () => Promise.resolve([stored(trail("trail-1", "p1", "Do it"))]) },
   });
   const response = await send({
     query:
-      '{ tasks(projectId: "' +
+      '{ trails(projectId: "' +
       toGlobalId("Project", "p1") +
-      '") { __typename ... on TaskList { tasks { id status } } } }',
+      '") { __typename ... on TrailList { trails { id state } } } }',
   });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
     data: {
-      tasks: {
-        __typename: "TaskList",
-        tasks: [{ id: toGlobalId("Task", "t1"), status: "DOING" }],
+      trails: {
+        __typename: "TrailList",
+        trails: [{ id: toGlobalId("Trail", "trail-1"), state: "DRAFT" }],
       },
     },
+  });
+});
+
+// Catches: one Trail read as an empty answer instead of a member, or its id decoded wrongly.
+test("trail(id) is served from the injected read", async () => {
+  const send = edgeWith({
+    reads: { trail: (id) => Promise.resolve(stored(trail(id, "p1", "Do it"))) },
+  });
+  const response = await send({
+    query:
+      '{ trail(id: "' +
+      toGlobalId("Trail", "trail-1") +
+      '") { __typename ... on TrailPayload { trail { id title } } ... on QueryFailure { code } } }',
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: {
+      trail: {
+        __typename: "TrailPayload",
+        trail: { id: toGlobalId("Trail", "trail-1"), title: "Do it" },
+      },
+    },
+  });
+});
+
+// Catches: a missing Trail answered as an empty object, which a screen would show as loading.
+test("a missing trail is not_found, a typed failure at HTTP 200", async () => {
+  const send = edgeWith({
+    reads: { trail: () => Promise.resolve({ kind: "not_found", refused: true }) },
+  });
+  const response = await send({
+    query:
+      '{ trail(id: "' +
+      toGlobalId("Trail", "gone") +
+      '") { __typename ... on QueryFailure { code } } }',
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: { trail: { __typename: "QueryFailure", code: "NOT_FOUND" } },
   });
 });
 
@@ -370,27 +419,42 @@ test("an invalid first is a typed failure at HTTP 200", async () => {
 test("a project id that is not a Project global id is a typed failure", async () => {
   const send = edgeWith({ reads: { projects: () => Promise.resolve([]) } });
   const raw = await send({
-    query: '{ tasks(projectId: "p1") { __typename ... on QueryFailure { code } } }',
+    query: '{ trails(projectId: "p1") { __typename ... on QueryFailure { code } } }',
   });
   expect(raw.status).toBe(200);
   expect(await raw.json()).toMatchObject({
-    data: { tasks: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
+    data: { trails: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
   const wrongType = await send({
     query:
-      '{ tasks(projectId: "' +
+      '{ trails(projectId: "' +
       toGlobalId("Conversation", "p1") +
       '") { __typename ... on QueryFailure { code } } }',
   });
   expect(await wrongType.json()).toMatchObject({
-    data: { tasks: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
+    data: { trails: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
   const malformed = await send({
-    query: '{ tasks(projectId: "not-a-global-id") { __typename ... on QueryFailure { code } } }',
+    query: '{ trails(projectId: "not-a-global-id") { __typename ... on QueryFailure { code } } }',
   });
   expect(await malformed.json()).toMatchObject({
-    data: { tasks: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
+    data: { trails: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
   });
+});
+
+// Catches: a raw or another type's id accepted as a Trail id by trail(id).
+test("a trail id that is not a Trail global id is a typed failure", async () => {
+  const send = edgeWith({
+    reads: { trail: () => Promise.resolve({ kind: "not_found", refused: true }) },
+  });
+  for (const id of ["trail-1", toGlobalId("Project", "trail-1"), "not-a-global-id"]) {
+    const response = await send({
+      query: '{ trail(id: "' + id + '") { __typename ... on QueryFailure { code } } }',
+    });
+    expect(await response.json(), id).toMatchObject({
+      data: { trail: { __typename: "QueryFailure", code: "INVALID_REQUEST" } },
+    });
+  }
 });
 
 // Catches: a missing database reported as an empty list or a 500.

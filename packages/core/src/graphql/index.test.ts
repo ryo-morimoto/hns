@@ -10,7 +10,8 @@ import {
   validateSchema,
 } from "graphql";
 import { buildSchema, buildSdl, defineEntity, EXCLUDED } from "./index.ts";
-import { PROJECT_EGRESS_POLICIES, TASK_STATUSES } from "../types.ts";
+import { TRAIL_STATES } from "../trail.ts";
+import { PROJECT_EGRESS_POLICIES } from "../types.ts";
 
 const golden = readFileSync(new URL("../../test/fixtures/schema.graphql", import.meta.url), "utf8");
 
@@ -83,7 +84,9 @@ test("ids are exposed as ID and the brand is not part of the contract", () => {
   );
   expect(sdl).toMatch(/  workspaceRoot: String!/u);
   expect(sdl).toMatch(/  projectId: ID!/u);
-  expect(sdl).toMatch(/type Task \{\n  createdAt: String!\n  id: ID!/u);
+  expect(sdl).toMatch(
+    /type Trail \{\n  acceptance: String!\n  createdAt: String!\n  createdBy: String!/u,
+  );
   const typeNames = [...sdl.matchAll(/^(?:type|enum) (\w+)/gmu)].map((match) => match[1]);
   expect(typeNames).toStrictEqual([
     "Conversation",
@@ -91,9 +94,32 @@ test("ids are exposed as ID and the brand is not part of the contract", () => {
     "MachineStatus",
     "Project",
     "ProjectEgress",
-    "Task",
-    "TaskStatus",
+    "Trail",
+    "TrailChange",
+    "TrailChangeState",
+    "TrailDecision",
+    "TrailDecisionAction",
+    "TrailFinding",
+    "TrailFindingSeverity",
+    "TrailFindingSource",
+    "TrailFindingStatus",
+    "TrailGate",
+    "TrailGateKind",
+    "TrailGateStatus",
+    "TrailKind",
+    "TrailPriority",
+    "TrailSession",
+    "TrailState",
   ]);
+});
+
+// Catches: the replaced unit surviving in the contract (D104): a Task type, its status, or its
+// query would be a second status and a second screen beside the Trail's.
+test("the SDL no longer carries Task or TaskStatus", () => {
+  const sdl = buildSdl();
+  expect(sdl).not.toMatch(/^type Task\b/mu);
+  expect(sdl).not.toMatch(/^enum TaskStatus\b/mu);
+  expect(sdl).not.toMatch(/\bTaskStatus\b/u);
 });
 
 test("nullability follows the model", () => {
@@ -105,15 +131,52 @@ test("nullability follows the model", () => {
 
 test("enum names are SCREAMING_SNAKE_CASE and keep the model values", () => {
   const schema = buildSchema(() => dummyQuery());
-  const type = schema.getType("TaskStatus");
+  const type = schema.getType("TrailState");
   assert.ok(type instanceof GraphQLEnumType);
   expect(type.getValues().map((value) => value.name)).toStrictEqual([
-    "TODO",
-    "DOING",
-    "DONE",
-    "BLOCKED",
+    "DRAFT",
+    "ACTIVE",
+    "IN_REVIEW",
+    "MERGED",
+    "OBSERVING",
+    "CLOSED",
+    "ABANDONED",
   ]);
-  expect(type.getValues().map((value) => value.value)).toStrictEqual([...TASK_STATUSES]);
+  expect(type.getValues().map((value) => value.value)).toStrictEqual([...TRAIL_STATES]);
+});
+
+/**
+ * The Trail enums the model publishes, and the values each carries.
+ *
+ * @remarks
+ * Written out rather than read from the registry: a test that compared the SDL with its own
+ * source would agree with any edit to the closed vocabulary.
+ */
+const TRAIL_ENUMS = {
+  TrailState: ["draft", "active", "in_review", "merged", "observing", "closed", "abandoned"],
+  TrailKind: ["feature", "fix", "chore", "spike"],
+  TrailPriority: ["urgent", "high", "normal", "low"],
+  TrailChangeState: ["open", "in_review", "merged", "abandoned"],
+  TrailFindingSeverity: ["high", "medium", "low", "none"],
+  TrailFindingSource: ["agent", "test", "human"],
+  TrailFindingStatus: ["open", "resolved", "dismissed"],
+  TrailDecisionAction: ["approve", "request_changes", "reject"],
+  TrailGateKind: ["human_review", "tests", "findings", "freshness"],
+  TrailGateStatus: ["pending", "pass", "fail", "ask"],
+} satisfies Readonly<Record<string, readonly string[]>>;
+
+// Catches: a Trail vocabulary published as a free String, or an open enum a new stored value
+// could quietly become (D104: the vocabularies are closed).
+test("every Trail vocabulary is a closed enum with its model values", () => {
+  const schema = buildSchema(() => dummyQuery());
+  for (const [name, values] of Object.entries(TRAIL_ENUMS)) {
+    const type = schema.getType(name);
+    assert.ok(type instanceof GraphQLEnumType, name + " is not an enum");
+    expect(
+      type.getValues().map((value) => value.value),
+      name,
+    ).toStrictEqual(values);
+  }
 });
 
 // Catches: an egress value the machine cannot enforce added to the model without the enum.

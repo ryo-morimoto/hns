@@ -1,16 +1,24 @@
-import type { TaskStatus, WorkflowRun } from "@hns/core";
+import type { WorkflowRun } from "@hns/core";
 import type { ReactElement } from "react";
 import { graphql, useFragment } from "react-relay";
 import type { SidebarConversations$key } from "../__generated__/SidebarConversations.graphql";
 import type { SidebarProjects$key } from "../__generated__/SidebarProjects.graphql";
-import type { SidebarTasks$key } from "../__generated__/SidebarTasks.graphql";
+import type { SidebarTrails$key } from "../__generated__/SidebarTrails.graphql";
 import { Badge } from "../components/Badge.tsx";
 import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
 import { formatHash, type Route } from "../routes/route.ts";
 import { formatRelative } from "./relativeTime.ts";
-import { conversationLinkOf, projectLinkOf, taskLinkOf, type ProjectLink } from "./viewModel.ts";
+import {
+  TRAIL_GROUP_LABELS,
+  conversationLinkOf,
+  projectLinkOf,
+  trailGroupsOf,
+  trailLinkOf,
+  type ProjectLink,
+  type TrailGroup,
+} from "./viewModel.ts";
 import { breakdownOf, totalsOf, type WorkspaceSummary } from "./workspaceSummary.ts";
 
 /** The sidebar selects the fields it renders; the shell spreads the fragment. */
@@ -36,13 +44,21 @@ export const SidebarConversationsFragment = graphql`
   }
 `;
 
-/** The tasks of the selected workspace. */
-export const SidebarTasksFragment = graphql`
-  fragment SidebarTasks on TaskList {
-    tasks {
+/**
+ * The Trails of the selected workspace, newest first.
+ *
+ * @remarks
+ * One list, grouped by state when it is rendered ({@link trailGroupsOf}); the selection carries
+ * the state because that is what the grouping reads, and nothing else. The server orders the list
+ * newest first (`store.trails.list`), and a group keeps that order.
+ */
+export const SidebarTrailsFragment = graphql`
+  fragment SidebarTrails on TrailList {
+    trails {
       id
+      projectId
       title
-      status
+      state
     }
   }
 `;
@@ -50,7 +66,7 @@ export const SidebarTasksFragment = graphql`
 export interface SidebarProps {
   readonly projectsRef: SidebarProjects$key | null;
   readonly conversationsRef: SidebarConversations$key | null;
-  readonly tasksRef: SidebarTasks$key | null;
+  readonly trailsRef: SidebarTrails$key | null;
   readonly runs: readonly WorkflowRun[];
   readonly summaries: readonly WorkspaceSummary[];
   readonly summariesPending: boolean;
@@ -64,17 +80,19 @@ export interface SidebarProps {
 
 type Tone = "neutral" | "accent" | "ok" | "warn" | "danger";
 
-function taskTone(status: TaskStatus): Tone {
-  switch (status) {
-    case "todo":
-      return "neutral";
-    case "doing":
-      return "accent";
-    case "done":
-      return "ok";
-    case "blocked":
-      return "danger";
-  }
+/**
+ * The tone of one Sidebar list's heading.
+ *
+ * @param group - The list.
+ * @returns The accent for what waits for a person, a neutral tone for the rest.
+ *
+ * @remarks
+ * Only "needs you" is coloured: it is the one list a reader acts on, and colouring four headings
+ * would make none of them stand out. A Sidebar is four lists, not a board: no Trail is a card in
+ * a column, and its state is the one thing that decides where it appears (D104).
+ */
+function groupTone(group: TrailGroup): Tone {
+  return group === "needs-you" ? "accent" : "neutral";
 }
 
 function runTone(status: WorkflowRun["status"]): Tone {
@@ -163,7 +181,7 @@ function SummaryRow({ label, count, breakdown, critical = false }: SummaryRowPro
 export function Sidebar({
   projectsRef,
   conversationsRef,
-  tasksRef,
+  trailsRef,
   runs,
   summaries,
   summariesPending,
@@ -178,7 +196,8 @@ export function Sidebar({
   const conversations = (
     useFragment(SidebarConversationsFragment, conversationsRef)?.conversations ?? []
   ).map(conversationLinkOf);
-  const tasks = (useFragment(SidebarTasksFragment, tasksRef)?.tasks ?? []).map(taskLinkOf);
+  const trails = (useFragment(SidebarTrailsFragment, trailsRef)?.trails ?? []).map(trailLinkOf);
+  const groups = trailGroupsOf(trails);
   const projectId = route.projectId;
   const currentConversation = route.kind === "conversation" ? route.conversationId : null;
   const summaryById = new Map<string, WorkspaceSummary>(
@@ -270,6 +289,8 @@ export function Sidebar({
                     aria-label={project.name + " の作業"}
                   >
                     <h3 className="hns-sidebar__subtitle">会話</h3>
+                    {/* One read feeds both lists (the workspace query), so its failure is shown
+                        once, above them, rather than twice. */}
                     {failed ? <p className="hns-sidebar__empty">読み込めません</p> : null}
                     {!failed && conversations.length === 0 ? (
                       <p className="hns-sidebar__empty">会話はありません</p>
@@ -293,15 +314,34 @@ export function Sidebar({
                         </li>
                       ))}
                     </ul>
-                    <h3 className="hns-sidebar__subtitle">タスク</h3>
-                    <ul className="hns-sidebar__list">
-                      {tasks.map((task) => (
-                        <li className="hns-sidebar__row" key={task.id}>
-                          <Badge tone={taskTone(task.status)}>{task.status}</Badge>
-                          <span>{task.title}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <h3 className="hns-sidebar__subtitle">Trails</h3>
+                    {!failed && trails.length === 0 ? (
+                      <p className="hns-sidebar__empty">Trail はありません</p>
+                    ) : null}
+                    {groups.map((group) => (
+                      <div
+                        className="hns-trail-group"
+                        role="group"
+                        data-group={group.group}
+                        aria-label={TRAIL_GROUP_LABELS[group.group]}
+                        key={group.group}
+                      >
+                        <h4 className="hns-sidebar__subtitle">
+                          <Badge tone={groupTone(group.group)}>
+                            {TRAIL_GROUP_LABELS[group.group]}
+                          </Badge>
+                          <span className="hns-trail-group__count">{group.trails.length}</span>
+                        </h4>
+                        <ul className="hns-sidebar__list">
+                          {group.trails.map((trail) => (
+                            <li className="hns-sidebar__row" key={trail.id}>
+                              <span>{trail.title}</span>
+                              <span className="hns-sidebar__state">{trail.state}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
                     <a
                       className="hns-sidebar__link"
                       href={formatHash({ kind: "policy", projectId: project.id })}

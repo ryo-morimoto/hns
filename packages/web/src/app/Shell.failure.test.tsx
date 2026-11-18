@@ -51,7 +51,7 @@ test("a typed conversation failure is shown in the sidebar", async () => {
         code: "UNAVAILABLE",
         message: "internal detail",
       },
-      tasks: { __typename: "TaskList", tasks: [] },
+      trails: { __typename: "TrailList", trails: [] },
     };
   });
   expect(await screen.findByText("読み込めません")).toBeTruthy();
