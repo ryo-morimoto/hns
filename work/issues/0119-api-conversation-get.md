@@ -1,8 +1,8 @@
 # 0119: 会話の単体取得と state のメタデータ
 
-status: open
-priority: hold
-design: pending
+status: in-progress
+priority: now
+design: agreed
 depends-on: 0145, 0146
 touches: packages/core/src/graphql, packages/server/src, packages/server/test
 
@@ -10,6 +10,13 @@ touches: packages/core/src/graphql, packages/server/src, packages/server/test
 
 会話画面が、一覧を引かずに1つの会話のメタデータ（title / project / archived / updated_at）を得る。
 /api/state と会話メタの取得を1往復にまとめる。
+
+## 設計（lead）
+
+- **面は REST**（既存の `/api/*` に合わせる。GraphQL は対話の一覧に既にあり、0105 は単体を 1 往復で欲しい）。
+- `GET /api/conversations/:id` は **session 認証**（未認証 401）。**deleted / 未知は 404**、archived は 200 で `archived: true`。
+- `/api/state` の応答に **`conversation` の要約**を足す（0105 が一覧の線形探索をしない）。**加算**で、既存の field は変えない。
+- 応答の型は **core の既存 DTO**（web で再定義しない）。
 
 ## Acceptance criteria
 
