@@ -77,16 +77,21 @@ fetch_and_check() {
   fi
   log "fetching $url"
   mkdir -p "$(dirname "$dest")"
-  curl -fsSL --retry 3 -o "$dest.part" "$url"
+  # A failed download says so. "The file is not the one pinned" is a different fault (upstream
+  # moved, or something rewrote it) and must not be reported as a network error.
+  curl -fsSL --retry 3 -o "$dest.part" "$url" || {
+    local status=$?
+    rm -f "$dest.part"
+    die "could not download $url (curl exit $status)"
+  }
   local got
   got="$(sha256sum "$dest.part" | cut -d' ' -f1)"
   if [[ "$got" != "$digest" ]]; then
     rm -f "$dest.part"
-    die "$url: sha256 is $got, expected $digest"
+    die "downloaded $url but its sha256 is $got, expected $digest; refusing to unpack it"
   fi
   mv "$dest.part" "$dest"
 }
-
 store_path_of() {
   local name=$1 version=$2 override=$3
   local found

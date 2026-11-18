@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  // The pack's tests. pack.mjs, build.sh and verify.sh are JavaScript and shell: the gate's oxfmt
+  // and oxlint scope does not cover .mjs, and pack.mjs is dependency-free by design (see its head).
+  "include": ["pack.test.ts", "test/**/*.ts"]
+}

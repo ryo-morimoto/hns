@@ -5,11 +5,27 @@
 // the gate's oxfmt/oxlint do not look at tools/*.mjs.
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** The shape of every digest this file writes and reads: `sha256:<64 lowercase hex>`. */
+const OFFICE_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const OPERATIONS = ["preview", "render", "convert"];
 /** What the release does not ship and the engine cannot start without (spike S12). */
 const SEED_LIBRARIES = ["libxcb.so.1", "libxkbcommon.so.0", "libxkbcommon-x11.so.0"];
@@ -34,20 +50,49 @@ const fail = (message) => {
 
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
-/** Every file under root, recursively, as pack-relative posix paths, sorted. */
-const walk = (root) => {
+/** One entry the pack carries: a regular file with its digest, or a symlink with its target. */
+/** Whether path is a symlink (lstat, not stat: a broken link is still a link the pack holds). */
+const isSymlink = (path) => {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
+/** Whether a symlink, followed, stays inside the pack root. */
+const resolvesInside = (root, link) => {
+  const base = resolve(root);
+  const resolved = resolve(dirname(link), readlinkSync(link));
+  return resolved === base || resolved.startsWith(base.endsWith("/") ? base : base + "/");
+};
+
+/**
+ * Every payload under root, recursively, as pack-relative posix paths, sorted.
+ *
+ * A symlink is payload too. The pack's store/ tree is nothing but symlinks into lib/store/, and a
+ * manifest that skipped them would leave their targets unaccounted for: re-pointing one at
+ * /etc/passwd would still verify. So each is listed with the target it actually has.
+ */
+const payload = (root) => {
   const out = [];
   const visit = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const path = join(dir, entry.name);
-      if (entry.isDirectory()) visit(path);
-      else if (entry.isFile()) out.push(relative(root, path).split("\\").join("/"));
+      // The mode comes from lstat: on a filesystem that does not report d_type for entries a
+      // Dirent may answer neither isDirectory nor isSymbolicLink, and the entry would vanish.
+      const stat = lstatSync(path);
+      if (stat.isDirectory()) visit(path);
+      else if (stat.isSymbolicLink()) out.push({ path: relative(root, path).split("\\").join("/"), symlink: true, target: readlinkSync(path) });
+      else if (entry.isFile()) out.push({ path: relative(root, path).split("\\").join("/"), symlink: false });
     }
   };
   visit(root);
   return out;
 };
 
+/** Just the paths, for the manifest writer. */
+const walk = (root) => payload(root).map((entry) => entry.path);
 /** ldd's view of a file's dependencies: the store paths the loader resolves. */
 const dependencies = (path) => {
   const result = spawnSync("ldd", [path], { encoding: "utf8" });
@@ -200,6 +245,7 @@ const fontsConf = () => {
       "     which the machine sets to this directory. There is no host <include> on purpose. -->",
       "<fontconfig>",
       '  <dir prefix="relative">fonts</dir>',
+      "  <!-- The cache lives in the pack: a check (pack.mjs fonts) must not write elsewhere. -->",
       '  <cachedir prefix="relative">var/cache/fontconfig</cachedir>',
       "</fontconfig>",
       "",
@@ -342,6 +388,112 @@ const icdLibraryPath = (pack) => {
 };
 
 /**
+ * The font check: which faces the pack's fonts.conf actually resolves, read from fontconfig
+ * (fc-list) rather than from the pack's own file list.
+ *
+ * The engine does not report a font it could not find: with IPAexGothic gone it draws Japanese in
+ * whatever fontconfig offers next and says nothing. So this is the check a caller can trust — it
+ * lists the faces fontconfig resolves *from the pack's own files* and names the pack files that
+ * resolved to none. Matching on the file as well as the family is what makes a fonts.conf that
+ * fell back to a host font (a <include>, say) fail instead of passing as "found". (C3.)
+ *
+ * It writes nothing: the pack's var/cache/fontconfig is the cache, so a check does not create
+ * directories in a caller's working directory.
+ */
+const fonts = () => {
+  const pack = option("pack");
+  const fcList = option("fontconfig") ?? "fc-list";
+  const expected = {
+    "fonts/ipaexg.ttf": "IPAexGothic",
+    "fonts/NotoSansJP-Regular.otf": "Noto Sans JP",
+    "fonts/NotoSansJP-Bold.otf": "Noto Sans JP",
+    "fonts/DejaVuSans.ttf": "DejaVu Sans",
+  };
+  const result = spawnSync(fcList, [], {
+    encoding: "utf8",
+    cwd: tempdir("fonts"),
+    env: { HOME: tempdir("fonts"), PATH: process.env.PATH ?? "", FONTCONFIG_FILE: join(pack, "fonts.conf"), FONTCONFIG_PATH: pack },
+  });
+  if (result.status !== 0) {
+    fail("fc-list failed under the pack's fonts.conf: " + (result.stderr ?? result.error?.message ?? "").trim());
+  }
+  const found = [];
+  for (const line of (result.stdout ?? "").split("\n")) {
+    const match = /^([^:]+): ([^:]+):/.exec(line);
+    if (match === null) continue;
+    found.push({ file: relative(pack, match[1]).split("\\").join("/"), family: match[2] });
+  }
+  const missing = Object.entries(expected)
+    .filter(([path, family]) => !found.some((entry) => entry.file === path && entry.family.split(",").includes(family)))
+    .map(([path]) => path);
+  process.stdout.write(JSON.stringify({ found, missing }) + "\n");
+  if (missing.length > 0) process.exit(2);
+};
+
+/** A scratch directory under the caller's temp, made on demand (the checks write nothing else). */
+const tempdir = (name) => {
+  const path = join(tmpdir(), "hns-office-pack-" + name);
+  mkdirSync(path, { recursive: true });
+  return path;
+};
+
+/**
+ * Why this pack cannot render, as phrases that name the path; empty when it can.
+ *
+ * Every path comes from the manifest — `runtime.bindPaths` and the ICD it names — and is checked,
+ * never discovered: a driver that exists only because this host has the store path is not
+ * reachable, and a bind whose digest does not match the file is refused rather than trusted.
+ */
+const reachable = (pack, value) => {
+  const reasons = [];
+  const bound = new Set();
+  for (const entry of value.build?.runtime?.bindPaths ?? []) {
+    if (typeof entry.path !== "string" || !entry.path.startsWith("/")) {
+      reasons.push("bindPaths names a relative path: " + String(entry.path));
+      continue;
+    }
+    // The digest is a claim the manifest always makes, whether or not this host can check it yet:
+    // an entry that names no well-formed sha256 is not a bind the machine may set up.
+    if (typeof entry.sha256 !== "string" || !OFFICE_DIGEST.test(entry.sha256)) {
+      reasons.push(entry.kind + " at " + entry.path + " has no sha256 in the manifest");
+      continue;
+    }
+    // When the file is here it has to be the file named: a wrong digest means the pack would run
+    // something else under a path it wrote down, which is worse than a missing file.
+    if (existsSync(entry.path)) {
+      if (!statSync(entry.path).isFile()) {
+        reasons.push(entry.kind + " at " + entry.path + " is not a regular file");
+        continue;
+      }
+      if (entry.sha256 !== "sha256:" + sha256(entry.path)) {
+        reasons.push(entry.kind + " at " + entry.path + " is not the file the manifest names");
+        continue;
+      }
+    }
+    // Verified here, or declared for the machine to bind: either way it is a path this pack means.
+    bound.add(entry.path);
+  }
+
+  const icdPath = value.build?.environment?.VK_ICD_FILENAMES;
+  if (typeof icdPath !== "string") return [...reasons, "build.environment.VK_ICD_FILENAMES is missing"];
+  const icd = join(pack, icdPath);
+  if (!existsSync(icd)) return [...reasons, "Vulkan driver manifest not found at " + icd];
+  const driver = String(JSON.parse(readFileSync(icd, "utf8")).ICD?.library_path);
+
+  // The pack's own copy, checked by digest rather than by existence: a driver file deleted from the
+  // pack is not found here even though this host still has the store path the ICD names.
+  const relative = relativeDriverPath(driver);
+  const copy = relative === undefined ? undefined : value.files?.[relative];
+  const copied =
+    typeof copy === "string" &&
+    OFFICE_DIGEST.test(copy) &&
+    existsSync(join(pack, relative)) &&
+    copy === "sha256:" + sha256(join(pack, relative));
+
+  if (!copied && !bound.has(driver)) reasons.push("Vulkan driver not found at " + driver);
+  return reasons;
+};
+/**
  * The manifest of docs/office.md section 11: what the pack can do, under which licence, and every
  * file it conveys with its digest.
  *
@@ -358,10 +510,12 @@ const manifest = () => {
   const vulkanLoader = option("vulkan-loader");
 
   const files = {};
-  for (const path of walk(pack)) {
+  for (const entry of payload(pack)) {
     // The manifest is what carries the list; About.txt is read by a person, not loaded.
-    if (path === "manifest.json" || path === "About.txt") continue;
-    files[path] = "sha256:" + sha256(join(pack, path));
+    if (entry.path === "manifest.json" || entry.path === "About.txt") continue;
+    files[entry.path] = entry.symlink
+      ? { kind: "symlink", target: entry.target, sha256: "sha256:" + sha256(join(pack, entry.path)) }
+      : "sha256:" + sha256(join(pack, entry.path));
   }
   const libraries = readFileSync(report, "utf8")
     .split("\n")
@@ -379,9 +533,8 @@ const manifest = () => {
     files,
     build: {
       // Not part of EngineManifestSchema, which 0236 validates the fields above against. A person
-      // answering "what is in this pack, and from where" reads this, and so does the sandbox
-      // bind list: sandbox.render is the pack path that has to appear at the ICD's absolute
-      // library_path before render works (see libraries()).
+      // answering "what is in this pack, and from where" reads this, and so does the sandbox's
+      // bind list: runtime.bindPaths is what has to appear outside the pack before render works.
       platform: "linux-x86_64",
       operations: {
         preview: "bin/ibisOffice --export pdf",
@@ -402,9 +555,7 @@ const manifest = () => {
         // Today one entry: the Mesa lavapipe driver, which the ICD names by its absolute store path
         // (see icd()). The pack carries the same bytes under lib/store/, so preview and render work
         // without the bind; the entry is what says so out loud, so the machine binds a known path
-        // rather than trusting that the host still has one at a path nobody wrote down. Measured in
-        // 0235: a pack whose driver files are removed still renders on a host that has the store
-        // path — the bind is what makes "the pack's driver" mean the pack's driver.
+        // rather than trusting that the host still has one at a path nobody wrote down.
         bindPaths: [{
           kind: "icd",
           path: icdLibraryPath(pack),
@@ -418,51 +569,31 @@ const manifest = () => {
   };
   writeFileSync(join(pack, "manifest.json"), JSON.stringify(value, null, 2) + "\n");
 };
-
 /**
- * The font check: which faces the pack's fonts.conf actually resolves, read from fontconfig
- * (fc-list) rather than from the pack's own file list.
+ * The render preflight: is the Vulkan driver reachable from exactly the paths the manifest names?
  *
- * The engine does not report a font it could not find: with IPAexGothic gone it draws Japanese in
- * whatever fontconfig offers next and says nothing. So this is the check a caller can trust — it
- * lists the faces fontconfig resolves and names the pack files that resolved to no face (C3: the
- * PDF still comes out, and the missing face is visible instead of substituted silently).
+ * `render` needs a working Vulkan stack; `preview` and `convert` do not (C4). The machine asks
+ * this before it answers officeEngine, and answers `{ available: false, reason }` naming the path
+ * that is missing rather than running PNG and failing (or calling render unsupported).
  */
-const fonts = () => {
+const render = () => {
   const pack = option("pack");
-  const fcList = option("fontconfig") ?? "fc-list";
-  const expected = {
-    "fonts/ipaexg.ttf": "IPAexGothic",
-    "fonts/NotoSansJP-Regular.otf": "Noto Sans JP",
-    "fonts/NotoSansJP-Bold.otf": "Noto Sans JP",
-    "fonts/DejaVuSans.ttf": "DejaVu Sans",
-  };
-  const result = spawnSync(fcList, [], {
-    encoding: "utf8",
-    env: { HOME: join(pack, "var"), PATH: process.env.PATH ?? "", FONTCONFIG_FILE: join(pack, "fonts.conf"), FONTCONFIG_PATH: pack },
-  });
-  if (result.status !== 0) {
-    fail("fc-list failed under the pack's fonts.conf: " + (result.stderr ?? result.error?.message ?? "").trim());
-  }
-  const found = [];
-  for (const line of (result.stdout ?? "").split("\n")) {
-    const match = /^([^:]+): ([^:]+):/.exec(line);
-    if (match === null) continue;
-    found.push({ file: relative(pack, match[1]).split("\\").join("/"), family: match[2] });
-  }
-  const missing = Object.entries(expected)
-    .filter(([path, family]) => !found.some((entry) => entry.file === path && entry.family.split(",").includes(family)))
-    .map(([path]) => path);
-  process.stdout.write(JSON.stringify({ found, missing }) + "\n");
-  if (missing.length > 0) process.exit(2);
+  const manifestPath = join(pack, "manifest.json");
+  if (!existsSync(manifestPath)) fail("no manifest.json in " + pack);
+  const value = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const reasons = reachable(pack, value);
+  process.stdout.write(JSON.stringify(reasons.length === 0 ? { available: true } : { available: false, reason: reasons.join("; ") }) + "\n");
+  if (reasons.length > 0) process.exit(2);
 };
+
 /**
  * Checks a pack against its own manifest, and the parts D102 requires it to convey.
  *
- * The manifest is the contract: every file it names must exist with that digest (C1 — one changed
- * byte in the binary and the pack is not runnable, C2), and every file on disk must be named (a
- * file nobody recorded is a file nobody can account for). The licence pieces are checked
- * separately because their absence does not break rendering — it breaks conveying (C5).
+ * Every entry is checked as what it claims to be: a file at its digest, or a symlink whose target
+ * is the recorded one and resolves inside the pack — the store/ tree is nothing but links, and a
+ * link re-pointed at /etc/passwd is a file the distribution did not account for. Files the
+ * manifest does not name are faults too (a file nobody recorded is a file nobody can account
+ * for). The licence pieces are checked separately: their absence breaks conveying, not rendering.
  */
 const verify = () => {
   const pack = option("pack");
@@ -490,14 +621,36 @@ const verify = () => {
   }
 
   const files = value.files ?? {};
-  for (const [path, digest] of Object.entries(files)) {
+  for (const [path, entry] of Object.entries(files)) {
     const target = join(pack, path);
-    if (!existsSync(target)) {
+    const listed = typeof entry === "string" ? { sha256: entry } : entry;
+    if (!existsSync(target) && !isSymlink(target)) {
       problems.push(path + " is in the manifest but not in the pack");
       continue;
     }
+    if (listed.kind === "symlink") {
+      if (!isSymlink(target)) {
+        problems.push(path + " is listed as a symlink but is not one");
+        continue;
+      }
+      const actual = readlinkSync(target);
+      if (actual !== listed.target) problems.push(path + " points at " + actual + ", the manifest says " + listed.target);
+      else if (!resolvesInside(pack, target)) problems.push(path + " points outside the pack (" + actual + ")");
+      // The target's digest is what the link means: a link that still points inside the pack but at
+      // rewritten bytes is a different file, and the machine would copy those to /nix/store.
+      else if (typeof listed.sha256 === "string" && "sha256:" + sha256(target) !== listed.sha256) {
+        problems.push(path + " resolves to " + ("sha256:" + sha256(target)) + ", the manifest says " + listed.sha256);
+      }
+      continue;
+    }
+    if (isSymlink(target)) {
+      problems.push(path + " is listed as a file but is a symlink");
+      continue;
+    }
+    const digest = typeof listed.sha256 === "string" ? listed.sha256 : "";
     const actual = "sha256:" + sha256(target);
-    if (actual !== digest) problems.push(path + " is " + actual + ", the manifest says " + digest);
+    if (!OFFICE_DIGEST.test(digest)) problems.push(path + " has no sha256 in the manifest");
+    else if (actual !== digest) problems.push(path + " is " + actual + ", the manifest says " + digest);
   }
   for (const path of walk(pack)) {
     if (path === "manifest.json" || path === "About.txt") continue;
@@ -509,71 +662,6 @@ const verify = () => {
     process.exit(1);
   }
   process.stdout.write("office-pack: " + pack + " verifies (" + Object.keys(files).length + " files, ibisOffice " + value.version + ")\n");
-};
-
-/**
- * Why this pack cannot render, as phrases that name the path; empty when it can.
- *
- * Every path comes from the manifest — `runtime.bindPaths` and the ICD it names — and is checked,
- * never discovered. A driver that exists only because this host has the store path is not
- * reachable: the machine sandbox will not have it unless the manifest declares it.
- */
-const reachable = (pack, value) => {
-  const reasons = [];
-  const bound = new Set();
-  for (const entry of value.build?.runtime?.bindPaths ?? []) {
-    if (typeof entry.path !== "string" || !entry.path.startsWith("/")) {
-      reasons.push("bindPaths names a relative path: " + String(entry.path));
-      continue;
-    }
-    // Declared is declared: the machine makes this path visible with a ro bind, so the preflight
-    // records it. Whether this host still has the file at that path is a separate question, and
-    // asking it here would make render depend on this machine — the thing the bind list removes.
-    bound.add(entry.path);
-  }
-
-  const icdPath = value.build?.environment?.VK_ICD_FILENAMES;
-  if (typeof icdPath !== "string") return [...reasons, "build.environment.VK_ICD_FILENAMES is missing"];
-  const icd = join(pack, icdPath);
-  if (!existsSync(icd)) return [...reasons, "Vulkan driver manifest not found at " + icd];
-  const driver = String(JSON.parse(readFileSync(icd, "utf8")).ICD?.library_path);
-
-  // The pack's own copy, checked by digest rather than by existence: a driver file deleted from the
-  // pack is not found here even though this host still has the store path the ICD names.
-  const relative = relativeDriverPath(driver);
-  const copy = relative === undefined ? undefined : value.files?.[relative];
-  const copied =
-    typeof copy === "string" &&
-    existsSync(join(pack, relative)) &&
-    copy === "sha256:" + sha256(join(pack, relative));
-
-  // Reachable when the pack carries it, or when the manifest declares the path it should be at.
-  // Neither branch looks at this host: with both gone, render says which path it wanted.
-  if (!copied && !bound.has(driver)) reasons.push("Vulkan driver not found at " + driver);
-  return reasons;
-};
-/**
- * The render preflight: is the Vulkan driver reachable from exactly the paths the manifest names?
- *
- * `render` needs a working Vulkan stack; `preview` and `convert` do not (C4). The machine asks this
- * before it answers officeEngine, and answers `{ available: false, reason }` naming the path that is
- * missing rather than running PNG and failing (or calling it unsupported).
- *
- * Paths come from the manifest and from one variable:
- * - `runtime.bindPaths`: what build.sh resolved and wrote down; each entry must exist with its
- *   digest, and each is checked, never discovered.
- * - the ICD named by `build.environment.VK_ICD_FILENAMES`: it is pack-relative, and the driver it
- *   names is either in the pack (lib/store/<store name>/...) or one of the bound paths above.
- * Nothing is searched for: no /nix/store walk, no PATH lookup.
- */
-const render = () => {
-  const pack = option("pack");
-  const manifestPath = join(pack, "manifest.json");
-  if (!existsSync(manifestPath)) fail("no manifest.json in " + pack);
-  const value = JSON.parse(readFileSync(manifestPath, "utf8"));
-  const reasons = reachable(pack, value);
-  process.stdout.write(JSON.stringify(reasons.length === 0 ? { available: true } : { available: false, reason: reasons.join("; ") }) + "\n");
-  if (reasons.length > 0) process.exit(2);
 };
 const sandbox = () => {
   const pack = option("pack");

@@ -127,6 +127,10 @@ export const stages: readonly Stage[] = [
           cwd: root,
           argv: [binary(root, "tsrs"), "--noEmit", "-p", "tools/test/tsconfig.json"],
         });
+        runs.push({
+          cwd: root,
+          argv: [binary(root, "tsrs"), "--noEmit", "-p", "tools/office-pack/tsconfig.json"],
+        });
       }
       return runs;
     },

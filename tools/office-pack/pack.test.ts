@@ -1,8 +1,18 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, test } from "vitest";
 import { EngineManifestSchema, OFFICE_OPERATIONS } from "@hns/core/office";
@@ -52,11 +62,25 @@ test("every fetched input is pinned to a sha256", () => {
   expect(build).toContain('readonly IBIS_OFFICE_VERSION="0.8.7"');
 });
 
-// Catches: a build that skips the digest check and trusts whatever arrived.
-test("build.sh refuses a file whose digest differs before it unpacks it", () => {
+// Catches: a build that skips the digest check and trusts whatever arrived — and one that reports
+// a moved upstream or a torn download as a digest mismatch, or the other way round (0235 NB4).
+test("build.sh checks the digest before unpacking, and says which fault it saw", () => {
   const build = read("build.sh");
-  const guard = /if \[\[ "\$got" != "\$digest" \]\]; then[\s\S]*?die[^\n]*\n\s*fi/.exec(build);
+  // A failed download stops with its own message; nothing is hashed, nothing is unpacked.
+  const download = build.slice(build.indexOf("  curl -fsSL"), build.indexOf("  local got"));
+  expect(download).toContain("could not download");
+  // A download whose digest differs says so, names both digests, and is removed before any use.
+  const guard =
+    /if \[\[ "\$got" != "\$digest" \]\]; then[\s\S]*?die "([^"]*)"[\s\S]*?mv "\$dest\.part" "\$dest"/.exec(
+      build,
+    );
   expect(guard).not.toBeNull();
+  const message = guard?.[1] ?? "";
+  expect(message).toContain("sha256");
+  expect(message).toContain("refusing to unpack");
+  expect(message).not.toContain("could not download");
+  // The mismatch branch removes the partial file before dying, so a later run cannot pick it up.
+  expect(/rm -f "\$dest\.part"\n\s*die "downloaded/.test(build)).toBe(true);
 });
 
 // Catches: verify.sh reporting "ok" while checking only the binary, so a stale library or a
@@ -64,8 +88,11 @@ test("build.sh refuses a file whose digest differs before it unpacks it", () => 
 test("verify.sh checks every manifested file, extra files, and the licence pieces", () => {
   const pack = read("pack.mjs");
   const verify = /const verify = \(\) => \{[\s\S]*?\n\};/.exec(pack)?.[0] ?? "";
-  expect(verify).toContain("for (const [path, digest] of Object.entries(files))");
+  expect(verify).toContain("for (const [path, entry] of Object.entries(files))");
   expect(verify).toContain("is in the pack but not in the manifest");
+  // A symlink is payload too: its target is compared, and it must resolve inside the pack.
+  expect(verify).toContain('listed.kind === "symlink"');
+  expect(verify).toContain("resolvesInside(pack, target)");
   expect(verify).toContain('["LICENSE", "NOTICE", "SOURCE.md", "About.txt"]');
   expect(verify).toContain("GNU AFFERO GENERAL PUBLIC LICENSE");
 });
@@ -81,23 +108,26 @@ test("the render preflight reads paths from the manifest and searches nothing", 
   expect(reachableFn).not.toMatch(/readdirSync|scandir|readdir\(/);
   expect(reachableFn).toContain("Vulkan driver not found at");
   expect(reachableFn).toContain("bound.has(driver)");
-  expect(reachableFn).not.toContain("existsSync(entry.path)");
+  // The digest is part of every bind: a shape check that always runs, and a value check when the
+  // file is here. That is the difference between "declared" and "claimed".
+  expect(reachableFn).toContain("OFFICE_DIGEST.test(entry.sha256)");
+  expect(reachableFn).toContain("is not the file the manifest names");
 });
 
 describe("a hand-made pack", () => {
   const root = mkdtempSync(join(tmpdir(), "hns-office-pack-"));
   const pack = join(root, "pack");
-  // The literal is the whole truth: its keys are the files a hand-made pack carries.
-  const content = {
-    "bin/ibisOffice": "foo",
-    LICENSE: "GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007",
-    NOTICE: "notice",
-    "SOURCE.md": "source",
-    "About.txt": "about",
-  } satisfies Record<string, string>;
-  const digestsOf = (): Record<string, string> =>
+  // The files a hand-made pack carries, and nothing else.
+  const content = new Map<string, string>([
+    ["bin/ibisOffice", "foo"],
+    ["LICENSE", "GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007"],
+    ["NOTICE", "notice"],
+    ["SOURCE.md", "source"],
+    ["About.txt", "about"],
+  ]);
+  const digestsOf = (files: ReadonlyMap<string, string> = content): Record<string, string> =>
     Object.fromEntries(
-      Object.entries(content).map(([path, body]) => [
+      [...files].map(([path, body]) => [
         path,
         "sha256:" + createHash("sha256").update(body).digest("hex"),
       ]),
@@ -131,21 +161,23 @@ describe("a hand-made pack", () => {
   };
   const layout = (bindPaths: readonly unknown[]): void => {
     rmSync(pack, { recursive: true, force: true });
-    mkdirSync(join(pack, "share/vulkan/icd.d"), { recursive: true });
-    for (const [path, body] of Object.entries(content)) {
-      mkdirSync(join(pack, path, ".."), { recursive: true });
+    // The ICD names a driver at the path where the machine's store would be, and is part of the
+    // pack like any other file, so the manifest accounts for all of it.
+    const files = new Map(content);
+    files.set(
+      "share/vulkan/icd.d/lvp_icd.x86_64.json",
+      JSON.stringify({ ICD: { library_path: "/nix/store/abc-mesa/lib/libvulkan_lvp.so" } }),
+    );
+    for (const [path, body] of files) {
+      mkdirSync(join(pack, dirname(path)), { recursive: true });
       writeFileSync(join(pack, path), body);
     }
     mkdirSync(join(pack, "lib"), { recursive: true });
     writeFileSync(
-      join(pack, "share/vulkan/icd.d/lvp_icd.x86_64.json"),
-      JSON.stringify({ ICD: { library_path: "/nix/store/abc-mesa/lib/libvulkan_lvp.so" } }),
-    );
-    writeFileSync(
       join(pack, "manifest.json"),
       JSON.stringify({
         ...manifest,
-        files: digestsOf(),
+        files: digestsOf(files),
         build: { ...manifest.build, runtime: { bindPaths } },
       }),
     );
@@ -173,11 +205,8 @@ describe("a hand-made pack", () => {
   // C1/C2/C5 at the level of verify.sh: a digest that no longer matches, a notice that is gone,
   // and a file nobody recorded all make the pack unusable instead of silently usable.
   test("verify refuses a pack whose binary changed, whose notice moved, or which holds an extra file", () => {
-    layout([]);
     // A pack the hand-made manifest fully accounts for passes; each fault below is what verify is
     // for, so the passing case has to come first.
-    const stray = join(pack, "share/vulkan/icd.d/lvp_icd.x86_64.json");
-    content["share/vulkan/icd.d/lvp_icd.x86_64.json"] = readFileSync(stray, "utf8");
     layout([]);
     execFileSync(here("verify.sh"), [pack]);
     writeFileSync(join(pack, "bin/ibisOffice"), "foo!");
@@ -200,43 +229,120 @@ describe("a hand-made pack", () => {
     });
   });
 
-  // A bind is a path the machine will make visible, not a claim about this host: a declared entry
-  // counts even when this host cannot resolve it, and a manifest with neither a declared path nor
-  // a carried copy is the case that says "not found" (above).
-  test("a declared bind is enough even when this host cannot resolve it yet", () => {
-    layout([
-      {
-        kind: "icd",
-        path: "/nix/store/abc-mesa/lib/libvulkan_lvp.so",
-        sha256: "sha256:" + "0".repeat(64),
-      },
-    ]);
-    expect(render()).toStrictEqual({ available: true });
-    // A relative path is a mistake in the manifest: there is nothing to bind to.
-    layout([{ kind: "icd", path: "libvulkan_lvp.so", sha256: "sha256:" + "0".repeat(64) }]);
-    expect(render().reason).toContain("bindPaths names a relative path");
-  });
-  // The paths are the manifest's, not a search: a driver that is a pack file is reachable, and a
-  // driver file that is gone is not — even when this host still has the /nix/store path the ICD
-  // names. That is the difference between "the pack's driver" and "whatever this machine has".
-  test("render follows the manifest and never the host", () => {
-    layout([]);
-    // The pack carries the driver under lib/store, at the path the ICD names: reachable.
+  // A bind is a claim the machine acts on, so every part of it is checked: the path is absolute,
+  // the digest is a digest, and when the file is here it is the file named. A path this host cannot
+  // resolve yet is the one case that is allowed through — that is what the bind is for.
+  // A bind is a claim the machine acts on, so every part of it is checked: the path is absolute,
+  // the digest is a digest, and when the file is here it is the file named. A path this host cannot
+  // resolve yet is the one case that is allowed through — that is what the bind is for.
+  test("a bind must carry a well-formed digest, and a wrong digest is refused", () => {
+    const driver = join(root, "driver.so");
+    writeFileSync(driver, "driver");
+    const digest = "sha256:" + createHash("sha256").update("driver").digest("hex");
+    // The ICD names the pack's own copy; the binds below are what stands that copy up. A driver this
+    // host cannot resolve yet is allowed, because the machine will bind it.
     mkdirSync(join(pack, "lib/store/abc-mesa/lib"), { recursive: true });
     writeFileSync(join(pack, "lib/store/abc-mesa/lib/libvulkan_lvp.so"), "driver");
+    const copy = "sha256:" + createHash("sha256").update("driver").digest("hex");
+    const withCopy = JSON.parse(readFileSync(join(pack, "manifest.json"), "utf8"));
+    withCopy.files["lib/store/abc-mesa/lib/libvulkan_lvp.so"] = copy;
+    writeFileSync(join(pack, "manifest.json"), JSON.stringify(withCopy));
+    expect(render()).toStrictEqual({ available: true });
+    // A digest that is not a digest is never a bind.
+    withCopy.build.runtime.bindPaths = [{ kind: "icd", path: driver, sha256: "not-even-a-digest" }];
+    writeFileSync(join(pack, "manifest.json"), JSON.stringify(withCopy));
+    expect(render().reason).toContain("has no sha256 in the manifest");
+    // A file that is here but is not the file named is refused, not trusted.
+    withCopy.build.runtime.bindPaths = [
+      { kind: "icd", path: driver, sha256: "sha256:" + "0".repeat(64) },
+    ];
+    writeFileSync(join(pack, "manifest.json"), JSON.stringify(withCopy));
+    expect(render().reason).toContain("is not the file the manifest names");
+    // The same file with its real digest is a bind; the copy alone is enough.
+    withCopy.build.runtime.bindPaths = [{ kind: "icd", path: driver, sha256: digest }];
+    writeFileSync(join(pack, "manifest.json"), JSON.stringify(withCopy));
+    expect(render()).toStrictEqual({ available: true });
+    delete withCopy.files["lib/store/abc-mesa/lib/libvulkan_lvp.so"];
+    rmSync(join(pack, "lib/store/abc-mesa/lib/libvulkan_lvp.so"));
+    // Nothing carried and nothing verified: not reachable, by name.
+    expect(render().reason).toContain("/nix/store/abc-mesa/lib/libvulkan_lvp.so");
+    // A relative path is a mistake in the manifest: there is nothing to bind to.
+    withCopy.build.runtime.bindPaths = [{ kind: "icd", path: "libvulkan_lvp.so", sha256: digest }];
+    writeFileSync(join(pack, "manifest.json"), JSON.stringify(withCopy));
+    expect(render().reason).toContain("bindPaths names a relative path");
+  });
+  // The store/ tree is symlinks, and a symlink is payload: verify reads the link it finds, not the
+  // file the manifest once recorded. Re-pointing one at a host file is a different pack.
+  test("verify refuses a retargeted symlink and one that leaves the pack", () => {
+    layout([]);
+    writeFileSync(join(pack, "lib/libx.so.1"), "library");
+    mkdirSync(join(pack, "store/x/lib"), { recursive: true });
+    const link = join(pack, "store/x/lib/libx.so.1");
+    const target = "../../../lib/libx.so.1";
+    const digest = "sha256:" + createHash("sha256").update("library").digest("hex");
+    symlinkSync(target, link);
     const files = {
-      ...digestsOf(),
-      "lib/store/abc-mesa/lib/libvulkan_lvp.so":
-        "sha256:" + createHash("sha256").update("driver").digest("hex"),
+      ...digestsOf(
+        new Map([
+          ...content,
+          [
+            "share/vulkan/icd.d/lvp_icd.x86_64.json",
+            readFileSync(join(pack, "share/vulkan/icd.d/lvp_icd.x86_64.json"), "utf8"),
+          ],
+        ]),
+      ),
+      "lib/libx.so.1": digest,
+      "store/x/lib/libx.so.1": { kind: "symlink", target, sha256: digest },
     };
     writeFileSync(join(pack, "manifest.json"), JSON.stringify({ ...manifest, files }));
-    expect(render()).toStrictEqual({ available: true });
-    // Delete it: the file is gone from the pack. This host may still have the store path the ICD
-    // names, but that is not the pack's answer — the reason names the path it looked for.
-    rmSync(join(pack, "lib/store/abc-mesa/lib/libvulkan_lvp.so"));
-    const absent = render();
-    expect(absent.available).toBe(false);
-    expect(absent.reason).toContain("/nix/store/abc-mesa/lib/libvulkan_lvp.so");
+    execFileSync(here("verify.sh"), [pack]);
+    // Re-pointed at a host file: the link is not the one the manifest recorded.
+    rmSync(link);
+    symlinkSync("/etc/passwd", link);
+    expect(spawnSync(here("verify.sh"), [pack], { encoding: "utf8" }).stderr).toContain(
+      "points at /etc/passwd",
+    );
+    // The manifest agreeing with a link that leaves the pack is not enough either.
+    writeFileSync(
+      join(pack, "manifest.json"),
+      JSON.stringify({
+        ...manifest,
+        files: {
+          ...files,
+          "store/x/lib/libx.so.1": { kind: "symlink", target: "/etc/passwd", sha256: digest },
+        },
+      }),
+    );
+    expect(spawnSync(here("verify.sh"), [pack], { encoding: "utf8" }).stderr).toContain(
+      "points outside the pack",
+    );
+    // And an unchanged link with changed content is a different file.
+    rmSync(link);
+    symlinkSync(target, link);
+    writeFileSync(
+      join(pack, "manifest.json"),
+      JSON.stringify({
+        ...manifest,
+        files: { ...files, "store/x/lib/libx.so.1": { kind: "symlink", target, sha256: digest } },
+      }),
+    );
+    writeFileSync(join(pack, "lib/libx.so.1"), "library!");
+    expect(spawnSync(here("verify.sh"), [pack], { encoding: "utf8" }).status).toBe(1);
+  });
+  // A check that leaves files behind in whatever directory it runs from is a check that changes the
+  // thing it inspects (0235 NB6): fonts and verify run in their own temp directory and write nothing
+  // in the caller's.
+  test("the checks write nothing in the caller's working directory", () => {
+    layout([]);
+    const cwd = mkdtempSync(join(root, "cwd-"));
+    const before = readdirSync(cwd).sort();
+    for (const args of [["fonts"], ["verify"]]) {
+      spawnSync(process.execPath, [here("pack.mjs"), ...args, "--pack", pack], {
+        cwd,
+        encoding: "utf8",
+      });
+    }
+    expect(readdirSync(cwd).sort()).toStrictEqual(before);
   });
 });
 

@@ -448,20 +448,35 @@ manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capa
 ```
 
 `id` / `version` / `capabilities` / `license` / `files` が `EngineManifestSchema` の形で、0236 はこれで検証する。
-`files` は**配布物の全ファイル**（pack 直下からの相対パスと `sha256:<hex>`）。`build` は型の外（schema は知らない）で、
-実行環境と出所を書く。
+`build` は型の外（schema は知らない）で、実行環境と出所を書く。
+
+`files` は**配布物の全ファイル**（pack 直下からの相対パス）で、値は 2 種類:
+
+- 通常のファイル: `sha256:<hex>`。
+- **symlink**: `{ "kind": "symlink", "target": "<読んだままのターゲット>", "sha256": "<解決先の内容>" }`。
+  pack の `store/` は `/nix/store` に ro bind するための相対 symlink だけで、これを manifest に載せないと
+  「リンクの向き先が置き換えられた」ことを誰も検出できない（0235 NB2）。
+
+`verify.sh` は次のすべてを確かめ、1 つでも合わなければ落ちる: 記録されたファイルが実在し digest が一致する /
+symlink はターゲットが記録どおりで、解決先が **pack の内側**にあり、その内容の digest も一致する /
+manifest に載っていないファイルが pack に無い / 法務 4 点が揃っている。
 
 ### `build.runtime.bindPaths`: pack が独立していない部分
 
 pack は「同梱して守る」（D102）が、Vulkan のドライバは `/nix/store` にしかないもの（Mesa の lavapipe）を使う。
 その部分を**探索せずに**実行時へ渡すため、`bindPaths` に**絶対パスと sha256 で明示**する。
 `build.sh` が作る時点で解決して書き、machine はそのパスを 0194 の sandbox に **ro bind** する 1 段として写す。
-実行時は「書いてあるパスが在るか」だけを見る（pack のファイルは 1 つも増えない）。
+pack のファイルは 1 つも増えない。判定は次のとおりで、**このホストを探さない**。
 
-- 在って sha256 が合えば、そのパスは「見えている」。
-- 無くても、pack が同じバイト列を持っていれば（`lib/store/<store-path>`）、render は成立する。
-- どちらも無ければ `render` は**能力なし**として `{ available: false, reason: "Vulkan driver not found at <path>" }`。
-  `preview` / `convert` はそのまま成功する（C4）。黙って別のドライバで描かない。
+- `sha256` は**常に必須**で、`sha256:<64 hex>` の形でなければその bind は無効（`unavailable`）。
+- そのパスが**このホストに在る**なら、実ファイルの digest と一致しなければ `unavailable`
+  （マニフェストが名指ししたパスに別のものを置いて動かすより、無い方がよい）。
+- このホストに**まだ無い**なら「machine が bind する予定」として受ける（digest の形は必須のまま）。
+  これは 0236 の ro bind が作る状態そのもの。
+- 加えて、pack が同じバイト列を持っていれば（`lib/store/<store-path>`）その digest を照合して成立とする。
+- どれも成り立たなければ `render` は**能力なし**として
+  `{ available: false, reason: "Vulkan driver not found at <path>" }` を返す。`preview` / `convert` はそのまま成功する（C4）。
+  黙って別のドライバで描かない。
 - 空配列は「pack が自分だけで完結する」の意味。いまの v0.8.7 + vulkan-loader 1.4.363 の組み合わせでも
   render は pack のコピーだけで動くが、ドライバの実体が `lib/store/` の中にあることを manifest でも名乗る。
 - 将来この独立が完結すれば `bindPaths` を空にするだけでよく、manifest の形は変えない。

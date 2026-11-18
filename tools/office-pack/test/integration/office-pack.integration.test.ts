@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -178,6 +179,24 @@ describe.skipIf(skip !== undefined)("the office pack", () => {
       readFileSync(join(pack, "manifest.json"), "utf8"),
     );
   }, 600_000);
+
+  // The store/ tree is only symlinks; verify reads them, so re-pointing one at a host file is
+  // caught (0235 NB2) — which a check that skipped links could not do.
+  test("a store symlink re-pointed at a host file fails verify", () => {
+    const retargeted = join(work, "retargeted");
+    cpSync(pack, retargeted, { recursive: true });
+    const manifest = JSON.parse(readFileSync(join(retargeted, "manifest.json"), "utf8"));
+    const link = Object.keys(manifest.files).find(
+      (path: string) => manifest.files[path].kind === "symlink" && path.endsWith("libvulkan.so.1"),
+    );
+    expect(link, "the pack lists its store links").toBeDefined();
+    const target = join(retargeted, link ?? "");
+    rmSync(target);
+    symlinkSync("/etc/passwd", target);
+    const check = spawnSync(join(tools, "verify.sh"), [retargeted], { encoding: "utf8" });
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain("points at /etc/passwd");
+  });
 
   // C5: the four AGPL pieces are in the distribution, and verify refuses a pack without them.
   test("C5: LICENSE, NOTICE, SOURCE.md and the About wording ship, and their absence fails the check", () => {
