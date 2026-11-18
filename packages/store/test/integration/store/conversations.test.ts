@@ -205,3 +205,39 @@ test("a row updated between pages does not stall or truncate the cursor walk", a
     ]);
   });
 });
+
+// Catches: a human's rename, archive, or delete that the row does not hold, a write that turns a
+// missing row into an error instead of a no-op, and a second delete restamping the tombstone.
+test("a human's rename, archive and soft delete write the row and no-op on a missing one", async () => {
+  await harness.withStore(async (store) => {
+    const project = await store.projects.ensureDefault();
+    const id = v.parse(ConversationIdSchema, "h1");
+    await register({ id, projectId: project.id, title: "before" });
+    await store.conversations.rename(project.id, id, "after");
+    expect((await store.conversations.get(project.id, id))?.title).toBe("after");
+    // The rename leaves the ordering key alone: activity is `updated_at`, not the title.
+    expect((await store.conversations.get(project.id, id))?.updated_at).toBe(
+      "2026-01-01T00:00:00.000Z",
+    );
+    await store.conversations.setArchived(project.id, id, true);
+    expect((await store.conversations.page()).items).toStrictEqual([]);
+    expect((await store.conversations.get(project.id, id))?.archived).toBe(true);
+    // The undo is the same write with false (0105).
+    await store.conversations.setArchived(project.id, id, false);
+    expect((await store.conversations.page()).items.map((row) => row.id)).toStrictEqual([id]);
+    await store.conversations.softDelete(project.id, id);
+    const buried = await store.conversations.get(project.id, id);
+    expect(buried?.deleted_at).not.toBe(null);
+    expect((await store.conversations.page({ includeArchived: true })).items).toStrictEqual([]);
+    // A second delete keeps the first tombstone rather than stamping a new one.
+    const first = buried?.deleted_at;
+    await store.conversations.softDelete(project.id, id);
+    expect((await store.conversations.get(project.id, id))?.deleted_at).toBe(first);
+    // A missing row is nothing to change, not a failure: the face has already refused it.
+    const missing = v.parse(ConversationIdSchema, "h2");
+    await store.conversations.rename(project.id, missing, "nowhere");
+    await store.conversations.setArchived(project.id, missing, true);
+    await store.conversations.softDelete(project.id, missing);
+    expect(await store.conversations.get(project.id, missing)).toBe(undefined);
+  });
+});

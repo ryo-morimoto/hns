@@ -1,4 +1,5 @@
 import type { AgentSession } from "@hns/agent/session";
+import type { JsonValue } from "@hns/core";
 import { openSession } from "@hns/agent/session";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -214,6 +215,43 @@ function edgeDeps() {
   };
 }
 
+/** A request with a JSON body and a signed session cookie, unless the caller asks for none. */
+async function write(
+  method: string,
+  path: string,
+  body: JsonValue,
+  signed = true,
+): Promise<Request> {
+  const request = new Request(BASE + path, {
+    method,
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+  });
+  if (signed) request.headers.set("cookie", await sessionCookie("owner"));
+  return request;
+}
+
+/** The row in D1, read by the test rather than through the face. */
+interface StoredRow {
+  readonly title: string;
+  readonly archived: number;
+  readonly deleted_at: string | null;
+}
+
+/** Read the conversation's row straight from D1. */
+async function rowOf(db: D1Binding, id: string): Promise<StoredRow | null> {
+  const row = await db
+    .prepare("SELECT title, archived, deleted_at FROM conversations WHERE id = ?")
+    .bind(id)
+    .first();
+  return v.parse(
+    v.nullable(
+      v.object({ title: v.string(), archived: v.number(), deleted_at: v.nullable(v.string()) }),
+    ),
+    row,
+  );
+}
+
 /** A GET with a signed session cookie, unless the caller asks for none. */
 async function get(path: string, signed = true): Promise<Request> {
   const request = new Request(BASE + path);
@@ -370,4 +408,217 @@ test("the assembled Worker serves the face and fails closed without a database",
   expect(session.requests.map((request) => new URL(request.url).pathname)).toStrictEqual([
     "/rpc/events",
   ]);
+});
+
+/**
+ * 0271n through the product's own parts: a real rename, archive, unarchive, and delete.
+ *
+ * @remarks
+ * The conversation is created by the real runtime and written to the real D1 by the real drain
+ * (see {@link openObject}); every request goes through `createEdge` and the production face, so the
+ * only thing this test adds is the caller. The object is never asked to change: the same object
+ * that holds the conversation is then read to show that its metadata is untouched.
+ */
+test("a person renames, archives, unarchives and deletes a conversation through the edge", async () => {
+  const object = await openObject();
+  try {
+    const edge = createEdge(edgeDeps());
+    const env = envWith({ db: object.db, session: namespaceOf(object.session, object.created) });
+    const at = "/api/conversations/" + object.created;
+    const before = await rowOf(object.db, object.created);
+    expect(before?.title).toBe("the conversation");
+    expect(before?.archived).toBe(0);
+    expect(before?.deleted_at).toBe(null);
+
+    // Rename: the row changes, and the answer is the row a GET would answer next.
+    const renamed = await edge(await write("PATCH", at, { title: "renamed by a person" }), env);
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toStrictEqual({
+      ok: true,
+      conversation: {
+        id: object.created,
+        project_id: LEGACY,
+        title: "renamed by a person",
+        created_at: expect.any(String),
+        updated_at: expect.any(String),
+        archived: false,
+        deleted_at: null,
+      },
+    });
+    expect(await rowOf(object.db, object.created)).toStrictEqual({
+      title: "renamed by a person",
+      archived: 0,
+      deleted_at: null,
+    });
+
+    // The bound is 200 code points: 200 lands, 201 is refused, and neither write happened.
+    const exactly = "あ".repeat(200);
+    const atBound = await edge(await write("PATCH", at, { title: exactly }), env);
+    expect(atBound.status).toBe(200);
+    expect((await rowOf(object.db, object.created))?.title).toBe(exactly);
+    const overBound = await edge(await write("PATCH", at, { title: "あ".repeat(201) }), env);
+    expect(overBound.status).toBe(400);
+    expect(await overBound.json()).toMatchObject({ ok: false, code: "invalid_request" });
+    expect((await rowOf(object.db, object.created))?.title).toBe(exactly);
+    // The same bound counts an emoji once, not twice: 200 of them is 400 UTF-16 units.
+    const emoji = "😀".repeat(200);
+    const emojiBound = await edge(await write("PATCH", at, { title: emoji }), env);
+    expect(emojiBound.status).toBe(200);
+    expect((await rowOf(object.db, object.created))?.title).toBe(emoji);
+    const control = async (title: string) => edge(await write("PATCH", at, { title }), env);
+    for (const refusedTitle of [
+      "",
+      "line\nbreak",
+      "tab\there",
+      "esc\u001b[31m",
+      "nul\u0000",
+      "del\u007f",
+      "\u009bc1",
+      " ".repeat(201),
+    ]) {
+      const refused = await control(refusedTitle);
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toMatchObject({ ok: false, code: "invalid_request" });
+    }
+    // A space is not a control character, so a title of one is a title.
+    expect((await control(" ")).status).toBe(200);
+    expect((await control(exactly)).status).toBe(200);
+
+    // Archive, then the undo the screen calls: the same face, `archived: false` (0105).
+    const archived = await edge(await write("PATCH", at, { archived: true }), env);
+    expect(archived.status).toBe(200);
+    expect(await archived.json()).toMatchObject({ ok: true, conversation: { archived: true } });
+    expect((await rowOf(object.db, object.created))?.archived).toBe(1);
+    const unarchived = await edge(await write("PATCH", at, { archived: false }), env);
+    expect(unarchived.status).toBe(200);
+    expect(await unarchived.json()).toMatchObject({ ok: true, conversation: { archived: false } });
+    expect((await rowOf(object.db, object.created))?.archived).toBe(0);
+
+    // Both members at once, and a patch that carries nothing changes nothing.
+    const both = await edge(await write("PATCH", at, { title: "both", archived: true }), env);
+    expect(both.status).toBe(200);
+    expect(await both.json()).toMatchObject({
+      ok: true,
+      conversation: { title: "both", archived: true },
+    });
+    const empty = await edge(await write("PATCH", at, { archived: false }), env);
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toMatchObject({ ok: true, conversation: { title: "both" } });
+
+    // A body the face does not understand is a bad request, not a write.
+    // (An empty object is not one of them: it is a patch that changes nothing, answered 200.)
+    for (const body of [
+      { project_id: "other" },
+      { title: "ok", project_id: "other" },
+      { deleted_at: "2026-01-01T00:00:00.000Z" },
+      { title: "ok", archived: "yes" },
+      { title: 7 },
+      { archived: null },
+      { Title: "case matters" },
+      null,
+      "title",
+    ]) {
+      const refused = await edge(await write("PATCH", at, body), env);
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toMatchObject({ ok: false, code: "invalid_request" });
+    }
+    expect((await edge(await write("PATCH", at, {}), env)).status).toBe(200);
+    // A body that is not JSON at all is the same refusal.
+    const notJson = new Request(BASE + at, {
+      method: "PATCH",
+      body: "{not json",
+      headers: { "content-type": "application/json", cookie: await sessionCookie("owner") },
+    });
+    expect((await edge(notJson, env)).status).toBe(400);
+    expect(await rowOf(object.db, object.created)).toStrictEqual({
+      title: "both",
+      archived: 0,
+      deleted_at: null,
+    });
+
+    // Delete: a tombstone, then the row is unknown to every route on the path.
+    const deleted = await edge(await write("DELETE", at, {}), env);
+    expect(deleted.status).toBe(200);
+    const deletedBody: unknown = await deleted.json();
+    expect(deletedBody).toStrictEqual({
+      ok: true,
+      id: object.created,
+      deleted_at: expect.any(String),
+    });
+    const tombstone = await rowOf(object.db, object.created);
+    expect(tombstone?.deleted_at).toBe(
+      v.parse(v.object({ deleted_at: v.string() }), deletedBody).deleted_at,
+    );
+    expect((await edge(await get(at), env)).status).toBe(404);
+    expect((await edge(await get(at + "/state"), env)).status).toBe(404);
+    expect((await edge(await write("PATCH", at, { title: "again" }), env)).status).toBe(404);
+    // The second delete is the same 404 as an id that never existed: idempotent, and no oracle.
+    const again = await edge(await write("DELETE", at, {}), env);
+    expect(again.status).toBe(404);
+    const againBody: unknown = await again.json();
+    expect(againBody).toMatchObject({ ok: false, code: "not_found" });
+    const unknown = await edge(
+      await write("DELETE", "/api/conversations/no-such-conversation", {}),
+      env,
+    );
+    // The two answers differ only in the path they name: a deleted row and no row are one answer.
+    const codeAndMessage = (text: string) =>
+      v.parse(v.object({ code: v.string(), message: v.string() }), JSON.parse(text));
+    expect(codeAndMessage(JSON.stringify(againBody))).toStrictEqual(
+      codeAndMessage(await unknown.text()),
+    );
+    // The tombstone is the first one; a second delete did not restamp it.
+    expect((await rowOf(object.db, object.created))?.deleted_at).toBe(tombstone?.deleted_at);
+
+    // A write is the same face for a caller with no session: 401 before anything is read.
+    for (const request of [
+      await write("PATCH", at, { title: "anonymous" }, false),
+      await write("DELETE", at, {}, false),
+    ]) {
+      const anonymous = await edge(request, env);
+      expect(anonymous.status).toBe(401);
+    }
+  } finally {
+    await object.close();
+  }
+});
+
+/**
+ * The asymmetry 0271n accepts, on the product's own rebuild.
+ *
+ * @remarks
+ * The face writes D1 only. This test shows the other half of that contract: the object still
+ * holds the title and the flag it was created with, and when its own metadata writes the row
+ * back (`POST /rpc/reindex`, the full rebuild; a drain does the same for a row the object marks
+ * dirty), the object wins and the human's title is gone. It is written down rather than hoped
+ * for, because a caller that reads the contract has to know the edit is a write to the index,
+ * not to the conversation.
+ */
+test("the object's own rebuild writes its metadata over a human's rename", async () => {
+  const object = await openObject();
+  try {
+    const edge = createEdge(edgeDeps());
+    const env = envWith({ db: object.db, session: namespaceOf(object.session, object.created) });
+    const at = "/api/conversations/" + object.created;
+    const renamed = await edge(await write("PATCH", at, { title: "a human's title" }), env);
+    expect(renamed.status).toBe(200);
+    expect((await rowOf(object.db, object.created))?.title).toBe("a human's title");
+    // The object's state is untouched by the face.
+    const state = await object.session.fetch(
+      new Request("https://session.internal/rpc/state?conversation=" + object.created),
+    );
+    expect(await state.json()).toMatchObject({ conversation: { title: "the conversation" } });
+    // A rebuild is how the object's metadata is written back: `POST /rpc/reindex` replaces the
+    // project's rows from the object, and the human's title is gone from D1.
+    const rebuilt = await object.session.fetch(
+      new Request("https://session.internal/rpc/reindex", {
+        method: "POST",
+        headers: { "x-request-id": "reindex" },
+      }),
+    );
+    expect(rebuilt.status).toBe(200);
+    expect((await rowOf(object.db, object.created))?.title).toBe("the conversation");
+  } finally {
+    await object.close();
+  }
 });

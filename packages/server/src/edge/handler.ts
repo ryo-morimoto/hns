@@ -111,6 +111,16 @@ const CHECKPOINTS_PATH = /^\/api\/workspaces\/([^/]+)\/checkpoints(?:\/|$)/u;
 /** The conversations face: `/api/conversations/<id>` and its sub-paths (0119). */
 const CONVERSATIONS_PATH = /^\/api\/conversations(?:\/|$)/u;
 
+/**
+ * The methods the conversations face serves.
+ *
+ * @remarks
+ * `PATCH` is the rename and the archive (one body, only the members given), `DELETE` is the
+ * tombstone (0271n); both act on the D1 row and nothing else. The list is the `Allow` header and
+ * the check in one place, so a method the face cannot answer never reaches it.
+ */
+const CONVERSATION_METHODS = ["GET", "PATCH", "DELETE"] as const;
+
 /** The cache policy for Vite's content-hashed files under `/assets`. */
 const ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
@@ -387,9 +397,13 @@ async function route(
     if (session === null) {
       return problem("unauthorized", "A valid session cookie is required.", path);
     }
-    if (request.method !== "GET") {
-      const response = problem("method_not_allowed", "Only GET is allowed on this path.", path);
-      response.headers.set("allow", "GET");
+    if (!CONVERSATION_METHODS.some((method) => method === request.method)) {
+      const response = problem(
+        "method_not_allowed",
+        "Only GET, PATCH and DELETE are allowed on this path.",
+        path,
+      );
+      response.headers.set("allow", CONVERSATION_METHODS.join(", "));
       return response;
     }
     if (dependencies.conversations === undefined) {

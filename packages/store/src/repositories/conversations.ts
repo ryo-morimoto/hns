@@ -79,6 +79,35 @@ export interface ConversationRepository {
   findById(id: ConversationId): Promise<Conversation | undefined>;
   /** Record activity by bumping `updated_at`; a no-op when the conversation is missing. */
   touch(projectId: ProjectId, id: ConversationId): Promise<void>;
+  /**
+   * Give the conversation a new title; a no-op when the conversation is missing.
+   *
+   * @remarks
+   * A human's write (0271n): it changes the **D1 row only**. The object's metadata is not
+   * written, so the next index drain that re-writes this row writes the object's title back
+   * (see {@link ConversationRepository}).
+   *
+   * @param projectId - The conversation's project.
+   * @param id - The conversation.
+   * @param title - The new title, already validated by the face (1..200 characters, no control).
+   */
+  rename(projectId: ProjectId, id: ConversationId, title: string): Promise<void>;
+  /**
+   * Archive or unarchive the conversation; a no-op when the conversation is missing.
+   *
+   * @param archived - The value to store; false is the undo 0105 offers.
+   */
+  setArchived(projectId: ProjectId, id: ConversationId, archived: boolean): Promise<void>;
+  /**
+   * Bury the conversation with a tombstone (`deleted_at`); a no-op when the conversation is
+   * missing, and when it is already buried.
+   *
+   * @remarks
+   * The tombstone is stamped from the store's clock, so it is the same clock `touch` uses. A row
+   * that is already deleted keeps its first tombstone: the face answers 404 either way, so a
+   * second delete changes nothing an operator could read.
+   */
+  softDelete(projectId: ProjectId, id: ConversationId): Promise<void>;
 }
 
 /** Escape LIKE metacharacters so a search term matches itself. */
@@ -149,6 +178,26 @@ export function conversationRepository(context: StoreContext): ConversationRepos
       await sql.run(
         "UPDATE conversations SET updated_at = ?, indexed_at = ? WHERE project_id = ? AND id = ?",
         [now(), now(), projectId, id],
+      );
+    },
+    async rename(projectId, id, title) {
+      await sql.run("UPDATE conversations SET title = ? WHERE project_id = ? AND id = ?", [
+        title,
+        projectId,
+        id,
+      ]);
+    },
+    async setArchived(projectId, id, archived) {
+      await sql.run("UPDATE conversations SET archived = ? WHERE project_id = ? AND id = ?", [
+        archived ? 1 : 0,
+        projectId,
+        id,
+      ]);
+    },
+    async softDelete(projectId, id) {
+      await sql.run(
+        "UPDATE conversations SET deleted_at = ? WHERE project_id = ? AND id = ? AND deleted_at IS NULL",
+        [now(), projectId, id],
       );
     },
   };
