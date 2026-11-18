@@ -430,9 +430,41 @@ manifest の型は core の `EngineManifest`（`EngineManifestSchema`）。`capa
     "operations": ["preview", "render", "convert"]
   },
   "license": { "spdx": "AGPL-3.0-only", "notice": "NOTICE", "source": "SOURCE.md" },
-  "files": { "bin/ibisOffice": "<sha256>" }
+  "files": { "bin/ibisOffice": "<sha256>", "fonts/ipaexg.ttf": "<sha256>", "...": "<sha256>" },
+  "build": {
+    "runtime": {
+      "bindPaths": [
+        {
+          "kind": "icd",
+          "path": "/nix/store/<hash>-mesa-26.1.5/lib/libvulkan_lvp.so",
+          "sha256": "<sha256>"
+        }
+      ]
+    },
+    "environment": { "LD_LIBRARY_PATH": "lib", "FONTCONFIG_FILE": "fonts.conf", "FONTCONFIG_PATH": "<pack root>", "VK_ICD_FILENAMES": "share/vulkan/icd.d/lvp_icd.x86_64.json" },
+    "fonts": ["fonts/ipaexg.ttf", "fonts/NotoSansJP-Regular.otf", "fonts/DejaVuSans.ttf"]
+  }
 }
 ```
+
+`id` / `version` / `capabilities` / `license` / `files` が `EngineManifestSchema` の形で、0236 はこれで検証する。
+`files` は**配布物の全ファイル**（pack 直下からの相対パスと `sha256:<hex>`）。`build` は型の外（schema は知らない）で、
+実行環境と出所を書く。
+
+### `build.runtime.bindPaths`: pack が独立していない部分
+
+pack は「同梱して守る」（D102）が、Vulkan のドライバは `/nix/store` にしかないもの（Mesa の lavapipe）を使う。
+その部分を**探索せずに**実行時へ渡すため、`bindPaths` に**絶対パスと sha256 で明示**する。
+`build.sh` が作る時点で解決して書き、machine はそのパスを 0194 の sandbox に **ro bind** する 1 段として写す。
+実行時は「書いてあるパスが在るか」だけを見る（pack のファイルは 1 つも増えない）。
+
+- 在って sha256 が合えば、そのパスは「見えている」。
+- 無くても、pack が同じバイト列を持っていれば（`lib/store/<store-path>`）、render は成立する。
+- どちらも無ければ `render` は**能力なし**として `{ available: false, reason: "Vulkan driver not found at <path>" }`。
+  `preview` / `convert` はそのまま成功する（C4）。黙って別のドライバで描かない。
+- 空配列は「pack が自分だけで完結する」の意味。いまの v0.8.7 + vulkan-loader 1.4.363 の組み合わせでも
+  render は pack のコピーだけで動くが、ドライバの実体が `lib/store/` の中にあることを manifest でも名乗る。
+- 将来この独立が完結すれば `bindPaths` を空にするだけでよく、manifest の形は変えない。
 
 ## 12. golden fixture と契約の検査
 

@@ -11,3 +11,7 @@ docs/api/
 .wrangler/
 .dev.vars
 *.secrets.json
+
+# The Office engine pack (0235): the release binary, fonts and libraries, built by
+# tools/office-pack/build.sh and shipped as an asset. Never committed.
+/office-pack/
