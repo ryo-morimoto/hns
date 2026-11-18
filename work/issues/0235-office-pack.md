@@ -1,6 +1,6 @@
 # 0235: Office エンジン（ibisOffice）の pack を同梱する
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D102, docs/office.md
@@ -25,13 +25,13 @@ machine がそれを読んで `preview` / `render` / `convert` を実行でき�
 
 ## Acceptance criteria
 
-- [ ] `tools/office-pack/build.sh` が版を固定して pack を作る（ibisOffice v0.8.7、sha256 を検証）
-- [ ] `manifest.json` の `capabilities.operations` は **preview / render / convert のみ**（sidecar の op は 0242 が足す）
-- [ ] フォント（IPAexGothic / Noto Sans JP）と `fonts.conf`、X11 3 点、mesa lavapipe + vulkan-loader が入る
-- [ ] pack の CLI スモーク（`--export pdf` と `--export png` が 1 文書で成功）が CI で回る
-- [ ] AGPL の 4 点（LICENSE / NOTICE / SOURCE.md / About 表示の文言）が配布物に含まれる
-- [ ] README に「pack の入れ方」「sandbox から見えるパス（ro bind）」「失敗時の見え方」がある
-- [ ] `.gitignore` で pack を git に入れない
+- [x] `tools/office-pack/build.sh` が版を固定して pack を作る（ibisOffice v0.8.7、sha256 を検証）
+- [x] `manifest.json` の `capabilities.operations` は **preview / render / convert のみ**（sidecar の op は 0242 が足す）
+- [x] フォント（IPAexGothic / Noto Sans JP）と `fonts.conf`、X11 3 点、mesa lavapipe + vulkan-loader が入る
+- [x] pack の CLI スモーク（`--export pdf` と `--export png` が 1 文書で成功）が CI で回る
+- [x] AGPL の 4 点（LICENSE / NOTICE / SOURCE.md / About 表示の文言）が配布物に含まれる
+- [x] README に「pack の入れ方」「sandbox から見えるパス（ro bind）」「失敗時の見え方」がある
+- [x] `.gitignore` で pack を git に入れない
 
 ## テスト条件
 
@@ -142,3 +142,19 @@ integration（build / verify / CLI smoke）と gate（法務ファイルの存�
 - 設計レビュー: issue-reviewer / **PASS with comments**（2026-11-17、5 ラウンド。blocking 0）
 - blocking: なし（R1〜R10 の整合修正を反映済み）
 - 次アクション: 0234 → 0235 → 0236 の順で実装レーンへ（0240 / 0242 は設計レビューで agreed に）
+
+## Result
+
+- verdict: **PASS**（reviewer-0235。初回 FAIL 2 回 —— `reachable()` が bind の sha256 を照合しない（虚偽の digest でも available:true）、次に lead 指示で symlink を `files` に入れたため**実 pack が `EngineManifestSchema` に落ちる回帰** —— を直して PASS）
+- HEAD: 9a687d1（main に ff 統合）。gate は exit 0（1853 tests / 1854、main で 161.1s）。
+- **供給網**: **v0.8.7 に固定**し、**sha256 を検証してから展開**（`0c6b15d9…085dd` はスパイクの実ファイルと GitHub release の digest に一致）。**フォント 3 種も pin URL + sha256**（Noto は OFL、IPAex は IPA Font License、DejaVu は Bitstream を同梱）。**curl 失敗と digest 不一致を別メッセージ**にし、**`.part` を消してから止まる**。
+- **manifest**: `docs/office.md` §11 の形。**`files` は `sha256:<hex>` の文字列のみ**（**symlink は型の外の `build.symlinks`**）。**実 pack（symlink 55 本）の manifest が `EngineManifestSchema` を通る**ことを統合テストで固定し、**静的テストで同じ再発を早く止める**。
+- **`runtime.bindPaths`**: build 時に解決して書き、**実行時は探索しない**。**digest の形は常に必須**、**在るときは実 sha256 と一致**。合わなければ **`available:false`（パス入りの reason）**、**存在しなければ「machine が bind する予定」として許す**。
+- **verify**: `files` と `build.symlinks` の両方を、**target 一致 / pack 内に解決 / 解決先の digest 一致**で検査し、**どちらにも載っていないものも落とす**。**`/etc/passwd` へ張り替え / manifest も書き換え / 解決先を 1 バイト改変 / 余剰 symlink** の 4 通りが落ちる。
+- **C3（フォント）**: `pack.mjs fonts` が **`fc-list` を pack の `fonts.conf` で**実行し **`missingFonts`** を出す。**ホストの `/etc/fonts` を include しない**ので**黙って代替しない**。
+- **C4**: lavapipe を消すと **PDF は成功・PNG は失敗**（`Vulkan driver not found at <path>`、`unsupported` に丸めない）。
+- **`tools/office-pack/tsconfig.json`** を gate の typecheck に追加。**`.mjs` が oxfmt/oxlint の対象外**であることは既存 `tools/obs/trace.mjs` と同じ扱い（README に明記）。
+- **調査で分かったこと**: PNG が落ちていた原因は **vulkan-loader 1.4.341 が ICD を pack の `lib/` からロードできない**こと。**1.4.363 に固定すると pack の `lib/` だけで PDF も PNG も通る**。**`bindPaths` は将来空配列にできる**。
+- **実運用で起動するもの**: pack の生成・検証・スモーク（`HNS_REQUIRE_OFFICE_PACK=1` で CI でも強制できる）。
+- **まだ起動しない**: **machine が `op:"office"` を実行するのは 0236**（今は `invalid_request` で「この build には無い」）。`GET /artifact` の署名 / cache の読み書きは 0236 / 0241。
+- **残件**: ①**同じ checkout で 2 本の `build.sh` を並行で走らせると壊れる**（`CACHE_DIR` / `WORK` がリポジトリ共通で `rm -rf` する。`$$` か `flock` が要る）②**integration に assert の無いケース**が 1 つ残っている ③`pack.test.ts` のコメント重複 ④**verify のメッセージが「契約側か build 側か」を名乗らない** ⑤`/tmp` の scratch は固定にしたが、**pack を作り直すたびに増えない**ことは確認済み。
