@@ -812,17 +812,18 @@ function runIdentityOf(
   api: HookApi,
 ): AuditIdentity | undefined {
   if (identity === undefined) return undefined;
-  const conversationId = conversationIdOf(api);
-  return conversationId === undefined ? identity : { ...identity, conversationId };
+  return { ...identity, conversationId: conversationIdOf(api) };
 }
 
 /**
  * The conversation a tool task runs in.
  *
  * @param api - The executing tool's API: the tool task's own conversation is its `conversationId`.
- * @returns The conversation id, or undefined for a task that names none.
+ * @returns The conversation id.
  */
-function conversationIdOf(api: HookApi): string | undefined {
+function conversationIdOf(api: HookApi): string {
+  // `HookApi.conversationId` is pi-durable's ConversationId (a branded decimal string): a tool task
+  // always runs in one conversation, so there is no "no conversation" branch to write.
   return String(api.conversationId);
 }
 

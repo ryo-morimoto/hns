@@ -149,6 +149,17 @@ export interface ToolPathState {
    * already admitted is `epoch_stale`, and the same revision is idempotent.
    */
   readonly admitTurn: (snapshot: PolicySnapshotPayload) => Promise<ToolSnapshotAdmission>;
+  /**
+   * Begin a run's turn: the run may be granted again from this point.
+   *
+   * @param runId - The conversation whose turn was submitted.
+   *
+   * @remarks
+   * A run's revocation ends its turn, and the ended turn refuses further relays. The next turn of
+   * the same conversation starts here, so a conversation is not left without tools after an abort;
+   * the revoked ledger rows remain the audit's fact.
+   */
+  readonly beginTurn: (runId: string) => void;
   /** Mint a run's relay token; the run's id is what it is checked against. */
   readonly mint: (runId: string) => string;
   /** Check one run's relay token; false refuses the relay. */
@@ -242,6 +253,12 @@ export interface ToolPathOptions {
   /** The manifests the issuer checks a request's hash against: the object's own tool contracts. */
   readonly manifests: () => Promise<readonly ToolManifest[]>;
   /**
+   * Told when a run's turn begins, so the object can stop refusing the turn a revocation ended.
+   *
+   * @param runId - The conversation whose turn was submitted.
+   */
+  readonly turnBegan?: ((runId: string) => void) | undefined;
+  /**
    * The ledger questions about one grant: was it revoked, and how many calls is it covering?
    *
    * @remarks
@@ -250,7 +267,16 @@ export interface ToolPathOptions {
    * it would hand the same run a working capability again. `revoked` answers from the ledger.
    */
   readonly revoked: (grantId: string) => Promise<boolean>;
-  /** The grant a run's relay was last given, so a replacement is refused once it is revoked. */
+  /**
+   * The newest grant issued for a run's current turn, live or revoked.
+   *
+   * @remarks
+   * A run's **turn** is what a revocation ends: the Session object revokes a run's grants when its
+   * run ends (an abort), and clears this record before the next turn of the same conversation. While
+   * the ended turn's record still stands, a relay of that run is refused `grant_revoked`; once the
+   * next turn begins, the record is gone and the run is issued a fresh capability (its own, with a
+   * new `grantId`). The revoked ledger rows stay as the audit's fact.
+   */
   readonly grantOf: (runId: string) => Promise<GrantRecord | undefined>;
   readonly now: () => number;
   /** The event id for one audit row. */
@@ -396,6 +422,10 @@ export function createToolPath(options: ToolPathOptions): ToolPath {
       }
       return token === known.value;
     },
+    beginTurn(runId) {
+      // The object owns the mark; the path only tells it a turn began.
+      options.turnBegan?.(runId);
+    },
     forget(runId) {
       tokens.delete(runId);
     },
@@ -490,9 +520,9 @@ async function relayOne(input: RelayInput): Promise<ToolRelayOutcome> {
     startedAt: options.now(),
   };
   const manifests = await options.manifests();
-  // A run whose grant was revoked is over: it gets no replacement and relays nothing. Relaying here
-  // is what keeps the run's end immediate — the window between a revocation and the grant's own
-  // expiry (at most 60 seconds) is closed by this check, not by the clock.
+  // The turn a revocation ended relays nothing: its record still stands until the next turn clears
+  // it, so the window between a revocation and the grant's own expiry (at most 60 seconds) is closed
+  // by this check, not by the clock. A later turn has no record and is issued its own grant.
   const bound = await options.grantOf(input.runId);
   if (bound !== undefined && (await options.revoked(bound.grantId))) {
     const decision = deny("grant_revoked", "the grant was revoked by its issuer");

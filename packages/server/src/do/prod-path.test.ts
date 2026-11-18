@@ -279,7 +279,6 @@ test("B1: the object's transport and its route agree on one granted call", async
   const fixture = await openObject(machineDenial);
   try {
     expect((await fixture.session.fetch(await send())).status).toBe(200);
-    fixture.session.enterRun("run-1");
     const path = fixture.pathOf("run-1");
     if (path === undefined) throw new Error("the run has no granted path");
     const contract = await readCall();
@@ -326,7 +325,6 @@ test("B1: a body the route cannot read as a call is refused, and nothing is rela
   try {
     await fixture.session.fetch(await send());
     // The run's path (and so its relay token) is minted when a tool call asks for it.
-    fixture.session.enterRun("run-1");
     fixture.pathOf("run-1");
     const token = fixture.session.runToken("run-1");
     const headers = new Headers({ "content-type": "application/json" });
@@ -355,7 +353,6 @@ test("B1: a body the route cannot read as a call is refused, and nothing is rela
 test("NB2: a run's abort revokes its grant by its conversation", async () => {
   const fixture = await openObject(machineDenial);
   try {
-    fixture.session.enterRun("run-1");
     await fixture.session.fetch(await send());
     const contract = await readCall();
     // One granted call through the object's relay: the grant it issues for the run is the run's.
@@ -407,11 +404,72 @@ test("NB2: a run's abort revokes its grant by its conversation", async () => {
   }
 });
 
+// The turn an abort ended is refused; the conversation's next turn is granted afresh, so an abort
+// does not leave a conversation without tools (the regression this test exists for).
+test("after an abort the same conversation's next turn is granted afresh", async () => {
+  const fixture = await openObject(machineDenial);
+  try {
+    await fixture.session.fetch(await send());
+    const contract = await readCall();
+    const call = (callId: string) =>
+      ({
+        v: 1,
+        callId,
+        toolId: "read_file",
+        toolVersion: contract.manifest.version,
+        args: { path: "a.txt" },
+      }) as const;
+    const first = await fixture.relayPath("run-1", {
+      call: call("tool:1:before-abort"),
+      manifest: contract.manifest,
+      bytes: 4096,
+    });
+    if (!first.ok) throw new Error("the object should answer a decision");
+    const before = (await fixture.ledger()).find((record) => record.runId === "run-1");
+    if (before === undefined) throw new Error("the run held no grant");
+    // The abort ends the turn: its grant is revoked, and a relay of it is refused.
+    expect(
+      (
+        await fixture.session.fetch(
+          new Request("https://session/rpc/conversations/run-1/abort", { method: "POST" }),
+        )
+      ).status,
+    ).toBe(200);
+    const ended = await fixture.relayPath("run-1", {
+      call: call("tool:2:ended-turn"),
+      manifest: contract.manifest,
+      bytes: 4096,
+    });
+    if (!ended.ok) throw new Error("the object should answer a decision");
+    expect(ended.answer.decision).toMatchObject({ outcome: "deny", code: "grant_revoked" });
+    // The conversation's next turn begins with its send: the run is granted again, with its own
+    // grant, and its tools work.
+    expect((await fixture.session.fetch(await send())).status).toBe(200);
+    const next = await fixture.relayPath("run-1", {
+      call: call("tool:3:next-turn"),
+      manifest: contract.manifest,
+      bytes: 4096,
+    });
+    if (!next.ok)
+      throw new Error("the next turn's relay failed: " + next.code + " " + next.message);
+    expect(next.answer.decision).toMatchObject({ outcome: "deny", code: "scope_exceeded" });
+    // A new grant, not the revoked one; the revoked row is still the ledger's fact.
+    const ledger = await fixture.ledger();
+    expect(ledger).toContainEqual(
+      expect.objectContaining({ grantId: before.grantId, revokedAt: expect.any(String) }),
+    );
+    const issued = ledger.filter((record) => record.runId === "run-1" && record.revokedAt === null);
+    expect(issued).toHaveLength(1);
+    expect(issued[0]?.grantId).not.toBe(before.grantId);
+  } finally {
+    fixture.close();
+  }
+});
+
 // A run keeps one granted path (and so one grant cache) across its turns (NB1).
 test("NB1: a run has one granted path across its turns", async () => {
   const fixture = await openObject(machineDenial);
   try {
-    fixture.session.enterRun("run-1");
     await fixture.session.fetch(await send());
     const first = fixture.pathOf("run-1");
     expect(first).toBeDefined();

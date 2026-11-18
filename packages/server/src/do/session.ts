@@ -195,8 +195,8 @@ async function openDurableSession(
   };
   // The granted path is per run; the object builds each run's transport, so the agent's tool code
   // holds only the issuer and the relay, never a key or a machine's URL.
-  // The factory is the object's own: it answers the run the runtime asks for (the tool task's
-  // conversation), and a fake runtime names its run through `enterRun` before asking.
+  // The factory is the object's own: it answers the run the runtime asks for, which in production is
+  // the tool task's conversation (the agent's hooks read it from their own API).
   return openSession(grantPathOf === undefined ? common : { ...common, grantPath: grantPathOf });
 }
 
@@ -228,8 +228,6 @@ export class Session {
   #tools: ToolPath | undefined;
   /** The token each run's relay was minted with, so a test can serve the route as its agent. */
   readonly #runTokens = new Map<string, string>();
-  /** The run a test's runtime names for the next `grantPath` call; see `enterRun`. */
-  #testRun: string | undefined;
   readonly #machineFetch: ToolPathOptions["fetch"] | undefined;
   /** The runs' relays, by conversation: one token and one transport per run. */
   readonly #transports = new Map<string, ToolRunTransport>();
@@ -240,21 +238,6 @@ export class Session {
    */
   runToken(runId: string): string | null {
     return this.#runTokens.get(runId) ?? null;
-  }
-
-  /**
-   * Name the run whose granted path the runtime asks for next (a test seam).
-   *
-   * @param conversationId - The run (a conversation); undefined clears it.
-   *
-   * @internal
-   * @remarks
-   * The production runtime reads the run from the tool task it is executing (`runIdentityOf`); a
-   * fake runtime has no tool task, so it names the run here before it asks. It is the same kind of
-   * seam as `machineFetch`: a test drives the object's path machinery without an agent harness.
-   */
-  enterRun(conversationId: string | undefined): void {
-    this.#testRun = conversationId;
   }
 
   /**
@@ -291,6 +274,15 @@ export class Session {
    * can refuse a grant before a machine sees it without reading the ledger per call.
    */
   readonly #revokedGrants = new Set<string>();
+  /**
+   * The runs whose turn ended, and which therefore refuse further relays until their next turn.
+   *
+   * @remarks
+   * A revocation is the run's end. The ledger keeps the revoked grant (the audit's fact), and this
+   * set makes the ended turn's relays `grant_revoked`; the next turn clears it, so a conversation is
+   * not left without tools after an abort.
+   */
+  readonly #endedTurns = new Set<string>();
   #session: AgentSession | undefined;
   #closed = false;
 
@@ -375,6 +367,9 @@ export class Session {
     try {
       const outcome = await grants.revokeRun(runId);
       for (const grantId of outcome.revoked) this.#revokedGrants.add(grantId);
+      // The run's turn is over: its ledger rows stay (and stay revoked), and the run refuses relays
+      // until its next turn begins. The next turn clears the mark (`beginTurn`).
+      if (outcome.revoked.length > 0) this.#endedTurns.add(runId);
       return outcome;
     } catch (error) {
       console.error("session grant revoke failed", error instanceof Error ? error.name : "unknown");
@@ -450,8 +445,13 @@ export class Session {
       revoked: async (grantId) => {
         return this.#revokedGrants.has(grantId);
       },
-      // The run's grant whether it stands or was revoked: a run whose grant was revoked is over.
-      grantOf: async (runId) => await grants.lastFor(runId),
+      // The run's current turn's grant, live or revoked. A revocation ends that turn; `#revokeRun`
+      // marks it in #endedTurns, and the next turn clears the mark so the run is issued afresh.
+      turnBegan: (runId) => {
+        this.#endedTurns.delete(runId);
+      },
+      grantOf: async (runId) =>
+        this.#endedTurns.has(runId) ? await grants.lastFor(runId) : undefined,
       now: this.#now,
       eventId: () => ids.next(),
     };

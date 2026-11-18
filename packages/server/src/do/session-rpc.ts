@@ -572,6 +572,9 @@ export async function handleSessionRpc(
       const parsed = v.safeParse(SendSchema, body.value);
       if (!parsed.success) return failure("invalid_request", "Invalid message input.");
       const tools = dependencies.tools;
+      // A submitted turn begins a run's turn: a revocation that ended the previous one no longer
+      // refuses this one (the run is granted afresh, with its own grant).
+      if (tools !== undefined) tools.state.beginTurn(id);
       if (tools !== undefined && parsed.output.policy !== undefined) {
         // The granted path: the turn is admitted under the policy the Worker read, and the object
         // refuses one older than a revision it already admitted.
