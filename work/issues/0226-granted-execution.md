@@ -1,6 +1,6 @@
 # 0226: grant をツール実行に通す（agent / workspace / machine の統合）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D091, docs/capability.md §3, §5, §10
@@ -17,15 +17,15 @@ touches: packages/agent/src/runtime.ts, packages/agent/src/tools.ts, packages/ag
 
 ## Acceptance criteria
 
-- [ ] `ToolRuntime` が read / write / exec を提供し、Phase 0 の `policy` と Phase 1 の `grant` の両方を受ける
-- [ ] `GrantSource` が Session DO の `createGrantIssuer` と policy snapshot を使い、`(toolId, version, manifestHash, machineId)` で grant をキャッシュする。期限切れ / epoch_stale で再取得する。tool call ごとの RPC はしない
-- [ ] machine は `authorization` の grant を検証し、操作フィールドから `ToolCall` を再構成して `callHash` を比較する。不一致は `manifest_mismatch` / `scope_exceeded`
-- [ ] 成功・拒否の両方で `tool.call` / `tool.result` が監査に残る
-- [ ] 既存の `read_file` / `write_file` / `bash` のモデル向け JSON を変えない
-- [ ] Session DO に `session_grants` テーブルと `GrantLedger`（`record` / `revoke`）を実装し、発行時に記録、失効時に revoke する
-- [ ] Session DO は Worker から渡された snapshot の hash を検証し、revision が単調増加でなければ拒否する。モデルには渡さない
-- [ ] grant が無い / 検証できない環境では exec を出さない（fail closed）
-- [ ] `npm test -w @hns/agent`、`-w @hns/machine`、`-w @hns/server` が通る
+- [x] `ToolRuntime` が read / write / exec を提供し、Phase 0 の `policy` と Phase 1 の `grant` の両方を受ける
+- [x] `GrantSource` が Session DO の `createGrantIssuer` と policy snapshot を使い、`(toolId, version, manifestHash, machineId)` で grant をキャッシュする。期限切れ / epoch_stale で再取得する。tool call ごとの RPC はしない
+- [x] machine は `authorization` の grant を検証し、操作フィールドから `ToolCall` を再構成して `callHash` を比較する。不一致は `manifest_mismatch` / `scope_exceeded`
+- [x] 成功・拒否の両方で `tool.call` / `tool.result` が監査に残る
+- [x] 既存の `read_file` / `write_file` / `bash` のモデル向け JSON を変えない
+- [x] Session DO に `session_grants` テーブルと `GrantLedger`（`record` / `revoke`）を実装し、発行時に記録、失効時に revoke する
+- [x] Session DO は Worker から渡された snapshot の hash を検証し、revision が単調増加でなければ拒否する。モデルには渡さない
+- [x] grant が無い / 検証できない環境では exec を出さない（fail closed）
+- [x] `npm test -w @hns/agent`、`-w @hns/machine`、`-w @hns/server` が通る
 
 ## テスト条件
 
@@ -74,3 +74,14 @@ touches: packages/agent/src/runtime.ts, packages/agent/src/tools.ts, packages/ag
 ## Log
 
 - 2026-11-17: 作成（D091）。
+
+## Result
+
+- verdict: **PASS**（reviewer-0226。4 巡。blocking 2 → 0、修正の副作用 2 件も統合前に解消）
+- HEAD: 08b7f65（main に ff 統合）。gate は exit 0（1481 tests / 1482、main で 67.8s。1 回目は cf dev の lock 競合で落ち、再実行で green）。
+- **鎖**: faux モデル → `beforeTool` → `GrantSource`（cache）→ **Session DO の実 0224 issuer** → 実 WebCrypto 署名 → **machine の実 0225 verifier** → 実行 → `policy_audit` に grantId / decision。**Phase 0 への fallback は無い**（kill switch off のときだけ Phase 0）。
+- **境界**: DO → machine は 0148 の control-plane 署名で出し、**grant の署名は body にだけ**（log / 例外 / 監査 / エラー応答に出さない）。`POST /rpc/conversations/<run>/tool` は **run ごとの token**（不一致 / 別 run / 失効後は 401）。**agent は grant を偽造できない**。snapshot は revision が小さいときだけ拒否（同じ revision は冪等）、hash を再計算、**モデルには渡さない**。
+- **寿命**: grant は run 単位で短命。**revocation は 1 ターンの終わり**で、次の send が成功すると新しい grantId で発行し直す（revoked の ledger 行は監査の事実として残る）。**send が失敗したら終了記録を消さない**（終了ターンの grant は生き返らない）。
+- **counter の正本は machine**（0225）。DO 側は監査の写しのみ。
+- レビューで見つかって直したもの: 本番の transport と route の body 形の不一致（**自作 transport でテストしていたため本番が一度も通っていなかった**）/ snapshot が無いと send が 400 で全滅 / abort 後に同じ conversation が恒久的に `grant_revoked` / send 失敗時に終了ターンの grant が生き返る。
+- **未実装（起動点）**: ①deploy の env 3 つ（`HNS_AGENT_URL` / `HNS_MACHINE_ID` / `HNS_CONTROL_PLANE_KEY`）②**Worker の send 面そのものが無い**ため snapshot の配線ができない ③`#transports` / `#grantPaths` / `#runTokens` は abort と object close で解放（conversation close の hook が無く、窓は grant の寿命 ≤60s）。→ [0270n](0270n-start-the-implemented-faces.md) に集約。
