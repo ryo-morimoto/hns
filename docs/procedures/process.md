@@ -44,7 +44,7 @@ worktree の `node_modules/@earendil-works` をそのまま辿ると `ERR_MODULE
 
 ## 完了・記録・成果
 
-完了は Result の追記ではなく、1 issue 1 レコードで表す（[D067](../decisions.md)）。置き場とスキーマは [0195](../../work/issues/0195-work-record-contract.md) で決める（YAML は D067）。done level はレコードから導出する。
+完了は Result の追記ではなく、1 issue 1 レコードで表す（[D067](../decisions/D067.md)）。置き場とスキーマは [0195](../../work/issues/0195-work-record-contract.md) で決める（YAML は D067）。done level はレコードから導出する。
 
 - 成果は四半期のテーゼと Moat 台帳で見る（D068）。週次デモ30分、月次キルリストを置く。
 - レビューは意図・設計・実装・結果の4層に分ける（D069）。月次で指摘をルール・テスト・eval・decisions に蒸留する。
