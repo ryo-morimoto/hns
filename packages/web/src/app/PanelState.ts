@@ -30,6 +30,16 @@ export interface PanelState {
   readonly selection: PreviewSelection | null;
   /** The file after this one in the URL's order, for the panel's "next" control; null at the end. */
   readonly next: PreviewSelection | null;
+  /**
+   * The order the route named (its `files` query), as the next link carries it on.
+   *
+   * @remarks
+   * **The list a file was opened from is part of the address.** A next link that dropped it
+   * would open the following file with no order left, so its own next would be gone: the second
+   * step of a walk through a folder would be the last. The array is empty when the route named
+   * no list, and the link then carries none either.
+   */
+  readonly files: readonly string[];
 }
 
 /**

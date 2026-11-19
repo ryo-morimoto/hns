@@ -24,7 +24,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
  */
 function renderPanel(
   projectId: string,
-  state: PanelState = { selection: null, next: null },
+  state: PanelState = { selection: null, next: null, files: [] },
 ): ReturnType<typeof render> {
   const environment = createEnvironment({
     fetch: async () =>
@@ -56,6 +56,7 @@ function fileState(projectId: string, path: string | null, next: string | null =
   return {
     selection: { workspaceId, path },
     next: next === null ? null : { workspaceId, path: next },
+    files: [],
   };
 }
 

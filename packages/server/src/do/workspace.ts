@@ -188,13 +188,15 @@ export interface WorkspaceOptions {
  */
 export interface WorkspaceBindings {
   /**
-   * The machine this deployment serves, when it is configured rather than leased (0239).
+   * **Test-only seam (0239).** The machine a harness names instead of a lease.
    *
    * @remarks
-   * A deployment names one machine (`HNS_MACHINE_ID`); the lease (0148's registry) is what picks
-   * one when it holds the workspace. A read that arrives before any write has no lease to read a
-   * machine from, and a deployment whose configuration names the machine can say so here. Absent,
-   * the read answers as it always did: no machine yet.
+   * **A deployment never sets this.** The machine is chosen by the workspace's lease (0148); a
+   * read that arrives before any write has no lease to read one from, and answers "no machine
+   * yet" as it always did. The office journey, which serves one machine and has no lease to
+   * acquire, passes it here. The `__` prefix is the mark that this is not part of the contract
+   * (`docs/invariants.md`, INV-14).
+   * @internal
    */
   readonly __workspace?: { readonly machineId: string } | undefined;
   /** The bucket for journal bodies over 256KB. */

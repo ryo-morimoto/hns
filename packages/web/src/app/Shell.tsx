@@ -239,7 +239,7 @@ function ShellFrame({
   );
   // The panel reads this store; the route is the only thing that writes it.
   useEffect(() => {
-    panelStore.set({ selection, next: nextFile });
+    panelStore.set({ selection, next: nextFile, files: fileOrderOf() });
   }, [selection, nextFile]);
   const conversationTitle =
     route.kind === "conversation"
@@ -476,16 +476,29 @@ function FileView({
  *
  * @remarks
  * **The order is the URL's own**: a document opened from a hash carries the list it belongs to
- * as the `files` query (`#/p/<project>/doc/<path>?files=<a>&files=<b>`). The next file is the one
+ * as the location's `files` query (`?files=<a>&files=<b>#/p/<project>/doc/<path>`). The next file is the one
  * after this file in that order, and nothing when the route names no list — the shell does not
  * invent an order (a file list is 0125 / 0104's to define).
  */
 function nextPathOf(path: string): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const files = params.getAll("files");
+  const files = fileOrderOf();
   const at = files.indexOf(path);
   const next = at === -1 ? undefined : files[at + 1];
   return next === undefined || next === "" ? null : next;
+}
+
+/**
+ * The list order the route carries (`?files=<a>&files=<b>`), or none.
+ *
+ * @returns The order, as the URL named it.
+ *
+ * @remarks
+ * One reading of the query for both the next file and the order the panel carries on to it (see
+ * `PanelState.files`): a link that kept one and dropped the other would end a walk after its
+ * second step.
+ */
+function fileOrderOf(): readonly string[] {
+  return new URLSearchParams(window.location.search).getAll("files").filter((item) => item !== "");
 }
 
 /**

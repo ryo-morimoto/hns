@@ -24,6 +24,21 @@ export function officeObjectName(projectId: string): string {
   return sessionNameFor(nameOf(projectId));
 }
 
+/**
+ * The project id a workspace id names, whether the caller has the graph's id or the raw one.
+ *
+ * @param workspaceId - A raw project id, or the graph's `Project:<base64url>`.
+ * @returns The raw project id.
+ *
+ * @remarks
+ * The office fields' arguments carry the graph's workspace id; the control database, the Session
+ * and Workspace objects and the machine's ROOT are named by the raw project id (D080). This
+ * function is that one step, and every place that crosses between the two reads it here.
+ */
+export function officeProjectId(workspaceId: string): string {
+  return nameOf(workspaceId);
+}
+
 /** A graph workspace id's project id, or the value itself when it is already one. */
 function nameOf(workspaceId: string): string {
   const decoded = fromGlobalId(workspaceId);

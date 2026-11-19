@@ -98,6 +98,22 @@ E2E の既定は 3 構成（D101）。
 - Safari / WebKit / 実機 iOS・Android は E2E の対象外。Playwright WebKit を Safari と呼べない。Safari / iOS Safari / 実機 Android の手動確認は 0113 / 0114 のどちらに置くか未確定（現時点では未検証）。
 - ブラウザ差は E2E で見る。unit / component をブラウザごとに回さない。この節の project 行列を正とし、0043 などの写しと食い違ったらこの節を直す。
 
+### E2E の主張の範囲
+
+**E2E は体験を見る。配線の順序は integration と component が見る。** E2E の主張は「利用者が開いて読める／
+失敗が画面で説明される」までで、**どの層がどの object を引くか、どのタイマーがいつ張られるか**は主張しない。
+配線の退行は、その層の integration（実 Durable Object・実 DB・実 machine の境界）と component（実ビルドの
+UI と実 query/mutation の文書）で、**E2E を回さずに**検出できるようにする。
+
+理由: E2E は環境（ブラウザ・実 pack・machine・ホストのライブラリ）に強く依存し、**環境が揃わなければ
+落ちる**。配線の証明をそこに置くと、環境の障害が製品の退行として現れ、逆に環境が緩いと退行が隠れる。
+0239 では、object 名の解決と配信路の分離を `office-alarm.test.ts`（integration）が、プレビューの
+ポーリングを `DocumentPanel.test.tsx`（component、実ビルドの文書）が受け持ち、E2E は 3 形式の表示・
+キャッシュ・監査・キーボード・拒否を見る。
+
+**E2E の実行手順と環境の前提は `e2e/README.md` に置く**（ブラウザ、pack、`LD_LIBRARY_PATH`、`PLAYWRIGHT_BROWSERS_PATH`）。
+実 pack・machine・ホストのライブラリを要る journey は **`npm run check` に入れない**（CI への持ち込みは CI 基盤の issue）。
+
 ### ケースとレビュー
 
 - ケースは「前提 / 操作 / 期待 / 事後」で書く。期待結果が言えない条件は設計に戻す。

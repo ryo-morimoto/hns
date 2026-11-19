@@ -2,6 +2,7 @@ import * as v from "valibot";
 import type { OfficePortOptions } from "./office-port.ts";
 import type { OfficeFailureView } from "../do/office-job.ts";
 import { officeFailureOf } from "../do/office-job.ts";
+import { officeObjectName } from "../office/route.ts";
 
 /** One file's current version, or the failure that says why it could not be read. */
 export type WorkspaceVersion =
@@ -49,7 +50,9 @@ export async function workspaceVersionOver(
     if (project === undefined) return VERSION_UNREADABLE;
     const workspaces = options.env.WORKSPACE;
     if (workspaces === undefined) return VERSION_UNREADABLE;
-    const stub = workspaces.get(workspaces.idFromName(workspaceId));
+    // The object's name is the project's id (D080), and the caller's workspace is the graph's:
+    // one name for one object, read through the one function that decides it.
+    const stub = workspaces.get(workspaces.idFromName(officeObjectName(workspaceId)));
     const query = new URLSearchParams({ projectRoot: project.workspace_root, path });
     let response: Response;
     try {

@@ -62,15 +62,25 @@ export interface ProjectLike {
  * @returns The origins, the project, and how to stop them.
  *
  * @remarks
- * **Every part is the product's.**
+ * **Every part of the path is the product's, with one boundary that is not: the Durable Object
+ * dispatch.** The edge's `fetch` is the deployment's entrypoint, served on a loopback port; the
+ * two object classes are the deployment's own classes; the machine is the product's agent; the
+ * database answers with D1's interface. What the journey **models** is the runtime's dispatch:
+ * one instance per object name, the object's SQLite state, and the alarm the platform fires.
+ * That resolution is this file's, not workerd's.
+ *
+ * A run of the same entry under **real workerd** (miniflare) was built and worked — the edge,
+ * both objects and the alarm all ran there — until it reached the store's `sql.batch`: inside a
+ * request, workerd's `db.batch` did not return, though the same call completed at startup. The
+ * store is not this issue's to change, and whether production D1 behaves the same is a defect of
+ * its own, so the journey keeps the model and **this paragraph is the record**: a change that only
+ * a real dispatch would catch is not something this journey proves.
  *
  * - The machine: `startMachineAgent` — its listener, its signed `op: "office"` and
  *   `GET /artifact`, its bubblewrap sandbox and its cache.
  * - The edge: the deploy project's Worker entrypoint (`packages/server/src/index.ts`, what
  *   `tools/deploy/worker.ts` re-exports), its `fetch` served on a loopback port, and its
- *   `Session` Durable Object class with one instance per project name — the runtime's own
- *   resolution (one object per name) modelled over `node:sqlite`, with the alarm the runtime's
- *   timer would fire exposed to the journey.
+ *   `Session` Durable Object class with one instance per project name — the resolution above.
  * - The database: the edge's `DB` binding over SQLite, with `prepare`/`batch` as D1 has them,
  *   so the edge's own `projectFor` reads the project.
  *

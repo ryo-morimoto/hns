@@ -113,13 +113,16 @@ export interface WorkerEnv {
    */
   readonly DB?: D1Binding | undefined;
   /**
-   * The GraphQL face's replacements, when the entry is run outside a deployment (0239).
+   * **Test-only seam (0239).** The GraphQL face's replacements for a harness that runs this entry
+   * over its own control database.
    *
    * @remarks
-   * Undefined in a deployment: the face then reads `DB` as it always has. A caller that runs the
-   * deployment's entry over its own control database (the office journey, a local harness) passes
-   * the one lookup that database needs here. The field is on the environment because that is the
-   * only object a Worker entry is given besides the request.
+   * **A deployment never sets this.** Undefined, the face reads `DB` as it always has; the only
+   * caller is the office journey (`e2e/`), which cannot give the entry a D1 it does not have.
+   * The `__` prefix is the mark: a name no binding uses, so an operator cannot set it by
+   * accident from a deployment variable, and a reader of the type sees it is not part of the
+   * contract. `docs/invariants.md` records the rule (INV-14).
+   * @internal
    */
   readonly __graphql?: GraphQLFaceDependencies | undefined;
   /** HMAC key for `hns_session`; at least 32 characters. Never logged. */

@@ -284,9 +284,21 @@ test("three formats open, the second open is the cache, a next file follows, and
   expect((await settledState(page)).status).toBe("ready");
   const next = page.getByTestId("office-next");
   await expect(next).toBeVisible();
-  await expect(next).toHaveAttribute("href", "#/p/" + PROJECT + "/doc/" + encodeURIComponent(FILES[1] ?? ""));
+  // The next link carries the order it was opened from (0239), as the location's query: dropping
+  // it would end a walk through a folder at its second file.
+  const order = "?" + FILES.map((item) => "files=" + encodeURIComponent(item)).join("&");
+  await expect(next).toHaveAttribute(
+    "href",
+    order + "#/p/" + PROJECT + "/doc/" + encodeURIComponent(FILES[1] ?? ""),
+  );
   await next.click();
-  await expect(page).toHaveURL(new RegExp("doc/" + encodeURIComponent(FILES[1] ?? "") + "$", "u"));
+  // The URL the link went to is the next file's address, with the order it came from.
+  await expect(page).toHaveURL(
+    new RegExp(
+      "files=" + encodeURIComponent(FILES[0] ?? "") + ".*#/p/" + PROJECT + "/doc/" + encodeURIComponent(FILES[1] ?? "") + "$",
+      "u",
+    ),
+  );
   const followed = await settledState(page);
   expect(followed.status).toBe("ready");
   expect(await pageNumber(page)).toBe("1 / " + String(FIXTURES[1]?.pages ?? 0));

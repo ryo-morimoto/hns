@@ -1,0 +1,3 @@
+# Playwright's own outputs (traces, screenshots, the HTML report).
+.cache/
+node_modules/

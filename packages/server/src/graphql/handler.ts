@@ -24,6 +24,7 @@ import type { OfficePort } from "./office.ts";
 import { officePortOver } from "./office-port.ts";
 import { ProjectIdSchema, type Project } from "@hns/core";
 import { projectFor } from "../edge/store.ts";
+import { officeProjectId } from "../office/route.ts";
 import {
   assertWithinBytes,
   assertWithinLimits,
@@ -294,7 +295,11 @@ export function createGraphQLFace(
           project:
             dependencies.officeProject ??
             (async (workspaceId) => {
-              const id = v.safeParse(ProjectIdSchema, workspaceId);
+              // **The office fields' argument is the graph's workspace id.** The rows, the
+              // Session object and the machine's ROOT are named by the raw project id (D080),
+              // and `officeProjectId` is the one place the two spellings become one: without it
+              // the lookup never found the project, and every preview answered "no session".
+              const id = v.safeParse(ProjectIdSchema, officeProjectId(workspaceId));
               if (!id.success) return undefined;
               return await projectFor(request.env, id.output);
             }),

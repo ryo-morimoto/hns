@@ -19,6 +19,7 @@
 | INV-11 | 索引は写し。正本は DO にあり、D1 の索引は DO から作り直せる。索引の更新失敗は操作を止めない | 索引の障害が会話を止めない・一覧は再構築できる | 0149 の `session-index`（dirtyAt + CAS）、`reindex` |
 | INV-12 | 実行中の状態は DO、確定したレコードは D1。どちらも他方の複製を正本にしない | 書き込みの正本を 1 つに決める | D049、`cost_turn` / `obs_events` の配置 |
 | INV-13 | 書き込みの権利は lease で 1 台に閉じる。未取得・期限切れ・古い epoch は fail closed | 2 台同時の書き込みを構造で防ぐ | `core/lease`、0142、`do/workspace` の epoch |
+| INV-14 | `__` 接頭辞の env/bindings は**テスト専用の seam**。本番はすべて `undefined` で、デプロイの変数で設定されない（`__graphql` / `__workspace`） | 本物の境界を harness のために緩めない（緩めたことは型と TSDoc に残す） | 0239、`edge/env.ts`、`do/workspace.ts` |
 
 ## 番号の使い方
 

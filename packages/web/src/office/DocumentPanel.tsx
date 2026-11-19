@@ -52,10 +52,13 @@ export function DocumentPanel({
   workspaceId,
   path,
   next = null,
+  files = [],
 }: {
   readonly workspaceId: string;
   readonly path: string | null;
   readonly next?: { readonly path: string } | null;
+  /** The order the route named, carried on by the next link (see `PanelState.files`). */
+  readonly files?: readonly string[];
 }): ReactElement {
   if (path === null) {
     return (
@@ -84,7 +87,13 @@ export function DocumentPanel({
   // A new (workspace, path) is a new visit: keying the panel on it drops every piece of state the
   // previous file held (the read in flight, the request marker, the retry counter) in one render.
   return (
-    <PanelFor key={workspaceId + ":" + path} workspaceId={workspaceId} path={path} next={next} />
+    <PanelFor
+      key={workspaceId + ":" + path}
+      workspaceId={workspaceId}
+      path={path}
+      next={next}
+      files={files}
+    />
   );
 }
 
@@ -116,10 +125,12 @@ function PanelFor({
   workspaceId,
   path,
   next,
+  files,
 }: {
   readonly workspaceId: string;
   readonly path: string;
   readonly next: { readonly path: string } | null;
+  readonly files: readonly string[];
 }): ReactElement {
   // Every read is a new query (a new key), so a poll always sees the server's answer.
   // The counter keys the read: every increment is a new request, so a poll always sees the
@@ -154,7 +165,7 @@ function PanelFor({
           onRetry={() => read()}
         />
       </Suspense>
-      {next === null || documentHash(workspaceId, next.path) === null ? null : (
+      {next === null || documentHash(workspaceId, next.path, files) === null ? null : (
         <nav className="hns-office__nav" aria-label="次のファイル">
           {/*
             The next file is a link, not a button: it is another URL (#/p/<project>/doc/<path>),
@@ -163,7 +174,7 @@ function PanelFor({
           <a
             className="hns-office__next"
             data-testid="office-next"
-            href={documentHash(workspaceId, next.path) ?? undefined}
+            href={documentHash(workspaceId, next.path, files) ?? undefined}
           >
             次のファイル: {fileNameOf(next.path)}
           </a>
@@ -255,6 +266,8 @@ function Requested({
   // never set — the panel asked once and then stopped, until the person reloaded. A row the
   // request answered is the same row a poll would read, so it polls too.
   const readStatus = shown === null ? null : shown.status;
+  // The poll interval is the panel's contract (`POLL_INTERVAL_MS`); a timer that outlived a
+  // render would be a second chain, so the effect owns exactly one per due status.
   useEffect(() => {
     if (readStatus === null || !isPolling(readStatus)) return;
     const timer = setTimeout(onPoll, POLL_INTERVAL_MS);
@@ -299,9 +312,15 @@ function Requested({
  * The project is this panel's workspace, read back from the global id the panel was given: the
  * panel opens files in the workspace it draws, so the next file cannot be another project's.
  */
-function documentHash(workspaceId: string, path: string): string | null {
+function documentHash(workspaceId: string, path: string, order: readonly string[]): string | null {
   const decoded = fromGlobalId(workspaceId);
-  return decoded.ok ? formatHash({ kind: "file", projectId: decoded.value.id, path }) : null;
+  if (!decoded.ok) return null;
+  const query = order.map((item) => "files=" + encodeURIComponent(item)).join("&");
+  const hash = formatHash({ kind: "file", projectId: decoded.value.id, path });
+  // **The order travels with the address** (see `PanelState.files`), as the location's query —
+  // the same place the route is read from — so a next link that dropped the list it came from
+  // would end the walk at the second file. A `?` inside the fragment would be part of the path.
+  return query === "" ? hash : "?" + query + hash;
 }
 
 /** Where a viewer's `Escape` puts focus: the panel's header, so the next Tab leaves the panel. */

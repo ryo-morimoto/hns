@@ -36,7 +36,7 @@ const preload = Promise.all([
  * its route changes, and every mounted panel reads it.
  */
 function createPanelStore() {
-  let state: PanelState = { selection: null, next: null };
+  let state: PanelState = { selection: null, next: null, files: [] };
   const listeners = new Set<() => void>();
   return {
     get: (): PanelState => state,
@@ -94,6 +94,7 @@ export function PanelContent(): ReactElement | null {
         workspaceId={selection.workspaceId}
         path={selection.path}
         next={nextOf(panel.next)}
+        files={panel.files}
       />
     </Suspense>
   );

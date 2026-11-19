@@ -1113,7 +1113,15 @@ export class Session {
         toolPathMode(this.#env).kind === "incomplete" && error instanceof Error
           ? error.message
           : "";
-      console.error("session open failed", error instanceof Error ? error.name : "unknown", detail);
+      console.error(
+        "session open failed",
+        error instanceof Error ? error.name : "unknown",
+        detail,
+        // The message and the stack, in a development run only: a deployment logs the class.
+        this.#env.HNS_ENV === "dev" && error instanceof Error
+          ? (error.message + "\n" + (error.stack ?? "")).slice(0, 1500)
+          : "",
+      );
       this.#state.abort("session open failed");
       throw error;
     }
