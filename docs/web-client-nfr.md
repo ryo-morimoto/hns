@@ -5,15 +5,17 @@
 ## 現状（実測）
 
 - web の build 出力は **`deploy/assets/`**（`vite.config.ts` の `outDir`）。`packages/web/dist` ではない。
-- 2026-11-18 の実測（`npm run build -w @hns/web` の後、`gzip -c`）: **初期 JS は 1 chunk 220.7KB gzip / 約 703KB raw**、**CSS 4.5KB gzip**。
-  - 2026-11-17 の記録（208.9KB / 3.4KB）から増えている。**増分は 0105（会話画面）と 0229（ポリシー画面）**で、どちらも初期 chunk に載っている。
-  - 初期 chunk には React / Relay / TanStack Query / Base UI が入る。**W-P1（≤250KB gzip）までは残り約 29KB**。
+- **W-P1 の 250KB は gzip の値**（raw ではない）。この文書の数字はすべて `gzip -c` の出力で読む。
+- 2026-11-19 の実測（0238 の後、`deploy/assets` の `index-*.js`）: **初期 JS 786,154 B raw / 230.32KB gzip**、**CSS 5.02KB gzip**。
+  - **W-P1 までの残りは約 19.7KB gzip**。0238 の増分は **+1.63KB gzip**（panel の `PanelContent` と `toGlobalId` の参照だけ。PDF.js と `DocumentPanel` は遅延 chunk）。
+  - 遅延 chunk: `DocumentPanel` 6.94KB gzip、`viewer`（PDF.js）133.82KB gzip、worker 1.27MB raw。**W-P3（≤150KB gzip）の範囲内**。
+  - 初期 chunk には React / Relay / TanStack Query / Base UI が入る。**raw の 786KB のうち office の寄与は約 3KB**——**raw を 250KB にするのはこの文書の要件ではない**。
 
 ## 性能
 
 | ID | 要件 | 目標 | 測り方 |
 | --- | --- | --- | --- |
-| W-P1 | 初期 JS | **≤250KB gzip**（現在 220.7KB） | build の出力（`deploy/assets`）。超えたら分割か依存を削る |
+| W-P1 | 初期 JS | **≤250KB gzip**（現在 230.32KB、残り 19.7KB） | build の出力（`deploy/assets`）。超えたら分割か依存を削る |
 | W-P2 | CSS | **≤20KB gzip** | build |
 | W-P3 | 画面ごとの lazy chunk | **≤150KB gzip**（editor は 0106 の ≤350KB を例外） | build / route 分割 |
 | W-P4 | LCP（p75） | **≤2.5s**（edge / local） | 0114 / 0043 の実測 |
