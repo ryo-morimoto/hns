@@ -82,6 +82,13 @@ issue の `## テスト設計` に書く。
 - store の DB テストは miniflare の実 D1 SQLite（workerd）を使う。workerd は子プロセスなので integration 層に置く（D064）。
 - サーバ実装後は、Workers の runtime テストを integration に置く。
 
+### Workerd の上で確かめること（0274n）
+
+**store の DB テストは miniflare の D1 を Node から呼んでいる。** `harness.ts` の `db` は miniflare の D1 クライアントで、`e2e/support/d1.ts` の `node:sqlite` はその代役。**Worker の中で binding がどう振る舞うかは、この2つでは分からない。** `blockConcurrencyWhile`・isolate の再利用・`sql.batch` のような「実行環境だけが決める」前提を確かめるときは、**そのコードを Worker にバンドルして miniflare に走らせる**（`packages/server/test/integration/d1-batch.test.ts`：`openStore`・`bind` した `prepare`・3文の `db.batch` が、リクエストの中で返ることを固定する）。
+
+- **本番と同じ形**は `cf dev` と、**D1 binding を持つ Worker**での実測。Node のクライアントと Worker の binding を並べるのは `packages/store/test/integration/d1-client-batch.test.ts`。
+- **D1 を持たない代役（`node:sqlite` など）の上で観測した hang を、D1 の欠陥と読まない。** 0239 の workerd の `sql.batch` の hang はこれで、代役の `batch` の結果の形が D1 と違った（`first()` に `RETURNING` を渡すと行が返らない等）ことに由来していた。実測は `packages/store/test/integration/d1-client-batch.test.ts` にある。
+
 ### E2E のブラウザ / 端末
 
 E2E の既定は 3 構成（D101）。

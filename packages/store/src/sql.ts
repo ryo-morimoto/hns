@@ -76,6 +76,16 @@ export interface Sql {
  *
  * @param db - A D1 binding (the Worker's `env.DB` or miniflare's database).
  * @returns The adapter; the caller owns it and should call {@link Sql.close}.
+ *
+ * @remarks
+ * **{@link Sql.batch} is the only transaction D1 offers, and it answers inside a Worker.** That
+ * was measured, not assumed (0274n): an `openStore` (the migrations, a batch each), a `bind`-ed
+ * `prepare`, and a `db.batch` of three all return in milliseconds in a request on miniflare's
+ * workerd (`packages/server/test/integration/d1-batch.test.ts`) and on `cf dev`. 0239's report
+ * that `sql.batch` "did not return" came from its e2e journey's hand-made D1 (a `node:sqlite`
+ * facade whose answers differed from D1's), never from this binding — so nothing here is
+ * written around the runtime: a batch is not split into single statements, and a transaction
+ * is not faked, because a batch is what makes a multi-statement write atomic.
  */
 export function createSql(db: D1Binding): Sql {
   let closed = false;
