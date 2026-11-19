@@ -91,6 +91,29 @@ import type { PreviewQuery } from "@hns/core/office";
 /** The internal routes the GraphQL face reaches the office rows on (0237). */
 const OFFICE_RPC_PREFIX = "/rpc/office/";
 
+/**
+ * The internal route the preview's bytes are read on (0239).
+ *
+ * @remarks
+ * **The public route's path is not this one.** The edge proves the session and forwards a
+ * preview to the object, and the object answers with the machine's bytes; the public
+ * `/api/office/preview` is `OFFICE_PREVIEW_PATH`'s only spelling, and this is the one the
+ * forwarded request carries. The two used to be one string, and the object's own dispatch
+ * read that string as its JSON RPC prefix before its bytes route — so every byte request was
+ * answered with the row's JSON and the bytes route could not be reached at all (0239). Keeping
+ * the internal name in this module is what makes the two unconfusable.
+ */
+const OFFICE_PREVIEW_RPC = "/rpc/office/bytes";
+
+/**
+ * How long a client should wait before reading a not-ready preview again, in milliseconds.
+ *
+ * @remarks
+ * The panel polls once a second (`POLL_INTERVAL_MS`, the contract's §6), and the answer says so
+ * in `retry-after`: a second is what the row's own alarm cadence moves at.
+ */
+const POLL_HINT_MS = 1_000;
+
 /** The office error codes, as this module names one. */
 type OfficeErrorCodeValue = import("@hns/core/office").OfficeErrorCode;
 
@@ -1128,12 +1151,15 @@ export class Session {
     }
     let response: Response;
     let turnRequestId: string | undefined;
-    if (path.startsWith(OFFICE_RPC_PREFIX)) {
-      response = await this.#officeRpc(path, request);
-    } else if (path === OFFICE_PREVIEW_PATH) {
+    // **The bytes route is decided before the JSON prefix.** The two names are distinct
+    // (`OFFICE_PREVIEW_RPC` against `OFFICE_RPC_PREFIX`), and this order is what keeps a
+    // future prefix from swallowing them again: a bytes read is a read, never a JSON answer.
+    if (path === OFFICE_PREVIEW_RPC) {
       // The preview's bytes (0237): the edge proved a session and forwarded the request; this
       // object authorises the file against its own workspace and streams the artifact (C1, C8).
       response = await this.previewStream(request);
+    } else if (path.startsWith(OFFICE_RPC_PREFIX)) {
+      response = await this.#officeRpc(path, request);
     } else if (path === "/ws") {
       response = await this.#openLive(request, session);
     } else if (path === "/rpc/events" || path === "/rpc/metrics") {
@@ -1671,13 +1697,40 @@ export class Session {
       return problem("not_found", authorized.failure.message, OFFICE_PREVIEW_PATH);
     }
     const office = this.#office;
-    const machine = this.#officeMachine;
-    if (office === undefined || machine === undefined) {
+    if (office === undefined) {
       return problem("unavailable", "This session has no office previews.", OFFICE_PREVIEW_PATH);
     }
+    // **The row is read before the machine is asked for.** Whether this version was ever asked
+    // for, and whether its row is ready, is what the rows say: a deployment with no machine
+    // cannot make a row exist or be ready, so a missing row is `404` and a moving one `425`
+    // there too — the client is told the truth about the preview, not about the machine.
     const row = await office.rowOf(this.#workspace, authorized.path, query.version);
-    if (row === undefined || row.status !== "ready" || row.bytes === null) {
+    if (row === undefined) {
+      // No row: this version was never asked for. The preview does not exist, and a person acts
+      // on that by requesting one.
       return problem("not_found", "No preview exists for this version.", OFFICE_PREVIEW_PATH);
+    }
+    if (row.status !== "ready" || row.bytes === null) {
+      // The row exists and is still moving: "not yet" is not "not at all", and a client that
+      // reads the same 404 for both cannot tell a file never requested from a conversion the
+      // alarm is still running (0239, the hole 0238 found between "not requested" and
+      // `engine_unavailable`). 425 with `retry-after` is what tells it to read again.
+      const answer = problem(
+        "too_early",
+        "The preview exists and is not ready yet.",
+        OFFICE_PREVIEW_PATH,
+      );
+      answer.headers.set("retry-after", String(Math.ceil(POLL_HINT_MS / 1000)));
+      return answer;
+    }
+    // Only a ready row needs the machine: its bytes come from the machine's `GET /artifact`.
+    const machine = this.#officeMachine;
+    if (machine === undefined) {
+      return problem(
+        "unavailable",
+        "This session has no machine to serve the bytes.",
+        OFFICE_PREVIEW_PATH,
+      );
     }
     const stream = artifactStream({
       machine: machine.machine,

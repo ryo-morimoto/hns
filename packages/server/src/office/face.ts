@@ -24,6 +24,9 @@ import { problem } from "../edge/problem.ts";
  * this deployment does not have (the caller resolves it against D1, as `/ws` resolves its own).
  * @returns The object's answer, unchanged.
  */
+/** The internal route the edge forwards a preview read to (the object's own bytes route). */
+const OFFICE_PREVIEW_RPC = "/rpc/office/bytes" as const;
+
 export function createOfficePreviewFace(): (
   request: EdgeRequest,
   nameFor: (workspaceId: string) => Promise<string | undefined>,
@@ -51,7 +54,11 @@ export function createOfficePreviewFace(): (
       return problem("unavailable", "The session binding is not configured.", OFFICE_PREVIEW_PATH);
     }
     const stub = sessions.get(sessions.idFromName(name));
-    const forwarded = new Request("https://session.internal/rpc/office/preview" + url.search, {
+    // **The bytes' own route, not the public one.** The object answers its JSON routes on
+    // `/rpc/office/` and the machine's bytes on `/rpc/office/bytes`; forwarding the public path
+    // here would reach whichever of the two the object checked first, and the row's JSON is not a
+    // PDF (0239).
+    const forwarded = new Request("https://session.internal" + OFFICE_PREVIEW_RPC + url.search, {
       method: "GET",
       headers: {
         [REQUEST_ID_HEADER]: request.requestId,

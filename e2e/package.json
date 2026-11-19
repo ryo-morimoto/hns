@@ -1,0 +1,17 @@
+{
+  "name": "@hns/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright journeys: a real browser against the real build, edge and machine",
+  "type": "module",
+  "scripts": {
+    "browsers": "playwright install --with-deps chromium",
+    "office": "playwright test",
+    "typecheck": "tsrs --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.0",
+    "@types/node": "24.19.2",
+    "tsrs": "0.22.0-ts7.1.0-beta"
+  }
+}

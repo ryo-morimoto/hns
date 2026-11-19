@@ -1,5 +1,5 @@
 import { useEffect, useState, type KeyboardEvent, type ReactElement } from "react";
-import type { LoadedDocument } from "./viewer.ts";
+import { DEFAULT_RETRY_MS, type LoadedDocument } from "./viewer.ts";
 import { PdfPage, type PageTextState } from "./PdfPage.tsx";
 
 /** How far one press moves the page, as a multiplier of the zoom. */
@@ -43,19 +43,39 @@ export function PdfViewer({
   const [zoom, setZoom] = useState(1);
   const [text, setText] = useState<PageTextState | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // A preview whose row is not ready answers `425` and is asked again, not drawn as a failure
+  // (0239): the panel polls the row once a second anyway, and the route's own answer says when.
+  const [early, setEarly] = useState(false);
 
   useEffect(() => {
     let live = true;
     let opened: LoadedDocument | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const abort = new AbortController();
     setLoaded(null);
     setError(false);
+    setEarly(false);
     setZoom(1);
     setPage(1);
     setText(null);
     // The reader is its own chunk: a person who never opens a preview does not download it.
     void import("./viewer.ts")
-      .then((viewer) => viewer.openDocument({ kind: "url", url }))
+      .then(async (viewer) => {
+        // **Ask before reading.** A `425` means the row is still moving; handing those bytes to
+        // the reader would be a failure drawn for a preview that is about to exist.
+        const probe = await viewer.probePreview(url, abort.signal);
+        if (probe.kind === "early") {
+          if (live) setEarly(true);
+          timer = setTimeout(
+            () => setAttempt((value) => value + 1),
+            Math.max(DEFAULT_RETRY_MS, probe.retryAfterMs),
+          );
+          return undefined;
+        }
+        return await viewer.openDocument({ kind: "url", url });
+      })
       .then((result) => {
+        if (result === undefined) return;
         opened = result;
         if (live) setLoaded(result);
         else void result.task.destroy();
@@ -65,6 +85,8 @@ export function PdfViewer({
       });
     return () => {
       live = false;
+      abort.abort();
+      if (timer !== undefined) clearTimeout(timer);
       if (opened !== null) void opened.task.destroy();
     };
   }, [url, attempt]);
@@ -122,6 +144,26 @@ export function PdfViewer({
     }
   };
 
+  // A row the route has not finished moving: the panel says "preparing", which is the truth about
+  // the preview, and asks again rather than offering a retry for something that is already running.
+  if (early) {
+    return (
+      <section
+        className="hns-office__state"
+        data-office-state="queued"
+        data-testid="office-state"
+        aria-busy="true"
+        aria-live="polite"
+      >
+        <span className="hns-office__spinner" data-testid="office-spinner" aria-hidden="true" />
+        <h3 className="hns-office__label" data-testid="office-label">
+          準備中
+        </h3>
+        <p className="hns-office__message">プレビューを作っています…</p>
+      </section>
+    );
+  }
+
   if (error) {
     return (
       <section className="hns-office__state" role="alert" data-testid="office-viewer-failed">
@@ -143,6 +185,9 @@ export function PdfViewer({
       className="hns-office__viewer"
       role="group"
       aria-label="PDF プレビュー"
+      // The route this viewer is reading, as the row named it: the panel's own evidence of which
+      // preview is on screen (0239 — a read that kept an older row read an older route).
+      data-office-url={url}
       tabIndex={0}
       onKeyDown={onKeyDown}
     >

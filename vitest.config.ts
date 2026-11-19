@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vitest/config";
 import { relay } from "./packages/web/vite.relay.ts";
@@ -31,6 +32,54 @@ function webBuild(): Plugin {
       });
     },
   };
+}
+
+/**
+ * The directories a web test may load modules from, besides the checkout.
+ *
+ * @returns The checkout plus every directory that holds a linked dependency.
+ *
+ * @remarks
+ * **A checkout whose `node_modules` is a set of links has dependencies outside it.** A worktree
+ * points every third-party package at the main checkout's copy (the layout process.md asks for),
+ * and Vite's module server only serves files under the roots it is given: `pdfjs-dist/build/
+ * pdf.worker.min.mjs?url`, resolved through that link, is outside the workspace root and the
+ * import is refused ("Denied ID"), so the viewer renders its failure state. The main checkout
+ * passes only because its `node_modules` is inside the root. Listing the resolved files' owners
+ * makes both layouts test the same code; the list is the resolution the package manager already
+ * recorded, not a second one. `realpath` is what turns a link into the file it names, which is
+ * the form Vite compares against.
+ */
+function moduleRoots(): string[] {
+  const roots = new Set<string>([source(".")]);
+  try {
+    const resolved = execFileSync(
+      process.execPath,
+      [
+        "-e",
+        "for (const name of process.argv.slice(1)) { try { process.stdout.write(require.resolve(name + '/package.json', { paths: [process.cwd()] }) + String.fromCharCode(10)) } catch {} }",
+        "pdfjs-dist",
+        "react",
+        "react-dom",
+        "react-relay",
+        "relay-runtime",
+        "@tanstack/react-query",
+        "@base-ui/react",
+        "valibot",
+      ],
+      { cwd: source("./packages/web"), encoding: "utf8", stdio: "pipe" },
+    );
+    for (const line of resolved.split("\n")) {
+      if (line === "") continue;
+      // <root>/node_modules/<name...>/package.json -> <root>
+      const marker = line.lastIndexOf("/node_modules/");
+      if (marker === -1) continue;
+      roots.add(realpathSync(line.slice(0, marker)));
+    }
+  } catch {
+    // A host where the lookup fails keeps the one root: the main checkout behaves as before.
+  }
+  return [...roots];
 }
 
 /** One path alias: a module pattern and the source file it resolves to. */
@@ -157,6 +206,9 @@ const packageProjects = (name: string) => [
 
 export default defineConfig({
   plugins: [doctest()],
+  // See moduleRoots: a linked node_modules lives outside the checkout, and the module server
+  // refuses to serve a file outside its roots.
+  server: { fs: { allow: moduleRoots() } },
   resolve: {
     // Packages export their source under this condition; Vite must read the same files tsc does.
     conditions: ["source"],
@@ -166,6 +218,7 @@ export default defineConfig({
     environment: "node",
     testTimeout: 30_000,
     hookTimeout: 30_000,
+
     projects: [
       ...packageProjects("core"),
       ...packageProjects("record"),

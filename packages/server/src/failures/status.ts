@@ -35,6 +35,9 @@ export const FAILURE_CODES = [
   "denied",
   "payload_too_large",
   "unsupported_media_type",
+  // The bytes are not there *yet*: a preview this workspace knows about, whose row is not ready
+  // (0239). Distinct from `not_found`, which is a version no row was ever asked for.
+  "too_early",
   "upgrade_required",
   "not_implemented",
   "budget_exceeded",
@@ -133,6 +136,10 @@ export const FAILURE_STATUS = {
     transport: "http",
     surfaces: ["edge", "gateway", "files", "session-rpc", "workspace-rpc"],
   },
+  // A preview whose row exists and is still moving (queued / generating / stale). 425 is what an
+  // HTTP client reads as "ask again later"; a 404 would say the preview does not exist, which is
+  // the one thing this answer must not say (0239).
+  too_early: { status: 425, transport: "http", surfaces: ["session-rpc", "edge"] },
   upgrade_required: { status: 426, transport: "http", surfaces: ["edge"] },
   not_implemented: { status: 501, transport: "http", surfaces: ["edge"] },
   budget_exceeded: { status: 429, transport: "http", surfaces: ["gateway"] },

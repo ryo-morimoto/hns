@@ -379,3 +379,265 @@ test("a machine that stays down ends at failed(engine_timeout) once the deadline
     opened.close();
   }
 }, 30_000);
+
+// Catches: the byte route being answered by the object's JSON RPC instead (0239). The public
+// \`/api/office/preview\` and the internal JSON routes \`/rpc/office/*\` are two names, and the
+// bytes' own route is decided before the JSON prefix: a request to the bytes route reaches
+// \`previewStream\` (which then answers its row's state), never the row as JSON.
+test("the bytes route is not swallowed by the JSON RPC prefix", async () => {
+  const { session, opened } = openObject({ HNS_ENV: "dev" });
+  try {
+    await session.ready();
+    const url = new URL("https://session.internal/rpc/office/bytes");
+    url.searchParams.set("workspaceId", WORKSPACE);
+    url.searchParams.set("path", "提案書.docx");
+    url.searchParams.set("v", VERSION);
+    const answer = await session.fetch(new Request(url, { method: "GET" }));
+    // No row for this version: the bytes route's own "does not exist", as problem+json, not a
+    // preview row's JSON.
+    expect(answer.status).toBe(404);
+    expect(answer.headers.get("content-type")).toBe("application/problem+json; charset=utf-8");
+    const body = await answer.json();
+    expect(body).toMatchObject({ code: "not_found", instance: "/api/office/preview" });
+    // The same call on the JSON route is the row's JSON: the two answers are different things.
+    const json = await session.fetch(
+      new Request(
+        "https://session.internal/rpc/office/preview?" +
+          new URLSearchParams({
+            workspaceId: WORKSPACE,
+            path: "提案書.docx",
+            v: VERSION,
+          }).toString(),
+        { method: "GET", headers: { [SESSION_NAME_HEADER]: WORKSPACE } },
+      ),
+    );
+    expect(json.status).toBe(200);
+    expect(await json.json()).toMatchObject({ __typename: "OfficeFailure" });
+  } finally {
+    opened.close();
+  }
+}, 30_000);
+
+// Catches: "there is no preview" and "the preview is not ready yet" being one answer (0239, the
+// hole 0238 found between "not requested" and engine_unavailable). A version never asked for is
+// 404; a version whose row is queued is 425 with a retry-after, and the client is told to ask
+// again rather than that the preview does not exist.
+test("a not-ready preview is 425 with a retry-after, and no row at all is 404", async () => {
+  const opened = openSqliteState();
+  let alarm: number | null = null;
+  const storage = {
+    ...opened.state.storage,
+    getAlarm: async () => alarm,
+    setAlarm: async (at: number) => {
+      alarm = at;
+    },
+    deleteAlarm: async () => {
+      alarm = null;
+    },
+  };
+  const { face } = faceOver(storage);
+  const state: SessionState = {
+    id: { name: WORKSPACE },
+    storage,
+    blockConcurrencyWhile: opened.state.blockConcurrencyWhile,
+    abort: () => undefined,
+  };
+  const session = new Session(state, { HNS_ENV: "dev" }, async () => inertSession(), {
+    office: face,
+  });
+  try {
+    await session.ready();
+    const read = async (version: string): Promise<Response> =>
+      await session.fetch(
+        new Request(
+          "https://session.internal/rpc/office/bytes?" +
+            new URLSearchParams({
+              workspaceId: WORKSPACE,
+              path: "提案書.docx",
+              v: version,
+            }).toString(),
+          { method: "GET" },
+        ),
+      );
+    // Never asked for: the preview does not exist.
+    const missing = await read(VERSION);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ code: "not_found" });
+    // Asked for, and still queued: it exists and is not ready.
+    await session.requestDocumentPreview("提案書.docx", VERSION);
+    const early = await read(VERSION);
+    expect(early.status).toBe(425);
+    expect(early.headers.get("retry-after")).toBe("1");
+    expect(await early.json()).toMatchObject({ code: "too_early" });
+  } finally {
+    opened.close();
+  }
+}, 30_000);
+
+/**
+ * The three failure patterns of 0239, at the object (T2: 故障注入 → integration).
+ *
+ * @remarks
+ * Each is a real answer from the machine's wire, injected through the one seam the object takes
+ * (its office face's \`machine\`): the probe's report and the job's result are the shapes the machine
+ * sends. What the object does with them — the row's state, its code, and the alarm's arms — is the
+ * product's own code, and the same answer the panel reads.
+ */
+test("a deployment with no pack writes disabled and runs no job", async () => {
+  const opened = openSqliteState();
+  let alarm: number | null = null;
+  const storage = {
+    ...opened.state.storage,
+    getAlarm: async () => alarm,
+    setAlarm: async (at: number) => {
+      alarm = at;
+    },
+    deleteAlarm: async () => {
+      alarm = null;
+    },
+  };
+  let jobs = 0;
+  const face = createOfficePreview({
+    rows: createOfficeRows(storage),
+    now: () => 1_700_000_000_000,
+    machine: {
+      // The probe's report: this deployment has no pack that can read a document.
+      probe: async () => ({ kind: "report", report: { available: false, reason: "no pack" } }),
+      job: async () => {
+        jobs += 1;
+        return { kind: "unavailable", detail: "unreachable" };
+      },
+    },
+  });
+  const state: SessionState = {
+    id: { name: WORKSPACE },
+    storage,
+    blockConcurrencyWhile: opened.state.blockConcurrencyWhile,
+    abort: () => undefined,
+  };
+  const session = new Session(state, { HNS_ENV: "dev" }, async () => inertSession(), {
+    office: face,
+  });
+  try {
+    await session.ready();
+    const answer = await session.requestDocumentPreview("提案書.docx", VERSION);
+    expect(answer).toMatchObject({ __typename: "DocumentPreview", status: "disabled" });
+    expect(alarm).toBeNull();
+    expect(jobs).toBe(0);
+  } finally {
+    opened.close();
+  }
+}, 30_000);
+
+test("a book over the cell ceiling is failed(too_many_cells) with the code, and nothing is retried", async () => {
+  const opened = openSqliteState();
+  let alarm: number | null = null;
+  const storage = {
+    ...opened.state.storage,
+    getAlarm: async () => alarm,
+    setAlarm: async (at: number) => {
+      alarm = at;
+    },
+    deleteAlarm: async () => {
+      alarm = null;
+    },
+  };
+  const face = createOfficePreview({
+    rows: createOfficeRows(storage),
+    now: () => 1_700_000_000_000,
+    machine: {
+      probe: async () => ({
+        kind: "report",
+        report: {
+          available: true,
+          id: "0.8.7",
+          version: "0.8.7",
+          formats: ["xlsx"],
+          operations: ["preview"],
+        },
+      }),
+      job: async () => ({
+        kind: "result",
+        result: { ok: false, error: "too_many_cells", message: "400000 cells" },
+      }),
+    },
+  });
+  const state: SessionState = {
+    id: { name: WORKSPACE },
+    storage,
+    blockConcurrencyWhile: opened.state.blockConcurrencyWhile,
+    abort: () => undefined,
+  };
+  const session = new Session(state, { HNS_ENV: "dev" }, async () => inertSession(), {
+    office: face,
+  });
+  try {
+    await session.ready();
+    await session.requestDocumentPreview("売上表.xlsx", VERSION);
+    await session.alarm();
+    const row = await session.documentPreview("売上表.xlsx", VERSION);
+    expect(row).toMatchObject({ __typename: "DocumentPreview", status: "failed" });
+    if (row.__typename !== "DocumentPreview") throw new Error("expected a row");
+    // The code a person is told, and no alarm: a book that big does not change.
+    expect(row.error?.code).toBe("too_many_cells");
+    expect(alarm).toBeNull();
+  } finally {
+    opened.close();
+  }
+}, 30_000);
+
+test("a job that runs out of time is failed(engine_timeout), not a silently empty row", async () => {
+  const opened = openSqliteState();
+  let alarm: number | null = null;
+  const storage = {
+    ...opened.state.storage,
+    getAlarm: async () => alarm,
+    setAlarm: async (at: number) => {
+      alarm = at;
+    },
+    deleteAlarm: async () => {
+      alarm = null;
+    },
+  };
+  const face = createOfficePreview({
+    rows: createOfficeRows(storage),
+    now: () => 1_700_000_000_000,
+    machine: {
+      probe: async () => ({
+        kind: "report",
+        report: {
+          available: true,
+          id: "0.8.7",
+          version: "0.8.7",
+          formats: ["docx"],
+          operations: ["preview"],
+        },
+      }),
+      job: async () => ({
+        kind: "result",
+        result: { ok: false, error: "engine_timeout", message: "the deadline passed" },
+      }),
+    },
+  });
+  const state: SessionState = {
+    id: { name: WORKSPACE },
+    storage,
+    blockConcurrencyWhile: opened.state.blockConcurrencyWhile,
+    abort: () => undefined,
+  };
+  const session = new Session(state, { HNS_ENV: "dev" }, async () => inertSession(), {
+    office: face,
+  });
+  try {
+    await session.ready();
+    await session.requestDocumentPreview("提案書.docx", VERSION);
+    await session.alarm();
+    const row = await session.documentPreview("提案書.docx", VERSION);
+    expect(row).toMatchObject({ __typename: "DocumentPreview", status: "failed" });
+    if (row.__typename !== "DocumentPreview") throw new Error("expected a row");
+    expect(row.error?.code).toBe("engine_timeout");
+    expect(alarm).toBeNull();
+  } finally {
+    opened.close();
+  }
+}, 30_000);

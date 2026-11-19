@@ -171,3 +171,16 @@
   white-space: pre;
   transform-origin: 0 0;
 }
+
+/* The next file: a link to the following document's URL, so Back returns to this one. */
+.hns-office__nav {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--hns-border, #d0d0d0);
+}
+
+.hns-office__next {
+  display: inline-block;
+  min-height: 44px;
+  line-height: 44px;
+  font-size: 0.875rem;
+}

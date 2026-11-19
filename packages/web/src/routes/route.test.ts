@@ -37,3 +37,47 @@ test("formatHash round-trips ids that need encoding", () => {
   expect(formatHash(route)).toBe("#/p/a%2Fb/c/c%20d");
   expect(parseHash(formatHash(route))).toStrictEqual(route);
 });
+
+// Catches: a file address that opens the workspace instead (the panel would never open), and a
+// path with directories losing its first segment to the route's own split.
+test("a doc hash names one file of the project", () => {
+  expect(parseHash("#/p/p1/doc/提案書.docx")).toStrictEqual({
+    kind: "file",
+    projectId: "p1",
+    path: "提案書.docx",
+  });
+  expect(parseHash("#/p/p1/doc/提案/本文.docx")).toStrictEqual({
+    kind: "file",
+    projectId: "p1",
+    path: "提案/本文.docx",
+  });
+  expect(parseHash("#/p/p1/doc/%E6%8F%90%E6%A1%88.docx")).toStrictEqual({
+    kind: "file",
+    projectId: "p1",
+    path: "提案.docx",
+  });
+});
+
+test("a doc hash round-trips a path that needs encoding", () => {
+  for (const path of ["提案書.docx", "提案/本文 v2.xlsx", "a+b/c%2Fd.pptx"]) {
+    const route = { kind: "file" as const, projectId: "p1", path };
+    expect(parseHash(formatHash(route))).toStrictEqual(route);
+  }
+});
+
+// Catches: a path climbing out of the workspace reaching the server (a read the contract refuses
+// anyway, asked for from a URL anyone can type), and an empty path opening the workspace instead
+// of the panel's refusal.
+test("a doc hash names no file when the path could leave the workspace", () => {
+  for (const hash of [
+    "#/p/p1/doc/..%2F..%2Fsecret",
+    "#/p/p1/doc/../x",
+    "#/p/p1/doc/a/../b",
+    "#/p/p1/doc/",
+    "#/p/p1/doc",
+    "#/p/p1/doc/%",
+  ]) {
+    const route = parseHash(hash);
+    expect(route.kind === "file" ? route.path : "not a file").toBe(null);
+  }
+});

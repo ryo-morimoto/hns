@@ -1,4 +1,5 @@
 import { OFFICE_PREVIEW_PATH } from "@hns/core/office";
+import { fromGlobalId } from "@hns/core/graphql";
 import { sessionNameFor } from "../session-name.ts";
 
 /**
@@ -20,7 +21,13 @@ import { sessionNameFor } from "../session-name.ts";
  * what the rows and the URL must name too.
  */
 export function officeObjectName(projectId: string): string {
-  return sessionNameFor(projectId);
+  return sessionNameFor(nameOf(projectId));
+}
+
+/** A graph workspace id's project id, or the value itself when it is already one. */
+function nameOf(workspaceId: string): string {
+  const decoded = fromGlobalId(workspaceId);
+  return decoded.ok && decoded.value.type === "Project" ? decoded.value.id : workspaceId;
 }
 
 /**

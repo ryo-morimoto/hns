@@ -15,6 +15,7 @@ import { projectFor, StoreUnavailableError } from "./store.ts";
 import {
   createEdge,
   type EdgeRequest,
+  type GraphQLRequest,
   type EdgeResponseEvent,
   type HandlerDependencies,
 } from "./handler.ts";
@@ -201,7 +202,10 @@ function recordResponse(event: EdgeResponseEvent, env: WorkerEnv): void {
  * @internal
  */
 export const dependencies: HandlerDependencies = {
-  graphql: createGraphQLFace(),
+  // The one substitution a deployment entry may be given (0239): a caller that runs this entry
+  // over its own control database passes the GraphQL face's replacements as \`__graphql\` on the
+  // environment. Production sets nothing, and the face is built from the environment's own D1.
+  graphql: faceFor,
   ws: forwardToSession,
   obs: forwardObs,
   files: createFilesFace(),
@@ -217,6 +221,30 @@ export const dependencies: HandlerDependencies = {
   conversations: createConversationsFace(lookupConversation),
   onResponse: recordResponse,
 };
+
+/**
+ * The GraphQL faces this isolate serves, one per environment.
+ *
+ * @remarks
+ * See \`dependencies.graphql\`: an environment that carries \`__graphql\` gets a face built with
+ * those replacements, and the deployment's own environment gets the face built at module load.
+ * A WeakMap keyed on the environment is one face per isolate per deployment, which is what a
+ * per-isolate table has always been.
+ */
+const faces = new WeakMap<WorkerEnv, (request: GraphQLRequest) => Promise<Response>>();
+
+function faceFor(request: GraphQLRequest): Promise<Response> {
+  const given = request.env.__graphql;
+  if (given === undefined) return deploymentFace(request);
+  let face = faces.get(request.env);
+  if (face === undefined) {
+    face = createGraphQLFace(given);
+    faces.set(request.env, face);
+  }
+  return face(request);
+}
+
+const deploymentFace = createGraphQLFace();
 
 const edge = createEdge(dependencies);
 

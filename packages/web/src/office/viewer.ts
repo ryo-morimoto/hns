@@ -59,6 +59,50 @@ export const URL_DOCUMENT_OPTIONS = {
   withCredentials: true,
 } as const;
 
+/**
+ * What one read of a preview route answered before PDF.js was asked for the document.
+ *
+ * @remarks
+ * **"Not yet" is not "broken".** The route answers `425 Too Early` while a row exists and the
+ * alarm has not finished the conversion (0239); PDF.js reading that answer would report a failed
+ * document, and the panel would show a failure for a preview that is about to exist. The viewer
+ * asks once, before the reader, and waits when the answer says so.
+ */
+export type PreviewProbe =
+  | { readonly kind: "ready" }
+  | { readonly kind: "early"; readonly retryAfterMs: number };
+
+/** How long to wait for a not-ready preview when the answer names no moment, in milliseconds. */
+export const DEFAULT_RETRY_MS = 1_000;
+
+/**
+ * Ask a preview route whether its bytes are there yet, without reading them.
+ *
+ * @param url - The preview route the row names.
+ * @param signal - Aborts the ask when the visit ends.
+ * @returns Whether the bytes may be read, or when to ask again.
+ *
+ * @remarks
+ * The ask is a `HEAD`: the route answers the same status and headers as the `GET`, and no range
+ * of the artifact is read. A route that does not answer `HEAD` (`405`) or a network failure is
+ * **not** "early": PDF.js is given the document and the answer is the reader's to report, because
+ * this probe may not turn an unexpected answer into a wait that never ends.
+ */
+export async function probePreview(url: string, signal: AbortSignal): Promise<PreviewProbe> {
+  let answer: Response;
+  try {
+    answer = await fetch(url, { method: "HEAD", credentials: "include", signal });
+  } catch {
+    return { kind: "ready" };
+  }
+  if (answer.status !== 425) return { kind: "ready" };
+  const named = Number(answer.headers.get("retry-after"));
+  return {
+    kind: "early",
+    retryAfterMs: Number.isFinite(named) && named > 0 ? named * 1000 : DEFAULT_RETRY_MS,
+  };
+}
+
 /** A loaded document, the way the viewer holds it. */
 export interface LoadedDocument {
   /** The document to render from. */

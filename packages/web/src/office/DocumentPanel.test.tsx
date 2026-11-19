@@ -330,6 +330,28 @@ test("C6: a stale row is re-read a second later and the panel switches to ready"
 });
 
 /**
+ * 0239: the url the viewer is given is the latest ready read's, not the request's first answer.
+ *
+ * Catches: a panel that keeps the row it first drew. The request answers `queued`; the poll then
+ * answers `ready` with the route the bytes are at. A panel that held the request's row would keep
+ * `null` (or an older version's route) and never hand the viewer a document, which is what the
+ * byte route used to make invisible.
+ */
+test("0239: a ready read's url is what the viewer reads, not the request's queued row", async () => {
+  // The read finds no row (the request will make one); the request answers queued, with no url;
+  // the poll that follows answers ready, naming the route the bytes are at.
+  const h = harness((_sent, index) => {
+    if (index === 0) return officeFailure("ENGINE_UNAVAILABLE");
+    return previewRow("READY", { url: URL_OF, bytes: 2048, pages: 1 });
+  }, previewRow("QUEUED"));
+  renderPanel(h.environment);
+  const viewer = await screen.findByRole("group", { name: "PDF プレビュー" }, { timeout: 5000 });
+  // The viewer is given the ready read's route — not the request's row, which had none. A panel
+  // that kept the request's answer would never draw a viewer at all.
+  expect(viewer.getAttribute("data-office-url")).toBe(URL_OF);
+});
+
+/**
  * C1: a read that found nothing is not a failure to show — the screen asks for the row.
  *
  * Catches: the panel drawing "engine_unavailable" for a file nobody asked about (the contract's

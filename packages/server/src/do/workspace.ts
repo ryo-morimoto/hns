@@ -187,6 +187,16 @@ export interface WorkspaceOptions {
  * remains the edge's own type.
  */
 export interface WorkspaceBindings {
+  /**
+   * The machine this deployment serves, when it is configured rather than leased (0239).
+   *
+   * @remarks
+   * A deployment names one machine (`HNS_MACHINE_ID`); the lease (0148's registry) is what picks
+   * one when it holds the workspace. A read that arrives before any write has no lease to read a
+   * machine from, and a deployment whose configuration names the machine can say so here. Absent,
+   * the read answers as it always did: no machine yet.
+   */
+  readonly __workspace?: { readonly machineId: string } | undefined;
   /** The bucket for journal bodies over 256KB. */
   readonly OBJECTS?: (JournalBucket & PackBucket) | undefined;
   /**
@@ -657,6 +667,8 @@ export class Workspace {
   readonly #leaseTtlMs: number;
   readonly #journal: Journal;
   readonly #files: MachineFiles | undefined;
+  /** The machine the bindings name, for a read before any lease (see `__workspace`). */
+  readonly #machine: { readonly machineId: string } | undefined;
   /** Where packs go; undefined fails the checkpoint path closed at the RPC. */
   readonly #packs: R2PackTransport | undefined;
   /**
@@ -710,6 +722,7 @@ export class Workspace {
       bucket: options.OBJECTS,
     });
     this.#files = options.files ?? machineFilesFrom(options);
+    this.#machine = options.__workspace;
     const packs = options.packs ?? options.OBJECTS;
     this.#packs = packs === undefined ? undefined : new R2PackTransport(packs);
     const artifacts = options.artifacts ?? options.ARTIFACTS;
@@ -2040,7 +2053,7 @@ export class Workspace {
     // written only after a successful read.
     const machineId: string | undefined = await this.#state.storage.transaction(async () => {
       this.#assertProject(projectRoot);
-      return this.#meta("machine_id");
+      return this.#meta("machine_id") ?? this.#machine?.machineId;
     });
     if (machineId === undefined) {
       return failure("unavailable", "The workspace has no machine yet.");

@@ -2,7 +2,9 @@ import { Suspense, useCallback, useEffect, useRef, useState, type ReactElement }
 import { useLazyLoadQuery } from "react-relay";
 import type { DocumentPanelQuery as DocumentPanelQueryType } from "../__generated__/DocumentPanelQuery.graphql";
 import type { DocumentPanelEngineQuery as DocumentPanelEngineQueryType } from "../__generated__/DocumentPanelEngineQuery.graphql";
+import { fromGlobalId } from "@hns/core/graphql";
 import { Button } from "../components/Button.tsx";
+import { formatHash } from "../routes/route.ts";
 import { DocumentPanelEngineQuery, DocumentPanelQuery } from "./DocumentPanel.ts";
 import {
   POLL_INTERVAL_MS,
@@ -15,6 +17,7 @@ import {
 } from "./format.ts";
 import { PdfViewer } from "./PdfViewer.tsx";
 import { useDocumentRequest } from "./Request.tsx";
+import { fileNameOf } from "../app/PanelState.ts";
 import "./office.css";
 
 /** The row as the wire carries it (one file at a time). */
@@ -29,27 +32,60 @@ type Failure = Extract<
   { readonly __typename: "OfficeFailure" }
 >;
 
-/** The empty panel: no file is selected yet. */
+/**
+ * One file's preview, or the refusal of a file the workspace cannot have.
+ *
+ * @param props.workspaceId - The workspace the Sidebar selected (the Project global id).
+ * @param props.path - The workspace-relative path, or null for a path the route could not read
+ * as one (it climbed out of the workspace, or named none).
+ * @param props.next - The file after this one in the URL's order, for the "next" control.
+ *
+ * @remarks
+ * **A path the workspace cannot have is still a visit, and it is refused without a request.**
+ * The route hands a null path for `..`, an absolute path, and an empty one; the panel draws the
+ * refusal as a failure (`not_authorized`: reading outside the workspace is denied, fail closed)
+ * and sends nothing to the server, because there is no file to ask about. It does not draw the
+ * "nothing is selected" sentence: a person asked for something, and the answer is that it
+ * cannot be opened.
+ */
 export function DocumentPanel({
   workspaceId,
   path,
+  next = null,
 }: {
   readonly workspaceId: string;
   readonly path: string | null;
+  readonly next?: { readonly path: string } | null;
 }): ReactElement {
   if (path === null) {
     return (
       <section className="hns-office" aria-label="文書プレビュー">
-        <h2 className="hns-office__title">文書プレビュー</h2>
-        <p className="hns-office__note" data-testid="office-empty">
-          プレビューするファイルが選ばれていません。
-        </p>
+        <h2 className="hns-office__title" id="office-title" tabIndex={-1}>
+          文書プレビュー
+        </h2>
+        <section
+          className="hns-office__state"
+          data-office-state="failed"
+          data-office-failure="not_authorized"
+          data-testid="office-state"
+          aria-live="off"
+        >
+          <h3 className="hns-office__label" data-testid="office-label">
+            権限がありません
+          </h3>
+          <p className="hns-office__message">{explainError("not_authorized").message}</p>
+          <p className="hns-office__note">
+            このパスは workspace の外を指しています。workspace の中のファイルを開く。
+          </p>
+        </section>
       </section>
     );
   }
   // A new (workspace, path) is a new visit: keying the panel on it drops every piece of state the
   // previous file held (the read in flight, the request marker, the retry counter) in one render.
-  return <PanelFor key={workspaceId + ":" + path} workspaceId={workspaceId} path={path} />;
+  return (
+    <PanelFor key={workspaceId + ":" + path} workspaceId={workspaceId} path={path} next={next} />
+  );
 }
 
 /**
@@ -70,13 +106,20 @@ export function DocumentPanel({
  *
  * **A state never runs backwards.** A read that names another `version` than the row on screen is
  * a different document: it replaces the row (and the viewer restarts at page 1).
+ *
+ * **The row's `url` is re-read on every `ready` answer (0239).** The route a ready row names is
+ * the answer's, not a value the panel keeps: a row that becomes ready while the panel holds an
+ * older read's version would keep asking the old route and read a `425` (or a `404`) forever.
+ * The latest read's url is what the viewer is given, and the viewer is keyed by it.
  */
 function PanelFor({
   workspaceId,
   path,
+  next,
 }: {
   readonly workspaceId: string;
   readonly path: string;
+  readonly next: { readonly path: string } | null;
 }): ReactElement {
   // Every read is a new query (a new key), so a poll always sees the server's answer.
   // The counter keys the read: every increment is a new request, so a poll always sees the
@@ -111,6 +154,21 @@ function PanelFor({
           onRetry={() => read()}
         />
       </Suspense>
+      {next === null || documentHash(workspaceId, next.path) === null ? null : (
+        <nav className="hns-office__nav" aria-label="次のファイル">
+          {/*
+            The next file is a link, not a button: it is another URL (#/p/<project>/doc/<path>),
+            so Back returns to this file and a middle click opens one more.
+          */}
+          <a
+            className="hns-office__next"
+            data-testid="office-next"
+            href={documentHash(workspaceId, next.path) ?? undefined}
+          >
+            次のファイル: {fileNameOf(next.path)}
+          </a>
+        </nav>
+      )}
     </section>
   );
 }
@@ -184,11 +242,19 @@ function Requested({
   }, [path, request, row, workspaceId]);
 
   // The row on screen: the request's answer, or the read's.
-  const shown: Row | null =
-    requested ?? (row !== null && row.__typename === "DocumentPreview" ? row : null);
+  // **The latest row wins, and it is the read's when the read answers one.** The request's answer
+  // is drawn only until a read replaces it: a poll that answers `ready` carries the url this
+  // preview is read at now, and keeping the request's older row would keep the older url (0239).
+  const read = row !== null && row.__typename === "DocumentPreview" ? row : null;
+  const shown: Row | null = read ?? requested;
 
   // A read whose row the alarm may still move is read again a second later.
-  const readStatus = row !== null && row.__typename === "DocumentPreview" ? row.status : null;
+  //
+  // The status comes from what is **drawn**, not from the read: the first read of a file finds no
+  // row and the request is what writes `queued`, so a timer keyed on the read's status alone was
+  // never set — the panel asked once and then stopped, until the person reloaded. A row the
+  // request answered is the same row a poll would read, so it polls too.
+  const readStatus = shown === null ? null : shown.status;
   useEffect(() => {
     if (readStatus === null || !isPolling(readStatus)) return;
     const timer = setTimeout(onPoll, POLL_INTERVAL_MS);
@@ -223,6 +289,21 @@ function Requested({
   return <PanelBody view={view} facts={shown} onRetry={onRetry} onExit={focusTitle} />;
 }
 
+/**
+ * The hash one file is opened at, in the shell's own spelling.
+ *
+ * @param path - The workspace-relative path.
+ * @returns `#/p/<project>/doc/<path>`, with the path's segments encoded one by one.
+ *
+ * @remarks
+ * The project is this panel's workspace, read back from the global id the panel was given: the
+ * panel opens files in the workspace it draws, so the next file cannot be another project's.
+ */
+function documentHash(workspaceId: string, path: string): string | null {
+  const decoded = fromGlobalId(workspaceId);
+  return decoded.ok ? formatHash({ kind: "file", projectId: decoded.value.id, path }) : null;
+}
+
 /** Where a viewer's `Escape` puts focus: the panel's header, so the next Tab leaves the panel. */
 function focusTitle(): void {
   document.getElementById("office-title")?.focus();
@@ -242,8 +323,10 @@ function PanelBody({
 }): ReactElement {
   if (view.kind === "display") {
     return (
+      // Keyed by the url itself: a ready row whose route changed (a new version, or the first
+      // read that carried one) is a new document to the reader, and the viewer must restart on it.
       <PdfViewer
-        key={facts === null ? view.url : facts.version}
+        key={view.url}
         url={view.url}
         expectedPages={facts?.pages ?? null}
         onExit={onExit}

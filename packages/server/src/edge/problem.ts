@@ -7,6 +7,8 @@ const TITLE: Record<EdgeErrorCode, string> = {
   unauthorized: "Unauthorized",
   invalid_request: "Bad Request",
   not_found: "Not Found",
+  // The row exists and is still moving (0239): the bytes are not there *yet*.
+  too_early: "Too Early",
   upgrade_required: "Upgrade Required",
   method_not_allowed: "Method Not Allowed",
   payload_too_large: "Payload Too Large",

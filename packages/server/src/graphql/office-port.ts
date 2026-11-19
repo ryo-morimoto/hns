@@ -14,6 +14,10 @@ export interface OfficePortOptions {
   readonly signal: AbortSignal;
   /** Finds the workspace row for an id, through the same store read the rest of the face uses. */
   readonly project: (workspaceId: string) => Promise<Project | undefined>;
+  /** How the workspace's Session object is reached; production reads the `SESSION` binding. */
+  readonly session?:
+    | ((workspaceId: string) => Promise<{ fetch(request: Request): Promise<Response> }>)
+    | undefined;
 }
 
 /** The row a DocumentPreview member carries, as the Session object answers it. */
@@ -73,6 +77,7 @@ export async function officePortOver(options: OfficePortOptions): Promise<Office
       return undefined;
     }
     if (workspace === undefined) return undefined;
+    if (options.session !== undefined) return await options.session(workspaceId);
     const session = options.env.SESSION;
     if (session === undefined) return undefined;
     // The object this resolves to is the one the preview URL names: both read the name from

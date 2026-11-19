@@ -80,6 +80,8 @@ interface R2Bucket {
  * Every binding is optional so a missing binding can fail closed instead of crashing at
  * startup: static assets 404, `/ws` returns 503, and the session check returns 401.
  */
+import type { GraphQLFaceDependencies } from "../graphql/handler.ts";
+
 export interface WorkerEnv {
   readonly ASSETS?: AssetFetcher | undefined;
   readonly SESSION?: DurableObjectNamespace | undefined;
@@ -110,6 +112,16 @@ export interface WorkerEnv {
    * isolate at startup. Faces open it through `openStore`; they never query D1 directly.
    */
   readonly DB?: D1Binding | undefined;
+  /**
+   * The GraphQL face's replacements, when the entry is run outside a deployment (0239).
+   *
+   * @remarks
+   * Undefined in a deployment: the face then reads `DB` as it always has. A caller that runs the
+   * deployment's entry over its own control database (the office journey, a local harness) passes
+   * the one lookup that database needs here. The field is on the environment because that is the
+   * only object a Worker entry is given besides the request.
+   */
+  readonly __graphql?: GraphQLFaceDependencies | undefined;
   /** HMAC key for `hns_session`; at least 32 characters. Never logged. */
   readonly HNS_SESSION_SECRET?: string | undefined;
   /**

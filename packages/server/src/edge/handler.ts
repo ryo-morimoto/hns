@@ -541,11 +541,17 @@ async function route(
     if (session === null) {
       return problem("unauthorized", "A valid session cookie is required.", path);
     }
-    if (request.method !== "GET") return methodNotAllowed("GET", path);
+    // `HEAD` is the same read without its body (0239): the panel asks it before handing the route
+    // to PDF.js, so a preview that is not ready yet is a `425` the viewer can wait on rather than
+    // a document the reader reports as broken. The face is given a `GET` — the object has one
+    // bytes route — and the body is dropped here, which is what a HEAD answer is.
+    const head = request.method === "HEAD";
+    if (request.method !== "GET" && !head) return methodNotAllowed("GET", path);
     if (dependencies.office === undefined) {
       return problem("unavailable", "The office preview face is not configured.", path);
     }
-    return dependencies.office({ request, env, session, requestId, signal });
+    const answer = await dependencies.office({ request, env, session, requestId, signal });
+    return head ? new Response(null, { status: answer.status, headers: answer.headers }) : answer;
   }
   if (path === "/api/machines/keys") {
     if (request.method !== "GET") return methodNotAllowed("GET", path);

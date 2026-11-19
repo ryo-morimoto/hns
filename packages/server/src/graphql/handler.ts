@@ -22,7 +22,7 @@ import {
 import type { PolicyFace } from "./policy/face.ts";
 import type { OfficePort } from "./office.ts";
 import { officePortOver } from "./office-port.ts";
-import { ProjectIdSchema } from "@hns/core";
+import { ProjectIdSchema, type Project } from "@hns/core";
 import { projectFor } from "../edge/store.ts";
 import {
   assertWithinBytes,
@@ -82,6 +82,29 @@ export interface GraphQLFaceDependencies {
    * the port over the request's D1 (the project lookup) and the SESSION binding.
    */
   readonly office?: OfficePort | undefined;
+  /**
+   * Replace the project lookup the office port answers workspaces with (0239).
+   *
+   * @remarks
+   * Production reads the project from D1 (`projectFor`), which is what proves a workspace id
+   * is a project of this deployment. A caller that already holds the projects — the office
+   * journey over the deploy project's own entry, which keeps its projects in one place so one
+   * workspace exists — passes its own lookup here rather than duplicating D1. Every other
+   * caller leaves it undefined.
+   */
+  readonly officeProject?: ((workspaceId: string) => Promise<Project | undefined>) | undefined;
+  /**
+   * Replace the Session object an office row is reached through (0239).
+   *
+   * @remarks
+   * Production leaves it out: a workspace's office rows live on the Session object named by the
+   * workspace (D080), reached through the `SESSION` binding. A caller that runs the face over its
+   * own objects (the office journey) supplies the one resolution it has; what the object answers
+   * is still the product's.
+   */
+  readonly session?:
+    | ((workspaceId: string) => Promise<{ fetch(request: Request): Promise<Response> }>)
+    | undefined;
   /** Replace the feature mutation modules; production uses the registered collection. */
   readonly mutations?: readonly MutationModule[] | undefined;
   /** The query limits; production uses {@link DEFAULT_GRAPHQL_LIMITS}. */
@@ -265,12 +288,16 @@ export function createGraphQLFace(
           requestId: request.requestId,
           signal: request.signal,
           // The workspace row names the project's root (for the version read) and proves the id
-          // is a project this deployment has; an id that does not parse is no project.
-          project: async (workspaceId) => {
-            const id = v.safeParse(ProjectIdSchema, workspaceId);
-            if (!id.success) return undefined;
-            return await projectFor(request.env, id.output);
-          },
+          // is a project this deployment has; an id that does not parse is no project. A caller
+          // that supplied its own lookup owns both halves of what this read does.
+          session: dependencies.session,
+          project:
+            dependencies.officeProject ??
+            (async (workspaceId) => {
+              const id = v.safeParse(ProjectIdSchema, workspaceId);
+              if (!id.success) return undefined;
+              return await projectFor(request.env, id.output);
+            }),
         })),
       maxRows: rows.maxRowsPerRequest,
       maxRowsPerList: rows.maxRowsPerList,

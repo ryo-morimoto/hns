@@ -52,7 +52,9 @@ test("an authenticated read forwards to the object and returns its stream unchan
   const forwarded = sessions.requests[0];
   if (forwarded === undefined) throw new Error("nothing was forwarded");
   const url = new URL(forwarded.url);
-  expect(url.pathname).toBe("/rpc/office/preview");
+  // The object's **bytes** route, not its JSON ones: `/rpc/office/preview` answers the row as JSON,
+  // and a byte read forwarded there was answered with that JSON instead of the artifact (0239).
+  expect(url.pathname).toBe("/rpc/office/bytes");
   expect(url.searchParams.get("workspaceId")).toBe("project-1");
   expect(url.searchParams.get("path")).toBe("a.docx");
   expect(forwarded.headers.get(SESSION_NAME_HEADER)).toBe("project-1");
@@ -116,4 +118,47 @@ test("only GET is answered, and an unwired face is a 503", async () => {
     envWith({ session: sessions.namespace }),
   );
   expect(answer.status).toBe(503);
+});
+
+// Catches: the panel's HEAD probe being refused (405) while the GET is served (0239). The panel
+// asks the route's status before handing it to PDF.js, so a preview that is still converting is a
+// 425 it can wait on; a HEAD answered "only GET is allowed" would make every preview look broken.
+test("a HEAD read is the GET's status and headers, and no body", async () => {
+  const bytes = new TextEncoder().encode("%PDF-1.7\npreview");
+  const { edge, sessions } = edgeWith(
+    { "project-1": "project-1" },
+    new Response(bytes, { headers: { "content-type": "application/pdf", "content-length": "15" } }),
+  );
+  const answer = await read(
+    edge,
+    sessions,
+    "workspaceId=project-1&path=a.docx&v=sha256:" + "a".repeat(64),
+    { method: "HEAD" },
+  );
+  expect(answer.status).toBe(200);
+  expect(answer.headers.get("content-type")).toBe("application/pdf");
+  // No body: a HEAD's answer is its headers, and its object was still asked as a GET.
+  expect(await answer.text()).toBe("");
+  expect(sessions.requests).toHaveLength(1);
+});
+
+// Catches: a HEAD probe of a preview that is not ready being a failure to the panel. The object
+// answers 425 while the row moves; the edge passes that status through unchanged (0239).
+test("a HEAD read of a not-ready preview is the object's 425, unchanged", async () => {
+  const { edge, sessions } = edgeWith(
+    { "project-1": "project-1" },
+    new Response(JSON.stringify({ code: "too_early" }), {
+      status: 425,
+      headers: { "content-type": "application/problem+json", "retry-after": "1" },
+    }),
+  );
+  const answer = await read(
+    edge,
+    sessions,
+    "workspaceId=project-1&path=a.docx&v=sha256:" + "a".repeat(64),
+    { method: "HEAD" },
+  );
+  expect(answer.status).toBe(425);
+  expect(answer.headers.get("retry-after")).toBe("1");
+  expect(await answer.text()).toBe("");
 });
