@@ -153,7 +153,7 @@ UI を Worker から配信し、typed client を WS と組み合わせる。0036
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-17: 実装。Workers Assets（`tools/deploy/wrangler.config.ts` の `deploy/assets`、`ASSETS` binding、
   `runWorkerFirst`）、edge の手動 SPA fallback と immutable / no-cache、custom domain（`HNS_DOMAIN`）と
   workers.dev の切替、Vite proxy、401 → `/login?next=` の配線、XSS の確認。`npm run check` exit 0

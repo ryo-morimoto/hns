@@ -32,4 +32,4 @@ checkpoint は Run ごとに増える。放っておくと R2 と `refs/hns` が
 
 ## Log
 
-- 2026-11-07: 作成（[D048](../../docs/decisions.md) と [durability.md](../../docs/durability.md) を契約として）。
+- 2026-11-07: 作成（[D048](../../docs/decisions/D048.md) と [durability.md](../../docs/durability.md) を契約として）。

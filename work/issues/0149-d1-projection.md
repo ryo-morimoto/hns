@@ -160,7 +160,7 @@ Node SQLite の実 storage で 1 text turn を測った（faux、`openSession`�
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-07: 範囲を会話・run の索引に縮小。制御データは D1 直（D049）。
 - 2026-11-17: 設計案を追加（レビュー待ち）。既存の `conversations` を索引にし、DO の `dirtyAt` から再送する形にした。
 - 2026-11-17: ユーザーの設計レビューで合意（D078）。U-01〜U-04 を決定し、`design: agreed` にした。

@@ -193,7 +193,7 @@ M6 の契約として先に固定し、0153〜0169 がこの契約に従って�
 
 ## Log
 
-- 2026-11-07: 作成（[D048](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D048](../../docs/decisions/D048.md) の採用を受けて）。
 - 2026-11-07: 契約を [docs/durability.md](../../docs/durability.md) に書いた（`(C, J)`・ack の順序・checkpoint の契機・費用の見方）。残りは core の型と workspace.md の更新。
 - 2026-11-11: RFC / design doc の形に再構成。故障クラス表・RPO 表・テスト条件 / 設計・代替案・compatibility を追加。core の型と workspace.md を更新。
 - 2026-11-11: `work/BOARD.md` / `work/LANES.md` を `touches` から外した（lead 所有）。

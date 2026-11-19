@@ -9,13 +9,13 @@
 
 | 機制 | 根拠 | なぜ効くか |
 | --- | --- | --- |
-| 変更レーンは最大3本、統合は直列 | [D060](../../docs/decisions.md) / [parallel-change.md](../../docs/parallel-change.md) | WIP を制限し、Little's law の W を守る |
+| 変更レーンは最大3本、統合は直列 | [D060](../../docs/decisions/D060.md) / [parallel-change.md](../../docs/parallel-change.md) | WIP を制限し、Little's law の W を守る |
 | touches 契約と依存 DAG | [work/README.md](../README.md) | 意味的な競合と先回りを防ぐ |
 | 著者とレビュアーの分離 | [review.md](../../docs/review.md) | 自分の読みをレビューと呼ばない |
 | 小さな変更（100行目安・2日上限） | D060 | レビューの認知負荷を上げない |
 | 関門（gate・anti-slop・path 別不変条件） | [AGENTS.md](../../AGENTS.md) | 機械で判定できるものを人間に戻さない |
 | 判断ログ（代替案と無効条件つき） | [decisions.md](../../docs/decisions.md) | 判断を再利用できる |
-| 着手規律（now のみ、agent は昇格しない） | [D054](../../docs/decisions.md) | 優先度の判断を人の側に残す |
+| 着手規律（now のみ、agent は昇格しない） | [D054](../../docs/decisions/D054.md) | 優先度の判断を人の側に残す |
 
 研究の言葉に直すと、guide（AGENTS.md / docs）、guardrail（gate / touches / レーン上限）、sensor（review / 計測）が揃っている。Mercari の「機構は外から買えるが、判断基準は自前で持つしかない」に近い状態だ。**この土台を壊さずに、3つの層を足す。**
 

@@ -30,4 +30,4 @@ touches: packages/workspace/src/restore.ts, packages/workspace/test/restore.test
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。

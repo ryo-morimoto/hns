@@ -125,7 +125,7 @@ authoritative な needs は 8 件。うち **6 件は live 状態からしか作
 | 120 | 120 | 120 | 10,368,000 |
 
 **活動量に関係なく一定。** 100ms 間隔なら 10 倍、10 秒なら 1/10。イベント駆動なら暇なときは減る。
-[cf-harness](../cf-harness/RESULTS.md) と [D048](../../../docs/decisions.md) の
+[cf-harness](../cf-harness/RESULTS.md) と [D048](../../../docs/decisions/D048.md) の
 「イベントごとの D1 同期更新」への警告は、この行数が対象。
 
 ## 9. 実装量

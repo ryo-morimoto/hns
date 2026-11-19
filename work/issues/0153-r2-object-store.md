@@ -87,7 +87,7 @@ R2 の書き込み回数（Class A）そのものはテストで数えない。�
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-17: 第2波で now へ（0154 の checkpoint と 0169 の 256KB 超の本文を開ける）。BOARD は別セッションの編集が落ち着いてから lead が反映。
 - 2026-11-17: テスト条件（C1–C14）とテスト設計（T1–T10）、Design を追加。`touches` に実装に必要なファイル（index / package exports / tsdown / integration / deploy 配線 / docs/durability.md）を追加。受入6を「versioning と object lock」から「object lock + key 設計」に修正した（R2 に bucket versioning が無いため。理由は Design と docs/durability.md §5）。
 - 2026-11-17: 実装。`packages/workspace/src/objects.ts` に object id（crypto.subtle）・git v2 pack・put / get / head / list・重複排除・checkpoint pack を置き、`@hns/workspace/objects` として公開。unit（11）と、`cf dev` の実 R2 binding で pack を `git index-pack` / `cat-file` / `rev-list` に通す integration（2）を追加。`OBJECTS` binding を `tools/deploy/cloudflare.config.ts` と `packages/server/src/edge/env.ts` に配線。`docs/durability.md` §5 に key の形と bucket lock の手順を追加。`npm run check` exit 0（lint / fmt / typecheck / 527 tests / build / deploy dry-run / knip）。独立レビューは未実施。

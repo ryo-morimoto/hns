@@ -94,7 +94,7 @@ unit ではなく integration に置く理由: checkpoint は git の子プロ�
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-17: 0153（R2）と 0169（watermark）が main に入ったので lead が `next` から `now` へ。design agreed・依存充足のため着手。
 - 2026-11-17: テスト条件（C1–C9）・テスト設計（T1–T9）・Design を追加。touches を実装に合わせた: テストは vitest の include 外（`test/` 直下）なので `test/integration/checkpoint.test.ts`、加えて `package.json` の `./checkpoint` export、`tsdown.config.ts`、README。
 - 2026-11-17: 実装。`packages/workspace/src/checkpoint.ts` で一時 `GIT_INDEX_FILE` に `git add -A` → 除外 pathspec を `git rm --cached` → `write-tree` → parent なしの `commit-tree`。`refs/hns/checkpoints/<runId>` は既存なら `created: false` で返し、無ければ pack を作ってから `update-ref` の CAS で進める。返すのは commit / ref / pack bytes / `checkpoints/<commit>.pack`。除外は `.hns`・`.env` / `.env.*`・資格情報名・`node_modules` で、tracked にも効く（一時 index から落とす）。`@hns/workspace/checkpoint` の subpath export にし、root entry / Worker bundle に Node の import を出さない。実 git の integration 8 本（作業ツリーとユーザー ref の不変、再実行と同時実行の冪等、tracked の除外、run ごとの ref、pack の `index-pack` と closure、空の作業ツリー、不正 runId / 非 git、サブディレクトリ root）。`npm run check` exit 0（605 tests / 106 files）。独立レビュー待ち。

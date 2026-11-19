@@ -240,7 +240,7 @@ truncation 後に settled の別内容が applied を返す件（低6）は、ou
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-17: 0156 の Result を受けて、intent / outcome への拡張をこの issue の範囲にした（touches に do/workspace.ts）。面は 0182 の棚卸しに従う。
 - 2026-11-17: 0154 / 0169 / 0162 の後に lead が next から now へ。REST content の面は D089 / D092、鍵は D100（control-plane）。
 - 2026-11-17: 設計 checkpoint を lead に送り、承認。Q1 touches（tools/deploy は 0157 単独、lock は触らない）、Q2=A（denied を outcome 語彙に足す）、Q3 p95 目標、Q4 status/priority。

@@ -153,7 +153,7 @@ touches: packages/server/src/obs/, packages/core/src/observability.ts, packages/
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-17: 0154 の後に lead が `next` から `now` へ（0145 / 0147 の依存が満たされ、0039 を吸収済み）。
 - 2026-11-17: 実装開始。## Design / ## テスト条件 / ## テスト設計 を追加し、status: in-progress。
   touches を拡張（edge / DO / agent / machine / core 語彙 / CLI / docs / コスト実測）。

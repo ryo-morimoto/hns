@@ -49,7 +49,7 @@ touches: tools/deploy/, tools/gate/stages.ts, tools/gate/test/stages.test.ts, vi
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-11: 実装開始。cf / wrangler を exact pin し、modes で進める。
   cf は npm workspace の root を project として扱わないため、config ごと tools/deploy/ に置く。
 - 2026-11-11: cf@1.0.0-beta.28 / wrangler@4.156.0 を tools/deploy に。root の npm install から

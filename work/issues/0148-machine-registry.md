@@ -118,7 +118,7 @@ cloudflared は外向きの接続を維持する（D053）が、machine の状�
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-07: DO をやめ、D1 + fetch に変更（D049）。
 - 2026-11-17: 0147 のキー分離（control-plane 鍵 / device key）を受けて、registry が両方を供給することを AC と Notes に足した。touches の migrations パスを実パスに直した。
 

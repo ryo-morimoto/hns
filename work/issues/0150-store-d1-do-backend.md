@@ -58,7 +58,7 @@ touches: packages/store/src/**, packages/store/test/**, packages/store/package.j
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-11: 二重バックエンドは負債と判断（利用者は Worker だけ、D1 の制約を node:sqlite が隠す）。D1 専用に変更し、node:sqlite を削除する。
 - 2026-11-11: D1 専用で実装。`npm run check` green（249 tests）。reviewer-0150 が PASS（初回・修正 diff・rebase 解消とも blocking なし）。low は修正済み。
 - 2026-11-11: 0145 の上に rebase し、main に統合（cff01f4、249 tests）。

@@ -161,7 +161,7 @@ DO はこの runtime を 1 つ持ち、内部 RPC（`/rpc/conversations...`）�
 
 ## Log
 
-- 2026-11-07: 作成（[D048](../../docs/decisions.md) と [durability.md](../../docs/durability.md) を契約として）。
+- 2026-11-07: 作成（[D048](../../docs/decisions/D048.md) と [durability.md](../../docs/durability.md) を契約として）。
 - 2026-11-07: Session DO と Workspace DO を分ける決定を反映。
 - 2026-11-07: 1 会話 = 1 DO をやめ、1 ワークスペース = 1 Session に訂正（D049）。
 - 2026-11-11: ユーザー指示で now に上げ、実装開始。CLI は cf のみ（D064）。設計は issue 内に置く。

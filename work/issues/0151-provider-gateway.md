@@ -90,7 +90,7 @@ gateway は **素の Worker**。予算のカウンタは D1 の 1 文で持つ�
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-07: 予算カウンタを D1 に変更（D049）。
 - 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L9。touches を実パス（`store/src/migrations/`）に直し、gateway Worker の配線として `tools/deploy/` を足した。store migration の枠を持つ。
 - 2026-11-17: touches を実装に合わせて直した。integration の置き場を `packages/server/test/integration/gateway/`

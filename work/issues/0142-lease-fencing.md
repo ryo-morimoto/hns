@@ -60,7 +60,7 @@ touches: packages/core/src/lease.ts, packages/core/src/lease.test.ts, packages/c
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-17: ユーザーの判断で `now` のまま最初に閉じる。touches を 0141 の形（test・index・README・CHANGELOG・docs）に合わせた。3本の同時実行（0190 / 0151 / 0147）とはファイルが交わらない。
 - 2026-11-17: 実装。core に `WorkspaceLease` / `LEASE_REFUSALS`（+ index / README / CHANGELOG）、docs/durability.md §3.4、ARCH の INV-13 と要件2の読み方、workspace.md の未決を更新。
 - 2026-11-17: 独立レビュー BLOCKED（blocking 1・低 8）。blocking: §3.4 が「古い epoch は拒否」と「unknown」を併記し、ack が DO を通ることも曖昧。§3.4 を「委譲は版チェックだけ、ack は §3.1 のまま」「古い epoch は `lease_epoch_stale`、`unknown` は outcome 欠落だけ」に修正。低も反映: issue 番号の除去、`expectTypeOf` で brand を固定、Notes の統合、要件2 の重複を 2 箇所に、取得競合と接続断の規則を追加。

@@ -61,7 +61,7 @@ touches: packages/server/src/ws.ts, packages/server/src/ws.test.ts, packages/ser
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-17: ユーザーの判断で `plan` から `now` へ昇格。レーン L2。3本が空くまで待機し、`do/session.ts` と `web/src/app/` を touches に足した。
 - 2026-11-17: 実装開始。token delta の実経路のため `packages/agent/src/session.ts`（ConversationView watch）と `do/state.ts`、ws / stream のテストを touches に追加（lead へ報告）。edge の転送は既存のまま 101 を通す想定で触らない。
 - 2026-11-17: 実装（c3c4116）。`core/src/stream.ts` の `LiveFrame` union と `LiveDeltaBatcher`、`server/src/ws.ts` の `acceptWebSocket` + attachment、`do/session.ts` の再購読、agent の `watchConversation`、web の再接続 client と `LiveConnection`。SSE は製品コードに未実装だったため削除対象は無い（0050 / 0118 は superseded のまま）。

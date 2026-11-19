@@ -41,7 +41,7 @@ touches: docs/auth.md, docs/automation.md, work/issues/0147-machine-agent.md
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-10: [docs/auth.md](../../docs/auth.md) に「秘密の配置（0143）」を追加。表・gateway・git の例外・DEK・
   sandbox hide・封じ込め手順。PoC の service/provider は履歴と明記した。
 - 2026-11-11: reviewer-0143 が **FAIL**（blocking 5）。provider 鍵 / DEK の置き場所、webhook token、0147 の鍵と

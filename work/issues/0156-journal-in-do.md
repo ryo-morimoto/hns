@@ -79,7 +79,7 @@ lease（0142）と版の表を実装し、Session DO から RPC で呼ばれる�
 
 ## Log
 
-- 2026-11-07: 作成（[D048](../../docs/decisions.md) と [durability.md](../../docs/durability.md) を契約として）。
+- 2026-11-07: 作成（[D048](../../docs/decisions/D048.md) と [durability.md](../../docs/durability.md) を契約として）。
 - 2026-11-07: 0556 から分割。Journal は 0169 へ。
 - 2026-11-17: 実装前のテスト分析・設計を追加（C1–C12 / T1–T8）。touches を修正: テストは vitest の include に入る `packages/server/src/do/workspace.test.ts` に置き、DO を Worker から export する `packages/server/src/index.ts` を追加。deploy 配線（binding / export）は 0151 の main 統合後に回す。
 - 2026-11-17: `Workspace` DO を実装（apply / read / lease、epoch の発番、期限切れ fail closed、版の表、`storage.transaction` による直列化）。12 unit tests（実 SQLite）を追加し、guard を壊す変異で検出力を確認。`npm run check` exit 0（100 server tests を含む）。`tools/deploy` は 0151 所有のため WORKSPACE binding と deploy 側 export は未配線。

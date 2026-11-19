@@ -6,7 +6,7 @@ touches: docs/decisions.md, ARCH.md, README.md, docs/topology.md, docs/packages.
 
 ## Goal
 
-[D047](../../docs/decisions.md) を決定として残し、要件・所有境界・トポロジの記述をそれに合わせる。
+[D047](../../docs/decisions/D047.md) を決定として残し、要件・所有境界・トポロジの記述をそれに合わせる。
 以後の issue はこの記述を契約として実装する。
 
 ## Acceptance criteria
@@ -38,7 +38,7 @@ touches: docs/decisions.md, ARCH.md, README.md, docs/topology.md, docs/packages.
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-07: D047–D049 を決定に追記。ARCH を書き換え（所有境界・INV-09〜11・保存先の割り当て）。topology に A''。README の要件1と前提。packages.md に `machine` と server の Worker/DO。
 - 2026-11-07: 独立レビュー 1回目 FAIL（B1–B6）。durability の DO/D1 二重定義、packages の tailnet、decisions のリンク切れ、D010 の SSE、TCP の断定、BOARD の旧決定。修正。
 - 2026-11-07: 2回目 FAIL（R1–R5）。D050 が並行作業と衝突して訂正が消えていた。**D053** を追記して再訂正。testing / auth / engineering の古い前提を修正。

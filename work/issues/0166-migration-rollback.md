@@ -32,5 +32,5 @@ Cloudflare を正本にしても、テストと開発はローカルで回せる
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。
 - 2026-11-11: 0150 が `node:sqlite` を削除したため、ローカルは D1（miniflare / cf dev）に変更。
