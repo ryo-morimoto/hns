@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { pageText, renderPage, type TextItem } from "./viewer.ts";
+import type { TextItem } from "./viewer.ts";
+
+/**
+ * The reader's module, loaded when there is a page to draw.
+ *
+ * @remarks
+ * It is an import rather than a static one so PDF.js is a chunk of its own: a person who never
+ * opens a preview does not download the renderer (W-P1's initial budget).
+ */
+async function reader(): Promise<typeof import("./viewer.ts")> {
+  return await import("./viewer.ts");
+}
 
 /** The z-index of the text layer: above the canvas, below every control. */
 const PAGE_TEXT_Z_INDEX = 1;
@@ -54,7 +65,8 @@ export function PdfPage({
     let live = true;
     setFailed(false);
     setDrawn(false);
-    void renderPage(document, page, target, zoom)
+    void reader()
+      .then((viewer) => viewer.renderPage(document, page, target, zoom))
       .then(() => {
         if (live) setDrawn(true);
       })
@@ -69,7 +81,8 @@ export function PdfPage({
   useEffect(() => {
     if (text !== null && text.page === page) return;
     let live = true;
-    void pageText(document, page)
+    void reader()
+      .then((viewer) => viewer.pageText(document, page))
       .then((found) => {
         if (live) onText(found);
       })

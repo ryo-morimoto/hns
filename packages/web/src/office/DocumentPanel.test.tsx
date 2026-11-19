@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { RelayEnvironmentProvider } from "react-relay";
@@ -6,6 +6,7 @@ import * as v from "valibot";
 import { expect, test } from "vitest";
 import { toGlobalId } from "@hns/core/graphql";
 import { createEnvironment } from "../relay/environment.ts";
+import { createTestEnvironment } from "../../test/support/relay.ts";
 import { answerWith } from "../../test/support/officeFace.ts";
 import { officeFailure, previewRow, type PreviewRow } from "../../test/support/officeWire.ts";
 import { DocumentPanel } from "./DocumentPanel.tsx";
@@ -230,6 +231,36 @@ test("C1: a size failure is 失敗 with its code", async () => {
   expect(within(state()).getByText("ファイルが大きすぎます（上限 50 MB）")).toBeTruthy();
 });
 
+/**
+ * NB1: the engine probe says which part is missing, not what the machine said.
+ *
+ * Catches: the machine's `reason` on screen — it is written for an operator, and can name a pack
+ * path, a directory, or a driver on that machine.
+ */
+test("C1: the disabled row's engine probe never shows the machine's reason", async () => {
+  const user = userEvent.setup();
+  const { environment } = createTestEnvironment((call) => {
+    if (call.operation === "DocumentPanelQuery") return { documentPreview: previewRow("DISABLED") };
+    if (call.operation === "DocumentPanelEngineQuery") {
+      return {
+        officeEngine: {
+          __typename: "OfficeEngineUnavailable",
+          reason: "no manifest at /home/runner/packs/office-0.8.7/manifest.json",
+        },
+      };
+    }
+    return undefined;
+  });
+  renderPanel(environment);
+  await waitFor(() => expect(state().dataset["officeState"]).toBe("disabled"));
+  await user.click(screen.getByRole("button", { name: "エンジンの状態を確かめる" }));
+  await waitFor(() => expect(screen.getByTestId("office-engine")).toBeTruthy());
+  expect(screen.getByTestId("office-engine").textContent).toBe(
+    "エンジンがありません（pack の導入が必要です）。",
+  );
+  expect(document.body.textContent ?? "").not.toContain("/home/runner");
+});
+
 test("C5: a ready row over 50 MiB is drawn as too large, and the viewer never mounts", async () => {
   const h = harness(() =>
     previewRow("READY", { url: URL_OF, bytes: 50 * 1024 * 1024 + 1, pages: 10 }),
@@ -312,6 +343,26 @@ test("C1: a read that finds no row asks for one, with the selected workspace", a
   await waitFor(() => expect(state().dataset["officeState"]).toBe("queued"));
   expect(countOf(h.calls, "RequestMutation")).toBe(1);
   expect(h.requestedVariables).toStrictEqual({ workspaceId: WORKSPACE, path: PATH });
+});
+
+/**
+ * NB3: a refusal is not a failed job, even though both are drawn as a failure to the eye.
+ *
+ * Catches: `not_authorized` mixed into the contract's seven states — a summary or a test could not
+ * tell "this document failed" from "you may not read this document", and an eighth state would
+ * quietly join the contract's vocabulary.
+ */
+test("C3: not_authorized names itself beside the failure, and a job failure does not", async () => {
+  const refused = harness(() => officeFailure("NOT_AUTHORIZED"), officeFailure("NOT_AUTHORIZED"));
+  renderPanel(refused.environment);
+  await waitFor(() => expect(state().dataset["officeFailure"]).toBe("not_authorized"));
+  // The state stays the contract's `failed` (a refusal is not an eighth state) …
+  expect(state().dataset["officeState"]).toBe("failed");
+  cleanup();
+  const failed = harness(() => previewRow("FAILED", { code: "ENGINE_TIMEOUT" }));
+  renderPanel(failed.environment);
+  await waitFor(() => expect(state().dataset["officeState"]).toBe("failed"));
+  expect(state().dataset["officeFailure"]).toBeUndefined();
 });
 
 // Catches: the retry doing nothing, or not asking the server again.

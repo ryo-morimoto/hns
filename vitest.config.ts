@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { defineConfig, type Plugin } from "vitest/config";
 import { relay } from "./packages/web/vite.relay.ts";
 import { doctest } from "vite-plugin-doctest";
 import webNode from "./vitest.web-node.config.ts";
@@ -7,6 +8,30 @@ import webNode from "./vitest.web-node.config.ts";
 // One runner for every layer (docs/testing.md). A project per package keeps
 // `npm test -w @hns/store` scoped to that package instead of the whole repo.
 const source = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
+
+/**
+ * Build the web app before its project runs.
+ *
+ * @returns A plugin whose `buildStart` runs the app's own build once.
+ *
+ * @remarks
+ * One web test asserts **what the build ships** (the bundle, the PDF.js worker, the page's own
+ * script): a worker that never reaches `deploy/assets` is a preview that dies in production, and
+ * a stale directory would let that test pass on an older build. The build is the app's
+ * `npm run build` — the same command the gate's build stage runs — and it is skipped where the
+ * output is already newer than every file it is made from.
+ */
+function webBuild(): Plugin {
+  return {
+    name: "hns-web-build",
+    buildStart() {
+      execFileSync("npm", ["run", "build", "--silent"], {
+        cwd: source("./packages/web"),
+        stdio: "pipe",
+      });
+    },
+  };
+}
 
 /** One path alias: a module pattern and the source file it resolves to. */
 interface SourceAlias {
@@ -153,7 +178,7 @@ export default defineConfig({
       // tags with the same one the bundle uses.
       {
         extends: true,
-        plugins: [relay()],
+        plugins: [webBuild(), relay()],
         test: {
           name: "web",
           include: ["packages/web/src/**/*.test.{ts,tsx}"],

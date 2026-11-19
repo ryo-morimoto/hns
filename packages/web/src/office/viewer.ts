@@ -11,11 +11,14 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
  * The PDF.js worker, as a URL the browser loads.
  *
  * @remarks
- * `?url` makes Vite emit the worker as its own file beside the bundle and hand back the URL it is
- * served at, so the built app loads `assets/pdf.worker.<hash>.mjs` from the same origin as
- * everything else. **Nothing is fetched from a CDN** (no `workerSrc` points off-origin), and the
- * module resolves this URL at import time rather than from `import.meta.url` at run time, so it
- * stays correct under `deploy/assets/` and behind any base path the edge serves the bundle at.
+ * `?url` asks Vite to emit the worker as its own file beside the bundle and hand back the URL it is
+ * served at: the built app loads `/assets/pdf.worker.min-<hash>.mjs` from the same origin as
+ * everything else, and **nothing is fetched from a CDN** (no `workerSrc` points off-origin).
+ *
+ * The emission happens **only where this module is in the build**: the worker is emitted because
+ * the panel is wired into the shell (the shell's panel slot loads it), which is what
+ * `packages/web/src/build.test.ts` asserts of `deploy/assets`. A runner resolves the URL to the
+ * package's own `node_modules` path, which is a test's stand-in and not a deployment's.
  */
 export const PDF_WORKER_URL: string = workerUrl;
 

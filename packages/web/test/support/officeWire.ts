@@ -1,7 +1,3 @@
-import * as v from "valibot";
-import type { JsonValue } from "@hns/core";
-import type { GraphQLCall } from "./relay.ts";
-
 /**
  * The office face's wire, as the published schema spells it.
  *

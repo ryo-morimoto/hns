@@ -25,6 +25,7 @@ import { ConversationScreen } from "../screens/conversation/ConversationScreen.t
 import { projectIdFrom } from "../routes/ids.ts";
 import { navigate, replaceRoute, useRoute } from "../routes/useRoute.ts";
 import { ConnectionStatus } from "./ConnectionStatus.tsx";
+import { PanelContent } from "./PanelContent.tsx";
 import type { LiveSocketFactory } from "../live/client.ts";
 import { applyLiveFrameToStore, forgetLiveTitle, reapplyLiveTitles } from "../live/store.ts";
 import { useLiveConnection } from "../live/useLiveConnection.ts";
@@ -75,7 +76,13 @@ export interface ShellProps {
 export function Shell(props: ShellProps): ReactElement {
   return (
     <QueryBoundary>
-      <ShellData {...props} />
+      {/*
+        The right panel's slot. Its content is the document preview, which draws nothing until a
+        screen asks for a file; mounting it here is what keeps the preview's code (and the PDF.js
+        worker it bundles) in the build, so the first screen that opens a file has a panel to open
+        it in. A caller that passes its own panel replaces it (a test, a future second panel).
+      */}
+      <ShellData {...props} panel={props.panel ?? <PanelContent />} />
     </QueryBoundary>
   );
 }

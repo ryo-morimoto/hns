@@ -1,7 +1,19 @@
-import { useEffect, type ReactElement } from "react";
+import { lazy, Suspense, type ReactElement } from "react";
 import { toGlobalId } from "@hns/core/graphql";
-import { DocumentPanel } from "../office/DocumentPanel.tsx";
 import { useProjectWorkspace } from "./ProjectWorkspace.tsx";
+
+/**
+ * The document panel, loaded when a file is selected.
+ *
+ * @remarks
+ * The panel is the shell's right slot, and most visits never open a file: the screen that draws
+ * documents (and the reader it opens them with) is a chunk of its own, loaded on the first
+ * selection. `DocumentPanel` holds no state a visit needs before then.
+ */
+const DocumentPanel = lazy(async () => {
+  const loaded = await import("../office/DocumentPanel.tsx");
+  return { default: loaded.DocumentPanel };
+});
 
 /**
  * The file the document panel was last asked to open.
@@ -9,8 +21,8 @@ import { useProjectWorkspace } from "./ProjectWorkspace.tsx";
  * @remarks
  * A **module-level** value rather than a React state, because nothing in this build can set one
  * yet: the workspace's file list has no preview action, and the conversation does not carry a
- * file. Until a screen exists that opens a file, the panel is closed and the shell draws what it
- * drew before — but the panel itself is complete and is what that screen will mount.
+ * file. Until a screen exists that opens a file, the panel draws nothing and the shell draws what
+ * it drew before — but the panel itself, and the build that must contain it, are here.
  *
  * It is a module value rather than a prop chain so the one screen that arrives first can set it
  * without the shell owning a second piece of UI state.
@@ -57,11 +69,11 @@ export function previewSelection(): PreviewSelection | null {
 export function PanelContent(): ReactElement | null {
   const workspace = useProjectWorkspace();
   const selection = previewSelection();
-  useEffect(() => {
-    // Nothing to do yet: the panel is drawn from the module's value, and the screen that sets it
-    // re-renders the shell. The effect exists so the value is read on every render, after mount.
-  });
   if (workspace === null || selection === null) return null;
   if (selection.workspaceId !== toGlobalId("Project", workspace.projectId)) return null;
-  return <DocumentPanel workspaceId={selection.workspaceId} path={selection.path} />;
+  return (
+    <Suspense fallback={null}>
+      <DocumentPanel workspaceId={selection.workspaceId} path={selection.path} />
+    </Suspense>
+  );
 }

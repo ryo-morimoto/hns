@@ -283,6 +283,9 @@ function StateView({
 }): ReactElement {
   const status =
     view.kind === "failure" ? "failed" : view.kind === "too_large" ? "failed" : view.status;
+  // A refusal is not one of the job's states: `data-office-failure` names it, so a test (and a
+  // screen reader's summary) can tell "this file failed" from "you may not read this file".
+  const refusal = view.kind === "failure" ? view.code : null;
   const label =
     view.kind === "failure"
       ? view.code === "not_authorized"
@@ -302,6 +305,7 @@ function StateView({
     <section
       className="hns-office__state"
       data-office-state={status}
+      data-office-failure={refusal ?? undefined}
       data-testid="office-state"
       aria-busy={busy}
       aria-live={busy ? "polite" : "off"}
@@ -374,11 +378,14 @@ function SetupGuide(): ReactElement {
 function EngineProbe(): ReactElement {
   const data = useLazyLoadQuery<DocumentPanelEngineQueryType>(DocumentPanelEngineQuery, {});
   const engine = data.officeEngine;
+  // **The machine's reason is not shown.** It is written for an operator and can name a path on
+  // the machine, a pack directory, or a driver; what a person reading a document needs is which
+  // part is missing, which is the sentence the panel already gives.
   const text =
     engine.__typename === "OfficeEngineAvailable"
       ? "エンジン: " + engine.id + " " + engine.version
       : engine.__typename === "OfficeEngineUnavailable"
-        ? "エンジンがありません: " + engine.reason
+        ? "エンジンがありません（pack の導入が必要です）。"
         : "エンジンの状態を問い合わせできませんでした。";
   return (
     <p className="hns-office__note" data-testid="office-engine">
