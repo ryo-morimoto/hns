@@ -112,24 +112,22 @@ async function drawn(page: Page): Promise<DrawnState> {
  * waits for that read by observing the panel, never by sleeping a fixed time.
  */
 async function settledState(page: Page): Promise<DrawnState> {
-  const deadline = Date.now() + 90_000;
-  let last: DrawnState = { status: null, failure: null };
-  for (;;) {
-    const state = await drawn(page);
-    last = state;
-    // A settled preview is the viewer. `null` is the moment between the page's first render and
-    // its first read (the lazy chunk, the store read), so it is waited on, not returned.
-    if (
-      state.status !== null &&
-      state.status !== "queued" &&
-      state.status !== "generating" &&
-      state.status !== "stale"
-    ) {
-      return state;
-    }
-    if (Date.now() > deadline) return last;
-    await page.waitForTimeout(250);
-  }
+  // A condition, not a clock: the panel either draws one of the states the alarm moves, or the
+  // viewer (which has no state element). The panel polls on its own until one of them is there.
+  await page
+    .waitForFunction(
+      () => {
+        if (document.querySelector("[data-testid='office-page-number']") !== null) return true;
+        const element = document.querySelector("[data-office-state]");
+        if (element === null) return false;
+        const status = element.getAttribute("data-office-state");
+        return status !== "queued" && status !== "generating" && status !== "stale";
+      },
+      undefined,
+      { timeout: 90_000 },
+    )
+    .catch(() => undefined);
+  return await drawn(page);
 }
 
 /**
@@ -168,7 +166,11 @@ test("three formats open, the second open is the cache, a next file follows, and
   page.on("pageerror", (error) => console.error("e2e pageerror", error.message.slice(0, 600)));
   page.on("request", (request) => {
     if (request.url().includes("/assets/")) return;
-    console.error("e2e req", request.method(), request.url().replace(/^http:\/\/127\.0\.0\.1:[0-9]+/, ""));
+    console.error(
+      "e2e req",
+      request.method(),
+      request.url().replace(/^http:\/\/127\.0\.0\.1:[0-9]+/, ""),
+    );
   });
 
   await openApp(page);
@@ -200,7 +202,8 @@ test("three formats open, the second open is the cache, a next file follows, and
       .not.toBe(null);
     await expect
       .poll(async () => runtime?.officeRows().length ?? 0, {
-        message: fixture.path + " made no office row; sessions " + JSON.stringify(runtime?.sessionNames()),
+        message:
+          fixture.path + " made no office row; sessions " + JSON.stringify(runtime?.sessionNames()),
         timeout: 30_000,
       })
       .toBeGreaterThan(0);
@@ -212,11 +215,16 @@ test("three formats open, the second open is the cache, a next file follows, and
       // The state the page drew, for a failure's diagnosis: the panel's own elements only.
       console.error(
         "e2e debug panel",
-        await page.locator("[aria-label='文書プレビュー']").evaluate((node) => node.outerHTML.slice(0, 600)),
+        await page
+          .locator("[aria-label='文書プレビュー']")
+          .evaluate((node) => node.outerHTML.slice(0, 600)),
       );
     }
     if (ready.status !== "ready") {
-      console.error("e2e debug html", await page.locator("[aria-label='文書プレビュー']").innerHTML());
+      console.error(
+        "e2e debug html",
+        await page.locator("[aria-label='文書プレビュー']").innerHTML(),
+      );
       throw new Error(
         fixture.path +
           " drew " +
@@ -242,7 +250,9 @@ test("three formats open, the second open is the cache, a next file follows, and
     const shown = await pageNumber(page);
     expect(shown).toBe("1 / " + String(fixture.pages));
     // The text layer over the canvas: the source document's text is what page 1 says.
-    await expect(page.getByTestId("office-text-layer")).toContainText(fixture.text, { timeout: 30_000 });
+    await expect(page.getByTestId("office-text-layer")).toContainText(fixture.text, {
+      timeout: 30_000,
+    });
     // The page asked for the preview (one request), and the row came back ready.
     expect(controls.requested()).toBeGreaterThanOrEqual(firstOpen);
 
@@ -286,16 +296,31 @@ test("three formats open, the second open is the cache, a next file follows, and
   await expect(next).toBeVisible();
   // The next link carries the order it was opened from (0239), as the location's query: dropping
   // it would end a walk through a folder at its second file.
+  // **The address is absolute and carries the order once** (0239): a relative link kept this
+  // page's query and appended to it, so the list grew by one on every step.
   const order = "?" + FILES.map((item) => "files=" + encodeURIComponent(item)).join("&");
-  await expect(next).toHaveAttribute(
-    "href",
-    order + "#/p/" + PROJECT + "/doc/" + encodeURIComponent(FILES[1] ?? ""),
-  );
+  const nextHref =
+    (runtime as OfficeRuntime).edgeOrigin +
+    "/app" +
+    order +
+    "#/p/" +
+    PROJECT +
+    "/doc/" +
+    encodeURIComponent(FILES[1] ?? "");
+  await expect(next).toHaveAttribute("href", nextHref);
+  // No second `files=` beyond the list's own: one order, not one more per step.
+  expect((nextHref.match(/files=/gu) ?? []).length).toBe(FILES.length);
   await next.click();
   // The URL the link went to is the next file's address, with the order it came from.
   await expect(page).toHaveURL(
     new RegExp(
-      "files=" + encodeURIComponent(FILES[0] ?? "") + ".*#/p/" + PROJECT + "/doc/" + encodeURIComponent(FILES[1] ?? "") + "$",
+      "files=" +
+        encodeURIComponent(FILES[0] ?? "") +
+        ".*#/p/" +
+        PROJECT +
+        "/doc/" +
+        encodeURIComponent(FILES[1] ?? "") +
+        "$",
       "u",
     ),
   );
@@ -321,10 +346,11 @@ test("three formats open, the second open is the cache, a next file follows, and
   // A path the workspace cannot have is refused without a request: the route keeps it, the
   // panel says so, and nothing is sent.
   const before = controls.requested();
-  await page.goto((runtime as OfficeRuntime).edgeOrigin + "/app#/p/" + PROJECT + "/doc/..%2F..%2Fetc%2Fpasswd");
+  await page.goto(
+    (runtime as OfficeRuntime).edgeOrigin + "/app#/p/" + PROJECT + "/doc/..%2F..%2Fetc%2Fpasswd",
+  );
   const refused = await settledState(page);
   expect(refused.failure).toBe("not_authorized");
   expect(await page.getByTestId("office-label").textContent()).toBe("権限がありません");
   expect(controls.requested()).toBe(before);
-
 });

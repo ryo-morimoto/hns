@@ -179,10 +179,24 @@ test("a file's name is its last segment", () => {
   expect(fileNameOf("本文.docx")).toBe("本文.docx");
 });
 
+// Catches: a next link that is relative (it would keep this page's `?files=` query and append
+// to it, so the list grew by one on every step) or that names another project.
 test("the next control links to the next file in the same project", () => {
   const { container } = renderPanel("project-1", fileState("project-1", "a.docx", "b.docx"));
   const link = container.querySelector("[data-testid='office-next']");
-  expect(link?.getAttribute("href")).toBe("#/p/project-1/doc/b.docx");
+  // The address is the location's own path with the same order: absolute, and one order.
+  expect(link?.getAttribute("href")).toBe(
+    window.location.origin + window.location.pathname + "#/p/project-1/doc/b.docx",
+  );
+});
+
+// Catches: a next link that keeps the current order by appending to it — the order is written
+// once, from the panel's own state, never grown from the page's query.
+test("the next control carries the order once", () => {
+  const state = fileState("project-1", "a.docx", "b.docx");
+  const { container } = renderPanel("project-1", { ...state, files: ["a.docx", "b.docx"] });
+  const href = container.querySelector("[data-testid='office-next']")?.getAttribute("href") ?? "";
+  expect(href.split("files=").length - 1).toBe(2);
 });
 
 // Catches: a next control drawn when the route named nothing after this file (it would link to

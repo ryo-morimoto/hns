@@ -498,6 +498,9 @@ function nextPathOf(path: string): string | null {
  * second step.
  */
 function fileOrderOf(): readonly string[] {
+  // **The location's own query, once.** A next link is an absolute URL to the next file's
+  // address with this same query, so it is the only copy of the order there is; a link that
+  // appended to it would grow the list by one on every step.
   return new URLSearchParams(window.location.search).getAll("files").filter((item) => item !== "");
 }
 

@@ -76,9 +76,10 @@ export async function officePortOver(options: OfficePortOptions): Promise<Office
     } catch (error) {
       // A lookup that threw is the same answer as one that found nothing (fail closed); the log
       // line names the error's class only, so an operator can tell a defect from a missing row.
+      // The class only: a message can carry a connection string or a binding's name.
       console.error(
         "office: project lookup failed",
-        error instanceof Error ? error.name + ": " + error.message.slice(0, 200) : "unknown",
+        error instanceof Error ? error.name : "unknown",
       );
       return undefined;
     }

@@ -320,7 +320,12 @@ function documentHash(workspaceId: string, path: string, order: readonly string[
   // **The order travels with the address** (see `PanelState.files`), as the location's query —
   // the same place the route is read from — so a next link that dropped the list it came from
   // would end the walk at the second file. A `?` inside the fragment would be part of the path.
-  return query === "" ? hash : "?" + query + hash;
+  //
+  // **An absolute address, and one order.** The link is a new location (the next file's path with
+  // the same query); a relative one would keep this page's query and append to it, and the list
+  // would grow by one on every step.
+  const origin = window.location.origin + window.location.pathname;
+  return (query === "" ? origin : origin + "?" + query) + hash;
 }
 
 /** Where a viewer's `Escape` puts focus: the panel's header, so the next Tab leaves the panel. */

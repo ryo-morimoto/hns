@@ -35,7 +35,10 @@ export interface OfficeRuntime {
   /** The office rows the Session keeps, for a failure's diagnosis (never for a page). */
   readonly officeRows: () => readonly Record<string, unknown>[];
   /** How many `office.job` rows the Session's audit has written, with their detail. */
-  readonly officeJobs: () => readonly { readonly detail: Record<string, unknown>; readonly path: string | null }[];
+  readonly officeJobs: () => readonly {
+    readonly detail: Record<string, unknown>;
+    readonly path: string | null;
+  }[];
   /** The edge's project lookup's answer, for the assertion "the workspace exists". */
   readonly projects: () => Promise<Map<string, ProjectLike>>;
   /** Stop every listener and close the database. */
@@ -101,7 +104,9 @@ export async function startOfficeRuntime(options: {
   const base = mkdtempSync(join(tmpdir(), "hns-e2e-office-"));
   const root = options.root;
 
-  const machineModule = (await import(pathToFileURL(join(REPO_ROOT, "packages/machine/src/index.ts")).href)) as typeof import("@hns/machine");
+  const machineModule = (await import(
+    pathToFileURL(join(REPO_ROOT, "packages/machine/src/index.ts")).href
+  )) as typeof import("@hns/machine");
   // The pack is bind-mounted into the sandbox, and bubblewrap refuses a symlink as a mount
   // destination: a checkout whose `office-pack` is a link to the build (the worktree layout)
   // is resolved here, the way a service manager hands a path to the agent.
@@ -122,7 +127,9 @@ export async function startOfficeRuntime(options: {
   const workspaceEntry = (await import(
     pathToFileURL(join(REPO_ROOT, "packages/server/src/do/workspace.ts")).href
   )) as typeof import("../../packages/server/src/do/workspace.ts");
-  const entry = (await import(pathToFileURL(join(REPO_ROOT, "packages/server/src/index.ts")).href)) as {
+  const entry = (await import(
+    pathToFileURL(join(REPO_ROOT, "packages/server/src/index.ts")).href
+  )) as {
     default: { fetch: (request: Request, env: unknown) => Promise<Response> };
     Session: SessionClass;
   };
@@ -183,7 +190,13 @@ export async function startOfficeRuntime(options: {
             const answer = await object.fetch(request);
             if (process.env["HNS_E2E_DEBUG"] === "1" && !request.url.includes("/rpc/events")) {
               const url = new URL(request.url);
-              console.error("e2e session", JSON.stringify(key), request.method, url.pathname, answer.status);
+              console.error(
+                "e2e session",
+                JSON.stringify(key),
+                request.method,
+                url.pathname,
+                answer.status,
+              );
             }
             return answer;
           } finally {
@@ -208,9 +221,7 @@ export async function startOfficeRuntime(options: {
       // version read addresses this object by the graph's workspace id.
       idFromName: (name: string) => ({ name, toString: () => name }),
       get: (id: { name: string; toString?: () => string }) => {
-        const object = workspaceObject(
-          typeof id.toString === "function" ? id.toString() : id.name,
-        );
+        const object = workspaceObject(typeof id.toString === "function" ? id.toString() : id.name);
         return {
           fetch: async (request: Request) => {
             const answer = await object.fetch(request);
@@ -230,7 +241,8 @@ export async function startOfficeRuntime(options: {
   };
   const workspace = objectsName(options.projectId);
   /** The Session object for a project: by its raw id, whatever name a caller used. */
-  const sessionFor = (projectId: string): SessionInstance => open(objectsName(rawProjectIdOf(projectId)));
+  const sessionFor = (projectId: string): SessionInstance =>
+    open(objectsName(rawProjectIdOf(projectId)));
   // The Workspace object each project's session reads its files' versions through (0237): one
   // object per project id, addressed exactly as the office port addresses it. It is constructed
   // with the runtime's state and the deployment's bindings, and its start-up (the version table,
@@ -247,9 +259,10 @@ export async function startOfficeRuntime(options: {
       // this harness models is the part the object uses (SQLite, the alarm, the id).
       instance = new workspaceEntry.Workspace(
         objectState(key) as unknown as ConstructorParameters<typeof workspaceEntry.Workspace>[0],
-        { ...(env as object), __workspace: { machineId: "machine-1" } } as unknown as ConstructorParameters<
-      typeof workspaceEntry.Workspace
-    >[1],
+        {
+          ...(env as object),
+          __workspace: { machineId: "machine-1" },
+        } as unknown as ConstructorParameters<typeof workspaceEntry.Workspace>[1],
       );
       workspaces.set(key, instance);
     }
@@ -264,25 +277,30 @@ export async function startOfficeRuntime(options: {
    * is addressed with go through this one function, so a project and its object are one name.
    */
   // The one substitution the deployment entry takes (0239): the office port's project lookup
-  // reads this database. The resolver's workspace is the graph's id, which names a project by the
-  // id inside it; the row itself is keyed by the raw project id.
+  // reads this database. **It is given the same argument the product's own lookup is** — the
+  // resolver's workspace, the graph's id — and it hands it to the same reader the product uses
+  // (`officeProjectId`, which is read from the checkout's source), so this seam changes only
+  // *where* the row comes from, never *which id* reaches it.
+  const { officeProjectId } = (await import(
+    pathToFileURL(join(REPO_ROOT, "packages/server/src/office/route.ts")).href
+  )) as typeof import("../../packages/server/src/office/route.ts");
   (env as Record<string, unknown>)["__graphql"] = {
     officeProject: async (workspaceId: string): Promise<Project | undefined> => {
-      const found = workspaceId === "" ? undefined : await projectOf(workspaceId);
-      return found;
+      const raw = officeProjectId(workspaceId);
+      return raw === "" ? undefined : await projectOf(raw);
     },
     // The Session object one workspace is reached through: by the project inside the graph id,
     // so the office's route (whose query carries that id) reaches the object the project's
     // session routes reach.
-    session: async (workspaceId: string): Promise<{ fetch(request: Request): Promise<Response> }> => {
+    session: async (
+      workspaceId: string,
+    ): Promise<{ fetch(request: Request): Promise<Response> }> => {
       return sessionFor(workspaceId);
     },
   };
-  const projectOf = async (workspaceId: string): Promise<Project | undefined> => {
-    const rows = await db
-      .prepare("SELECT * FROM projects WHERE id = ?")
-      .bind(rawProjectIdOf(workspaceId))
-      .all();
+  /** One project's row, by the raw project id (the database's key). */
+  const projectOf = async (projectId: string): Promise<Project | undefined> => {
+    const rows = await db.prepare("SELECT * FROM projects WHERE id = ?").bind(projectId).all();
     const row = rows.results[0];
     // The row is the wire's value; the projection is the model's (the store parses the same one).
     return row === undefined ? undefined : projectRowOf(row);
@@ -332,7 +350,7 @@ export async function startOfficeRuntime(options: {
 
       for (let round = 0; round < 5; round += 1) {
         clock.now = Math.max(clock.now, timer.at ?? clock.now);
-  
+
         // Past the moment it armed: nothing due means the timer has nothing left to run.
         if (timer.at === null || timer.at <= clock.now) break;
       }
