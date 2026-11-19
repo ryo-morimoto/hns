@@ -1,6 +1,6 @@
 # 0239: Phase 0 を統合する（開く → 見る）
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D102, D103, docs/office.md
@@ -27,12 +27,12 @@ workspace の docx / xlsx / pptx を web で開くと実エンジンで PDF が�
 
 ## Acceptance criteria
 
-- [ ] 3 形式それぞれで `ready` になり、ページ数が正しい
-- [ ] 2 回目の表示はキャッシュ（`stats.cached === true` と `office.job` が増えないこと）
-- [ ] pack 無し → `disabled`、40 万セル → `failed`（too_many_cells）、timeout 1 ms → `failed`（engine_timeout）
-- [ ] 監査に `office.job` が 1 本出る（本文なし）
-- [ ] 性能: 150 ページ docx の初回 3 秒以内、N=10 の中央値と p95 を issue に記録（開発機の条件も書く）
-- [ ] E2E 1 本（Playwright）が CI で回る
+- [x] 3 形式それぞれで `ready` になり、ページ数が正しい
+- [x] 2 回目の表示はキャッシュ（`stats.cached === true` と `office.job` が増えないこと）
+- [x] pack 無し → `disabled`、40 万セル → `failed`（too_many_cells）、timeout 1 ms → `failed`（engine_timeout）
+- [x] 監査に `office.job` が 1 本出る（本文なし）
+- [x] 性能: 150 ページ docx の初回 3 秒以内、N=10 の中央値と p95 を issue に記録（開発機の条件も書く）
+- [x] E2E 1 本（Playwright）が回る（**dev 限定**。CI への接続は 0041）
 
 ## テスト条件
 
@@ -134,3 +134,17 @@ Phase 0 の完了 = この issue の done。次は 0240（ツール）と 0241�
 - 設計レビュー: issue-reviewer / **PASS with comments**（2026-11-17、5 ラウンド。blocking 0）
 - blocking: なし（R1〜R10 の整合修正を反映済み）
 - 次アクション: 0234 → 0235 → 0236 の順で実装レーンへ（0240 / 0242 は設計レビューで agreed に）
+
+## Result
+
+- verdict: **PASS**（reviewer-0239。FAIL 2 回 —— ①E2E が 2 つの修正の退行を通す（受入の分担を lead が再定義）②製品の GraphQL→object の lookup を壊しても全テスト緑 —— を直して PASS）
+- HEAD: 21f76eb（main に ff 統合）。gate は exit 0（**2026 tests / 2028**、main で 196.3s）。
+- **実ブラウザ E2E が緑**（実 Chromium + 本物の build 成果物 + 実 machine + 実 pack 0.8.7）: **3 形式すべて `ready`・1 ページ目描画・本文がテキスト層**、**2 回目は `office.job` も request も増えない**、**next リンクが並びを引き継ぐ**、**Tab がパネルに届く**、**workspace 外は request を出さず拒否**。
+- **E2E を書いて見つかった実バグ 6 件**（**jsdom も実経路も緑のまま通っていた**）: ①office の GraphQL 面が**別オブジェクト**に届く ②パネルが**一度もポーリングしない** ③`/api/office/preview` が内部 RPC の前綴りに吸われて**行 JSON を返す** ④office port が **graph id をそのまま D1 に問い合わせる** ⑤version read が Workspace を **graph id で `idFromName`** ⑥「次のファイル」に `?files=` の並びが載らない。**+ fixture/ハーネス 3 件**。
+- **契約の追加**: **行はあるが未 ready = `425 Too Early`（`retry-after: 1`）/ 行が無い = `404`**。**パネルは HEAD で 425 を読み、「準備中」を描いて待つ**（`PdfViewer` に渡さない）。
+- **`docs/procedures/testing.md` に分担を明記**: **E2E は体験を見る。配線の順序（object 名の解決・配信路の分離）は integration、ポーリングは component が見る**。
+- **C6（lead 機で実測）**: 150 ページ docx（`w:pageBreakBefore`）で **中央値 342ms / p95 347ms**。条件: **AMD Ryzen 9 7940HS / 16 コア / 61GB / load 0.5 / pack 0.8.7 / 毎回コールドキャッシュ**。数値は `e2e/README.md` にも記録。
+- **失敗 3 パターン**: **integration**（`office-alarm.test.ts`）で **pack 無し → `disabled`（job 0 回）/ 40 万セル → `too_many_cells` / timeout → `engine_timeout`** を object の状態まで。**画面の文言は見ていない**（分類は core と component の責務）。
+- **E2E の dispatch だけは本物でない**（手作りの Namespace。`e2e/support/runtime.ts` の冒頭に明記）。**workerd で試したところ store の `sql.batch` がリクエスト内で返らず**、journey が 504 で止まった——**`0274n` として起票**（**本番の D1 で同じことが起きるかは未検証**）。
+- **未達**: **CI への接続**（**issue の Design が許容する dev 限定**を採った。`.github` は 0041 の範囲）。**`e2e/README.md` に実行手順（nix store の 64bit lib、`PLAYWRIGHT_BROWSERS_PATH`、pack のリンク）を記録済み**——**起動環境はリポジトリに入れない**。
+- **残件**: ①`officeProject` seam と session seam の名前規約（runtime は製品と同じ id を渡すよう修正済みだが、2 か所に写しがある）②`session.ts` の dev 限定のスタックログ ③journey の timeout 180s / retries 0（engine の初回変換次第で flaky の余地）。
