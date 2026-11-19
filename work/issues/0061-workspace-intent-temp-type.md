@@ -1,7 +1,7 @@
 # 0061: JournalIntent.temp の「無い」を型で表す
 
 status: open
-priority: hold
+priority: parked
 design: pending
 depends-on: 0045
 touches: packages/workspace

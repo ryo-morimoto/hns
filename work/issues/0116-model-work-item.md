@@ -1,7 +1,7 @@
 # 0116: WorkItem モデル（task / run / conversation を束ねる）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0047, 0049, 0145, 0146
 touches: packages/core/src/types.ts, packages/core/src/schemas.ts, packages/core/src/http.ts, packages/store/src, packages/store/test, packages/server/src, packages/server/test

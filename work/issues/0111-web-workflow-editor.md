@@ -1,7 +1,7 @@
 # 0111: Workflow graph editor（ノード・辺・版）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0110, 0130
 touches: packages/web/src/components/WorkflowGraph, packages/web/src/screens/workflows/edit, packages/web/test/workflow-graph

@@ -1,7 +1,7 @@
 # 0117: Attention Ack API（確認済み・Undo）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0047, 0116
 touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test/http.test.ts, packages/store/src, packages/store/test, packages/server/src, packages/server/test

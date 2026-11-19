@@ -1,7 +1,7 @@
 # 0192: findings 13 件を再判定し、直す
 
 status: open
-priority: batch
+priority: later
 design: agreed
 design-ref: 設計を変えない（findings の再判定）
 depends-on: 0145, 0146

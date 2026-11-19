@@ -1,7 +1,7 @@
 # 0114: Web visual / interaction review（状態行列のスクリーンショット）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0113
 touches: packages/web/test/visual, work/issues/0036-web-ui.md

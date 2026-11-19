@@ -1,7 +1,7 @@
 # 0124: Backup の状態・実行・スケジュール API
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0145, 0146, 0164
 touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test, packages/store/src, packages/store/test, packages/server/src, packages/server/test

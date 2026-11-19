@@ -1,7 +1,7 @@
 # 0110: Workflow / Run 画面（一覧・開始・human 入力）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0038, 0102, 0129, 0159
 touches: packages/web/src/screens/workflows, packages/web/src/screens/runs, packages/web/test/workflows, packages/web/test/runs

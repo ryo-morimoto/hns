@@ -1,7 +1,7 @@
 # 0173: D047〜D053 採用後の docs の残り
 
 status: open
-priority: batch
+priority: later
 design: agreed
 design-ref: 設計を変えない（docs の整合）
 depends-on: 0140

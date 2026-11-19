@@ -1,7 +1,7 @@
 # 0166: 移行とロールバック（ローカル実装を残す）
 
 status: open
-priority: plan
+priority: next
 design: agreed
 design-ref: D047, docs/durability.md §11
 depends-on: 0150, 0157

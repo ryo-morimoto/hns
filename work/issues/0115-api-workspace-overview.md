@@ -5,7 +5,7 @@
 > 前提変更: 一覧は D1 の投影から返す（0149）。touches と依存を見直すこと。
 
 status: open
-priority: hold
+priority: parked
 design: pending
 depends-on: 0049, 0145, 0146
 touches: packages/core/src/graphql, packages/server/src, packages/server/test

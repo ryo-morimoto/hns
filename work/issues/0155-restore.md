@@ -1,7 +1,7 @@
 # 0155: restore（base + Journal の再生）
 
 status: open
-priority: plan
+priority: next
 design: agreed
 design-ref: docs/durability.md §6
 depends-on: 0154

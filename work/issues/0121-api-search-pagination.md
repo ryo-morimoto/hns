@@ -5,7 +5,7 @@
 > 前提変更: 検索と pagination は D1 の投影（0149）。DO に横断クエリは無い。
 
 status: open
-priority: hold
+priority: parked
 design: pending
 depends-on: 0047, 0145, 0146
 touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test/http.test.ts, packages/store/src, packages/store/test, packages/server/src, packages/server/test

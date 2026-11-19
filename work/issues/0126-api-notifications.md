@@ -1,7 +1,7 @@
 # 0126: Attention 通知（in-app / desktop / webhook）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0102, 0115, 0145, 0146, 0159
 touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test, packages/server/src, packages/server/test, packages/web/src/app/notifications.ts

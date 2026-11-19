@@ -1,7 +1,7 @@
 # 0164: バックアップと復元の運用（0020 の再定義）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0154
 touches: docs/backup.md, deploy/backup/

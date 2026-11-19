@@ -1,7 +1,7 @@
 # 0129: Workflow run のキャンセル
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0038, 0145, 0146
 touches: packages/core/src/types.ts, packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test, packages/server/src, packages/server/test

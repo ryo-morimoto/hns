@@ -1,7 +1,7 @@
 # 0197: 記録の製品統合（WorkItem / Evidence への写像）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0116, 0120, 0196
 touches: packages/core/src/types.ts, packages/store/src, packages/server/src, packages/web/src

@@ -1,7 +1,7 @@
 # 0187: TSDoc 契約と doctest を全パッケージへ展開する
 
 status: done
-priority: plan
+priority: next
 depends-on: 0186
 touches: packages/*/src/**, packages/*/tsconfig.json, packages/*/package.json, packages/*/tsdown.config.ts, packages/*/typedoc.json, tools/gate/dist-check.ts, tools/gate/test/dist-check.test.ts, typedoc.json, vitest.config.ts, package.json, package-lock.json, .gitignore, docs/testing.md, docs/engineering.md, docs/api/, AGENTS.md
 

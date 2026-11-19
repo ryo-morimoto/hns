@@ -1,7 +1,7 @@
 # 0168: checkpoint と R2 の保持（GC・保持期間）
 
 status: open
-priority: plan
+priority: next
 design: agreed
 design-ref: docs/durability.md §5
 depends-on: 0154, 0155

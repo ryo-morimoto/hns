@@ -1,7 +1,7 @@
 # 0158: 認証の再編（passkey / PRF / デバイス鍵）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0048, 0069, 0070, 0071, 0147
 touches: packages/server/src/auth/, packages/core/src/auth.ts

@@ -1,7 +1,7 @@
 # 0193: backlog のメタデータを現在に合わせる
 
 status: open
-priority: batch
+priority: later
 design: agreed
 design-ref: 設計を変えない（メタデータ整合）
 depends-on: 0141, 0146

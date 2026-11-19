@@ -1,7 +1,7 @@
 # 0161: automations の実行先（マシン必須の明示）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0038, 0148
 touches: packages/core/src/workflow.ts, packages/server/src/automations/

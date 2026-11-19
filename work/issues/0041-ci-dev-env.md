@@ -1,7 +1,7 @@
 # 0041: CI と開発環境の固定
 
 status: open
-priority: batch
+priority: later
 design: agreed
 design-ref: 設計を変えない（CI）
 depends-on: 0046

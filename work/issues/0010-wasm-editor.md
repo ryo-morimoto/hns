@@ -1,7 +1,7 @@
 # 0010: WASM エディタ（Want）
 
 status: open
-priority: hold
+priority: parked
 design: pending
 depends-on: —
 touches: work/poc/wasm-editor, work/research/wasm-editor.md

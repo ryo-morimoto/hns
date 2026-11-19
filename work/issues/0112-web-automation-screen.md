@@ -1,7 +1,7 @@
 # 0112: Automation 画面（trigger / action / firings）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0038, 0102, 0131
 touches: packages/web/src/screens/automations, packages/web/test/automations

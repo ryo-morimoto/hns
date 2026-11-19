@@ -1,7 +1,7 @@
 # 0104: Workspace 画面（Running / Needs you / Completed）
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0102, 0115, 0117
 touches: packages/web/src/screens/workspace, packages/web/src/components/WorkCard.tsx, packages/web/src/components/StatCard.tsx, packages/web/test/workspace

@@ -1,7 +1,7 @@
 # 0167: リモート経路の故障注入（intent / apply / outcome）
 
 status: open
-priority: plan
+priority: next
 design: agreed
 design-ref: docs/durability.md §3.1
 depends-on: 0157, 0169

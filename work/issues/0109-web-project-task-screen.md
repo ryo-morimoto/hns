@@ -1,7 +1,7 @@
 # 0109: Project / Task 画面
 
 status: open
-priority: plan
+priority: next
 design: pending
 depends-on: 0102, 0127
 touches: packages/web/src/screens/projects, packages/web/src/screens/tasks, packages/web/test/projects, packages/web/test/tasks
