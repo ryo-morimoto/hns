@@ -207,18 +207,20 @@ function createRepository(opened: OpenSqliteState): Store["trails"] {
         opened.sql(text, ...params);
         return Promise.resolve(1);
       },
-      // A batch is executed one statement at a time. Only a statement with RETURNING answers
-      // rows (as D1 answers one): the store's `addChange` reads the inserted row from the
-      // batch's first result, and the state move it writes second answers none.
+      // A batch is executed one statement at a time, and each statement runs **once**. Only a
+      // statement with RETURNING answers rows (as D1 answers one): the store's `addChange` reads
+      // the inserted row from the batch's first result, and the state move it writes second
+      // answers none. Running the stripped INSERT again to read it back would insert it twice.
       batch: (statements) =>
         Promise.resolve(
           statements.map((statement) => {
             const returning = /\s+RETURNING\s+\*\s*$/iu.test(statement.sql);
             const params = statement.params ?? [];
-            opened.sql(statement.sql, ...params);
-            return returning
-              ? opened.rows(statement.sql.replace(/\s+RETURNING\s+\*\s*$/iu, ""), ...params)
-              : [];
+            if (!returning) {
+              opened.sql(statement.sql, ...params);
+              return [];
+            }
+            return opened.rows(statement.sql, ...params);
           }),
         ),
       close: () => Promise.resolve(),
@@ -269,6 +271,9 @@ function sessionBindingOf(opened: OpenSqliteState) {
         onEvent: hooks.onEvent,
       });
     },
+    // The same clock the workspace and the sink use: the entry is stamped with it, and the metrics
+    // window is measured back from it, so the line the test waits for is inside the window.
+    { now: () => Date.parse("2026-11-18T00:00:00.000Z") },
   );
   const id = { name: "obs" };
   return {
