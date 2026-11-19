@@ -3,7 +3,7 @@
 status: open
 priority: next
 design: pending
-depends-on: 0048, 0069, 0070, 0071, 0147
+depends-on: 0048, 0069, 0070, 0071, 0147, 0189
 touches: packages/server/src/auth/, packages/core/src/auth.ts
 
 ## Goal
@@ -24,6 +24,7 @@ tailnet の入口認証（D016）は廃止し、外部 IdP は使わない。
 
 - PoC は認証無し。0145 の境界に後から入れる。
 - 単一ユーザー前提。RBAC は作らない（U-12）。
+- 入口の方式（A Native / B Access-only / C Hybrid / D Tailnet）は 0048 U-01 の比較（`work/research/auth-access-options.md`）で決める。A なら passkey、B なら Access の JWT 検証 + サーバ鍵に置き換わる。
 
 ## やらないこと
 
@@ -32,4 +33,4 @@ tailnet の入口認証（D016）は廃止し、外部 IdP は使わない。
 
 ## Log
 
-- 2026-11-07: 作成（[D047](../../docs/decisions.md) の採用を受けて）。
+- 2026-11-07: 作成（[D047](../../docs/decisions/D047.md) の採用を受けて）。

@@ -8,7 +8,7 @@ status: open
 priority: parked
 design: pending
 depends-on: 0047, 0145, 0146
-touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test/http.test.ts, packages/store/src, packages/store/test, packages/server/src, packages/server/test
+touches: packages/core/src/graphql/, packages/core/test/graphql/, packages/store/src, packages/store/test, packages/server/src, packages/server/test
 
 ## Goal
 

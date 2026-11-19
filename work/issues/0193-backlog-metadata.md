@@ -22,13 +22,13 @@ touches: work/, docs/, AGENTS.md
 
 ## Acceptance criteria
 
-- [ ] `core/src/http.ts` / `http-schemas.ts` を指す `touches` を実在パスへ直す（0065, 0116, 0117, 0120, 0121, 0123–0128, 0130, 0131）
-- [ ] `store/src/migrations/d1/` を指す `touches` を 0189 後の実パスへ直す（0148, 0151, 0169）
-- [ ] `depends-on` を実態に合わせる（0149 → 0146, 0150, 0189、0158 → 0048/0069/0070/0147/**0189**、0176 → 0189）
+- [x] `core/src/http.ts` / `http-schemas.ts` を指す `touches` を実在パスへ直す（0065, 0116, 0117, 0120, 0121, 0123–0128, 0130, 0131）
+- [x] `store/src/migrations/d1/` を指す `touches` を 0189 後の実パスへ直す（0148, 0151, 0169）
+- [x] `depends-on` を実態に合わせる（0149 → 0146, 0150, 0189、0158 → 0048/0069/0070/0147/**0189**、0176 → 0189）
 - [ ] 0149 の AC と `touches` に 0189 の provider seam（isolate 初回 open）と、migration 失敗を `requestId` 付きで記録する責務を足す
-- [ ] 0032 を閉じる（machine だけ 0147 に残し、Reason を1行）
+- [x] 0032 を閉じる（machine だけ 0147 に残し、Reason を1行）
 - [ ] 0173 を消化する（AGENTS.md の machine、docs/packages.md の server 依存、docs/engineering.md の層）
-- [ ] BOARD の now 表・優先度マトリクス・計画表を issue の frontmatter と一致させる（照合手順を1つ決める）
+- [x] BOARD の now 表・優先度マトリクス・計画表を issue の frontmatter と一致させる（照合手順: `node work/tools/board-audit.mjs`）
 - [ ] `npm run check`
 
 ## Notes
@@ -47,3 +47,6 @@ touches: work/, docs/, AGENTS.md
 ## Log
 
 - 2026-11-11: 作成。0141 / 0146 の並行中に、`touches` の偽の非衝突がレーン設計を壊すため。
+- 2026-11-17: `touches` の削除済みパスを実在パスへ（0065, 0116, 0117, 0120, 0121, 0123–0128, 0130, 0131, 0157）。0149 / 0158 の depends に 0189 を足した。0032 を superseded にした。
+- 2026-11-17: BOARD の now 表を 0059 / 0153 に更新（0147 / 0159 は done）。設計待ち 12 / 順番待ち 4。0105 に D077 の WS 送信の残りを追記。
+- 2026-11-17: 照合スクリプト `work/tools/board-audit.mjs` を追加。frontmatter の実測に合わせて BOARD を更新（open 72 / agreed 18 / pending 54、設計待ち 15 / 順番待ち 6 / 依存待ち 36）。0147 / 0159 の done で埋もれていた 0157 / 0162（順番待ち）と 0148 / 0152 / 0160 / 0165 / 0181 / 0194 / 0043（設計待ち）を戻した。

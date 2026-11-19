@@ -4,7 +4,7 @@ status: open
 priority: parked
 design: pending
 depends-on: 0047
-touches: packages/store, packages/core/src/http.ts, docs
+touches: packages/store, docs
 
 ## Goal
 

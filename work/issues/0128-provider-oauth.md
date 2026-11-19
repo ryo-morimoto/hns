@@ -4,7 +4,7 @@ status: open
 priority: next
 design: pending
 depends-on: 0069, 0107, 0122
-touches: packages/core/src/http.ts, packages/core/src/http-schemas.ts, packages/core/test, packages/agent/src/providers, packages/store/src, packages/server/src, packages/server/test, packages/web/src/screens/settings
+touches: packages/core/src/graphql/, packages/core/test/graphql/, packages/agent/src/providers, packages/store/src, packages/server/src, packages/server/test, packages/web/src/screens/settings
 
 ## Goal
 
