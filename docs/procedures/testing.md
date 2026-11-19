@@ -87,7 +87,9 @@ issue の `## テスト設計` に書く。
 **store の DB テストは miniflare の D1 を Node から呼んでいる。** `harness.ts` の `db` は miniflare の D1 クライアントで、`e2e/support/d1.ts` の `node:sqlite` はその代役。**Worker の中で binding がどう振る舞うかは、この2つでは分からない。** `blockConcurrencyWhile`・isolate の再利用・`sql.batch` のような「実行環境だけが決める」前提を確かめるときは、**そのコードを Worker にバンドルして miniflare に走らせる**（`packages/server/test/integration/d1-batch.test.ts`：`openStore`・`bind` した `prepare`・3文の `db.batch` が、リクエストの中で返ることを固定する）。
 
 - **本番と同じ形**は `cf dev` と、**D1 binding を持つ Worker**での実測。Node のクライアントと Worker の binding を並べるのは `packages/store/test/integration/d1-client-batch.test.ts`。
-- **D1 を持たない代役（`node:sqlite` など）の上で観測した hang を、D1 の欠陥と読まない。** 0239 の workerd の `sql.batch` の hang はこれで、代役の `batch` の結果の形が D1 と違った（`first()` に `RETURNING` を渡すと行が返らない等）ことに由来していた。実測は `packages/store/test/integration/d1-client-batch.test.ts` にある。
+- **D1 を持たない代役（`node:sqlite` など）の上で観測した hang を、D1 の欠陥と読まない。** 0239 の workerd の `sql.batch` の hang はこの形の報告で、**実 D1 では Worker の中でも起きない**（上のテストが固定する）。
+- **代役と D1 の違いは、測ったものだけを書く。** `e2e/support/d1.ts` を読むと **① `batch` は逐次の `run()` で、SELECT / DDL の行を返さない ② 途中で失敗しても戻らない（原子的でない）** が違いで、D1 については **`packages/server/test/integration/d1-batch.test.ts` が、`batch` が 1 トランザクションであること（途中で失敗すると全部戻る）と `RETURNING` の行が返ることを固定している**。**それ以外の差分（`RETURNING` を含む文の結果の形など）は実測していない。**
+- **覆っていない条件は Result と test の remark に書く。** 0274n で覆えていないのは、**`blockConcurrencyWhile` の中**・**同じ isolate の 2 回目以降と並行 dispatch**・**`cf dev` の常設 integration（実測はしたが、そのプロジェクトは repo に無く再現手順も無い＝未記録）** の3つ。
 
 ### E2E のブラウザ / 端末
 

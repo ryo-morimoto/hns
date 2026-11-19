@@ -5,7 +5,7 @@ import { createSql, type D1Binding } from "../../src/sql.ts";
 import { createD1Harness, type D1Harness } from "./harness.ts";
 
 /**
- * The same store calls through the Worker's binding and through the Node client (0274n).
+ * The same statements through the Worker's binding and through the Node client (0274n).
  *
  * @remarks
  * 0239 ran the e2e journey over **real workerd** and the store's `sql.batch` did not return in a
@@ -16,24 +16,30 @@ import { createD1Harness, type D1Harness } from "./harness.ts";
  * - `outside` is the same database through miniflare's **Node client**, which is what
  *   `e2e/support/d1.ts` stands in for and what `harness.ts` hands the store.
  *
- * Both run the store's own calls (a raw `batch` of three, the same three through `createSql`, and
- * a single statement), so a difference between them is a difference in how the call reaches the
- * runtime, not in the store. **Measured (2026-11-19): both answer**, which is what places the 0239
- * hang in the journey's own D1 (its `node:sqlite` `batch` answers differently from D1's) rather
- * than in miniflare or in the store. `d1-batch.test.ts` (server) proves the real store's open,
- * read, and batch inside a Worker; this suite is the record `docs/procedures/testing.md` cites.
+ * Both run the store's own batch — three statements with a `RETURNING` row, an update that changes
+ * nothing, and a read (the shape `trailRepository.addChange` issues) — and both answer, with the
+ * same rows. **That is what the two D1s differ on here** (2026-11-19): what the e2e journey's
+ * stand-in (`e2e/support/d1.ts`) does differently is **not measured** ("its `batch` answers
+ * differently from D1's" was a guess, not an observation).
+ *
+ * **Not covered** (0274n): a batch run inside `blockConcurrencyWhile`; a second request, or two
+ * dispatches at once, in the same isolate (every call here is one after another); `cf dev` (it
+ * answered, but the project it ran in is not in this repo, so the measurement is unrecorded).
+ * `d1-batch.test.ts` (server) covers the Worker's side with `RETURNING`, rollback, and a Durable
+ * Object's SQLite; this suite records both clients of the same binding.
  */
 
 const TIMEOUT_MS = 3_000;
 
-/** The three statements the store issues in one batch: DDL, a write with parameters, a read. */
+/** The three statements `addChange` issues in one batch: a `RETURNING` insert, an update, a read. */
 const STATEMENTS = [
   "CREATE TABLE IF NOT EXISTS probe_0274n (id INTEGER PRIMARY KEY, v TEXT)",
-  "INSERT OR REPLACE INTO probe_0274n (id, v) VALUES (1, 'x')",
+  "INSERT OR REPLACE INTO probe_0274n (id, v) VALUES (1, 'x') RETURNING *",
+  "UPDATE probe_0274n SET v = 'y' WHERE id = 2",
   "SELECT * FROM probe_0274n",
 ];
 
-/** What one call did: answered (with its value) or not, before the deadline. */
+/** What one call did: answered (with its rows) or not, before the deadline. */
 const OutcomeSchema = v.object({
   answered: v.boolean(),
   value: v.string(),
@@ -43,7 +49,7 @@ const OutcomeSchema = v.object({
  * Run one call and report whether it answered.
  *
  * @param run - The call; a rejected call is an answer (it came back), only silence is not.
- * @returns Whether it answered, with its value rendered for a failure message.
+ * @returns Whether it answered, with its rows rendered for a failure message.
  *
  * @remarks
  * A call that never settles is the observation under test, so the deadline resolves the race
@@ -100,19 +106,20 @@ afterAll(async () => {
 });
 
 // Catches: the Worker's binding being credited with a hang it does not have (the 0239 report).
-test("the D1 binding inside a worker answers a raw batch and createSql's batch", async () => {
+test("the D1 binding inside a worker answers the store's batch, RETURNING included", async () => {
   if (inside === undefined) throw new Error("the binding did not start");
   const db = inside;
   const raw = await outcome(async () => {
     const results = await db.batch(STATEMENTS.map((sql) => db.prepare(sql)));
-    return { answered: true, value: JSON.stringify(results).slice(0, 300) };
+    return { answered: true, value: JSON.stringify(results.map((result) => result.results)) };
   });
   expect(raw.answered, "the Worker's binding did not answer the batch: " + raw.value).toBe(true);
+  expect(raw.value).toContain('{"id":1,"v":"x"}');
   const sql = createSql(db);
   try {
     const batched = await outcome(async () => {
       const rows = await sql.batch(STATEMENTS.map((statement) => ({ sql: statement })));
-      return { answered: true, value: JSON.stringify(rows).slice(0, 300) };
+      return { answered: true, value: JSON.stringify(rows) };
     });
     expect(
       batched.answered,
@@ -125,20 +132,20 @@ test("the D1 binding inside a worker answers a raw batch and createSql's batch",
 });
 
 // Catches: the Node client being read as the binding — the client the store's suites call.
-test("the Node client answers the same calls through the same binding", async () => {
+test("the Node client answers the same batch with the same rows", async () => {
   if (harness === undefined) throw new Error("the harness did not start");
   const db = harness.db;
   const single = await outcome(async () => {
     const row = await db.prepare("SELECT count(*) AS n FROM sqlite_master").first();
-    return { answered: true, value: JSON.stringify(row).slice(0, 300) };
+    return { answered: true, value: JSON.stringify(row) };
   });
   expect(single.answered, "the client did not answer a single statement: " + single.value).toBe(
     true,
   );
-  // An empty batch: the one the store short-circuits before D1 is asked anything.
-  const empty = await outcome(async () => {
-    const results = await db.batch([]);
-    return { answered: true, value: JSON.stringify(results).slice(0, 300) };
+  const batched = await outcome(async () => {
+    const results = await db.batch(STATEMENTS.map((sql) => db.prepare(sql)));
+    return { answered: true, value: JSON.stringify(results.map((result) => result.results)) };
   });
-  expect(empty.answered, "the client's empty batch: " + empty.value).toBe(true);
+  expect(batched.answered, "the client's batch: " + batched.value).toBe(true);
+  expect(batched.value).toContain('{"id":1,"v":"x"}');
 });
