@@ -1,6 +1,6 @@
 # 0238: web に PDF プレビューを置く
 
-status: open
+status: in-progress
 priority: now
 design: agreed
 design-ref: D103, docs/office.md
@@ -26,16 +26,16 @@ workspace の docx / xlsx / pptx を開くと右パネルに PDF が表示され
 
 ## Acceptance criteria
 
-- [ ] `pdfjs-dist` を**正確な版で pin** して追加し、worker をバンドルする（CDN を使わない）
-- [ ] `ready` で PDF が表示され、ページ送り・ズーム・テキスト選択ができる
-- [ ] `queued` / `generating` はスピナー +「準備中」。**1 秒間隔のポーリング**（live は会話専用のため使わない）で切り替わる
-- [ ] query の失敗 union（`OfficeFailure`）を扱い、`not_authorized` を文言にする
-- [ ] `stale` は「結果を確認中」を出し、alarm の決着後に ready / failed に切り替わる
-- [ ] `failed` は code ごとの文言（docs §9）と再試行
-- [ ] `unsupported` は理由（形式）を出す。大きさの超過は `failed` + code として出す
-- [ ] `disabled` は「Office プレビューは未設定です」＋セットアップ手順
-- [ ] `bytes` > 50 MiB または 300 ページ超は PDF を読み込まずに案内を出す
-- [ ] キーボードでページ送り・ズーム・パネルから抜けられる
+- [x] `pdfjs-dist` を**正確な版で pin** して追加し、worker をバンドルする（CDN を使わない）
+- [x] `ready` で PDF が表示され、ページ送り・ズーム・テキスト選択ができる
+- [x] `queued` / `generating` はスピナー +「準備中」。**1 秒間隔のポーリング**（live は会話専用のため使わない）で切り替わる
+- [x] query の失敗 union（`OfficeFailure`）を扱い、`not_authorized` を文言にする
+- [x] `stale` は「結果を確認中」を出し、alarm の決着後に ready / failed に切り替わる
+- [x] `failed` は code ごとの文言（docs §9）と再試行
+- [x] `unsupported` は理由（形式）を出す。大きさの超過は `failed` + code として出す
+- [x] `disabled` は「Office プレビューは未設定です」＋セットアップ手順
+- [x] `bytes` > 50 MiB または 300 ページ超は PDF を読み込まずに案内を出す
+- [x] キーボードでページ送り・ズーム・パネルから抜けられる
 
 ## テスト条件
 
@@ -143,3 +143,16 @@ flag（`office.preview`）。Phase 0 の完了条件は「開いて読める」�
 - 設計レビュー: issue-reviewer / **PASS with comments**（2026-11-17、5 ラウンド。blocking 0）
 - blocking: なし（R1〜R10 の整合修正を反映済み）
 - 次アクション: 0234 → 0235 → 0236 の順で実装レーンへ（0240 / 0242 は設計レビューで agreed に）
+
+## Result
+
+- verdict: **PASS**（reviewer-0238 → FAIL 1 → reviewer-0238b PASS）。**W-P1 は lead 裁定で問題なし**（下記）
+- HEAD: d339b86（main に ff 統合）。gate は exit 0（2004 tests / 2005、main で 197.9s）。
+- **`pdfjs-dist` 6.5.438 を pin** し、**worker をバンドル**（**CDN 不使用**）。**build 成果物に `pdf.worker.min-*.mjs` がちょうど 1 つ**出て、**bundle が指す URL は same-origin の root-relative で実在**。**main HEAD を build すると worker 0 個 / このブランチは 1 個**を実測。
+- **7 状態の表示**: `queued` / `generating` はスピナー +「準備中」、`ready` は PDF（ページ送り・ズーム・テキスト選択）、`stale` は「結果を確認中」、`failed` は code ごとの文言 + 再試行、`unsupported` は理由（形式）、`disabled` は未設定 + セットアップ手順、`not_authorized` は失敗側の文言。**server の message は一切表示しない**。**`data-office-failure` で `not_authorized` を区別**（8 番目の状態は増やさない）。
+- **`bytes > 50 MiB` / 300 ページ超は PDF.js に渡す前に**案内（**`panelViewOf` の 1 か所**）。**1 秒ポーリング**（live 不使用）。**キーボードのみでページ送り・ズーム・パネルから抜けられる**。
+- **実経路 2 本**: ①**実 machine + 実 pack → Session → 実ルート → 実 `pdfjs-dist`**（ページ数が row の `pages` と一致）②**本物の Relay 環境 + 本物の SDL**。
+- **レビューで見つかって直したもの（重大）**: **`PanelContent` が Shell に配線されていなかった**ので、**office のコードが build graph に入らず `pdf.worker` が emit されていなかった**。しかも**「パネルが閉じている」ように見えるので障害として露見しない**——**0239 の Phase 0 完了判定に流れる**ところだった。修正: **`Shell` に `panel={<PanelContent />}`**（**選択 null なら null** で UI 不変）、**build 成果物で worker を assert するテスト**。
+- **W-P1 の裁定（lead）**: **250 KB は gzip**（`docs/web-client-nfr.md` に明記。**raw と gzip が混在していて同じ build が pass とも fail とも読めていた**）。**実測: 初期 JS 786,154 B raw / 230.32 KB gzip**、**上限まで 19.7 KB**。**0238 の寄与は +1.63 KB gzip / 約 +3 KB raw**（`PanelContent` と `toGlobalId` の参照だけ。**PDF.js 444 KB と `DocumentPanel` は遅延 chunk**）。**W-P3（≤150 KB gzip）内**。
+- **同時に直したもの（lead）**: **`faces-start.test.ts` の赤**（`56036e8`）——**テストの SQLite シムが batch の INSERT を 2 回実行**していた（`UNIQUE constraint failed: trail_changes.id`）＋ **sink の時計（凍結）と metrics の窓（実時計）の不一致**。
+- **未接続 / 残件**: ①**`setPreviewSelection` を呼ぶ画面が無い**ので、**ファイルを選ぶ操作からパネルを開く経路はまだ無い**（**器は付いた**）②`setPreviewSelection` は**購読が無いモジュール変数**で、最初の利用者が来たら state / store に置き換える ③**実ブラウザの E2E**（worker が同一オリジンから読まれ、キーボードで操作できる）は **0239** ④`web-node` の実経路は **`npm run check` では skip**（CI に回す仕組みが無い。0239 の E2E で置き換える）⑤`build.test.ts` のコメントが「build を skip する」と書いているが**実装は毎回 build**（実装が正しい）。
